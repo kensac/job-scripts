@@ -49,6 +49,21 @@ def latest(
     return f"SELECT {columns} FROM verdicts vlast WHERE {where} ORDER BY vlast.id DESC LIMIT 1"
 
 
+def latest_per(key: str, columns: str, where: str, *, alias: str = "v", join: str = "") -> str:
+    """The latest answer per `key` (one row each), as a statement: a CTE
+    body, a derived table, or a query on its own.
+
+    The ORDER BY is the key then newest id, so an index on (url, check_type,
+    id) or (url, prompt_hash, id) yields rows already in order. A key on
+    jobs.id (`join="JOIN jobs j ON j.url = v.url"`) sorts integers where a
+    url key sorts text: api/routers/analytics.py measured 1.15 s against
+    245 ms for the same rows."""
+    return (
+        f"SELECT DISTINCT ON ({key}) {columns} FROM verdicts {alias} {join} "
+        f"WHERE {where} ORDER BY {key}, {alias}.id DESC"
+    )
+
+
 def latest_status(url: str, check: str, *, prompt_hash: str | None = None) -> str:
     """The latest answer's status ('passed' or 'rejected'), NULL when none."""
     return f"({latest(url, check, prompt_hash=prompt_hash)})"

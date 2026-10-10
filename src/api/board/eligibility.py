@@ -9,6 +9,7 @@ from typing import Any
 
 from api import db
 from api.board import criteria
+from core import verdict_reads
 
 SUBSCRIBED = "j.source IN (SELECT source FROM user_sources WHERE user_id = %(uid)s)"
 
@@ -18,12 +19,13 @@ ENABLED_FILTERS = """
 SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
 """
 
-LATEST_CHECK = """
+_LATEST_CHECKS = verdict_reads.latest_per(
+    "url, check_type", "url, check_type, status", "check_type IN ('closed', 'clearance')"
+)
+
+LATEST_CHECK = f"""
 latest_check AS (
-    SELECT DISTINCT ON (url, check_type) url, check_type, status
-    FROM verdicts
-    WHERE check_type IN ('closed', 'clearance')
-    ORDER BY url, check_type, id DESC
+    {_LATEST_CHECKS}
 )
 """
 

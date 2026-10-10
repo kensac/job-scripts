@@ -39,6 +39,7 @@ from api.mail.current import current_event
 from api.problem import refuse
 from api.rates import Rate
 from api.routers.admin import require_admin
+from core import verdict_reads
 
 router = APIRouter(prefix="/admin")
 
@@ -280,14 +281,16 @@ GROUP BY lower(btrim(a.company_name)), uj.status
 # closed verdict per posting. Computing it any other way - "has any closed row
 # in ai_queries", say, which would count 'failed' rows too - would let this
 # page and the board disagree with nobody able to see which was wrong.
-_OPEN_SQL = """
+_LATEST_CLOSED_PER_JOB = verdict_reads.latest_per(
+    "j.id",
+    "lower(btrim(j.company)) AS company_key, v.status, v.created_at",
+    "v.check_type = 'closed' AND lower(btrim(j.company)) = ANY(%(keys)s)",
+    join="JOIN jobs j ON j.url = v.url",
+)
+
+_OPEN_SQL = f"""
 WITH latest AS (
-    SELECT DISTINCT ON (j.id) lower(btrim(j.company)) AS company_key,
-           a.status, a.created_at
-    FROM verdicts a JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'closed'
-      AND lower(btrim(j.company)) = ANY(%(keys)s)
-    ORDER BY j.id, a.id DESC
+    {_LATEST_CLOSED_PER_JOB}
 )
 SELECT company_key,
        count(*) AS n_checked,

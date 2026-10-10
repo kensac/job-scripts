@@ -15,6 +15,7 @@ from api.board import visibility
 from api.config import group_access_allowed
 from api.models import FilterCreate, FilterPatch, ImprovePromptRequest, Ok
 from api.problem import AI_REFUSALS, refuse
+from core import verdict_reads
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
@@ -414,18 +415,25 @@ def run_all_filters(user: AuthedUser = Depends(require_user)) -> RunQueued:
 # AI runs, which is worse than the wall - so the numbers ship with the preset
 # rather than the choice being made blind. Today one preset of eleven has any
 # cached verdicts at all.
-_PRESET_COVERAGE_SQL = """
-WITH q AS (
-    SELECT j.id AS job_id, j.url AS url, a.check_type, a.status, a.id AS qid
-    FROM verdicts a
-    JOIN jobs j ON j.url = a.url
-    WHERE j.active AND a.check_type IN ('closed', 'clearance')
-), latest AS (
-    -- Deduping on jobs.id rather than the url text is load-bearing for speed,
-    -- not tidiness: the url-keyed version of this pair of queries measured
-    -- 134s and 20s against production. Sorting integers keeps it in memory.
-    SELECT DISTINCT ON (job_id, check_type) job_id, url, check_type, status
-    FROM q ORDER BY job_id, check_type, qid DESC
+# Deduping on jobs.id rather than the url text is load-bearing for speed,
+# not tidiness: the url-keyed version of this pair of queries measured 134s
+# and 20s against production. Sorting integers keeps it in memory.
+_LATEST_GATES = verdict_reads.latest_per(
+    "j.id, v.check_type",
+    "j.id AS job_id, j.url AS url, v.check_type, v.status",
+    "j.active AND v.check_type IN ('closed', 'clearance')",
+    join="JOIN jobs j ON j.url = v.url",
+)
+
+_LATEST_JUDGED = verdict_reads.latest_per(
+    "url, prompt_hash",
+    "url, prompt_hash, status",
+    "check_type = 'custom' AND prompt_hash = ANY(%(hashes)s)",
+)
+
+_PRESET_COVERAGE_SQL = f"""
+WITH latest AS (
+    {_LATEST_GATES}
 ), eligible AS (
     -- Both gates passed. HAVING count(*) = 2 beats a self-join on the same
     -- CTE, which is what made the original slow.
@@ -433,10 +441,7 @@ WITH q AS (
     FROM latest WHERE status = 'passed'
     GROUP BY job_id HAVING count(*) = 2
 ), judged AS (
-    SELECT DISTINCT ON (url, prompt_hash) url, prompt_hash, status
-    FROM verdicts
-    WHERE check_type = 'custom' AND prompt_hash = ANY(%(hashes)s)
-    ORDER BY url, prompt_hash, id DESC
+    {_LATEST_JUDGED}
 )
 SELECT jd.prompt_hash,
        count(*) AS judged,
@@ -446,15 +451,9 @@ FROM eligible e JOIN judged jd ON jd.url = e.url
 GROUP BY jd.prompt_hash
 """
 
-_ELIGIBLE_SQL = """
-WITH q AS (
-    SELECT j.id AS job_id, a.check_type, a.status, a.id AS qid
-    FROM verdicts a
-    JOIN jobs j ON j.url = a.url
-    WHERE j.active AND a.check_type IN ('closed', 'clearance')
-), latest AS (
-    SELECT DISTINCT ON (job_id, check_type) job_id, check_type, status
-    FROM q ORDER BY job_id, check_type, qid DESC
+_ELIGIBLE_SQL = f"""
+WITH latest AS (
+    {_LATEST_GATES}
 )
 SELECT count(*) AS eligible FROM (
     SELECT job_id FROM latest WHERE status = 'passed'

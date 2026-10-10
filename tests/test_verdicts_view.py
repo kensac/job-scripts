@@ -59,21 +59,9 @@ def test_only_call_readers_restate_what_a_decided_answer_is():
 # on one posting's answers) is a copy free to drift from it. Each entry here
 # is a read that is not that shape, or a copy not yet moved, with why.
 _OWNER = "core/verdict_reads.py"
-_NOT_YET_MOVED = "latest row per key, moves onto verdict_reads in the next change"
 _HAND_WRITTEN_ALLOWED = {
     # The first answer to each check, not the latest: `p.id < q.id`.
     "api/health/sources.py": "earliest answer per posting and check",
-    "api/board/eligibility.py": _NOT_YET_MOVED,
-    "api/board/visibility.py": _NOT_YET_MOVED,
-    "api/compensation_candidates.py": _NOT_YET_MOVED,
-    "api/experiments.py": _NOT_YET_MOVED,
-    "api/managed_board_runs.py": _NOT_YET_MOVED,
-    "api/routers/analytics.py": _NOT_YET_MOVED,
-    "api/routers/companies.py": _NOT_YET_MOVED,
-    "api/routers/filters.py": _NOT_YET_MOVED,
-    "api/routers/job_detail.py": _NOT_YET_MOVED,
-    "core/store.py": _NOT_YET_MOVED,
-    "tasks/verify.py": _NOT_YET_MOVED,
 }
 _READ = re.compile(r"\b(?:FROM|JOIN) verdicts\b")
 _NEWEST_FIRST = re.compile(r"\bq?id DESC\b")
