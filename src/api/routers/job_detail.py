@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from api import db, signals
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
+from core import verdict_reads
 from core.comp import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -115,9 +116,7 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         "j.active, j.date_posted, j.comp_min, j.comp_max, j.comp_text, j.comp_currency, "
         "j.comp_period, j.comp_basis, "
         "j.created_at, "
-        "(SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END "
-        " FROM verdicts q WHERE q.url = j.url AND q.check_type = 'closed' "
-        " ORDER BY q.id DESC LIMIT 1) AS closed_verdict",
+        f"{verdict_reads.closed_verdict('j.url')} AS closed_verdict",
     )
     content_row = db.query_one(
         "SELECT input_content, created_at FROM page_texts "
@@ -135,17 +134,15 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         """,
         {"url": job["url"]},
     )
+    latest_filter_verdict = verdict_reads.latest(
+        "%(url)s", "custom", "status, reason, model, created_at", prompt_hash="f.prompt_hash"
+    )
     filter_verdicts = db.query_as(
         FilterVerdictRow,
-        """
+        f"""
         SELECT f.name, f.enabled, v.status, v.reason, v.model, v.created_at
         FROM user_filters f
-        LEFT JOIN LATERAL (
-            SELECT status, reason, model, created_at FROM verdicts q
-            WHERE q.url = %(url)s AND q.check_type = 'custom'
-              AND q.prompt_hash = f.prompt_hash
-            ORDER BY q.id DESC LIMIT 1
-        ) v ON TRUE
+        LEFT JOIN LATERAL ({latest_filter_verdict}) v ON TRUE
         WHERE f.user_id = %(uid)s ORDER BY f.id
         """,
         {"url": job["url"], "uid": user.id},

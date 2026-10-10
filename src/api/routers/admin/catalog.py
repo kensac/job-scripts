@@ -15,6 +15,7 @@ from api.auth import AuthedUser
 from api.locations import LocationExtract, Place, store
 from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
+from core import verdict_reads
 
 router = APIRouter()
 
@@ -221,11 +222,7 @@ def list_reports(
         FROM reports r
         JOIN users u ON u.id = r.user_id
         JOIN jobs j ON j.id = r.job_id
-        LEFT JOIN LATERAL (
-            SELECT status FROM verdicts
-            WHERE url = j.url AND check_type = 'closed'
-            ORDER BY id DESC LIMIT 1
-        ) c ON TRUE
+        LEFT JOIN LATERAL ({verdict_reads.latest("j.url", "closed")}) c ON TRUE
         {where}
         ORDER BY r.id DESC LIMIT %(limit)s OFFSET %(offset)s
         """,

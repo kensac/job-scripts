@@ -19,8 +19,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from core import providers
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
+from core import providers, verdict_reads
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 PURPOSE = "experiment"
 
@@ -173,7 +173,7 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
         SELECT j.url, j.company, j.title, q.input_content
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {VERIFIED_OPEN.format(url="j.url")}
+        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.verified_open("j.url")}
         ORDER BY md5(j.url || %(seed)s) LIMIT %(n)s
         """,
         {"seed": seed, "n": n},

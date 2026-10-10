@@ -5,14 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
+from core import verdict_reads
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
-from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL, VERIFIED_OPEN
+from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 _ELIGIBLE = f"""
     FROM jobs j
     {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content")}
     WHERE {AI_ELIGIBLE_JOB.format(job="j")}
-      AND {VERIFIED_OPEN.format(url="j.url")}
+      AND {verdict_reads.verified_open("j.url")}
       AND NOT EXISTS (
         SELECT 1 FROM job_profiles p
         WHERE p.content_row_id = q.content_row_id

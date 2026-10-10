@@ -21,6 +21,7 @@ from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
 from api.board.person_state import UNTOUCHED
+from core import verdict_reads
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ def materialize_passing(user_id: int) -> int:
     row WAS the board. That sheet is gone and the row now means something
     else; the docstring said otherwise until 2026-09-10."""
     params = board_eligibility.settings_params(user_id)
+    filter_status = verdict_reads.latest_status("j.url", "custom", prompt_hash="e.prompt_hash")
     result = db.query_one(
         f"""
             WITH enabled AS (
@@ -65,10 +67,8 @@ def materialize_passing(user_id: int) -> int:
                        OR j.source = 'sheet_import' OR j.uploaded_by = %(uid)s)
                   AND {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
                   AND (SELECT COUNT(*) FROM enabled) > 0
-                  AND (SELECT COUNT(*) FROM enabled e WHERE (
-                        SELECT status FROM verdicts q WHERE q.url = j.url
-                          AND q.check_type = 'custom' AND q.prompt_hash = e.prompt_hash
-                        ORDER BY q.id DESC LIMIT 1) = 'passed') = (SELECT COUNT(*) FROM enabled)
+                  AND (SELECT COUNT(*) FROM enabled e WHERE {filter_status} = 'passed')
+                      = (SELECT COUNT(*) FROM enabled)
             ),
             legacy_insert AS (
                 INSERT INTO user_jobs (user_id, job_id)
@@ -209,9 +209,7 @@ def demote_closed() -> int:
                 -- forever, because ingest marks them inactive and the sweep
                 -- never looks at them again.
                 NOT j.active
-                OR (SELECT q.status FROM verdicts q WHERE q.url = j.url
-                    AND q.check_type = 'closed'
-                    ORDER BY q.id DESC LIMIT 1) = 'rejected'
+                OR {verdict_reads.latest_status("j.url", "closed")} = 'rejected'
                 )
                 ORDER BY membership.user_id, membership.job_id
             ),

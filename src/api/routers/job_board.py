@@ -12,6 +12,7 @@ from api.auth import AuthedUser, require_user
 from api.board import column_filters as column_filters_
 from api.board import visibility
 from api.reports import ReportKind, report_kinds
+from core import verdict_reads
 from core.comp import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -85,10 +86,7 @@ _JOB_ROW = f"""
     j.url, j.raw_url, j.active, j.date_posted, j.created_at AS added_at,
     j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
     j.comp_period, j.comp_basis,
-    (SELECT CASE q.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END
-     FROM verdicts q
-     WHERE q.url = j.url AND q.check_type = 'closed'
-     ORDER BY q.id DESC LIMIT 1) AS closed_verdict,
+    {verdict_reads.closed_verdict("j.url")} AS closed_verdict,
     uj.status, uj.date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
     COALESCE(uj.hidden, FALSE) AS hidden

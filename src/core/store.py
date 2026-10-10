@@ -348,32 +348,6 @@ AI_ELIGIBLE_JOB = (
 )
 
 
-# A posting whose latest closed and clearance verdicts both passed. The
-# extractors (comp, requirements) select on it: on 2026-09-06 the catalog
-# held 74,477 active postings of which 37,438 were verified open, and both
-# extractors were paying for the other half, whose numbers nothing reads
-# because a closed or restricted posting reaches no board. The narrower
-# option, extracting only for postings on someone's board (3,117 that day,
-# 4 percent), is not taken yet: a posting reaching a board later would wait
-# a cycle for its comp column, and the market table would be built from a
-# smaller slice than the filters admit. Written down here so it is a
-# decision and not an oversight.
-#
-# This reads the latest closed and clearance rows in ai_queries. A retention
-# policy on that table (none exists; it is the largest table and the
-# decision is open) must keep the latest verdict per (url, check_type), or
-# a posting whose verdicts age out silently reads as unverified here and
-# drops out of both extractors, then re-enters them at cost once re-verified.
-VERIFIED_OPEN = """
-    (SELECT lc.status FROM verdicts lc
-      WHERE lc.url = {url} AND lc.check_type = 'closed'
-      ORDER BY lc.id DESC LIMIT 1) = 'passed'
-    AND (SELECT lc.status FROM verdicts lc
-      WHERE lc.url = {url} AND lc.check_type = 'clearance'
-      ORDER BY lc.id DESC LIMIT 1) = 'passed'
-"""
-
-
 def get_contents(urls: list[str]) -> dict[str, str]:
     """Newest raw cached content per URL, with the same eligibility as get_content."""
     if not urls:

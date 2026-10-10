@@ -8,6 +8,7 @@ from typing import Any
 from api import compensation_candidates, db
 from api.ai import batch_results
 from api.task_config import configured_shape
+from core import verdict_reads
 from core.comp import (
     COMP_BASES,
     COMP_INPUT_CHARS,
@@ -17,7 +18,7 @@ from core.comp import (
     CompExtract,
 )
 from core.shapes import COMP_TASK
-from core.store import CONTENT_LATERAL, VERIFIED_OPEN
+from core.store import CONTENT_LATERAL
 from tasks import rescrape
 from tasks.runtime import (
     consume_result,
@@ -70,7 +71,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
           AND j.active
           AND {eligible}
-          AND {VERIFIED_OPEN.format(url="j.url")}
+          AND {verdict_reads.verified_open("j.url")}
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,
