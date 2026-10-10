@@ -159,8 +159,10 @@ class AiBatch(Base):
     failed_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, server_default=text("'submitted'"))
     est_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    input_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
-    output_tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # Nothing writes these four since #923; tasks.usage_copies empties them
+    # and the next release drops them.
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
     est_cost_usd: Mapped[Any | None] = mapped_column(Numeric(12, 6))
     submitted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
