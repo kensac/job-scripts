@@ -278,11 +278,6 @@ pointer cannot outlive its text. The upsert's change check compares
 `pattern_id`. The copy this replaces was 492 MB of the table's 863 MB of row
 data for 4 distinct values (1,060,806 rows, 2026-10-10).
 
-`listings.pattern` is that old copy and nothing reads or writes it. A pull
-empties each row it rewrites; `drop_listing_pattern_copies`
-(`tasks/listing_patterns.py`), queued each ingest cycle until a run starts
-with none left, empties the rest. Then the column is dropped (migrations.md).
-
 A candidate pattern is judged against this table (`pattern-preview`) before it
 replaces the live one. A posting a wider pattern admits arrives in `jobs` on
 the next pull, and ingest stores the carried text as the posting's content

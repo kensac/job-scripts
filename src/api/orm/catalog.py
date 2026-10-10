@@ -385,10 +385,8 @@ class Listing(Base):
     title: Mapped[str] = mapped_column(Text, server_default=text("''"))
     locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
     date_posted: Mapped[datetime.datetime | None]
-    # The copy title_patterns replaced. Nothing reads or writes it; it is
-    # emptied (tasks.listing_patterns) and then dropped (migrations.md).
-    pattern: Mapped[str | None] = mapped_column(Text)
-    pattern_id: Mapped[int | None] = mapped_column(
+    # The title pattern whose match set kept, stored once (TitlePattern).
+    pattern_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("title_patterns.id", name="fk_listings_pattern")
     )
     kept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))

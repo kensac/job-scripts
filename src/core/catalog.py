@@ -410,10 +410,7 @@ def title_pattern_id(pattern: str) -> int:
 # row would hold after it equals what it holds now. date_posted keeps the first
 # date seen, so a board that dates by age ("Posted 3 Days Ago", Workday and the
 # markdown lists), which yields a new timestamp on every pull, is not a change.
-# The pattern is compared by pattern_id, which names exactly one text, so a row
-# written before pattern_id existed (NULL) is a change and gains one on the
-# first pull that still lists it. Any rewrite empties the copy in `pattern`,
-# which nothing reads; it is dropped once empty (migrations.md).
+# The pattern is compared by pattern_id, which names exactly one text.
 _RECORD_LISTINGS: LiteralString = f"""
     INSERT INTO listings
         (url, source, company, title, locations, date_posted, pattern_id, kept,
@@ -446,7 +443,7 @@ _RECORD_LISTINGS: LiteralString = f"""
         source = EXCLUDED.source, company = EXCLUDED.company,
         title = EXCLUDED.title, locations = EXCLUDED.locations,
         date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
-        pattern = NULL, pattern_id = EXCLUDED.pattern_id, kept = EXCLUDED.kept,
+        pattern_id = EXCLUDED.pattern_id, kept = EXCLUDED.kept,
         {_set_payload("description")},
         {_set_payload("raw")},
         last_seen_at = now()
@@ -542,42 +539,3 @@ def record_listings(
             (source, retention_days, refresh_hours),
         )
     return inline
-
-
-def listings_holding_a_pattern_copy() -> dict[str, int]:
-    """Rows that still carry their pattern's text in listings.pattern, by
-    source, after storing every such text in title_patterns. A pull empties a
-    row it rewrites; these are what no pull has rewritten since, most of them
-    rows no board lists any more, kept for retention. One scan of the table
-    for each half."""
-    with pool.connection() as conn:
-        conn.execute(
-            "INSERT INTO title_patterns (digest, pattern) "
-            "SELECT DISTINCT sha256(convert_to(pattern, 'UTF8')), pattern FROM listings "
-            "WHERE pattern IS NOT NULL "
-            "ON CONFLICT (digest) DO NOTHING"
-        )
-        rows = conn.execute(
-            "SELECT source, count(*) AS n FROM listings WHERE pattern IS NOT NULL GROUP BY source"
-        ).fetchall()
-    return {r["source"]: r["n"] for r in rows}
-
-
-def drop_pattern_copies(source: str, limit: int = _BATCH) -> int:
-    """For up to `limit` of this source's rows that still carry the text,
-    points pattern_id at the stored copy of that text and empties the column.
-    The text is what the row's last writer meant, so it decides the pointer,
-    and the row is only emptied when its text is stored. Locked through the
-    source index in url order (_LOCK_ORDER), as the pull's upsert and the
-    retention delete lock them. Returns how many rows it changed; 0 means
-    none of this source's are left whose text listings_holding_a_pattern_copy
-    stored."""
-    with pool.connection() as conn:
-        return conn.execute(
-            "UPDATE listings l SET pattern_id = t.id, pattern = NULL FROM title_patterns t "
-            "WHERE l.url IN ("
-            "  SELECT url FROM listings WHERE source = %s AND pattern IS NOT NULL "
-            f"  ORDER BY url {_LOCK_ORDER} LIMIT %s FOR UPDATE) "
-            "AND t.pattern = l.pattern",
-            (source, limit),
-        ).rowcount
