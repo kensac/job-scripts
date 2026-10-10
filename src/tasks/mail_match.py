@@ -29,7 +29,6 @@ from typing import Any
 from api import db
 from api.mail import match as mail_match
 from api.mail.current import current_event, current_match
-from api.mail.pipeline import sync_action_items
 from tasks.runtime import set_progress
 
 logger = logging.getLogger(__name__)
@@ -496,35 +495,6 @@ def detach_unattachable(user_id: int) -> int:
     return len(rows)
 
 
-def _applications_touched(user_id: int, since: datetime.datetime | None) -> list[int]:
-    """The applications whose action items can have moved since `since`: one
-    created since, or one that a message matched or classified since is or
-    was attached to. The old attachment is included because a rematch strands
-    the item it left behind, and that item has to be closed."""
-    return [
-        r["id"]
-        for r in db.query(
-            """
-            SELECT id FROM applications
-            WHERE user_id = %(user)s
-              AND (%(since)s::timestamptz IS NULL
-                   OR created_at > %(since)s
-                   OR id IN (
-                       SELECT am.application_id FROM application_matches am
-                       WHERE am.message_id IN (
-                           SELECT message_id FROM application_matches
-                           WHERE created_at > %(since)s
-                           UNION
-                           SELECT message_id FROM email_events WHERE created_at > %(since)s
-                       )
-                   ))
-            ORDER BY id
-            """,
-            {"user": user_id, "since": since},
-        )
-    ]
-
-
 def _step_progress(
     task_id: int, index: int, users: int, user_id: int, what: str, done: int, total: int
 ) -> None:
@@ -574,8 +544,6 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         "attached": 0,
         "detached": 0,
         "floors_lowered": 0,
-        "opened": 0,
-        "resolved": 0,
     }
     skipped = 0
     for index, user_id in enumerate(user_ids):
@@ -608,21 +576,13 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         )
         created, _ = seed_from_mail(user_id)
         totals["derived"] += created
-        apps = _applications_touched(user_id, since)
-        for done, app_id in enumerate(apps):
-            if done % PROGRESS_EVERY == 0:
-                step("applications", done, len(apps))
-            result = sync_action_items(app_id)
-            totals["opened"] += result["opened"]
-            totals["resolved"] += result["resolved"]
 
     summary = (
         f"{len(user_ids)} user(s): {totals['derived']} derived "
         f"applications, {totals['swept']} messages swept "
         f"({totals['attached']} now attached), "
         f"{totals['detached']} detached, "
-        f"{totals['floors_lowered']} floors lowered, "
-        f"{totals['opened']} items opened, {totals['resolved']} resolved"
+        f"{totals['floors_lowered']} floors lowered"
         + (f", {skipped} unchanged since the last sweep" if skipped else "")
     )
     logger.info(f"Task {task_id}: {summary}")

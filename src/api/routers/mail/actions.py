@@ -10,7 +10,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db
 from api.auth import AuthedUser, require_user
 from api.mail import pipeline as mail_pipeline
 from api.mail.pipeline import Proposal, ProposalAnswered
@@ -108,26 +107,21 @@ def resolve_action(
     is closed by the acknowledgement that follows it, not by the user
     remembering. That is what makes this no-touch rather than a second inbox.
 
-    But two kinds have no settling event at all. `respond_to_offer` closes only
-    on a rejection, so accepting an offer, declining it or signing never
-    settles it - 146 open and none has ever closed. `reply_to_recruiter` has an
-    empty settling set by construction. For those, a person is the only
-    producer, exactly as the board is the only producer of `withdrawn`.
+    But `respond_to_offer` closes only on a rejection, so accepting an offer,
+    declining it or signing never settles it: 146 open and none has ever
+    closed. For that, a person is the only producer, exactly as the board is
+    the only producer of `withdrawn`.
 
-    Guarded on the event id in sync_action_items, so a resolved item is not
-    reopened by the next recomputation.
+    `action_id` is the id of the event that asked. The answer is appended to
+    `event_answers`, the record of what a person said.
     """
-    row = db.query_one(
-        "SELECT id, resolved_at FROM action_items WHERE id = %s AND user_id = %s",
-        (action_id, user.id),
-    )
-    if row is None:
+    item = mail_pipeline.action_item(user.id, action_id)
+    if item is None:
         raise refuse(404, "NOT_FOUND", "action not found")
-    if row["resolved_at"] is not None:
+    if item.resolved_at is not None:
         return ActionClosed(ok=True, already=True)
-    db.execute(
-        "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
-        (body.note or "marked done", action_id),
+    mail_pipeline.answer(
+        user.id, action_id, mail_pipeline.ACTION_QUESTION, mail_pipeline.DONE, body.note
     )
     return ActionClosed(ok=True, already=False)
 
@@ -139,23 +133,21 @@ def reopen_action(
     """Undo a manual resolution.
 
     Refused on one that a later event settled: that is a fact about the mail
-    rather than a decision the user made, and reopening it would only have it
-    close again on the next recomputation.
+    rather than a decision the user made, and reopening it would change
+    nothing: the event still settles it. A reopen is appended, so the closing
+    answer stays readable underneath it.
     """
-    row = db.query_one(
-        "SELECT id, resolved_by_event_id FROM action_items WHERE id = %s AND user_id = %s",
-        (action_id, user.id),
-    )
-    if row is None:
+    item = mail_pipeline.action_item(user.id, action_id)
+    if item is None:
         raise refuse(404, "NOT_FOUND", "action not found")
-    if row["resolved_by_event_id"] is not None:
+    if item.resolved_by_event_id is not None:
         raise refuse(
             409,
             "SETTLED_BY_MAIL",
             "a later email settled this; it would close again on the next pass",
         )
-    db.execute(
-        "UPDATE action_items SET resolved_at = NULL, resolution = NULL WHERE id = %s",
-        (action_id,),
-    )
+    if item.resolved_at is not None:
+        mail_pipeline.answer(
+            user.id, action_id, mail_pipeline.ACTION_QUESTION, mail_pipeline.REOPENED, body.note
+        )
     return Ok()

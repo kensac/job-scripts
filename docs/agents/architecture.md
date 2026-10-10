@@ -28,7 +28,13 @@ Import → classify → match → derive.
   (the fill's `application_id` names it, and a submit on a board posting
   names that posting's application); and `email`, written by the matcher. A
   posting has at most one application per person (a unique index).
-- `action_items`: derived from events, resolvable by a person.
+- Asks ("schedule the interview", "respond to the offer") and status
+  proposals are derived when read (`mail.pipeline.action_items`,
+  `proposals_for`) from each message's current event on its current
+  application; an ask is closed by a later event that settles it. Their ids
+  are the asking event's. Only what a person answered is stored, in
+  `event_answers`: append-only, one row per answer, so a reopen is an answer
+  and the closing one stays readable. No sweep keeps them in step.
 
 **Stage is derived at read time from the event stream and never stored.**
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
@@ -62,8 +68,7 @@ finished `match_mail` that covered the user and had no `limit`. The worker
 enqueues a sweep only when `changed_since` finds a new application, event or
 match, or a board row moved into an applied status. A sweep skips a user with
 none of these, decides again only messages whose verdict or the cutoff is
-older than a new application or event, and resyncs action items only for the
-applications those changes touch. The verdict timestamp alone is not a
+older than a new application or event. The verdict timestamp alone is not a
 cutoff, because `match.record` does not append a verdict that repeats the
 standing one. Before this, 245 runs in the 14 days to 2026-10-10 took 200.5
 worker-hours deciding the same 4,852 messages, and 244 of them wrote nothing.

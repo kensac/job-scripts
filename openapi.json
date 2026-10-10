@@ -28738,7 +28738,7 @@
     "/v1/user/actions/{action_id}/resolve": {
       "post": {
         "summary": "Resolve Action",
-        "description": "Mark an action done, because for some kinds nothing else ever will.\n\nAuto-resolution carries most of the weight and should: an assessment invite\nis closed by the acknowledgement that follows it, not by the user\nremembering. That is what makes this no-touch rather than a second inbox.\n\nBut two kinds have no settling event at all. `respond_to_offer` closes only\non a rejection, so accepting an offer, declining it or signing never\nsettles it - 146 open and none has ever closed. `reply_to_recruiter` has an\nempty settling set by construction. For those, a person is the only\nproducer, exactly as the board is the only producer of `withdrawn`.\n\nGuarded on the event id in sync_action_items, so a resolved item is not\nreopened by the next recomputation.",
+        "description": "Mark an action done, because for some kinds nothing else ever will.\n\nAuto-resolution carries most of the weight and should: an assessment invite\nis closed by the acknowledgement that follows it, not by the user\nremembering. That is what makes this no-touch rather than a second inbox.\n\nBut `respond_to_offer` closes only on a rejection, so accepting an offer,\ndeclining it or signing never settles it: 146 open and none has ever\nclosed. For that, a person is the only producer, exactly as the board is\nthe only producer of `withdrawn`.\n\n`action_id` is the id of the event that asked. The answer is appended to\n`event_answers`, the record of what a person said.",
         "operationId": "resolve_action_v1_user_actions__action_id__resolve_post",
         "parameters": [
           {
@@ -28888,7 +28888,7 @@
     "/v1/user/actions/{action_id}/reopen": {
       "post": {
         "summary": "Reopen Action",
-        "description": "Undo a manual resolution.\n\nRefused on one that a later event settled: that is a fact about the mail\nrather than a decision the user made, and reopening it would only have it\nclose again on the next recomputation.",
+        "description": "Undo a manual resolution.\n\nRefused on one that a later event settled: that is a fact about the mail\nrather than a decision the user made, and reopening it would change\nnothing: the event still settles it. A reopen is appended, so the closing\nanswer stays readable underneath it.",
         "operationId": "reopen_action_v1_user_actions__action_id__reopen_post",
         "parameters": [
           {

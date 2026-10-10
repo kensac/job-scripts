@@ -84,7 +84,7 @@ current_match AS (
     {current_match("id", "application_id", "method", "actor_user_id")}
 ),
 answered AS (
-    SELECT DISTINCT application_id, event_id FROM suggestion_responses
+    SELECT DISTINCT event_id FROM event_answers WHERE question = 'status'
 )
 SELECT cm.message_id, m.sent_at, e.id AS event_id, e.kind, NULL AS company,
        cm.id AS match_id, cm.actor_user_id, a.id AS application_id,
@@ -95,7 +95,7 @@ JOIN applications a ON a.id = cm.application_id
 JOIN email_messages m ON m.id = cm.message_id
 LEFT JOIN current_event e ON e.message_id = cm.message_id
 LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
-LEFT JOIN answered sr ON sr.application_id = a.id AND sr.event_id = e.id
+LEFT JOIN answered sr ON sr.event_id = e.id
 WHERE a.user_id = %(user)s
   AND a.dismissed_at IS NULL
 UNION ALL
@@ -139,22 +139,6 @@ JOIN email_messages m ON m.id = p.message_id
 LEFT JOIN email_events e ON e.id = p.event_id
 LEFT JOIN application_matches cm ON cm.id = p.match_id
 LEFT JOIN applications a ON a.id = p.application_id
-"""
-
-_ACTIONS_SQL = """
-SELECT ai.id, ai.kind, ai.due_at, ai.application_id, ai.event_id,
-       a.company_name, a.title, a.job_id, uj.status AS board_status,
-       uj.user_id IS NOT NULL AS on_board,
-       m.id AS message_id, m.subject, m.from_email, m.sent_at
-FROM action_items ai
-LEFT JOIN applications a ON a.id = ai.application_id
-LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
-LEFT JOIN email_events e ON e.id = ai.event_id
-LEFT JOIN email_messages m ON m.id = e.message_id
-WHERE ai.user_id = %(user)s
-  AND ai.resolved_at IS NULL
-  AND (a.id IS NULL OR a.dismissed_at IS NULL)
-ORDER BY ai.due_at NULLS LAST, ai.id
 """
 
 
@@ -314,50 +298,55 @@ def action_items(owner_id: int, events: dict[int, list[QueueEvent]]) -> list[Ran
     clothes. The list is the honest form: it says what would close this, and
     an empty one says nothing will.
     """
-    items = []
-    for row in db.query(_ACTIONS_SQL, {"user": owner_id}):
-        settling = mail_pipeline.settles_on(row["kind"])
-        message = (
-            {
-                "id": row["message_id"],
-                "subject": row["subject"],
-                "from_email": row["from_email"],
-                "sent_at": row["sent_at"],
-            }
-            if row["message_id"]
-            else None
+    open_apps = {
+        r["id"]: r
+        for r in db.query(
+            """
+            SELECT a.id, a.company_name, a.title, a.job_id, uj.status AS board_status,
+                   uj.user_id IS NOT NULL AS on_board
+            FROM applications a
+            LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
+            WHERE a.user_id = %s AND a.dismissed_at IS NULL
+            """,
+            (owner_id,),
         )
+    }
+    items = []
+    for ask in mail_pipeline.action_items(owner_id, open_only=True):
+        app = open_apps.get(ask.application_id)
+        if app is None:
+            continue
+        message = {
+            "id": ask.message_id,
+            "subject": ask.subject,
+            "from_email": ask.from_email,
+            "sent_at": ask.sent_at,
+        }
         item = {
-            "id": f"action:{row['id']}",
+            "id": f"action:{ask.id}",
             "kind": ACTION_ITEM,
             "rank": RANK_ATTACHABLE,
-            "rank_reason": f"an incoming {' or '.join(settling)} would close this"
-            if settling
+            "rank_reason": f"an incoming {' or '.join(ask.settles_on)} would close this"
+            if ask.settles_on
             else "nothing that arrives can close this; only you can",
             "message": message,
             "application": {
-                "id": row["application_id"],
-                "company_name": row["company_name"],
-                "title": row["title"],
-                "stage": mail_pipeline.stage_for(
-                    events.get(row["application_id"], []), row["board_status"]
-                ),
-                "on_board": bool(row["on_board"]),
-                "job_id": row["job_id"],
-            }
-            if row["application_id"]
-            else None,
+                "id": app["id"],
+                "company_name": app["company_name"],
+                "title": app["title"],
+                "stage": mail_pipeline.stage_for(events.get(app["id"], []), app["board_status"]),
+                "on_board": bool(app["on_board"]),
+                "job_id": app["job_id"],
+            },
             "action": {
-                "id": row["id"],
-                "kind": row["kind"],
-                "due_at": row["due_at"],
-                "settles_on": settling,
+                "id": ask.id,
+                "kind": ask.kind,
+                "due_at": ask.due_at,
+                "settles_on": ask.settles_on,
             },
             "choices": [_choice(MARK_DONE, "Done")],
         }
-        items.append(
-            Ranked(ACTION_ITEM, RANK_ATTACHABLE, message["sent_at"] if message else None, item)
-        )
+        items.append(Ranked(ACTION_ITEM, RANK_ATTACHABLE, ask.sent_at, item))
     return items
 
 

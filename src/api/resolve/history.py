@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
+from api.mail.current import current_match
 
-# Everything a person has decided, from the four logs that record it, newest
+# Everything a person has decided, from the three logs that record it, newest
 # first.
 #
 # Read from the logs themselves rather than from a decisions table, because
@@ -22,7 +23,7 @@ from api import db
 # That the matcher can never appear as the newer row is not an accident of the
 # data: `mail_match.record` refuses to overwrite a human verdict, so a human
 # row's successor is always another human row.
-_HISTORY_SQL = """
+_HISTORY_SQL = f"""
 WITH match_decisions AS (
     SELECT am.id, am.created_at, am.actor_user_id, am.message_id, am.application_id,
            am.rationale
@@ -41,33 +42,21 @@ LEFT JOIN applications a ON a.id = d.application_id
 
 UNION ALL
 
-SELECT 'proposal', sr.id, sr.created_at, sr.user_id, sr.application_id,
-       lead(sr.id) OVER (PARTITION BY sr.application_id, sr.event_id ORDER BY sr.id),
-       lag(sr.id) OVER (PARTITION BY sr.application_id, sr.event_id ORDER BY sr.id),
-       sr.response,
+-- A person's answers about events: a proposed status ('proposal') or an
+-- ask ('action'). Append-only, so a reopened ask shows the closing answer it
+-- replaced. The application is the one the event's message is on now.
+SELECT CASE ea.question WHEN 'status' THEN 'proposal' ELSE 'action' END, ea.id,
+       ea.created_at, ea.actor_user_id, cm.application_id,
+       lead(ea.id) OVER (PARTITION BY ea.event_id, ea.question ORDER BY ea.id),
+       lag(ea.id) OVER (PARTITION BY ea.event_id, ea.question ORDER BY ea.id),
+       CASE ea.answer WHEN 'done' THEN 'closed' ELSE ea.answer END,
        coalesce(a.company_name, 'an application')
-FROM suggestion_responses sr
-LEFT JOIN applications a ON a.id = sr.application_id
-WHERE sr.user_id = %(user)s
-
-UNION ALL
-
--- Closed by hand, not by a later email. `resolved_by_event_id` set means the
--- system settled it, which is it working rather than a decision anyone made.
---
--- No neighbours, because `action_items` is updated in place rather than
--- appended to: reopening clears `resolved_at` and the closure that preceded it
--- is gone from the row. So this log can show that an item was closed and
--- cannot show that it was closed twice. Stated rather than papered over - the
--- fix is a second table and it is not worth one for the 0 items a person has
--- ever closed.
-SELECT 'action', ai.id, ai.resolved_at, ai.user_id, ai.application_id, NULL, NULL,
-       'closed', coalesce(a.company_name, ai.kind)
-FROM action_items ai
-LEFT JOIN applications a ON a.id = ai.application_id
-WHERE ai.user_id = %(user)s
-  AND ai.resolved_at IS NOT NULL
-  AND ai.resolved_by_event_id IS NULL
+FROM event_answers ea
+JOIN email_events ev ON ev.id = ea.event_id
+JOIN email_messages m3 ON m3.id = ev.message_id
+LEFT JOIN ({current_match("application_id")}) cm ON cm.message_id = ev.message_id
+LEFT JOIN applications a ON a.id = cm.application_id
+WHERE m3.user_id = %(user)s
 
 UNION ALL
 

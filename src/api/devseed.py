@@ -265,16 +265,11 @@ def seed() -> dict[str, int]:
     # seed finds the application the first made.
     application_id = applications.from_board(user_id, job_ids[0], _days_ago(40).date())
     counts["applications"] += 1
-    mail_match.record(
-        message_ids[0],
-        mail_match.Match(application_id, mail_match.ATS_COMPANY, "high", "dev seed"),
-    )
-    # Historical and unresolvable: no open action item in the real corpus has a
-    # future deadline, and respond_to_offer has never once auto-resolved.
-    for kind, due in (("complete_assessment", _days_ago(200)), ("respond_to_offer", None)):
-        db.execute(
-            "INSERT INTO action_items (user_id, application_id, kind, due_at) "
-            "VALUES (%s, %s, %s, %s)",
-            (user_id, application_id, kind, due),
+    # The acknowledgement and the interview invite, so the application has an
+    # open ask derived from its mail, with no deadline, like every real one.
+    for message_id in message_ids[:2]:
+        mail_match.record(
+            message_id,
+            mail_match.Match(application_id, mail_match.ATS_COMPANY, "high", "dev seed"),
         )
     return counts
