@@ -2,15 +2,19 @@
 
 from api.board import criteria
 from api.board.person_state import UNTOUCHED
+from core import verdict_reads
 from core.store import AI_ELIGIBLE_JOB
+
+_LATEST_FILTER = verdict_reads.latest_per(
+    "url, prompt_hash",
+    "url, prompt_hash, status",
+    "check_type = 'custom' "
+    "AND prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM user_filters WHERE enabled))",
+)
 
 TARGETS = f"""
 latest_filter AS MATERIALIZED (
-    SELECT DISTINCT ON (url, prompt_hash) url, prompt_hash, status
-    FROM verdicts
-    WHERE check_type = 'custom'
-      AND prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM user_filters WHERE enabled))
-    ORDER BY url, prompt_hash, id DESC
+    {_LATEST_FILTER}
 ),
 compensation_demand AS MATERIALIZED (
     SELECT id FROM jobs WHERE uploaded_by IS NOT NULL

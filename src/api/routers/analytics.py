@@ -38,6 +38,7 @@ from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE, Rate
 from api.rates import rate as _rate
 from api.routers.admin import require_admin
+from core import verdict_reads
 from core.checks import POSTING_CHECK_NAMES
 
 router = APIRouter(prefix="/analytics")
@@ -75,15 +76,16 @@ GROUP BY source
 # text url and spills to disk (~1.15s measured on prod). Carrying jobs.id
 # through and sorting on (job_id, check_type, id) keeps the same sort in
 # memory and costs ~245ms for identical output.
-_FUNNEL_SQL = """
-WITH q AS (
-    SELECT j.source AS source, j.id AS job_id, a.check_type, a.status, a.id AS qid
-    FROM verdicts a
-    JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = ANY(%(checks)s)
-), latest AS (
-    SELECT DISTINCT ON (job_id, check_type) source, check_type, status
-    FROM q ORDER BY job_id, check_type, qid DESC
+_LATEST_CHECK_PER_JOB = verdict_reads.latest_per(
+    "j.id, v.check_type",
+    "j.source AS source, v.check_type, v.status",
+    "v.check_type = ANY(%(checks)s)",
+    join="JOIN jobs j ON j.url = v.url",
+)
+
+_FUNNEL_SQL = f"""
+WITH latest AS (
+    {_LATEST_CHECK_PER_JOB}
 )
 SELECT source, check_type,
        count(*) AS checked,
@@ -92,20 +94,20 @@ SELECT source, check_type,
 FROM latest GROUP BY source, check_type
 """
 
+_LATEST_FILTER_PER_JOB = verdict_reads.latest_per(
+    "j.id, v.prompt_hash",
+    "j.source AS source, j.id AS job_id, v.status",
+    "v.check_type = 'custom' AND v.prompt_hash IS NOT NULL",
+    join="JOIN jobs j ON j.url = v.url",
+)
+
 # Custom filters are per-user and a job can be judged by several of them, so
 # there are two honest denominators and this returns both: evaluations (one per
 # job per filter prompt) and jobs that passed every filter they were put in
 # front of, which is the job-level predicate the board itself applies.
-_CUSTOM_SQL = """
-WITH q AS (
-    SELECT j.source AS source, j.id AS job_id, a.prompt_hash, a.status, a.id AS qid
-    FROM verdicts a
-    JOIN jobs j ON j.url = a.url
-    WHERE a.check_type = 'custom'
-      AND a.prompt_hash IS NOT NULL
-), latest AS (
-    SELECT DISTINCT ON (job_id, prompt_hash) source, job_id, status
-    FROM q ORDER BY job_id, prompt_hash, qid DESC
+_CUSTOM_SQL = f"""
+WITH latest AS (
+    {_LATEST_FILTER_PER_JOB}
 ), per_job AS (
     SELECT source, job_id,
            count(*) AS evaluations,

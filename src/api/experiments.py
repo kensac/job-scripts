@@ -233,11 +233,9 @@ def _filter_deployed(urls: list[str], params: Params) -> Deployed:
     if not row:
         return {}
     rows = db.query(
-        """
-        SELECT DISTINCT ON (url) url, status FROM verdicts
-        WHERE url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s
-        ORDER BY url, id DESC
-        """,
+        verdict_reads.latest_per(
+            "url", "url, status", "url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s"
+        ),
         (urls, row["prompt_hash"]),
     )
     return {r["url"]: {"should_filter": r["status"] == "rejected"} for r in rows}
@@ -245,11 +243,11 @@ def _filter_deployed(urls: list[str], params: Params) -> Deployed:
 
 def _verify_deployed(urls: list[str], params: Params) -> Deployed:
     rows = db.query(
-        """
-        SELECT DISTINCT ON (url, check_type) url, check_type, status FROM verdicts
-        WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance')
-        ORDER BY url, check_type, id DESC
-        """,
+        verdict_reads.latest_per(
+            "url, check_type",
+            "url, check_type, status",
+            "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
+        ),
         (urls,),
     )
     out: Deployed = {}

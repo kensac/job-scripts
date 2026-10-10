@@ -139,7 +139,9 @@ A failed attempt is a call, not a verdict, so readers that count calls
 are answers instead of reading the view.
 
 How an answer is read is `core/verdict_reads.py`'s: the latest answer to a
-check for a posting (`latest`, `latest_status`, `read_latest`), what a closed
+check for a posting (`latest`, `latest_status`, `read_latest`), the latest
+answer per key (`latest_per`, keyed on `jobs.id` where a url key would sort
+text), what a closed
 answer shows a person (`closed_verdict`), whether any answer exists
 (`has_verdict`), and verified-open (`verified_open`). The same test fails
 when a module outside it writes a latest-answer shape (`ORDER BY id DESC`

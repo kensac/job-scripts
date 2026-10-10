@@ -148,9 +148,11 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
         return set()
     latest: dict[str, dict[str, dict[str, Any]]] = {}
     for row in db.query(
-        "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason, request_sha256 "
-        "FROM verdicts WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
-        "ORDER BY url, check_type, id DESC",
+        verdict_reads.latest_per(
+            "url, check_type",
+            "url, check_type, status, reason, request_sha256",
+            "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
+        ),
         (list(questions),),
     ):
         latest.setdefault(row["url"], {})[row["check_type"]] = row
@@ -556,21 +558,23 @@ def _copy_twin_verdicts(reuse: list[tuple[dict[str, Any], str]]) -> None:
     checks = {
         (row["url"], row["check_type"]): row
         for row in db.query(
-            "SELECT DISTINCT ON (url, check_type) url, check_type, status, reason "
-            "FROM verdicts WHERE url = ANY(%s) AND check_type IN ('closed', 'clearance') "
-            "ORDER BY url, check_type, id DESC",
+            verdict_reads.latest_per(
+                "url, check_type",
+                "url, check_type, status, reason",
+                "url = ANY(%s) AND check_type IN ('closed', 'clearance')",
+            ),
             (twin_urls,),
         )
     }
     customs: dict[str, list[dict[str, Any]]] = {}
     for row in db.query(
-        "SELECT DISTINCT ON (q.url, q.prompt_hash, q.model) q.url, q.prompt_hash, q.model, "
-        "q.filter_name, q.status, q.reason, q.parsed_json FROM verdicts q "
-        "WHERE q.url = ANY(%s) AND q.check_type = 'custom' "
-        "AND q.prompt_hash IN ("
-        "SELECT prompt_hash FROM managed_boards WHERE published "
-        "UNION SELECT prompt_hash FROM user_filters WHERE enabled) "
-        "ORDER BY q.url, q.prompt_hash, q.model, q.id DESC",
+        verdict_reads.latest_per(
+            "url, prompt_hash, model",
+            "url, prompt_hash, model, filter_name, status, reason, parsed_json",
+            "url = ANY(%s) AND check_type = 'custom' AND prompt_hash IN ("
+            "SELECT prompt_hash FROM managed_boards WHERE published "
+            "UNION SELECT prompt_hash FROM user_filters WHERE enabled)",
+        ),
         (twin_urls,),
     ):
         customs.setdefault(row["url"], []).append(row)

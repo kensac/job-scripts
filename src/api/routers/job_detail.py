@@ -126,12 +126,11 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
     )
     checks = db.query_as(
         CheckVerdict,
-        """
-        SELECT DISTINCT ON (check_type) check_type, status, reason, model, created_at
-        FROM verdicts
-        WHERE url = %(url)s AND check_type IN ('closed', 'clearance')
-        ORDER BY check_type, id DESC
-        """,
+        verdict_reads.latest_per(
+            "check_type",
+            "check_type, status, reason, model, created_at",
+            "url = %(url)s AND check_type IN ('closed', 'clearance')",
+        ),
         {"url": job["url"]},
     )
     latest_filter_verdict = verdict_reads.latest(

@@ -31,11 +31,19 @@ from api.board import criteria
 from api.board import eligibility as board_eligibility
 from api.board.eligibility import settings_params
 from api.queue import enqueue
+from core import verdict_reads
 
 logger = logging.getLogger(__name__)
 
 _ACTED_ON = """(COALESCE(uj.status, '') <> '' OR COALESCE(uj.notes, '') <> ''
                OR uj.date_applied IS NOT NULL)"""
+
+_LATEST_FILTER = verdict_reads.latest_per(
+    "v.url, v.prompt_hash",
+    "v.url, v.status",
+    "v.check_type = 'custom' "
+    "AND v.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled_filters))",
+)
 
 FULL = f"""
 WITH enabled_filters AS (
@@ -49,11 +57,7 @@ filter_pass AS (
     -- idx_ai_queries_latest_custom already yields index order and there is
     -- no sort at all: 28 ms, measured on production 2026-09-05.
     SELECT url, COUNT(*) AS passed_count FROM (
-        SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.status
-        FROM verdicts q
-        WHERE q.check_type = 'custom'
-          AND q.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled_filters))
-        ORDER BY q.url, q.prompt_hash, q.id DESC
+        {_LATEST_FILTER}
     ) t WHERE t.status = 'passed' GROUP BY url
 )
 SELECT {{columns}}

@@ -8,7 +8,7 @@ from typing import Any, LiteralString, cast
 
 from psycopg import Connection
 
-from core import pricing, query_instructions
+from core import pricing, query_instructions, verdict_reads
 from core.pool import connection
 
 logger = logging.getLogger(__name__)
@@ -220,14 +220,12 @@ def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = N
     clause = " AND model = %s" if model is not None else ""
     params = (urls, prompt_hash, model) if model is not None else (urls, prompt_hash)
     with connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT ON (url) url, "
-            "CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id "
-            "FROM verdicts WHERE url = ANY(%s) AND check_type = 'custom' "
-            f"AND prompt_hash = %s{clause} "
-            "ORDER BY url, id DESC",
-            params,
-        ).fetchall()
+        sql = verdict_reads.latest_per(
+            "url",
+            "url, CASE WHEN instructions IS NULL THEN instructions_id END AS instructions_id",
+            f"url = ANY(%s) AND check_type = 'custom' AND prompt_hash = %s{clause}",
+        )
+        rows = conn.execute(cast("LiteralString", sql), params).fetchall()
     query_instructions.hydrate([{"instructions": None, **row} for row in rows])
     return {row["url"] for row in rows}
 

@@ -16,6 +16,7 @@ from api.board import criteria as board_criteria
 from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
 from api.task_jobs import run_jobs
+from core import verdict_reads
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.managed_board_title_gate import TitleGateConfig
@@ -236,6 +237,14 @@ def _reservation(board: _Board, candidates: list[_Candidate]) -> int:
     )
 
 
+_LATEST_CUSTOM = verdict_reads.latest_per(
+    "v.url, v.prompt_hash",
+    "v.url, v.prompt_hash, v.status",
+    "v.check_type = 'custom' AND v.model = %(model)s "
+    "AND v.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled))",
+)
+
+
 def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
     """Machine-only personal-filter results at one exact verdict identity."""
     params = {"model": resolved_model, **eligibility.settings_params(sponsor_id)}
@@ -245,11 +254,7 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
         WITH enabled AS ({eligibility.ENABLED_FILTERS}),
         {eligibility.LATEST_CHECK},
         latest_custom AS (
-          SELECT DISTINCT ON (q.url, q.prompt_hash) q.url, q.prompt_hash, q.status
-          FROM verdicts q
-          WHERE q.check_type = 'custom' AND q.model = %(model)s
-            AND q.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled))
-          ORDER BY q.url, q.prompt_hash, q.id DESC
+          {_LATEST_CUSTOM}
         )
         SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
