@@ -182,8 +182,21 @@ def _order(schema: _Schema, tables: list[str]) -> list[str]:
                 if parent and parent != t and parent in remaining
             }
         )
-        if not ready:  # a genuine cycle; take the smallest and let FKs be null
-            ready = [sorted(remaining)[0]]
+        if not ready:
+            # A genuine cycle. Break it at a table that waits only through
+            # nullable columns (email_messages and its current event and
+            # match pointers), whose rows can go in first with those columns
+            # null. Otherwise take the smallest and let its FKs be null.
+            ready = [
+                t
+                for t in sorted(remaining)
+                if all(
+                    column["is_nullable"] == "YES"
+                    for column in schema.columns[t]
+                    for parent, _ in [schema.parent_of(t, column["column_name"]) or ("", "")]
+                    if parent and parent != t and parent in remaining
+                )
+            ][:1] or [sorted(remaining)[0]]
         done.extend(ready)
         remaining -= set(ready)
     return done
