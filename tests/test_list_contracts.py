@@ -61,18 +61,19 @@ def test_admin_user_sort_applies_multiple_keys_and_echoes_them(client, admin_hea
     assert body["sorts"] == [{"key": "name", "dir": "asc"}, {"key": "email", "dir": "asc"}]
 
 
-def test_cursor_board_total_does_not_change_when_page_becomes_empty(client, user_headers, f):
+def test_board_total_does_not_change_when_page_becomes_empty(client, user_headers, f):
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
-    ids = [f.make_job(uploaded_by=uid) for _ in range(3)]
-    for cursor in [ids[-1], ids[0]]:
+    for _ in range(3):
+        f.make_job(uploaded_by=uid)
+    for offset, rows in [(2, 1), (3, 0)]:
         response = client.get(
             "/v1/user/jobs",
-            params={"cursor": cursor, "with_total": True, "sort": "company"},
+            params={"offset": offset, "with_total": True, "sort": "company"},
             headers=user_headers,
         )
         assert response.status_code == 200
+        assert len(response.json()["rows"]) == rows
         assert response.json()["total"] == 3
-        assert response.json()["sorts"] == [{"key": "id", "dir": "desc"}]
 
 
 def test_mail_sort_uses_secondary_key(client, admin_headers, f):

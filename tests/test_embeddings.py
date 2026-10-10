@@ -41,13 +41,15 @@ class TestSchema:
 
 
 class TestCandidateSelection:
-    def test_includes_urls_with_no_job_row(self, f):
+    def test_excludes_urls_with_no_job_row(self, f):
+        # No similarity route can address a url without a job row.
         f.make_verdict("https://orphan.test/1", "content", "passed", content=CONTENT)
         urls = [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
-        assert "https://orphan.test/1" in urls
+        assert "https://orphan.test/1" not in urls
 
     def test_skips_already_embedded_urls(self, f):
-        _, url = f.make_ready_job(content=CONTENT)
+        job_id, url = f.make_ready_job(content=CONTENT)
+        db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (f.make_user(), job_id))
         assert url in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]
         f.make_embedding(url)
         assert url not in [r["url"] for r in db.query(_CANDIDATES, {"cap": 100})]

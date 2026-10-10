@@ -8,7 +8,7 @@ from api.routers.admin.config import ConfigPut, put_config
 
 
 def test_config_history_records_actual_changes_and_actor(client, admin_headers):
-    path = "/v1/admin/config/embedding_visible_only"
+    path = "/v1/admin/config/managed_board_cache_writes_enabled"
     assert client.put(path, json={"value": False}, headers=admin_headers).status_code == 200
     assert client.put(path, json={"value": False}, headers=admin_headers).status_code == 200
     assert client.put(path, json={"value": True}, headers=admin_headers).status_code == 200
@@ -24,9 +24,11 @@ def test_config_history_records_actual_changes_and_actor(client, admin_headers):
 
 
 def test_config_history_missing_previous_row_is_explicit(client, admin_headers):
-    db.execute("DELETE FROM app_config WHERE key = 'embedding_visible_only'")
+    db.execute("DELETE FROM app_config WHERE key = 'managed_board_cache_writes_enabled'")
     response = client.put(
-        "/v1/admin/config/embedding_visible_only", json={"value": True}, headers=admin_headers
+        "/v1/admin/config/managed_board_cache_writes_enabled",
+        json={"value": True},
+        headers=admin_headers,
     )
     assert response.status_code == 200
     row = client.get("/v1/admin/config/history", headers=admin_headers).json()["items"][0]
@@ -36,7 +38,10 @@ def test_config_history_missing_previous_row_is_explicit(client, admin_headers):
 
 
 def test_invalid_config_writes_do_not_append(client, admin_headers):
-    for key, value in [("embedding_visible_only", "false"), ("unknown_secret", "secret")]:
+    for key, value in [
+        ("managed_board_cache_writes_enabled", "false"),
+        ("unknown_secret", "secret"),
+    ]:
         response = client.put(
             f"/v1/admin/config/{key}", json={"value": value}, headers=admin_headers
         )
@@ -46,9 +51,9 @@ def test_invalid_config_writes_do_not_append(client, admin_headers):
 
 def test_history_pagination_and_key_filter(client, admin_headers):
     for key, value in [
-        ("embedding_visible_only", False),
+        ("managed_board_cache_writes_enabled", False),
         ("signups_enabled", False),
-        ("embedding_visible_only", True),
+        ("managed_board_cache_writes_enabled", True),
     ]:
         assert (
             client.put(
@@ -57,11 +62,12 @@ def test_history_pagination_and_key_filter(client, admin_headers):
             == 200
         )
     first = client.get(
-        "/v1/admin/config/history?key=embedding_visible_only&limit=1", headers=admin_headers
+        "/v1/admin/config/history?key=managed_board_cache_writes_enabled&limit=1",
+        headers=admin_headers,
     ).json()
     assert first["items"][0]["new_value"] is True
     second = client.get(
-        f"/v1/admin/config/history?key=embedding_visible_only&limit=1&before_id={first['next_before_id']}",
+        f"/v1/admin/config/history?key=managed_board_cache_writes_enabled&limit=1&before_id={first['next_before_id']}",
         headers=admin_headers,
     ).json()
     assert second["items"][0]["new_value"] is False
@@ -85,8 +91,8 @@ def test_config_and_history_roll_back_together(monkeypatch, f):
 
     monkeypatch.setattr(db, "execute", fail_projection)
     with pytest.raises(RuntimeError, match="projection unavailable"):
-        put_config("embedding_visible_only", ConfigPut(value=False), actor)
-    assert db.get_config("embedding_visible_only") is True
+        put_config("managed_board_cache_writes_enabled", ConfigPut(value=False), actor)
+    assert db.get_config("managed_board_cache_writes_enabled") is True
     assert db.query("SELECT id FROM app_config_changes") == []
 
 
