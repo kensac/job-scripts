@@ -612,7 +612,7 @@ async def run_once() -> bool:
         # declared `async def` that never awaits blocks the event loop for its
         # entire run, so a coroutine heartbeat is never scheduled and the
         # liveness signal fails exactly when the work is longest. Two handler
-        # modules contain no await at all - mail_match and message_html - and
+        # modules contained no await at all - mail_match and a mail backfill - and
         # match_mail was measured holding a worker for 428 seconds while the
         # admin fleet view reported it dead the whole time.
         #
