@@ -44,7 +44,6 @@ from tasks.page_fetch_move import handle_move_page_fetches
 from tasks.receipt_vector_format import handle_rewrite_receipt_vectors_v1
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
-from tasks.user_job_backfill import handle_backfill_user_job_split
 from tasks.verify import (
     handle_reverify_chunk,
     handle_reverify_open,
@@ -78,7 +77,6 @@ HANDLERS = {
     "fetch_missing_content": handle_fetch_missing_content,
     "application_draft": handle_application_draft,
     "application_sweep": handle_application_sweep,
-    "backfill_user_job_split": handle_backfill_user_job_split,
     "run_managed_board": handle_run_managed_board,
     "run_managed_board_batch": handle_run_managed_board_batch,
     "classify_job_profiles": handle_classify_job_profiles,

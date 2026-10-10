@@ -60,7 +60,7 @@ real only relocates the problem.
 |---|---|---|
 | 0 | The layering is enforced | An import contract fails CI on a new upward edge |
 | 1 | Check types are a registry | **Done.** A new posting check is a `POSTING_CHECKS` registration; dispatch does not grow a purpose ladder |
-| 2 | A board row and the working set are told apart | Named and pinned apart (2a). Moving the sweeps' scope off `user_jobs` (2b): product meanings chosen 2026-10-10, each read moves with a cutover comparison |
+| 2 | A board row and the working set are told apart | **Done 2026-10-10.** `user_jobs` holds person state, `user_job_working_set` what the filters picked; every scope reader moved with a production comparison (2b, below) |
 | 3 | Catalog observations are facts | A re-listing is an appended row, not a mutated column. **Dual write in progress**; see below |
 | 4 | ~~Derivations are content addressed~~ | **Dropped 2026-09-10.** Measured; see below |
 | 5 | Files move to the shape | **Done.** `tasks` is a sibling of `api` and `core`; domain seams, not directory names, own the remaining moves |
@@ -346,11 +346,11 @@ at all, so an untouched board row does not make anything visible and the two
 writers cannot disagree with FULL about what a person sees. Visibility already
 has one definition, computed into `board_visible` and never patched in place.
 
-What those rows do instead is carry scope. `AI_ELIGIBLE_JOB` admits any job
-with a board row, and the re-verification sweep takes its candidates from
-`user_jobs`, so an untouched row is what keeps a posting being paid for. That
-is a second job the table was never named for, and `materialize_passing` still
-describes itself as a mirror of the step that wrote a Google Sheet.
+What those rows did instead was carry scope. `AI_ELIGIBLE_JOB` admitted any
+job with a board row, and the re-verification sweep took its candidates from
+`user_jobs`, so an untouched row was what kept a posting being paid for. That
+was a second job the table was never named for; phase 2b moved it to
+`user_job_working_set`.
 
 Measured before assuming it was expensive: 3,709 board rows, 2,337 untouched,
 and of the jobs eligible only through a board row, 861 are tracked by someone
@@ -397,24 +397,6 @@ a measurement asks for it.
 Phase 2 still brings its numbers before it merges: it decides what gets paid
 for.
 
-The split backfill (`tasks/user_job_backfill.py`) is admitted by
-`api.board.user_job_split.admit`, from the admin route and from the scheduler,
-which admits it every cycle until one run is `done`. A live run is returned
-rather than duplicated, and a failed or cancelled one continues from its
-checkpoint with its original cutoff.
-
-`GET /admin/working-set-shadow` is the read-only cutover report. Run it after
-the split backfill and at least one complete filter cycle. It compares legacy
-and proposed pair membership, AI eligibility, the full stale re-verification
-population, and scheduled users in one database snapshot. It reports bounded
-examples and keeps legacy rows with no surviving provenance in
-`legacy_unknown`; those rows are not evidence for either side. The ordinary
-re-verification cap is shown separately and never narrows the comparison.
-
-The report's digest rows are `cannot_tell` because `user_job_working_set` has
-no admission timestamp. That stops mattering once the digest reads what the
-decision below says it reads.
-
 Kanishk chose the three product meanings the storage cutover needed
 (2026-10-10). They are the rules for every cutover step:
 
@@ -446,12 +428,25 @@ Kanishk chose the three product meanings the storage cutover needed
   `acted_on`, `working_set` and `visible` beside the old `tracked` and
   `board_rows`.
 
-The cutover follows the parallel-cutover rule below, one step a PR: run the
-split backfill, observe a complete filter cycle, read this report on
-production, move each reader (sweep scope, AI eligibility, digest, analytics)
-with proof of equality or a measured, explained difference, stop writing
-machine rows into `user_jobs`, convert the legacy rows, and delete the
-compatibility code.
+Phase 2b ran on 2026-10-10, one step a PR, each read checked on production
+after the split backfill before it merged:
+
+- Backfill: 1,369 legacy rows a person had touched got `person_touched_at`;
+  1,293 all-default rows joined `user_job_working_set`.
+- AI eligibility (#866) and the re-verification sweep (#869) moved to the
+  working set; on production both selected the same postings as before (3,830
+  and 192). The digest (#870) reads `board_visible`; analytics (#872) carry
+  the three populations.
+- `materialize_passing` stopped writing `user_jobs` (#905). Then the 2,416
+  legacy all-default rows were deleted from `user_jobs`, every one already in
+  the working set; 2,021 of them were postings the person could not see, and
+  none granted visibility, so no board changed. `user_jobs` held 1,415 rows
+  afterwards, all stamped.
+- The split backfill, its admission and the working-set shadow report were
+  deleted.
+
+So `user_jobs` is what a person did, and nothing writes an empty row there.
+A reader that wants "postings the filters picked" reads `user_job_working_set`.
 
 ## Phase 3: what a source observation means
 

@@ -23,10 +23,6 @@ UNTOUCHED = """
 # (phase 2b), not this.
 PERSON_STATE = f"(uj.person_touched_at IS NOT NULL OR NOT ({UNTOUCHED}))"
 
-USER_JOB_SPLIT_VERSION = 1
-USER_JOB_SPLIT_CHECKPOINT = "user_job_split_v1"
-USER_JOB_SPLIT_DEDUPE_PREFIX = "user-job-split:v1"
-
 
 def track_board_row(user_id: int, job_id: int) -> dict:
     """Record tracking intent without changing application status or dates."""

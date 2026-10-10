@@ -225,13 +225,13 @@ async def test_nothing_stale_still_demotes_the_rows_a_closure_left_behind(f, tak
     uid = f.make_user()
     f.subscribe(uid, source)
     job_id, _url = f.make_ready_job(source=source, closed="rejected")
-    f.make_board_row(uid, job_id, status=None)
+    _machine_row(uid, job_id)
 
     task_id = f.make_task("reverify_open", {}, status="running")
     await tasks_verify.handle_reverify_open(task_id, {})
 
     assert taken == [], "a verdict recorded today is not stale"
-    assert not db.query_one("SELECT 1 FROM user_jobs WHERE job_id = %s", (job_id,))
+    assert not db.query_one("SELECT 1 FROM user_job_working_set WHERE job_id = %s", (job_id,))
 
 
 @pytest.mark.asyncio
