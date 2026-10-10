@@ -593,9 +593,6 @@ def _specialise(table: str, rows: list[dict[str, Any]], gen: _Generator) -> None
             row["embedding"] = str(vector)
             row["model"] = EMBEDDING_MODEL
             row["content_hash"] = f"corpus-{gen._next():08x}"
-    elif table == "ai_prompts":
-        for i, row in enumerate(rows):
-            row["prompt_hash"] = f"corpusprompt{i:04d}"
 
 
 def _pair_verdicts_into_sweeps(rows: list[dict[str, Any]], gen: _Generator) -> None:

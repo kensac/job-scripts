@@ -37,8 +37,7 @@ def test_a_posting_on_a_board_shows_each_stage_it_passed(f):
         (url,),
     )
     db.execute(
-        "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at, projection_revision) "
-        "VALUES (%s, %s, now(), 1)",
+        "INSERT INTO managed_board_jobs (managed_board_id, job_id, sort_at) VALUES (%s, %s, now())",
         (board["id"], job_id),
     )
 

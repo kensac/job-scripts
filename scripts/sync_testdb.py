@@ -113,7 +113,6 @@ ANONYMISE = {
     "applications.company_name": "'Company ' || id",
     "applications.title": "'Role ' || id",
     "email_events.detail": "NULL",
-    "ai_prompt_samples.output": "NULL",
     "reports.corrections": "NULL",
     # Opaque, but they are handles on a real Gmail mailbox.
     "email_messages.provider_message_id": "'copied-msg-' || id",
@@ -145,7 +144,6 @@ COPIED_VERBATIM = {
     # user. It is in IDENTIFYING because the profile is committed and there is
     # no reason to publish prompt text, not because it is anyone's data.
     "filter_presets.prompt": "application content, not user data",
-    "ai_prompts.instructions": "application content, not user data",
     # The dev API renders a board from these. Emptying them turns the whole
     # point of a copy - clicking around real shapes - into an empty grid.
     "user_settings.prefs": "the dev API renders the board from it",

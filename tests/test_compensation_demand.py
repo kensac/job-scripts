@@ -73,8 +73,7 @@ async def test_comp_admits_a_published_managed_board_without_personal_subscripti
         (sponsor,),
     )
     db.execute(
-        "INSERT INTO managed_board_jobs (managed_board_id,job_id,sort_at,projection_revision) "
-        "VALUES (%s,%s,now(),1)",
+        "INSERT INTO managed_board_jobs (managed_board_id,job_id,sort_at) VALUES (%s,%s,now())",
         (board["id"], job),
     )
     asked = []

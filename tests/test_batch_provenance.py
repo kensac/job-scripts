@@ -64,7 +64,6 @@ async def test_resume_prices_persisted_model_without_resolving_current_configura
     assert ledger[0]["cost_usd"] == (
         expected.quantize(Decimal("0.000001")) if expected is not None else None
     )
-    assert db.query_one("SELECT count(*) AS n FROM ai_prompts")["n"] == 0
 
 
 @pytest.mark.asyncio

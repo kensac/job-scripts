@@ -103,8 +103,6 @@ IDENTIFYING = frozenset(
         "user_filters.prompt",
         "user_filters.name",
         "filter_presets.prompt",
-        "ai_prompts.instructions",
-        "ai_prompt_samples.output",
         # Machine hostnames. Low cardinality and not secret, but one of them
         # is a laptop named after its owner, and the corpus does not need real
         # ones to exercise "which worker holds this task".
@@ -145,8 +143,6 @@ STRUCTURAL = frozenset(
         "ai_queries.prompt_hash",
         "ai_queries.batch_id",
         "ai_batches.provider_batch_id",
-        "ai_prompts.prompt_hash",
-        "ai_prompt_samples.custom_id",
         "job_skills.url",
         "job_requirements.url",
         "job_requirements.content_hash",
