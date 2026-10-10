@@ -17,7 +17,14 @@ Import → classify → match → derive.
 - `email_events`: append-only. Latest row per message wins on read.
 - `application_matches`: append-only. Latest row per message wins on read.
 - `applications`: `job_id` is nullable. **Never synthesise a job row from an
-  email.** Mail predating the catalog is the normal case.
+  email.** Mail predating the catalog is the normal case. It is the one
+  record that a person applied, written where the act is recorded and not by
+  a sweep (`api/mail/applications.py`). It has three provenances: `tracker`,
+  written by the board write that moves a row into an applied status;
+  `apply`, written by an extension submit whose posting is not on the board
+  (the fill's `application_id` names it, and a submit on a board posting
+  names that posting's application); and `email`, written by the matcher. A
+  posting has at most one application per person (a unique index).
 - `action_items`: derived from events, resolvable by a person.
 
 **Stage is derived at read time from the event stream and never stored.**

@@ -932,3 +932,41 @@ def test_a_page_with_no_matching_posting_has_no_drafts(client, user_headers):
         headers=user_headers,
     ).json()
     assert got["job"] is None and got["drafts"] == []
+
+
+def test_a_submit_records_the_application_it_made(client, user_headers):
+    """`applications` is the one record that a person applied. A submit on a
+    posting on the board links that posting's application; a submit on a
+    form whose posting is not on the board makes one of provenance `apply`
+    (8 such submits on production on 2026-10-10 had none)."""
+    uid = _uid(user_headers)
+    job_id = _insert_job("linked", "https://jobs.ashbyhq.com/linked/abc")
+    for url in (
+        "https://jobs.ashbyhq.com/linked/abc/application",
+        "https://job-boards.greenhouse.io/embed/job_app?for=stripe&token=1",
+    ):
+        fill = client.post(
+            "/v1/user/apply/resolve", json={"url": url, "fields": []}, headers=user_headers
+        ).json()
+        resp = client.post(
+            f"/v1/user/apply/fills/{fill['fill_id']}/submitted",
+            json={"fields": []},
+            headers=user_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    rows = db.query(
+        "SELECT a.job_id, a.company_name, a.source_provenance, f.submitted_at, a.applied_at "
+        "FROM application_fills f JOIN applications a ON a.id = f.application_id "
+        "WHERE f.user_id = %s ORDER BY f.id",
+        (uid,),
+    )
+    assert [(r["job_id"], r["source_provenance"]) for r in rows] == [
+        (job_id, "tracker"),
+        (None, "apply"),
+    ]
+    assert rows[1]["company_name"] == "stripe"
+    assert rows[1]["applied_at"] == rows[1]["submitted_at"]
+    assert (
+        db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (uid,))["n"] == 2
+    )

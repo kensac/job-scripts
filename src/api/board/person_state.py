@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 
 from api import db, events
+from api.mail import applications
 
 # The legacy row is machine-shaped only when every person-editable field still
 # has its exact default. Kept here so migration tasks and live board writers
@@ -90,16 +91,21 @@ def write_board_row(user_id: int, job_id: int, patch: dict, *, publish: bool = T
     cols = ", ".join(f"{key} = %({key})s" for key in fields)
     insert_cols = ", ".join(fields)
     insert_vals = ", ".join(f"%({key})s" for key in fields)
-    written = db.query_one(
-        f"""
-        INSERT INTO user_jobs (user_id, job_id, person_touched_at, {insert_cols})
-        VALUES (%(uid)s, %(jid)s, now(), {insert_vals})
-        ON CONFLICT (user_id, job_id) DO UPDATE SET
-            {cols}, person_touched_at = now(), updated_at = now()
-        RETURNING status, date_applied, hidden
-        """,
-        {"uid": user_id, "jid": job_id, **fields},
-    )
+    with db.transaction():
+        written = db.query_one(
+            f"""
+            INSERT INTO user_jobs (user_id, job_id, person_touched_at, {insert_cols})
+            VALUES (%(uid)s, %(jid)s, now(), {insert_vals})
+            ON CONFLICT (user_id, job_id) DO UPDATE SET
+                {cols}, person_touched_at = now(), updated_at = now()
+            RETURNING status, date_applied, hidden
+            """,
+            {"uid": user_id, "jid": job_id, **fields},
+        )
+        # A row moving into an applied status is the person saying they
+        # applied, and the application is recorded with it, not by a sweep.
+        if written and written["status"] in applications.APPLIED_STATUSES:
+            applications.from_board(user_id, job_id, written["date_applied"])
     # Every path that writes a board row ends here, so this is the one place
     # an open board learns of the change without a reload.
     if publish:

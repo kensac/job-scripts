@@ -30,8 +30,10 @@ from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser, require_user
 from api.board.person_state import touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
+from api.mail import applications
 from api.models import Ok
 from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
+from core.fetching import forms
 from core.fetching.forms import posting_urls
 from core.store import get_content
 
@@ -569,7 +571,8 @@ def fill_submitted(
     the bank; the board row flips to submitted."""
     with db.transaction():
         fill = db.query_one(
-            "SELECT id, job_id, fields, submitted_at FROM application_fills WHERE id = %s AND user_id = %s FOR UPDATE",
+            "SELECT id, job_id, url, fields, submitted_at FROM application_fills "
+            "WHERE id = %s AND user_id = %s FOR UPDATE",
             (fill_id, user.id),
         )
         if not fill:
@@ -605,10 +608,12 @@ def fill_submitted(
                     "last_used_at = now() WHERE user_id = %s AND label_norm = %s",
                     (user.id, apply.normalize(entry["label"])),
                 )
-        db.execute(
-            "UPDATE application_fills SET fields = %s, submitted_at = now() WHERE id = %s",
+        submitted = db.query_one(
+            "UPDATE application_fills SET fields = %s, submitted_at = now() WHERE id = %s "
+            "RETURNING submitted_at",
             (db.jsonb(fields), fill_id),
         )
+        assert submitted is not None
         # A fill opened before resolve_form matched only touchable postings
         # may still name another person's private upload. The board row is a
         # visibility grant, so it obeys the rule every other board write does.
@@ -616,7 +621,17 @@ def fill_submitted(
         if job_id is not None and job_id not in touchable_job_ids(user.id, [job_id]):
             job_id = None
         if job_id is not None:
+            # The board write records the application with the status.
             _write_board_row(user.id, job_id, {"status": SUBMITTED_STATUS}, publish=False)
+            application_id = applications.from_board(user.id, job_id, None)
+        else:
+            application_id = applications.from_form(
+                user.id, forms.board_of(fill["url"]), submitted["submitted_at"]
+            )
+        db.execute(
+            "UPDATE application_fills SET application_id = %s WHERE id = %s",
+            (application_id, fill_id),
+        )
     if job_id is not None:
         row = db.query_one(
             "SELECT status, date_applied, hidden FROM user_jobs WHERE user_id = %s AND job_id = %s",

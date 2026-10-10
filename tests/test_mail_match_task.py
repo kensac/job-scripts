@@ -14,6 +14,7 @@ import itertools
 import pytest
 
 from api import db
+from api.board.person_state import write_board_row
 from tasks import mail_match as task
 
 _seq = itertools.count(1)
@@ -62,28 +63,31 @@ def _event(message_id: int, kind: str, *, company=None, title=None) -> int:
     return row["id"]
 
 
-def test_tracker_applications_are_seeded_once(f):
+def test_a_board_row_moving_into_an_applied_status_records_the_application(f):
+    """Written with the status, not by a later sweep: the hourly
+    seed_from_tracker this replaces was the only writer, so a status set
+    between sweeps had no application for up to an hour."""
     uid = f.make_user()
     job = f.make_job(company="Acme", title="Engineer")
-    f.make_board_row(uid, job, status="Application Submitted")
+    write_board_row(uid, job, {"status": "Application Submitted"}, publish=False)
+    write_board_row(uid, job, {"status": "Follow-up"}, publish=False)
+    write_board_row(uid, job, {"notes": "called"}, publish=False)
 
-    assert task.seed_from_tracker(uid) == 1
-    assert task.seed_from_tracker(uid) == 0, "re-running must not duplicate"
-
-    row = db.query_one("SELECT company_name, job_id, source_provenance FROM applications")
-    assert row is not None
-    assert row["company_name"] == "Acme"
-    assert row["job_id"] == job
-    assert row["source_provenance"] == "tracker"
+    rows = db.query("SELECT company_name, job_id, source_provenance, applied_at FROM applications")
+    assert len(rows) == 1, "re-writing the row must not duplicate"
+    assert rows[0]["company_name"] == "Acme"
+    assert rows[0]["job_id"] == job
+    assert rows[0]["source_provenance"] == "tracker"
+    assert rows[0]["applied_at"] is not None, "dated from the autofilled date_applied"
 
 
 def test_a_posting_the_user_declined_is_not_an_application(f):
-    """634 of this user's board rows are 'No Longer Interested'. Seeding those
-    would invent a job search that did not happen."""
+    """634 of this user's board rows are 'No Longer Interested'. Recording
+    those would invent a job search that did not happen."""
     uid = f.make_user()
     job = f.make_job(company="Acme")
-    f.make_board_row(uid, job, status="No Longer Interested")
-    assert task.seed_from_tracker(uid) == 0
+    write_board_row(uid, job, {"status": "No Longer Interested"}, publish=False)
+    assert db.query("SELECT id FROM applications") == []
 
 
 def test_mail_creates_the_application_a_dead_posting_left_behind(f):
@@ -122,8 +126,9 @@ def test_mail_does_not_add_a_second_application_at_a_tracked_company(f):
     would make every future message there permanently unmatchable."""
     uid = f.make_user()
     job = f.make_job(company="Acme", title="Engineer")
-    f.make_board_row(uid, job, status="Application Submitted")
-    task.seed_from_tracker(uid)
+    write_board_row(
+        uid, job, {"status": "Application Submitted", "date_applied": None}, publish=False
+    )
 
     msg = _message(uid, sent_at=datetime.datetime(2030, 1, 1, tzinfo=datetime.UTC))
     _event(msg, "rejection", company="Acme, Inc.", title="Something Else Entirely")
@@ -215,8 +220,9 @@ def test_the_cap_rises_to_a_real_job_search(f):
     uid = f.make_user()
     for i in range(20):
         job = f.make_job(company="Tesla", title=f"Engineer {i}")
-        f.make_board_row(uid, job, status="Application Submitted")
-    task.seed_from_tracker(uid)
+        write_board_row(
+            uid, job, {"status": "Application Submitted", "date_applied": None}, publish=False
+        )
     assert task.derived_cap(uid) == 20
 
     other = f.make_user()
@@ -230,8 +236,7 @@ async def test_a_scheduled_run_covers_every_user(f):
     user would look identical to one that did everybody."""
     first, second = f.make_user(), f.make_user()
     for uid in (first, second):
-        job = f.make_job(company=f"Acme{uid}", title="Engineer")
-        f.make_board_row(uid, job, status="Application Submitted")
+        _event(_message(uid), "rejection", company=f"Acme{uid}", title="Engineer")
 
     await task.handle_match_mail(f.make_task("match_mail", {}), {})
 
@@ -246,8 +251,7 @@ async def test_a_scheduled_run_covers_every_user(f):
 async def test_matching_one_user_leaves_the_others_alone(f):
     first, second = f.make_user(), f.make_user()
     for uid in (first, second):
-        job = f.make_job(company=f"Acme{uid}", title="Engineer")
-        f.make_board_row(uid, job, status="Application Submitted")
+        _event(_message(uid), "rejection", company=f"Acme{uid}", title="Engineer")
 
     await task.handle_match_mail(f.make_task("match_mail", {}), {"user_id": first})
 
@@ -268,8 +272,9 @@ def test_a_recruiter_approach_is_never_attached_to_an_application(f):
     about a job he actually applied for."""
     uid = f.make_user()
     job = f.make_job(company="RippleMatch", title="Software Engineer")
-    f.make_board_row(uid, job, status="Application Submitted")
-    task.seed_from_tracker(uid)
+    write_board_row(
+        uid, job, {"status": "Application Submitted", "date_applied": None}, publish=False
+    )
 
     msg = _message(uid, subject="still looking for new roles?")
     _event(msg, "recruiter_outreach", company="RippleMatch", title="Software Engineer")
@@ -320,8 +325,9 @@ def test_employer_mail_relayed_by_a_platform_still_matches(f):
     platform's own mail was wrong, so the fix must not cost the rest."""
     uid = f.make_user()
     job = f.make_job(company="Plaid", title="Software Engineer")
-    f.make_board_row(uid, job, status="Application Submitted")
-    task.seed_from_tracker(uid)
+    write_board_row(
+        uid, job, {"status": "Application Submitted", "date_applied": None}, publish=False
+    )
 
     msg = _message(uid, subject="An update from Plaid")
     _event(msg, "rejection", company="Plaid", title="Software Engineer")
@@ -694,7 +700,9 @@ async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
         _event(mid, "rejection", company=f"Nowhere{i}")
     for i in range(3):
         job = f.make_job(company=f"Acme{i}", title="Engineer")
-        f.make_board_row(uid, job, status="Application Submitted")
+        write_board_row(
+            uid, job, {"status": "Application Submitted", "date_applied": None}, publish=False
+        )
     task_id = f.make_task("match_mail", {})
 
     written: list[str] = []

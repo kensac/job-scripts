@@ -126,7 +126,16 @@ class EmailEvent(Base):
 class Application(Base):
     __tablename__ = "applications"
     __table_args__ = (
-        Index("idx_applications_user_job", "user_id", "job_id"),
+        # One application per posting a person applied to: the board write
+        # that moves a row into an applied status creates it ON CONFLICT DO
+        # NOTHING, so two concurrent writes cannot make two.
+        Index(
+            "idx_applications_user_job",
+            "user_id",
+            "job_id",
+            unique=True,
+            postgresql_where=text("job_id IS NOT NULL"),
+        ),
         Index("idx_applications_company", "user_id", text("lower(company_name)")),
     )
 
