@@ -98,7 +98,7 @@ def candidates_for(user_id: int) -> list[dict[str, Any]]:
     return db.query(
         f"""
         WITH {board_eligibility.LATEST_CHECK}
-        SELECT j.url, j.company, j.title FROM jobs j
+        SELECT j.url, j.company, j.title, j.source FROM jobs j
         WHERE {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
           AND ({board_eligibility.SUBSCRIBED} OR j.uploaded_by = %(uid)s)
         ORDER BY j.id DESC

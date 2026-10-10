@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.job_profile import JobProfileAnswer
-from core.screening import _TECHNICAL
+from core.screening import _TECHNICAL, Recipe
 
 Mode = Literal["off", "shadow", "enforce"]
 
@@ -27,6 +27,17 @@ class ReviewGatePolicy(BaseModel):
     profile_mode: Mode = "off"
     scopes: dict[str, ReviewGateScope] = Field(default_factory=dict)
     lookup_timeout_ms: int = Field(default=1000, gt=0, le=5000)
+
+    def title_recipes(self) -> dict[str, Recipe]:
+        """The screen each enforced prompt hash applies before any review.
+
+        A posting it skips is left out of that prompt's candidates, every run,
+        for as long as its title, this recipe and the scope stay as they are;
+        switching the stage off returns it on the next run.
+        """
+        if self.title_mode != "enforce":
+            return {}
+        return {h: s.title_recipe for h, s in self.scopes.items() if s.title_recipe}
 
 
 def profile_rejection(profile: JobProfileAnswer, title: str = "") -> str | None:

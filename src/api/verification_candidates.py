@@ -2,15 +2,18 @@
 
 from api import db
 from api.board import criteria
+from api.review_gate import load_policy
 from core import screening
 from core.review_gate import VolumeGate
 from core.store import AI_ELIGIBLE_JOB
 
-# A board's enforced title gate.
+# A board's enforced title gate, and the screen filter_review_gate applies to
+# the target's prompt: a posting either skips would never be judged for it.
 _TITLE_SQL = (
     "AND (COALESCE(target.title_gate->>'mode', 'shadow') <> 'enforce' OR NOT "
     + screening.skips_sql("target.title_gate->>'recipe'")
-    + ")"
+    + ") AND NOT "
+    + screening.skips_sql("%(review_title_recipes)s::jsonb ->> target.prompt_hash")
 )
 
 TARGETS = """
@@ -128,5 +131,6 @@ def params() -> dict[str, object]:
         "volume_gate_title_keys": unproductive_titles(gate),
         "volume_gate_audit_percent": gate.audit_percent,
         "volume_gate_titles": gate.occupation_titles,
+        "review_title_recipes": db.jsonb(load_policy().title_recipes()),
         **screening.PARAMS,
     }
