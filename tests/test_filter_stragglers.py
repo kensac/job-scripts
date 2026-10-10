@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from api import ai, db, fetching
+from core import page_fetches
 from core.store import add_ai_result
 from tasks import filters as tasks_filters
 from tasks import ingest as tasks_ingest
@@ -120,7 +121,7 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
         "INSERT INTO jobs (url, company, title, source) VALUES (%s, 'co', 'SWE', 'internships')",
         (url,),
     )
-    add_ai_result(url, "passed", "content cached", "content", input_content="great job")
+    page_fetches.record(url, "passed", "scraped", "great job")
     add_ai_result(url, "passed", "not closed", "closed")
     parent = make_task("run_all_filters", {"user_id": uid, "batched": True}, status="waiting")
     flt = db.query_one("SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters")

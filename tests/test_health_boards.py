@@ -32,8 +32,8 @@ def _ingest(source, status, *, worker="hetzner", age_hours=1, error=None, **coun
 def _content(url, reason, age_hours):
     db.execute(
         """
-        INSERT INTO ai_queries (url, check_type, status, reason, input_content, created_at)
-        VALUES (%s, 'content', 'passed', %s, 'x', now() - make_interval(hours => %s))
+        INSERT INTO page_fetches (url, status, method, content, created_at)
+        VALUES (%s, 'passed', %s, 'x', now() - make_interval(hours => %s))
         """,
         (url, reason, age_hours),
     )

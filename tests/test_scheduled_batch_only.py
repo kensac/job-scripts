@@ -91,7 +91,7 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
 
     async def fetch(url, **kwargs):
         calls.append(url)
-        f.make_verdict(url, "content", content="fetched posting " * 30)
+        f.make_fetch(url, content="fetched posting " * 30)
         return "fetched posting " * 30, None
 
     async def submit(tid, specs, *args):
@@ -118,7 +118,7 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
 @pytest.mark.asyncio
 async def test_recent_failed_fetch_is_not_repeated_by_scheduled_chunk(setup, f, monkeypatch):
     _uid, _cfg, _flt, job, _parent, payload = setup
-    f.make_verdict(job["url"], "content", status="failed")
+    f.make_fetch(job["url"], status="failed")
 
     async def forbidden(*args, **kwargs):
         pytest.fail("recent failed fetch or missing content must not make a request")
@@ -135,7 +135,7 @@ async def test_recent_failed_fetch_is_not_repeated_by_scheduled_chunk(setup, f, 
 @pytest.mark.asyncio
 async def test_scheduled_receipt_replay_ignores_current_configuration(setup, f, monkeypatch):
     _uid, cfg, _flt, job, _parent, payload = setup
-    f.make_verdict(job["url"], "content", content="ready posting " * 30)
+    f.make_fetch(job["url"], content="ready posting " * 30)
     submissions = []
 
     async def submit(tid, specs, *args):
@@ -183,15 +183,15 @@ def test_bulk_content_preserves_single_url_raw_content_semantics(f):
     from core import store
 
     urls = [f"https://content.test/{i}" for i in range(5)]
-    f.make_verdict(urls[0], "content", content="old raw")
+    f.make_fetch(urls[0], content="old raw")
     f.make_verdict(urls[0], "custom", content="wrapped custom")
-    f.make_verdict(urls[1], "content", content="raw first")
-    f.make_verdict(urls[1], "closed", content="newer raw copy")
-    f.make_verdict(urls[2], "content", content="nonempty")
-    f.make_verdict(urls[2], "content", content="")
+    f.make_fetch(urls[1], content="raw first")
+    f.make_verdict(urls[1], "closed", content="a newer copy on an answer")
+    f.make_fetch(urls[2], content="nonempty")
+    f.make_fetch(urls[2], content="")
     f.make_verdict(urls[3], "custom", content="only wrapped")
     expected = {url: content for url in urls if (content := store.get_content(url)) is not None}
-    assert expected == {urls[0]: "old raw", urls[1]: "newer raw copy", urls[2]: "nonempty"}
+    assert expected == {urls[0]: "old raw", urls[1]: "raw first", urls[2]: "nonempty"}
     assert store.get_contents(urls) == expected
     assert store.get_contents([]) == {}
 

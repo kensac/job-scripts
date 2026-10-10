@@ -20,9 +20,7 @@ async def test_content_committed_after_guard_does_not_leave_stale_comp_complete(
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                pool.submit(
-                    f.make_verdict, url, "content", content="Salary USD 200000 yearly. " * 20
-                ).result()
+                pool.submit(f.make_fetch, url, content="Salary USD 200000 yearly. " * 20).result()
         return current
 
     async def answer(task_id, shape, specs):
@@ -74,7 +72,7 @@ async def test_known_compensation_source_changes_are_selected_again(f, monkeypat
     monkeypatch.setattr(comp, "run_batched", answer)
     await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 1
-    f.make_verdict(url, "content", content="Salary USD 200000 yearly. " * 20)
+    f.make_fetch(url, content="Salary USD 200000 yearly. " * 20)
     await comp.handle_extract_comp(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 2
     assert db.query_one("SELECT comp_min FROM jobs WHERE id = %s", (job_id,))["comp_min"] == 200000
@@ -89,7 +87,7 @@ async def test_unknown_legacy_source_does_not_trigger_bulk_reextraction(f, monke
         "UPDATE jobs SET comp_extracted = true, comp_min = 100000, comp_period = 'yearly' WHERE id = %s",
         (job_id,),
     )
-    f.make_verdict(url, "content", content="New posting content " * 20)
+    f.make_fetch(url, content="New posting content " * 20)
 
     async def unexpected(*args):
         pytest.fail("Unknown legacy source must not trigger extraction")

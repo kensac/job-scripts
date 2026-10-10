@@ -1,4 +1,4 @@
-"""`page_texts` is the one statement of which ai_queries rows hold page text."""
+"""`page_texts` is the one statement of which rows hold page text."""
 
 from __future__ import annotations
 
@@ -6,15 +6,15 @@ import pathlib
 import re
 
 from api import db
-from core import store
+from core import page_fetches, store
 from core.store import add_ai_result
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # Page text read from ai_queries in the same statement. The admin row explorer
-# shows a stored row as it is, page text included, so it reads the table, and
-# the move of fetches out of ai_queries reads the rows it moves.
-_RAW_ROW_READERS = {"api/routers/admin/queries.py", "tasks/page_fetch_move.py"}
+# shows a stored row as it is, the text the model saw included, so it reads
+# the table.
+_RAW_ROW_READERS = {"api/routers/admin/queries.py"}
 _TEXT_FROM_TABLE = re.compile(
     r"input_content[^;]{0,400}?(?:FROM|JOIN) ai_queries"
     r"|(?:FROM|JOIN) ai_queries[^;]{0,400}?input_content",
@@ -23,17 +23,14 @@ _TEXT_FROM_TABLE = re.compile(
 PAGE = "Posting text. " * 40
 
 
-def test_page_text_is_a_fetched_page_or_a_check_copy_never_a_filter_input():
-    fetched = add_ai_result("https://x/a", "passed", check_type="content", input_content=PAGE)
-    copied = add_ai_result("https://x/b", "passed", check_type="closed", input_content=PAGE)
+def test_page_text_is_fetched_text_never_an_answer_copy_or_a_filter_input():
+    fetched = page_fetches.record("https://x/a", "passed", "scraped", PAGE)
+    page_fetches.record("https://x/a", "failed", "fetch returned nothing")
+    add_ai_result("https://x/b", "passed", check_type="closed", input_content=PAGE)
     add_ai_result("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
-    add_ai_result("https://x/d", "failed", check_type="content")
 
-    rows = db.query("SELECT id, url, on_verdict FROM page_texts ORDER BY url")
-    assert rows == [
-        {"id": fetched, "url": "https://x/a", "on_verdict": False},
-        {"id": copied, "url": "https://x/b", "on_verdict": True},
-    ]
+    rows = db.query("SELECT id, url FROM page_texts ORDER BY url")
+    assert rows == [{"id": fetched, "url": "https://x/a"}]
 
 
 def test_the_sweeps_and_the_filters_read_the_same_text():

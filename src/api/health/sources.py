@@ -172,9 +172,8 @@ def _detect_sources() -> list[dict[str, Any]]:
                                 AND now() - interval '24 hours') AS base_total,
                COUNT(*) FILTER (WHERE created_at BETWEEN now() - interval '8 days'
                                 AND now() - interval '24 hours' AND status = 'failed') AS base_failed
-        FROM ai_queries
-        WHERE check_type IN ('extraction', 'content')
-          AND created_at > now() - interval '8 days'
+        FROM page_fetches
+        WHERE created_at > now() - interval '8 days'
         GROUP BY 1
         """
     ):

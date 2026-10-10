@@ -119,9 +119,7 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         f"{verdict_reads.closed_verdict('j.url')} AS closed_verdict",
     )
     content_row = db.query_one(
-        "SELECT input_content, created_at FROM page_texts "
-        "WHERE url = %s AND NOT on_verdict "
-        "ORDER BY id DESC LIMIT 1",
+        "SELECT input_content, created_at FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
         (job["url"],),
     )
     checks = db.query_as(

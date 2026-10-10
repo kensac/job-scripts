@@ -91,7 +91,7 @@ def test_requirements_sweep_skips_unreachable_postings(population, f):
         row = db.query_one("SELECT url FROM jobs WHERE id = %s", (population[key],))
         assert row is not None
         urls[key] = row["url"]
-        f.make_verdict(row["url"], "content", "passed", content="a long posting body " * 30)
+        f.make_fetch(row["url"], content="a long posting body " * 30)
         f.make_verdict(row["url"], "closed", "passed")
         f.make_verdict(row["url"], "clearance", "passed")
 

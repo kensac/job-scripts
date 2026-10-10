@@ -205,7 +205,7 @@ def _candidates(board: _Board) -> list[_Candidate]:
         FROM jobs j
         LEFT JOIN LATERAL (
           SELECT q.id, q.input_content FROM page_texts q
-          WHERE q.url = j.url AND NOT q.on_verdict
+          WHERE q.url = j.url
           ORDER BY q.id DESC LIMIT 1
         ) content ON true
         WHERE j.source = ANY(%(sources)s)

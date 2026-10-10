@@ -303,10 +303,14 @@ def test_public_job_detail_is_projection_scoped_and_exposes_cached_content(clien
     )
     url = db.query_one("SELECT url FROM jobs WHERE id = %s", (included,))["url"]
     db.execute(
-        "INSERT INTO ai_queries (url, check_type, status, input_content, created_at) "
-        "VALUES (%s, 'content', 'passed', 'public description', %s), "
-        "(%s, 'closed', 'rejected', NULL, %s)",
-        (url, instant, url, instant),
+        "INSERT INTO page_fetches (url, status, method, content, created_at) "
+        "VALUES (%s, 'passed', 'scraped', 'public description', %s)",
+        (url, instant),
+    )
+    db.execute(
+        "INSERT INTO ai_queries (url, check_type, status, created_at) "
+        "VALUES (%s, 'closed', 'rejected', %s)",
+        (url, instant),
     )
 
     detail = client.get(f"/v1/public/job-lists/engineering/jobs/{included}")

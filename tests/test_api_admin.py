@@ -250,17 +250,11 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
 def _content_row(url, reason, when_days_ago):
     import datetime
 
-    from core.store import add_ai_result
+    from core import page_fetches
 
-    add_ai_result(
-        url, "passed", reason, "content", input_content="X" * 400, config_name="content-cache"
-    )
+    fetch_id = page_fetches.record(url, "passed", reason, "X" * 400)
     stamp = (datetime.datetime.now() - datetime.timedelta(days=when_days_ago)).isoformat()
-    db.execute(
-        "UPDATE ai_queries SET created_at = %s WHERE id = "
-        "(SELECT MAX(id) FROM ai_queries WHERE url = %s)",
-        (stamp, url),
-    )
+    db.execute("UPDATE page_fetches SET created_at = %s WHERE id = %s", (stamp, fetch_id))
 
 
 def test_health_detects_ats_collapse_and_resolves_when_it_recovers(client, admin_headers):
@@ -408,7 +402,7 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(
     """The reported bug: a recheck over cached text said 'open' for a posting
     that had since started redirecting to a careers page."""
     from api.ai import verdicts
-    from core.store import add_ai_result
+    from core import page_fetches
 
     db.execute(
         "INSERT INTO jobs (url, source, company, title) VALUES "
@@ -416,12 +410,8 @@ def test_recheck_refetches_and_reports_gone_without_asking_the_model(
     )
     jid = db.query_one("SELECT id FROM jobs WHERE url = 'https://gone.test/jobs/1'")["id"]
     # Stale cache from when the posting was still live.
-    add_ai_result(
-        "https://gone.test/jobs/1",
-        "passed",
-        "content cached",
-        "content",
-        input_content="A full and healthy job description. " * 30,
+    page_fetches.record(
+        "https://gone.test/jobs/1", "passed", "scraped", "A full and healthy job description. " * 30
     )
 
     async def fake_refresh(url, company="", job_title="", context="manual"):

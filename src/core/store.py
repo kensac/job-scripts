@@ -121,6 +121,9 @@ def ai_result_row(
     cache_write_tokens: int | None = None,
     request_sha256: str | None = None,
 ) -> dict[str, Any]:
+    if check_type == "content":
+        # No view reads a fetch stored here; it would be lost.
+        raise ValueError("a page fetch is written by core.page_fetches.record")
     row = {
         # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
         # now(), and letting the database supply it is what keeps every
@@ -231,11 +234,9 @@ MIN_CONTENT_CHARS = 200
 
 # The one spelling of "which stored page text feeds the AI for this url".
 #
-# Reads page_texts, which already excludes a custom filter's wrapped input.
-# Prefers a fetched page row over the copy older verification wrote onto its
-# answer (on_verdict), then takes the newest. Formatted with the url expression to join against, so a sweep over
-# jobs passes 'j.url' and a sweep over ai_queries itself passes its own alias;
-# every caller gets the same row for the same url either way.
+# The newest page text longer than MIN_CONTENT_CHARS, from page_texts.
+# Formatted with the url expression to join against, so a sweep over jobs
+# passes 'j.url'; every caller gets the same row for the same url.
 #
 # `columns` is what to take from that row. Usually input_content, but a sweep
 # deciding WHETHER to re-read a page wants only the row's id: input_content is
@@ -243,10 +244,8 @@ MIN_CONTENT_CHARS = 200
 # instead of detoasting the whole corpus. Both spellings pick the same row,
 # which is the point of having one lateral rather than two.
 #
-# Deliberately NOT the same query as get_content(), which takes the newest text
-# whatever check produced it. Preferring a 'content' row can return older text,
-# which is right for extracting stable facts and wrong for deciding whether a
-# posting has since closed.
+# Not always the same row as get_content(), which takes the newest text of
+# any length.
 CONTENT_LATERAL = (
     """
         JOIN LATERAL (
@@ -254,7 +253,7 @@ CONTENT_LATERAL = (
             WHERE q.url = {url} AND length(q.input_content) > """
     + str(MIN_CONTENT_CHARS)
     + """
-            ORDER BY q.on_verdict, q.id DESC LIMIT 1
+            ORDER BY q.id DESC LIMIT 1
         ) q ON TRUE
 """
 )
@@ -375,9 +374,7 @@ def get_contents(urls: list[str]) -> dict[str, str]:
 
 
 def get_content(url: str) -> str | None:
-    """Most recent page text stored for a url (page_texts, which excludes a
-    custom filter's wrapped input: reusing it would re-wrap the content on
-    every subsequent custom filter)."""
+    """Most recent page text fetched for a url (page_texts)."""
     with connection() as conn:
         row = conn.execute(
             "SELECT input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",

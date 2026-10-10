@@ -31,7 +31,8 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     ent = budget.Entitlement(True, None, 0, False, [])
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
-    f.make_verdict(job["url"], "closed", content="Build useful software.")
+    f.make_verdict(job["url"], "closed")
+    f.make_fetch(job["url"], content="Build useful software.")
     text = '{"should_filter": false}' if family == "filter" else '{"answer": "Fits."}'
     if outcome == "empty":
         text = None

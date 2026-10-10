@@ -78,8 +78,8 @@ def _receipt(f):
     originals = []
     for i in range(2):
         url = f"https://embedding.test/{i}"
-        f.make_verdict(url, "content", content="a sufficiently detailed posting " * 30)
-        row = db.query_one("SELECT id,input_content FROM ai_queries WHERE url=%s", (url,))
+        f.make_fetch(url, content="a sufficiently detailed posting " * 30)
+        row = db.query_one("SELECT id,input_content FROM page_texts WHERE url=%s", (url,))
         originals.append(
             {
                 "url": url,
@@ -121,7 +121,7 @@ async def test_packed_resume_and_replay_without_key_preserve_vectors(f, monkeypa
 @pytest.mark.asyncio
 async def test_packed_result_keeps_current_sibling_when_one_page_changes(f):
     task_id, originals = _receipt(f)
-    f.make_verdict(originals[0]["url"], "content", content="a changed detailed posting " * 30)
+    f.make_fetch(originals[0]["url"], content="a changed detailed posting " * 30)
     await embeddings.handle_embed_postings_batch(task_id, {})
     assert [row["url"] for row in db.query("SELECT url FROM job_embeddings")] == [
         originals[1]["url"]
@@ -150,7 +150,7 @@ async def test_submission_parks_packed_requests_and_respects_existing_work(f, mo
     for i in range(101):
         url = f"https://packed.test/{i}"
         f.make_job(url=url, uploaded_by=owner)
-        f.make_verdict(url, "content", content="a detailed posting " * 30)
+        f.make_fetch(url, content="a detailed posting " * 30)
     task_id = f.make_task("embed_postings_batch", {}, status="running")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     submitted = []
