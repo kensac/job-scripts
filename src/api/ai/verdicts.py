@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from api import ai, db, metrics, telemetry
 from api.ai import AIConfig
-from core import page_fetches, pricing
+from core import catalog, page_fetches, pricing
 from core.fetching.hosts import hostname
 from core.store import add_ai_result, add_ai_results, ai_result_row
 
@@ -384,12 +384,7 @@ async def refresh_content(
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
         page_fetches.record(url, "passed", "ats text", ats_res.text)
         if ats_res.posted:
-            # Only where the board's listing left it empty: a date the listing
-            # stated is the same fact from the same board, and never worse.
-            db.execute(
-                "UPDATE jobs SET date_posted = %s WHERE url = %s AND date_posted IS NULL",
-                (ats_res.posted, url),
-            )
+            catalog.fill_date_posted(url, ats_res.posted)
         return ats_res.text, None
 
     if host_paced(url):

@@ -20,6 +20,14 @@ orders, so it gets its own transaction. 36 ingests failed on deadlocks in the
 `tests/test_catalog_lock_order.py` reproduces each interleaving with a held
 row and fails on the deadlock.
 
+**`core.catalog` is the only writer of `jobs`.** A new write is a named
+function there, so it keeps the lock order and a later change to what a
+column means has one place to land. `jobs.active` outside a pull is written
+only by `catalog.set_active`. `tests/test_catalog_one_writer.py` fails on an
+`INSERT`, `UPDATE`, `DELETE` or `MERGE` of `jobs` anywhere else under `src`;
+its allow-list holds only the pay and near-copy columns the derived facts move
+is taking off `jobs`, and fails once a listed file stops writing.
+
 When the same logic exists in several places and one has drifted, delete the
 duplication. Do not fix the copy.
 
