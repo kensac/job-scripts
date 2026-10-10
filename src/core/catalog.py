@@ -253,42 +253,55 @@ def fill_date_posted(url: str, posted: datetime.date) -> None:
         )
 
 
-# An upload's state is written twice until every reader has moved:
-# jobs.uploaded_by and jobs.extraction_status, and its posting_uploads row.
-# The jobs row is written first and posting_uploads second, in one
-# transaction, so every writer of a posting_uploads row already holds its
-# jobs row and the two locks cannot be taken in opposite orders.
+# An upload's state lives in posting_uploads alone. jobs.uploaded_by and
+# jobs.extraction_status are no longer written; clear_upload_columns empties
+# the copies uploads left in them, so a later migration can prove
+# uploaded_by empty and drop it. extraction_status keeps the values that are
+# not copies, so it is frozen rather than dropped. A writer that touches both
+# tables takes the jobs row first, so the two locks are never taken in
+# opposite orders.
 
 
 def add_upload(url: str, raw_url: str, user_id: int) -> dict:
-    """A person's own posting. A url the catalog already holds keeps its row;
-    a failed extraction of it goes back to pending. Returns id,
-    extraction_status and uploaded_by, which the caller checks for another
-    person's upload. Joins the caller's transaction."""
+    """A person's own posting. A url the catalog already holds keeps its row,
+    and saving it writes no upload: it only tracks it. An upload whose
+    extraction failed goes back to pending. Returns id, extraction_status and
+    uploaded_by (both None for a catalog posting), which the caller checks for
+    another person's upload. Joins the caller's transaction."""
     with transaction(), statement() as conn:
-        row = conn.execute(
-            "INSERT INTO jobs (url, raw_url, source, uploaded_by, extraction_status) "
-            "VALUES (%s, %s, 'upload', %s, 'pending') "
-            "ON CONFLICT (url) DO UPDATE SET extraction_status = "
-            "CASE WHEN jobs.extraction_status = 'failed' THEN 'pending' ELSE jobs.extraction_status END "
-            "RETURNING id, extraction_status, uploaded_by",
-            (url, raw_url, user_id),
+        # DO NOTHING waits for a concurrent insert of the same url to commit,
+        # so the SELECT below and the upload read see its row.
+        inserted = conn.execute(
+            "INSERT INTO jobs (url, raw_url, source) VALUES (%s, %s, 'upload') "
+            "ON CONFLICT (url) DO NOTHING RETURNING id",
+            (url, raw_url),
         ).fetchone()
-        assert row is not None
-        # A catalog posting nobody uploaded gets no row: saving it only
-        # tracks it.
-        if row["uploaded_by"] is not None and row["extraction_status"] is not None:
+        if inserted is not None:
             conn.execute(
-                "INSERT INTO posting_uploads (job_id, uploaded_by, status) VALUES (%s, %s, %s) "
-                "ON CONFLICT (job_id) DO UPDATE SET status = EXCLUDED.status",
-                (row["id"], row["uploaded_by"], row["extraction_status"]),
+                "INSERT INTO posting_uploads (job_id, uploaded_by, status) "
+                "VALUES (%s, %s, 'pending')",
+                (inserted["id"], user_id),
             )
-    return row
+            return {"id": inserted["id"], "extraction_status": "pending", "uploaded_by": user_id}
+        job = conn.execute("SELECT id FROM jobs WHERE url = %s", (url,)).fetchone()
+        assert job is not None
+        upload = conn.execute(
+            "UPDATE posting_uploads SET status = "
+            "CASE WHEN status = 'failed' THEN 'pending' ELSE status END "
+            "WHERE job_id = %s RETURNING uploaded_by, status",
+            (job["id"],),
+        ).fetchone()
+    return {
+        "id": job["id"],
+        "extraction_status": upload["status"] if upload else None,
+        "uploaded_by": upload["uploaded_by"] if upload else None,
+    }
 
 
 def set_extraction_status(job_id: int, status: Literal["pending", "failed"]) -> None:
-    with transaction(), statement() as conn:
-        conn.execute("UPDATE jobs SET extraction_status = %s WHERE id = %s", (status, job_id))
+    """A forced reparse of a posting nobody uploaded has no row to mark; its
+    outcome is its task's."""
+    with statement() as conn:
         conn.execute("UPDATE posting_uploads SET status = %s WHERE job_id = %s", (status, job_id))
 
 
@@ -298,43 +311,51 @@ def record_extraction(
     """What the extractor read off the page of an upload or a forced reparse."""
     with transaction(), statement() as conn:
         conn.execute(
-            "UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s, "
-            "extraction_status = 'done' WHERE id = %s",
+            "UPDATE jobs SET company = %s, title = %s, locations = %s, terms = %s WHERE id = %s",
             (company, title, locations, terms, job_id),
         )
         conn.execute("UPDATE posting_uploads SET status = 'done' WHERE job_id = %s", (job_id,))
 
 
-# The uploads after id {after}, up to {limit}, made to match what jobs says:
-# a row for an upload that has none, and the status where it differs. A
-# server still on the release before posting_uploads writes only jobs, so an
-# upload it took, or a status it changed, is repaired here. A no-op once the
-# two agree. Reads through idx_jobs_uploaded_by: 11 uploads on 2026-10-10.
-# Takes no jobs lock, and posting_uploads rows in job id order.
-_RECONCILE_UPLOADS: LiteralString = """
-WITH chunk AS (
-    SELECT id, uploaded_by, extraction_status FROM jobs
-    WHERE uploaded_by IS NOT NULL AND id > %(after)s ORDER BY id LIMIT %(limit)s
-), written AS (
-    INSERT INTO posting_uploads (job_id, uploaded_by, status)
-    SELECT id, uploaded_by, extraction_status FROM chunk
-    WHERE extraction_status IS NOT NULL
-    ORDER BY id
-    ON CONFLICT (job_id) DO UPDATE SET status = EXCLUDED.status
-    WHERE posting_uploads.status IS DISTINCT FROM EXCLUDED.status
-    RETURNING job_id
+# One chunk of uploads after id {after}: the copy of each upload on its jobs
+# row set to NULL. A candidate is a row holding an uploader
+# (idx_jobs_uploaded_by) or a row posting_uploads holds; both are small (11 on
+# 2026-10-10). A row is cleared only where posting_uploads names the same
+# person, or the jobs row names nobody, so no owner is lost; a row naming an
+# owner posting_uploads does not is left and counted. extraction_status on a
+# row with no upload row is not a copy of anything and is never touched: 6,021
+# sheet import rows stamped done on 2026-08-24 and one forced reparse
+# (task 726592) hold the only record of it. Locks in url order (_LOCK_ORDER)
+# and skips rows another writer holds; the next run takes them.
+def clear_upload_columns(after: int, limit: int) -> dict:
+    """One chunk: `last` is the id to continue after, None when there is
+    nothing past `after`."""
+    sql: LiteralString = f"""
+WITH candidates AS (
+    SELECT id FROM (
+        SELECT id FROM jobs WHERE uploaded_by IS NOT NULL AND id > %(after)s
+        UNION SELECT job_id FROM posting_uploads WHERE job_id > %(after)s
+    ) u ORDER BY id LIMIT %(limit)s
+), held AS (
+    SELECT j.id,
+           p.job_id IS NOT NULL AND (j.uploaded_by IS NULL OR p.uploaded_by = j.uploaded_by)
+               AS owner_kept
+    FROM jobs j JOIN candidates c ON c.id = j.id
+    LEFT JOIN posting_uploads p ON p.job_id = j.id
+    WHERE j.uploaded_by IS NOT NULL OR j.extraction_status IS NOT NULL
+), doomed AS (
+    SELECT j.id FROM jobs j JOIN held h ON h.id = j.id AND h.owner_kept
+    ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
+), cleared AS (
+    UPDATE jobs SET uploaded_by = NULL, extraction_status = NULL FROM doomed
+    WHERE jobs.id = doomed.id RETURNING jobs.id
 )
-SELECT (SELECT max(id) FROM chunk) AS last,
-       (SELECT count(*) FROM written) AS written,
-       (SELECT count(*) FROM chunk WHERE extraction_status IS NULL) AS no_status
+SELECT (SELECT max(id) FROM candidates) AS last,
+       (SELECT count(*) FROM cleared) AS cleared,
+       (SELECT count(*) FROM held WHERE NOT owner_kept) AS unmatched
 """
-
-
-def reconcile_uploads(after: int, limit: int) -> dict:
-    """One chunk of _RECONCILE_UPLOADS: `last` is the id to continue after,
-    None when there is nothing past `after`."""
     with statement() as conn:
-        row = conn.execute(_RECONCILE_UPLOADS, {"after": after, "limit": limit}).fetchone()
+        row = conn.execute(sql, {"after": after, "limit": limit}).fetchone()
     assert row is not None
     return row
 
@@ -596,6 +617,18 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     if proposed
                     else []
                 )
+                # Uploads this pull will take over (source becomes the feed's,
+                # the SET below): read before the upsert, because afterwards
+                # they no longer say upload. Driven by upload rows not yet
+                # done, which is none almost always.
+                taken = [
+                    r["job_id"]
+                    for r in cur.execute(
+                        "SELECT p.job_id FROM posting_uploads p JOIN jobs j ON j.id = p.job_id "
+                        "WHERE p.status <> 'done' AND j.source = 'upload' AND j.url = ANY(%s)",
+                        ([row[0] for row in batch],),
+                    ).fetchall()
+                ]
                 # A row is written only when the update would change it.
                 # Rewriting every listed row was 1.33M updates in 36 hours on
                 # a 605k-row catalog, 5.7 GB of WAL, while the feeds put back
@@ -623,12 +656,10 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                                 THEN v.title ELSE j.title END,
                            v.locations, v.terms, v.active,
                            COALESCE(j.date_posted, v.date_posted),
-                           CASE WHEN j.source = 'upload' THEN v.source ELSE j.source END,
-                           CASE WHEN j.source = 'upload'
-                                THEN 'done' ELSE j.extraction_status END)
+                           CASE WHEN j.source = 'upload' THEN v.source ELSE j.source END)
                           IS NOT DISTINCT FROM
                           (j.company, j.title, j.locations, j.terms, j.active,
-                           j.date_posted, j.source, j.extraction_status)
+                           j.date_posted, j.source)
                 )
                 ON CONFLICT (url) DO UPDATE SET
                     company = CASE WHEN jobs.source = 'upload' OR jobs.company = ''
@@ -640,23 +671,19 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                     active = EXCLUDED.active,
                     date_posted = COALESCE(jobs.date_posted, EXCLUDED.date_posted),
                     source = CASE WHEN jobs.source = 'upload'
-                                  THEN EXCLUDED.source ELSE jobs.source END,
-                    extraction_status = CASE WHEN jobs.source = 'upload'
-                                             THEN 'done' ELSE jobs.extraction_status END
+                                  THEN EXCLUDED.source ELSE jobs.source END
                         """,
                     batch,
                 )
-                # A pull that lists an upload's url takes the row over and
-                # marks its extraction done (the SET above); its upload row
-                # follows. The jobs rows it changed are locked by this
-                # transaction already. Drives from posting_uploads rows not yet
-                # done, which is none almost always.
-                cur.execute(
-                    "UPDATE posting_uploads p SET status = 'done' FROM jobs j "
-                    "WHERE j.id = p.job_id AND p.status <> 'done' "
-                    "AND j.extraction_status = 'done' AND j.url = ANY(%s)",
-                    ([row[0] for row in batch],),
-                )
+                # A pull that lists an upload's url takes the row over, and
+                # the feed's text replaces the extraction: the upload is done.
+                # The jobs rows it changed are locked by this transaction.
+                if taken:
+                    cur.execute(
+                        "UPDATE posting_uploads SET status = 'done' "
+                        "WHERE job_id = ANY(%s) AND status <> 'done'",
+                        (taken,),
+                    )
                 # The feed put these back after having dropped them. One row
                 # per return, which is what makes a flapping board countable.
                 if returning:

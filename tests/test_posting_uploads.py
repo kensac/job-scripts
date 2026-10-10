@@ -1,6 +1,5 @@
-"""posting_uploads follows jobs.uploaded_by and jobs.extraction_status while
-both are written, and the backfill brings rows an older server wrote into
-line."""
+"""posting_uploads is the only record of an upload, and the clearing task
+empties the jobs columns it replaced without losing an owner."""
 
 from __future__ import annotations
 
@@ -58,27 +57,65 @@ def test_a_pull_that_takes_an_upload_over_marks_it_done(f):
     assert _uploads() == {job_id: (uid, "done")}
 
 
-def test_backfill_copies_what_an_older_server_wrote_and_then_finds_nothing(f):
+def _jobs_columns() -> dict[int, tuple[int | None, str | None]]:
+    return {
+        r["id"]: (r["uploaded_by"], r["extraction_status"])
+        for r in db.query(
+            "SELECT id, uploaded_by, extraction_status FROM jobs "
+            "WHERE uploaded_by IS NOT NULL OR extraction_status IS NOT NULL"
+        )
+    }
+
+
+def _run_clear(f) -> dict:
+    task_id = f.make_task("clear_upload_columns", status="running")
+    asyncio.run(posting_uploads.handle_clear_upload_columns(task_id, {}))
+    row = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))
+    assert row is not None
+    return row["progress"]
+
+
+def test_the_upload_writers_leave_the_jobs_columns_alone(f):
     uid = f.make_user()
-    # What a server on the release before posting_uploads writes: jobs only.
-    missing = f.make_job()
-    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (uid, missing))
-    behind = catalog.add_upload("https://x.test/behind", "https://x.test/behind", uid)["id"]
-    db.execute("UPDATE jobs SET extraction_status = 'done' WHERE id IN (%s, %s)", (missing, behind))
-    # Not an upload: the sheet import stamped extraction done with no uploader.
-    f.make_job(source="sheet_import")
-    db.execute("UPDATE jobs SET extraction_status = 'done' WHERE source = 'sheet_import'")
+    job_id = catalog.add_upload("https://x.test/cols", "https://x.test/cols", uid)["id"]
+    catalog.set_extraction_status(job_id, "failed")
+    catalog.record_extraction(job_id, "Acme", "Engineer", [], [])
+    assert _jobs_columns() == {}
 
-    first = f.make_task("backfill_posting_uploads", status="running")
-    asyncio.run(posting_uploads.handle_backfill_posting_uploads(first, {}))
-    assert _uploads() == {missing: (uid, "done"), behind: (uid, "done")}
-    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (first,))
-    assert progress is not None and progress["progress"]["written"] == 2
 
-    second = f.make_task("backfill_posting_uploads", status="running")
-    asyncio.run(posting_uploads.handle_backfill_posting_uploads(second, {}))
-    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (second,))
-    assert progress is not None and progress["progress"]["written"] == 0
+def test_clearing_keeps_every_owner_and_every_stamp_then_finds_nothing(f, monkeypatch):
+    uid, other = f.make_user(), f.make_user()
+    # What a server on the release before this one wrote: both copies.
+    upload = f.make_job(source="upload")
+    f.upload(upload, uid)
+    db.execute(
+        "UPDATE jobs SET uploaded_by = %s, extraction_status = 'done' WHERE id = %s", (uid, upload)
+    )
+    # Its status written to jobs on an upload whose jobs row names nobody.
+    status_only = f.make_job(source="upload")
+    f.upload(status_only, uid, status="failed")
+    db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (status_only,))
+    # Not an upload: the sheet import's stamp is the only record of it.
+    stamped = f.make_job(source="sheet_import")
+    db.execute("UPDATE jobs SET extraction_status = 'done' WHERE id = %s", (stamped,))
+    # An owner posting_uploads does not name is not cleared.
+    orphan = f.make_job(source="upload")
+    f.upload(orphan, uid)
+    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (other, orphan))
+    # One upload per statement, so the walk crosses chunk boundaries.
+    monkeypatch.setattr(posting_uploads, "BATCH", 1)
+
+    first = _run_clear(f)
+    assert (first["cleared"], first["unmatched"]) == (2, 1)
+    assert _jobs_columns() == {orphan: (other, None), stamped: (None, "done")}
+    assert _uploads() == {
+        upload: (uid, "done"),
+        status_only: (uid, "failed"),
+        orphan: (uid, "done"),
+    }
+
+    second = _run_clear(f)
+    assert (second["cleared"], second["unmatched"]) == (0, 1)
 
 
 def test_readers_take_ownership_from_posting_uploads_alone(f):
