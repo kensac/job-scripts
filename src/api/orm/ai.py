@@ -52,6 +52,14 @@ class AiQuery(Base):
         Index("idx_ai_queries_config_recent", "config_name", "created_at"),
         Index("idx_ai_queries_worker_recent", "worker", "created_at"),
         Index("idx_ai_queries_prompt_hash", "check_type", "prompt_hash"),
+        # The first answer naming each call carries the call's usage; readers
+        # find it per call, an index-only scan of this.
+        Index(
+            "idx_ai_queries_model_call",
+            "model_call_id",
+            "id",
+            postgresql_where=text("model_call_id IS NOT NULL"),
+        ),
         Index(
             "idx_ai_queries_latest_verdict",
             "url",
