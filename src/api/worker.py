@@ -297,6 +297,16 @@ def schedule_ingest_cycle() -> None:
             {"cycle": cycle},
             dedupe_key=f"listing-pattern-copies:{cycle}",
         )
+    # Messages whose current event or match pointer lags its log
+    # (tasks.mail_pointers). Counting them is a pass over every message,
+    # 0.9 s on production on 2026-10-10, so the task counts once a cycle
+    # rather than every worker on every poll; a run with none to fill only
+    # reads. One at a time.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'backfill_mail_pointers' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("backfill_mail_pointers", {"cycle": cycle}, dedupe_key=f"mail-pointers:{cycle}")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own

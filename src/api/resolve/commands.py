@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from api import db
+from api.mail import events as mail_events
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.mail.store import owned_message
@@ -74,10 +75,12 @@ def _resolve_message(
     # not_job_related: an append to the event log, the same retraction rule a
     # reclassification uses. The match is retracted too, because an event that
     # says this is not job mail cannot leave the message attached to a job.
-    db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
-        "VALUES (%s, 'not_job_related', 'high', %s, NULL, %s)",
-        (message_id, db.jsonb({"corrected_by_user": True}), actor_user_id),
+    mail_events.append(
+        message_id,
+        "not_job_related",
+        confidence="high",
+        detail={"corrected_by_user": True},
+        actor_user_id=actor_user_id,
     )
     mail_match.record(
         message_id,
