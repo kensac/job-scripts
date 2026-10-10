@@ -1,11 +1,11 @@
 import gzip
 import hashlib
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import pytest
 
 from api import db
-from api.ai import batch_results, receipt_payloads
+from api.ai import batch_results
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
 from tests.factories import ObjectClient
@@ -16,8 +16,8 @@ def objects():
     return PayloadStore(ObjectClient(), "test-payloads")
 
 
-def receipt(f, *, status="done", kind="embed_postings_batch", consumed=True):
-    task_id = f.make_task(kind, {}, status=status)
+def receipt(f):
+    task_id = f.make_task("embed_postings_batch", {}, status="done")
     batch_results.snapshot_specs(task_id, [BatchSpec("packed", endpoint="/v1/embeddings")])
     result = BatchResult(
         "packed",
@@ -27,16 +27,6 @@ def receipt(f, *, status="done", kind="embed_postings_batch", consumed=True):
         model="embedding-model",
     )
     batch_results.checkpoint(task_id, [result], [])
-    # The shape written before checkpoint stored vectors as an object: inline
-    # vectors and no reference. That is the population this tooling moves.
-    db.execute(
-        "UPDATE batch_result_receipts SET response=response-'embedding_vectors_ref' || %s "
-        "WHERE task_id=%s",
-        (db.jsonb({"embedding_vectors": result.embedding_vectors}), task_id),
-    )
-    if consumed:
-        with batch_results.consume_result(task_id, result) as acknowledgement:
-            acknowledgement.outcome = "written"
     return task_id, result
 
 
@@ -85,151 +75,9 @@ def test_object_integrity_failures_are_explicit(objects, failure):
         objects.get(ref)
 
 
-@pytest.mark.parametrize("failure", ["fail_put", "fail_get"])
-def test_copy_failure_leaves_receipt_untouched(f, objects, failure):
-    task_id, _ = receipt(f)
-    original = row(task_id)
-    setattr(objects.client, failure, True)
-    with pytest.raises(PayloadUnavailable):
-        receipt_payloads.migrate(original, objects, mode="copy")
-    assert row(task_id) == original
-
-
-def test_copy_compact_restore_preserve_receipt_accounting_and_replay(f, objects):
-    task_id, result = receipt(f)
-    original = row(task_id)
-    assert receipt_payloads.migrate(original, objects, mode="copy") == "copied"
-    copied = row(task_id)
-    assert copied["response"]["embedding_vectors"] == result.embedding_vectors
-    assert receipt_payloads.migrate(copied, objects, mode="copy") == "verified"
-    assert receipt_payloads.migrate(copied, objects, mode="compact") == "compacted"
-    compacted = row(task_id)
-    assert "embedding_vectors" not in compacted["response"]
-    assert batch_results.response_payload(compacted["response"], objects) == original["response"]
-    assert {k: v for k, v in compacted.items() if k != "response"} == {
-        k: v for k, v in original.items() if k != "response"
-    }
-    assert {k: v for k, v in compacted["response"].items() if k != "embedding_vectors_ref"} == {
-        k: v for k, v in original["response"].items() if k != "embedding_vectors"
-    }
-    objects.client.fail_get = True
-    assert batch_results.unconsumed(task_id) == []
-    with batch_results.consume_result(task_id, result) as acknowledgement:
-        assert not acknowledgement.pending
-    with pytest.raises(PayloadUnavailable):
-        receipt_payloads.migrate(compacted, objects, mode="restore")
-    assert row(task_id) == compacted
-    objects.client.fail_get = False
-    assert receipt_payloads.migrate(compacted, objects, mode="restore") == "restored"
-    assert row(task_id) == original
-
-
-@pytest.mark.parametrize(
-    "status,kind,consumed",
-    [
-        ("running", "embed_postings_batch", True),
-        ("pending", "embed_postings_batch", True),
-        ("done", "embed_postings_batch", False),
-        ("done", "classify_job_profiles", True),
-    ],
-)
-def test_ineligible_receipts_never_copied_or_compacted(f, objects, status, kind, consumed):
-    task_id, _ = receipt(f, status=status, kind=kind, consumed=consumed)
-    original = row(task_id)
-    assert receipt_payloads.candidates(after=None, limit=10, mode="copy") == []
-    assert receipt_payloads.migrate(original, objects, mode="copy") == "changed"
-    assert row(task_id) == original
-    assert objects.client.objects == {}
-
-
-@pytest.mark.parametrize("change", ["status", "response", "consumed", "outcome"])
-def test_concurrent_change_prevents_reference_write(f, objects, change):
-    task_id, _ = receipt(f)
-    original = row(task_id)
-
-    def change_source():
-        if change == "status":
-            db.execute("UPDATE tasks SET status='running' WHERE id=%s", (task_id,))
-        elif change == "response":
-            db.execute(
-                'UPDATE batch_result_receipts SET response=response || \'{"error":"changed"}\'::jsonb WHERE task_id=%s',
-                (task_id,),
-            )
-        elif change == "consumed":
-            db.execute(
-                "UPDATE batch_result_receipts SET consumed_at=NULL WHERE task_id=%s", (task_id,)
-            )
-        else:
-            db.execute("UPDATE batch_result_receipts SET outcome=NULL WHERE task_id=%s", (task_id,))
-
-    objects.client.after_put = change_source
-    assert receipt_payloads.migrate(original, objects, mode="copy") == "changed"
-    assert "embedding_vectors_ref" not in row(task_id)["response"]
-    assert "embedding_vectors" in row(task_id)["response"]
-
-
-def test_orphan_upload_retry_and_unverified_compaction(f, objects):
-    task_id, _ = receipt(f)
-    original = row(task_id)
-    objects.put_verified(original["response"]["embedding_vectors"])
-    assert receipt_payloads.migrate(original, objects, mode="copy") == "copied"
-    assert len(objects.client.objects) == 1
-    copied = row(task_id)
-    objects.client.fail_get = True
-    with pytest.raises(PayloadUnavailable):
-        receipt_payloads.migrate(copied, objects, mode="compact")
-    assert row(task_id) == copied
-
-
-def test_required_external_vectors_fail_explicitly_and_inline_needs_no_store(f, objects):
-    task_id, _ = receipt(f, consumed=False)
-    original = row(task_id)["response"]
-    assert batch_results.response_payload(original) == original
-    ref = objects.put_verified(original["embedding_vectors"])
-    external = {**original, "embedding_vectors_ref": asdict(ref)}
-    assert batch_results.response_payload(external) == original
-    external.pop("embedding_vectors")
-    db.execute(
-        "UPDATE batch_result_receipts SET response=%s WHERE task_id=%s",
-        (db.jsonb(external), task_id),
-    )
-    objects.client.objects.clear()
-    with pytest.raises(PayloadUnavailable):
-        batch_results.response_payload(external, objects)
-    assert row(task_id)["outcome"] is None
-
-
-def test_keyset_iteration_and_restore_selection(f, objects):
-    first, _ = receipt(f)
-    second, _ = receipt(f)
-    page = receipt_payloads.candidates(after=None, limit=1, mode="copy")
-    assert len(page) == 1
-    cursor = (page[0]["provider_batch_id"], page[0]["custom_id"])
-    other = receipt_payloads.candidates(after=cursor, limit=1, mode="copy")
-    assert len(other) == 1 and other[0]["task_id"] != page[0]["task_id"]
-    assert {page[0]["task_id"], other[0]["task_id"]} == {first, second}
-    assert receipt_payloads.candidates(after=None, limit=10, mode="restore") == []
-
-
 def test_reference_parse_rejects_wrong_types():
     with pytest.raises(PayloadUnavailable):
         PayloadRef.parse({"bucket": "b", "key": "k", "sha256": "x", "size": True, "version": 1})
-
-
-def test_migration_rejects_outer_transaction(f, objects):
-    task_id, _ = receipt(f)
-    with db.transaction(), pytest.raises(RuntimeError, match="inside a database transaction"):
-        receipt_payloads.migrate(row(task_id), objects, mode="copy")
-    assert objects.client.objects == {}
-
-
-def test_compaction_cli_requires_backup_confirmation(monkeypatch):
-    from api.ai.migrate_receipt_payloads import main
-
-    monkeypatch.setattr("sys.argv", ["migration", "compact", "--limit", "1"])
-    with pytest.raises(SystemExit) as error:
-        main()
-    assert error.value.code == 2
 
 
 def test_store_rejects_empty_credentials_before_sdk_discovery(monkeypatch):
@@ -239,96 +87,20 @@ def test_store_rejects_empty_credentials_before_sdk_discovery(monkeypatch):
         PayloadStore.from_env()
 
 
-def test_compaction_rechecks_task_after_object_download(f, objects, monkeypatch):
-    task_id, _ = receipt(f)
-    receipt_payloads.migrate(row(task_id), objects, mode="copy")
-    copied = row(task_id)
-    original_get = objects.get
-
-    def reactivate(ref):
-        vectors = original_get(ref)
-        db.execute("UPDATE tasks SET status='running' WHERE id=%s", (task_id,))
-        return vectors
-
-    monkeypatch.setattr(objects, "get", reactivate)
-    assert receipt_payloads.migrate(copied, objects, mode="compact") == "changed"
-    assert row(task_id) == copied
+def test_receipt_holds_only_the_reference(f):
+    task_id, result = receipt(f)
+    response = row(task_id)["response"]
+    assert "embedding_vectors" not in response
+    assert batch_results.response_payload(response)["embedding_vectors"] == (
+        result.embedding_vectors
+    )
 
 
 def test_required_receipt_loading_raises_without_acknowledging(f):
-    objects = PayloadStore.from_env()
-    task_id, result = receipt(f, consumed=False)
-    original = row(task_id)["response"]
-    ref = objects.put_verified(original.pop("embedding_vectors"))
-    original["embedding_vectors_ref"] = asdict(ref)
-    db.execute(
-        "UPDATE batch_result_receipts SET response=%s WHERE task_id=%s",
-        (db.jsonb(original), task_id),
-    )
+    task_id, result = receipt(f)
     assert batch_results.unconsumed(task_id)[0].embedding_vectors == result.embedding_vectors
-    del objects.client.objects[ref.bucket, ref.key]
+    PayloadStore.from_env().client.objects.clear()
     with pytest.raises(PayloadUnavailable):
         batch_results.unconsumed(task_id)
     assert row(task_id)["outcome"] is None
     assert row(task_id)["consumed_at"] is None
-
-
-def test_verification_works_in_read_only_session(f, objects, monkeypatch):
-    from psycopg.rows import dict_row
-    from psycopg_pool import ConnectionPool
-
-    import core.pool as connections
-
-    task_id, _ = receipt(f)
-    receipt_payloads.migrate(row(task_id), objects, mode="copy")
-    original = row(task_id)
-    # A separate read-only pool cannot leak session defaults into later tests.
-    with (
-        ConnectionPool(
-            connections.DATABASE_URL,
-            min_size=1,
-            max_size=1,
-            kwargs={"row_factory": dict_row, "options": "-c default_transaction_read_only=on"},
-        ) as readonly,
-        monkeypatch.context() as patch,
-    ):
-        patch.setattr(connections, "pool", readonly)
-        assert db.query_one("SHOW default_transaction_read_only") == {
-            "default_transaction_read_only": "on"
-        }
-        assert receipt_payloads.migrate(original, objects, mode="verify") == "verified"
-    assert row(task_id) == original
-
-
-def test_named_receipts_are_the_only_ones_any_mode_touches(f, objects, monkeypatch, capsys):
-    import json
-
-    from api.ai.migrate_receipt_payloads import main
-    from core.pool import pool
-
-    tasks = [receipt(f)[0] for _ in range(3)]
-    by_key = {(row(task)["provider_batch_id"], row(task)["custom_id"]): task for task in tasks}
-    keys = sorted(by_key)
-    first, named, last = (by_key[key] for key in keys)
-    original = {task: row(task) for task in tasks}
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
-    monkeypatch.setattr(pool, "close", lambda: None)
-    monkeypatch.setenv("PGOPTIONS", "")
-
-    def run(*argv):
-        monkeypatch.setattr("sys.argv", ["migration", *argv, "--receipt", *keys[1]])
-        code = main()
-        return code, json.loads(capsys.readouterr().out)["counts"]
-
-    assert run("copy", "--limit", "5") == (0, {"copied": 1})
-    assert run("compact", "--limit", "5", "--backup-complete") == (0, {"compacted": 1})
-    assert run("verify", "--limit", "5") == (0, {"verified": 1})
-    assert "embedding_vectors" not in row(named)["response"]
-    assert row(first) == original[first] and row(last) == original[last]
-    # Without the name, restore would start at the first referenced receipt.
-    for task in (first, last):
-        receipt_payloads.migrate(row(task), objects, mode="copy")
-    untouched = {task: row(task) for task in (first, last)}
-    assert run("restore", "--limit", "5") == (0, {"restored": 1})
-    assert row(named) == original[named]
-    assert row(first) == untouched[first] and row(last) == untouched[last]

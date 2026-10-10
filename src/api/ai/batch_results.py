@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -36,15 +35,6 @@ def snapshot_of(spec: BatchSpec) -> Any:
     return json.loads(_encoded(spec))
 
 
-def snapshot_sha256(spec: BatchSpec) -> str:
-    """The digest a reference records for this spec's stored form.
-
-    encode_payload is canonical, so encoding the value JSON gives back yields
-    these same bytes.
-    """
-    return hashlib.sha256(_encoded(spec)).hexdigest()
-
-
 def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     """Freeze requests before paid submission; an existing request always wins.
 
@@ -75,15 +65,15 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
             ref = refs.get(spec.custom_id)
             if ref is None:
                 row = db.query_one(
-                    "SELECT custom_id,snapshot,snapshot_ref FROM batch_requests "
+                    "SELECT custom_id,snapshot_ref FROM batch_requests "
                     "WHERE task_id=%s AND custom_id=%s",
                     (task_id, spec.custom_id),
                 )
             else:
                 row = db.query_one(
                     "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref) VALUES (%s,%s,%s) "
-                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot=batch_requests.snapshot "
-                    "RETURNING custom_id,snapshot,snapshot_ref",
+                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot_ref=batch_requests.snapshot_ref "
+                    "RETURNING custom_id,snapshot_ref",
                     (task_id, spec.custom_id, db.jsonb(ref)),
                 )
             if row is None:
@@ -92,13 +82,14 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     frozen = []
     cache: BundleCache = {}
     for row in rows:
-        source = row
-        if row["snapshot"] is None and row["snapshot_ref"] == refs.get(row["custom_id"]):
+        written = refs.get(row["custom_id"])
+        if written is not None and row["snapshot_ref"] == written:
             # This call wrote the row from a value already read back from storage.
-            source = {**row, "snapshot": fresh[row["custom_id"]]}
-        spec = request_snapshots.resolve(source, cache=cache)
+            spec = request_snapshots.spec(row["custom_id"], fresh[row["custom_id"]])
+        else:
+            spec = request_snapshots.resolve(row, cache=cache)
         if spec is None:
-            raise RuntimeError("cannot resubmit a legacy request without its original snapshot")
+            raise RuntimeError("request snapshot was not recorded")
         frozen.append(spec)
     return frozen
 
@@ -162,9 +153,8 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
 
 def response_payload(response: dict[str, Any], store: PayloadStore | None = None) -> dict[str, Any]:
     payload = dict(response)
-    external = "embedding_vectors_ref" in payload
     reference = payload.pop("embedding_vectors_ref", None)
-    if external and payload.get("embedding_vectors") is None:
+    if reference is not None:
         # An unavailable required input raises before consumption or accounting.
         # Consumed receipts are never hydrated by the replay path.
         payload["embedding_vectors"] = (store or PayloadStore.from_env()).get(
@@ -184,7 +174,7 @@ def unconsumed(task_id: int) -> list[BatchResult]:
             **response_payload(row["response"]),
         )
         for row in db.query(
-            "SELECT r.*, q.snapshot,q.snapshot_ref FROM batch_result_receipts r LEFT JOIN batch_requests q "
+            "SELECT r.*, q.snapshot_ref FROM batch_result_receipts r LEFT JOIN batch_requests q "
             "ON q.task_id=r.task_id AND q.custom_id=r.custom_id "
             "WHERE r.task_id=%s AND r.consumed_at IS NULL ORDER BY r.provider_batch_id,r.custom_id",
             (task_id,),

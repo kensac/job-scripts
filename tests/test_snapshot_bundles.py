@@ -6,7 +6,7 @@ from dataclasses import asdict
 import pytest
 
 from api import db
-from api.ai import batch_results, request_snapshots, snapshot_payloads
+from api.ai import batch_results, request_snapshots
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
 from tests.factories import ObjectClient
@@ -35,8 +35,6 @@ def task(f, count, *, status="done"):
         BatchSpec(f"r{index}", "rules", f"page {index}", context={"n": index})
         for index in range(count)
     ]
-    for spec in specs:
-        f.make_inline_request(task_id, spec)
     return task_id, specs
 
 
@@ -44,25 +42,22 @@ def rows(task_id):
     return db.query("SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,))
 
 
-def attach_bundle(store, sources, *, keep_inline=True):
-    """Stand in for the bundle writer: one object, one member reference per row."""
-    refs = store.put_bundle({source["custom_id"]: source["snapshot"] for source in sources})
-    for source in sources:
+def attach_bundle(store, task_id, specs):
+    """Stand in for the writer: one object, one member reference per request."""
+    refs = store.put_bundle({spec.custom_id: batch_results.snapshot_of(spec) for spec in specs})
+    for spec in specs:
         db.execute(
-            "UPDATE batch_requests SET snapshot_ref=%s"
-            + ("" if keep_inline else ",snapshot=NULL")
-            + " WHERE task_id=%s AND custom_id=%s",
-            (db.jsonb(asdict(refs[source["custom_id"]])), source["task_id"], source["custom_id"]),
+            "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref) VALUES (%s,%s,%s)",
+            (task_id, spec.custom_id, db.jsonb(asdict(refs[spec.custom_id]))),
         )
     return refs
 
 
 def test_member_reference_shape_and_old_reader_refuses_it(f, objects):
-    task_id, _ = task(f, 2)
-    sources = rows(task_id)
-    refs = attach_bundle(objects, sources)
+    task_id, specs = task(f, 2)
+    refs = attach_bundle(objects, task_id, specs)
     ref = asdict(refs["r0"])
-    raw = encode_payload(sources[0]["snapshot"])
+    raw = encode_payload(batch_results.snapshot_of(specs[0]))
     assert ref["version"] == 3
     assert ref["member"] == "r0"
     assert ref["member_sha256"] == hashlib.sha256(raw).hexdigest()
@@ -77,17 +72,14 @@ def test_member_reference_shape_and_old_reader_refuses_it(f, objects):
 
 def test_member_reference_resolves_to_the_identical_spec(f, objects):
     task_id, specs = task(f, 3)
-    inline = [request_snapshots.resolve(source) for source in rows(task_id)]
-    attach_bundle(objects, rows(task_id), keep_inline=False)
-    referenced = rows(task_id)
-    assert all(source["snapshot"] is None for source in referenced)
-    assert [request_snapshots.resolve(source) for source in referenced] == inline == specs
+    attach_bundle(objects, task_id, specs)
+    assert [request_snapshots.resolve(source) for source in rows(task_id)] == specs
 
 
 @pytest.mark.parametrize("tamper", ["bundle", "member_digest", "member_name", "member_size"])
 def test_tampered_bundle_or_member_raises(f, objects, tamper):
-    task_id, _ = task(f, 2)
-    refs = attach_bundle(objects, rows(task_id), keep_inline=False)
+    task_id, specs = task(f, 2)
+    refs = attach_bundle(objects, task_id, specs)
     source = rows(task_id)[0]
     ref = dict(source["snapshot_ref"])
     if tamper == "bundle":
@@ -105,9 +97,8 @@ def test_tampered_bundle_or_member_raises(f, objects, tamper):
 
 def test_resolving_a_whole_task_gets_each_bundle_once(f, objects):
     task_id, specs = task(f, 5)
-    sources = rows(task_id)
-    attach_bundle(objects, sources[:3], keep_inline=False)
-    attach_bundle(objects, sources[3:], keep_inline=False)
+    attach_bundle(objects, task_id, specs[:3])
+    attach_bundle(objects, task_id, specs[3:])
     batch_results.checkpoint(
         task_id, [BatchResult(spec.custom_id, text="a", batch_id="paid") for spec in specs], []
     )
@@ -125,88 +116,10 @@ def test_recovery_and_freeze_get_each_bundle_once(f, objects):
         "UPDATE tasks SET payload=%s WHERE id=%s",
         (db.jsonb({"payload_recovery": {"reason": "payload_unavailable"}}), task_id),
     )
-    attach_bundle(objects, rows(task_id), keep_inline=False)
+    attach_bundle(objects, task_id, specs)
     objects.client.gets.clear()
     assert batch_results.snapshot_specs(task_id, specs) == specs
     assert len(objects.client.gets) == 1
     objects.client.gets.clear()
     assert payload_recovery.retry(task_id, objects) == "pending"
     assert len(objects.client.gets) == 1
-
-
-def test_mixed_inline_v2_and_member_rows_in_one_task_resolve(f, objects):
-    task_id, specs = task(f, 4)
-    sources = rows(task_id)
-    v2 = objects.put_verified(sources[1]["snapshot"])
-    db.execute(
-        "UPDATE batch_requests SET snapshot=NULL,snapshot_ref=%s WHERE task_id=%s AND custom_id='r1'",
-        (db.jsonb(asdict(v2)), task_id),
-    )
-    attach_bundle(objects, sources[2:], keep_inline=False)
-    mixed = rows(task_id)
-    assert mixed[0]["snapshot_ref"] is None
-    assert mixed[1]["snapshot_ref"]["version"] == 2
-    assert mixed[2]["snapshot_ref"]["version"] == 3
-    assert [request_snapshots.resolve(source) for source in mixed] == specs
-    batch_results.checkpoint(
-        task_id, [BatchResult(spec.custom_id, text="a", batch_id="paid") for spec in specs], []
-    )
-    assert [result.request for result in batch_results.unconsumed(task_id)] == specs
-
-
-def test_compact_clears_only_verified_member_rows_and_restore_is_exact(f, objects):
-    task_id, _ = task(f, 4)
-    original = rows(task_id)
-    attach_bundle(objects, original)
-    # r2's inline value no longer matches its member: it and everything after
-    # it in the chunk must keep their inline value.
-    db.execute(
-        "UPDATE batch_requests SET snapshot=snapshot || %s WHERE task_id=%s AND custom_id='r2'",
-        (db.jsonb({"input": "edited"}), task_id),
-    )
-    objects.client.gets.clear()
-    outcomes = snapshot_payloads.migrate_many(rows(task_id), objects, mode="compact", workers=3)
-    assert outcomes == ["compacted", "compacted", "unavailable"]
-    assert len(objects.client.gets) == 1
-    after = rows(task_id)
-    assert [source["snapshot"] is None for source in after] == [True, True, False, False]
-    assert snapshot_payloads.migrate_many(after[:2], objects, mode="verify") == ["verified"] * 2
-    assert snapshot_payloads.migrate_many(after[:2], objects, mode="restore") == ["restored"] * 2
-    restored = rows(task_id)
-    assert restored[:2] == [{**source, "snapshot_ref": None} for source in original[:2]]
-
-
-def test_copy_leaves_member_rows_as_they_are(f, objects):
-    task_id, _ = task(f, 2)
-    attach_bundle(objects, rows(task_id))
-    before = rows(task_id)
-    puts = len(objects.client.objects)
-    assert snapshot_payloads.migrate_many(before, objects, mode="copy") == ["verified"] * 2
-    assert rows(task_id) == before
-    assert len(objects.client.objects) == puts
-
-
-def test_manifest_operates_on_member_references(f, objects):
-    task_id, _ = task(f, 2)
-    sources = rows(task_id)
-    manifest = [
-        {
-            "task_id": task_id,
-            "custom_id": source["custom_id"],
-            "snapshot_sha256": hashlib.sha256(encode_payload(source["snapshot"])).hexdigest(),
-        }
-        for source in sources
-    ]
-    attach_bundle(objects, sources)
-    for item, source in zip(manifest, rows(task_id), strict=True):
-        item["reference"] = source["snapshot_ref"]
-    logical = sum(len(encode_payload(source["snapshot"])) for source in sources)
-    for mode in ("verify", "compact", "verify", "restore"):
-        result = snapshot_payloads.migrate_manifest(
-            manifest, objects, mode=mode, limit=2, backup_complete=True
-        )
-        assert result.exhausted and result.completed == 2
-        assert result.logical_bytes_verified == logical
-    assert [source["snapshot"] for source in rows(task_id)] == [
-        source["snapshot"] for source in sources
-    ]
