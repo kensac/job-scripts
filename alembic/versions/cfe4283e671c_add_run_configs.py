@@ -1,7 +1,7 @@
 """add run_configs
 
 Revision ID: cfe4283e671c
-Revises: 3c0273da3222
+Revises: 98ace4b3fc55
 Create Date: 2026-10-10 01:06:31.133503
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "cfe4283e671c"
-down_revision: Union[str, None] = "3c0273da3222"
+down_revision: Union[str, None] = "98ace4b3fc55"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
