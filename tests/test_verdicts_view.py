@@ -32,7 +32,6 @@ def test_every_check_and_filter_answer_is_a_verdict_and_nothing_else_is():
     for check in checks:
         for status in ("passed", "rejected", "failed"):
             add_ai_result(f"https://x/{check}/{status}", status, check_type=check)
-    add_ai_result("https://x/page", "passed", check_type="content", input_content="text")
 
     rows = db.query("SELECT url FROM verdicts ORDER BY url")
     assert [r["url"] for r in rows] == sorted(

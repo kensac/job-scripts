@@ -34,7 +34,7 @@ async def test_saved_extraction_result_collects_without_new_candidates(
     )
     job_id, url = f.make_ready_job(content=content)
     content_row = db.query_one(
-        "SELECT id FROM ai_queries WHERE url = %s AND check_type = 'content' ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
         (url,),
     )["id"]
     task_id = f.make_task(f"extract_{family}", status="running")
@@ -53,7 +53,7 @@ async def test_saved_extraction_result_collects_without_new_candidates(
     db.execute("UPDATE jobs SET active = false WHERE id = %s", (job_id,))
     if changed:
         db.execute(
-            "INSERT INTO ai_queries (url, check_type, status, input_content) VALUES (%s, 'content', 'passed', %s)",
+            "INSERT INTO page_fetches (url, status, method, content) VALUES (%s, 'passed', 'scraped', %s)",
             (url, "Completely changed posting, no old requirements apply. " * 30),
         )
     module = comp if family == "comp" else requirements

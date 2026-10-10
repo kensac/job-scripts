@@ -45,7 +45,7 @@ async def _sweep(f) -> None:
 
 def _content(url: str, text: str) -> None:
     db.execute(
-        "UPDATE ai_queries SET input_content = %s WHERE url = %s AND check_type = 'content'",
+        "UPDATE page_fetches SET content = %s WHERE url = %s",
         (text, url),
     )
 
@@ -75,7 +75,7 @@ async def test_a_twin_of_a_verified_posting_takes_its_verdicts_and_is_not_asked(
     assert copy not in [spec.custom_id for spec in submitted]
     rows = db.query(
         "SELECT check_type, status, config_name, prompt_hash, model FROM ai_queries "
-        "WHERE url = %s AND check_type <> 'content' ORDER BY check_type",
+        "WHERE url = %s ORDER BY check_type",
         (copy,),
     )
     assert [(r["check_type"], r["status"], r["config_name"]) for r in rows] == [

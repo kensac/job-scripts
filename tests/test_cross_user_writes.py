@@ -41,7 +41,7 @@ def _rechecks() -> list[dict]:
 def private_upload(user_headers, f):
     """User A's private upload, with cached page text another user must not read."""
     job_id = f.make_job(url=SECRET_URL, source="upload", uploaded_by=_uid(user_headers))
-    f.make_verdict(SECRET_URL, "content", "passed", content=SECRET_TEXT, reason="scraped")
+    f.make_fetch(SECRET_URL, content=SECRET_TEXT)
     return job_id
 
 

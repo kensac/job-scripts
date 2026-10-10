@@ -1,8 +1,7 @@
 """The one writer of a page fetch.
 
 A fetch is a fact about a posting's page: when it was read, how, and what
-came back. Readers use the page_fetches and page_texts views, not the table,
-so the rows still stored in ai_queries read the same until they are moved.
+came back. Readers of the text alone use the page_texts view.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ def record(url: str, status: str, method: str, content: str | None = None) -> in
     when nothing usable did; `method` says how it was read or why not."""
     with connection() as conn:
         row = conn.execute(
-            "INSERT INTO page_fetch_rows (url, status, method, content, worker) "
+            "INSERT INTO page_fetches (url, status, method, content, worker) "
             "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (url, status, method, content, WORKER),
         ).fetchone()

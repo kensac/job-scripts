@@ -31,7 +31,6 @@ SWEEP_KINDS = frozenset(
         "classify_mail",
         "embed_postings_batch",
         "fetch_missing_content",
-        "move_page_fetches",
         "backfill_mail_pointers",
     }
 )

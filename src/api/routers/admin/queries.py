@@ -409,9 +409,7 @@ def delete_queries(
 ) -> QueriesDeleted:
     with db.pool.connection() as conn:
         deleted = conn.execute("DELETE FROM ai_queries WHERE id = ANY(%s)", (body.ids,)).rowcount
-        deleted += conn.execute(
-            "DELETE FROM page_fetch_rows WHERE id = ANY(%s)", (body.ids,)
-        ).rowcount
+        deleted += conn.execute("DELETE FROM page_fetches WHERE id = ANY(%s)", (body.ids,)).rowcount
     return QueriesDeleted(deleted=deleted)
 
 

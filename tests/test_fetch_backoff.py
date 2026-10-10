@@ -25,18 +25,16 @@ from core.fetching import ats
 def _failures(url: str, *hours_ago: int) -> None:
     for h in hours_ago:
         db.execute(
-            "INSERT INTO ai_queries (url, check_type, status, reason, config_name, created_at) "
-            "VALUES (%s, 'content', 'failed', 'fetch returned nothing', 'content-cache', "
-            "now() - make_interval(hours => %s))",
+            "INSERT INTO page_fetches (url, status, method, created_at) "
+            "VALUES (%s, 'failed', 'fetch returned nothing', now() - make_interval(hours => %s))",
             (url, h),
         )
 
 
 def _success(url: str, hours_ago: int) -> None:
     db.execute(
-        "INSERT INTO ai_queries (url, check_type, status, reason, input_content, config_name, "
-        "created_at) VALUES (%s, 'content', 'passed', 'scraped', %s, 'content-cache', "
-        "now() - make_interval(hours => %s))",
+        "INSERT INTO page_fetches (url, status, method, content, created_at) "
+        "VALUES (%s, 'passed', 'scraped', %s, now() - make_interval(hours => %s))",
         (url, "page text " * 40, hours_ago),
     )
 

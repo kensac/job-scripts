@@ -104,6 +104,16 @@ def make_verdict(
     )
 
 
+def make_fetch(
+    url: str, *, content: str | None = None, status: str = "passed", method: str = "scraped"
+) -> int:
+    """Append a page fetch, the way the fetchers do. The newest fetch with
+    text is the page every reader sees."""
+    from core import page_fetches
+
+    return page_fetches.record(url, status, method, content)
+
+
 def make_ready_job(
     *,
     source: str = "src-test",
@@ -120,7 +130,7 @@ def make_ready_job(
     row = db.query_one("SELECT url FROM jobs WHERE id = %s", (job_id,))
     assert row is not None
     url = row["url"]
-    make_verdict(url, "content", "passed", content=content, reason="scraped")
+    make_fetch(url, content=content)
     if closed:
         make_verdict(url, "closed", closed)
     if clearance:
@@ -237,9 +247,8 @@ def make_requirements(
     # it the row reads as "extracted from we-do-not-know-which page", which the
     # sweep correctly treats as needing a re-read.
     current = db.query_one(
-        "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
-        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC "
-        "LIMIT 1",
+        "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
+        "ORDER BY id DESC LIMIT 1",
         (url,),
     )
     db.execute(
@@ -274,9 +283,8 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
         vector[1] = seed
     assert len(vector) == EMBEDDING_DIMENSIONS
     current = db.query_one(
-        "SELECT id FROM ai_queries WHERE url = %s AND input_content IS NOT NULL "
-        "AND length(input_content) > 200 ORDER BY (check_type = 'content') DESC, id DESC "
-        "LIMIT 1",
+        "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
+        "ORDER BY id DESC LIMIT 1",
         (url,),
     )
     db.execute(

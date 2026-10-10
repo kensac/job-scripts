@@ -102,33 +102,30 @@ through a view, so changing the storage behind a kind changes the view and no
 reader:
 
 1. `verdicts`: decided answers. Done.
-2. `page_texts`: page text, the same way. Done. It excludes a custom
-   filter's input, which wraps the page with the company and title, and
-   `on_verdict` marks text that older verification stored only on its
-   answer.
-3. Page fetches as their own table, `page_fetch_rows`, written only by
-   `core.page_fetches.record`. A fetch is a fact with none of an answer's
-   columns. In progress:
-   - Done: writers append to the table; readers use `page_fetches` (every
-     fetch, in either place), `page_texts` (fetched text plus the old copies
-     on answers) and `ledger_rows` (every row ai_queries ever held, for the
-     admin ledger, board spend and the derivation scopes, so their numbers do
-     not move while rows do). Ids come from `ai_queries_id_seq`, so a moved
-     fetch keeps its id and every `content_row_id` stays true.
-   - Moving: `move_page_fetches` (`tasks/page_fetch_move.py`), queued every
-     cycle, one at a time, moves the old fetch rows, deleting and inserting
-     in one statement so each is in exactly one place, and labels the ones
-     with no recorded origin `unknown`. For a url whose only text is a copy
-     on an answer, it inserts the copies a reader picks (the newest, and the
-     newest longer than `MIN_CONTENT_CHARS`) as fetches with method
-     `verification` and the answer's id, so no reader's text changes and a
-     derivation read from that copy still names a fetch. The other copies
-     stay copies: no derivation whose hash matches a reader's text names one.
-   - Next, once ai_queries holds no fetch and no url's text is only a copy:
-     `on_verdict` is always false and is removed, the views drop their
-     ai_queries arms, the table takes the name `page_fetches`, and the move
-     task is deleted.
-   - Then: an answer points at the fetch it judged, and the copies of page
+2. `page_texts`: page text, the same way. Done. It is the fetches that
+   brought text back. A custom filter's input, which wraps the page with the
+   company and title, is not page text, and neither is the copy of the page
+   an answer carries: that is what the model saw, read only by the admin row
+   explorer.
+3. Page fetches as their own table, `page_fetches`, written only by
+   `core.page_fetches.record`. Done. A fetch is a fact with none of an
+   answer's columns. `core.store.ai_result_row` refuses `check_type = 'content'`,
+   so a fetch cannot be written where no view reads it. Ids come from
+   `ai_queries_id_seq`: the 910,622 fetches stored in ai_queries until
+   2026-10-10 kept their ids when they moved, so every `content_row_id` that
+   named one still does. For the 11,189 urls whose only text was a copy on a
+   closed or clearance answer, the copies a reader picked became fetches with
+   method `verification` and the answer's id. `ledger_rows` (ai_queries plus
+   the fetches, in ai_queries' shape, for the admin ledger, board spend and
+   the derivation scopes) leaves those out, because the answer is already
+   listed.
+   - `content_row_id` on `job_profiles`, `job_requirements`,
+     `job_embeddings` and `jobs.comp_content_row_id` has no foreign key: some
+     rows name a copy on an answer in ai_queries (on 2026-10-10: 3,502 of
+     84,052 profiles, 6,610 of 59,645 requirements, 6,749 of 217,212
+     embeddings, 52 of 48,239 comp rows). Such a row is not a url's newest
+     fetch, so it does not name the url's current text.
+   - Next: an answer points at the fetch it judged, and the copies of page
      text on answers are cleared.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves. See "The ledger of paid model calls" below.

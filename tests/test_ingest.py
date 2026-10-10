@@ -102,9 +102,8 @@ def test_title_pattern_bypass_admits_every_posting_but_preserves_pattern_evidenc
 
 def _failed_fetch(url: str, hours_ago: int) -> None:
     db.execute(
-        "INSERT INTO ai_queries (url, check_type, status, reason, created_at) "
-        "VALUES (%s, 'content', 'failed', 'fetch returned nothing', "
-        "now() - make_interval(hours => %s))",
+        "INSERT INTO page_fetches (url, status, method, created_at) "
+        "VALUES (%s, 'failed', 'fetch returned nothing', now() - make_interval(hours => %s))",
         (url, hours_ago),
     )
 

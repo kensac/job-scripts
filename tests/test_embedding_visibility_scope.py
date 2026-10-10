@@ -14,7 +14,7 @@ async def test_new_embedding_submissions_follow_visibility(f, monkeypatch):
     urls = [f"https://embedding-scope.test/{i}" for i in range(6)]
     jobs = [f.make_job(url=url, source=source) for url in urls[:5]]
     for url in urls:
-        f.make_verdict(url, "content", content=f"Detailed posting at {url} " * 30)
+        f.make_fetch(url, content=f"Detailed posting at {url} " * 30)
     db.execute("INSERT INTO board_visible(user_id,job_id) VALUES (%s,%s)", (uid, jobs[0]))
     db.execute("UPDATE jobs SET uploaded_by=%s WHERE id=%s", (uid, jobs[1]))
     db.execute(
