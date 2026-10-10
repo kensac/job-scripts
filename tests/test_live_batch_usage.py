@@ -105,7 +105,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         batched=batched,
     )
     if family == "filter":
-        verdict = db.query_one("SELECT * FROM ai_queries WHERE check_type = 'custom'")
+        verdict = db.query_one("SELECT * FROM ledger_rows WHERE check_type = 'custom'")
         assert verdict["status"] == ("passed" if outcome == "success" else "failed")
         if outcome == "success":
             assert verdict["reason"] is None

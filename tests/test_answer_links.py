@@ -8,15 +8,15 @@ from typing import Any
 from api import db
 from core.answers import VERIFY_INPUT_CHARS
 from core.filters import build_custom_input
-from core.store import add_ai_result
 from tasks import answer_links
+from tests.factories import legacy_answer
 
 PAGE = "a posting body that is long enough to be a page " * 10
 
 
 def _answer(url: str, check_type: str, copy: str, **columns: Any) -> int:
     """An answer as older writers stored it: a copy and no pointers."""
-    return add_ai_result(url, "passed", "", check_type, input_content=copy, **columns)
+    return legacy_answer(url, "passed", "", check_type, input_content=copy, **columns)
 
 
 def _run(f) -> dict:
@@ -101,25 +101,30 @@ def test_text_no_fetch_holds_becomes_a_fetch_before_its_copy_points_at_it(f):
         config_name="filter-batch",
     )
     f.make_fetch(url, content="the page as it is now " * 20)
-    # Newer than every fetch of its url: storing its text would make it the
-    # url's current page, so it keeps its copy.
+    # Newer than every fetch of its url: its text is the newest the system
+    # saw, so it becomes the url's current page.
     newest = _answer("https://links.test/newest", "closed", seen, config_name="reverify")
     f.make_fetch("https://links.test/newest", content="an earlier page " * 20)
     db.execute("UPDATE page_fetches SET id = id - 1000 WHERE url = 'https://links.test/newest'")
 
     progress = _run(f)
 
-    assert _pointer(newest)["page_fetch_id"] is None
+    assert _pointer(newest)["page_fetch_id"] == newest
+    current = db.query_one(
+        "SELECT id FROM page_texts WHERE url = 'https://links.test/newest' ORDER BY id DESC LIMIT 1"
+    )
+    assert current["id"] == newest
     stored = db.query(
         "SELECT id, method, content FROM page_fetches WHERE method = 'verification' ORDER BY id"
     )
     assert [(s["id"], s["content"]) for s in stored] == [
         (closed, seen),
         (custom, "an older custom page " * 20),
+        (newest, seen),
     ], "one fetch per text, under the first answer that saw it, without its header"
     assert _pointer(closed)["page_fetch_id"] == _pointer(clearance)["page_fetch_id"] == closed
     assert _pointer(custom)["page_fetch_id"] == custom
-    assert progress["linked"]["fetches_stored"] == 2
+    assert progress["linked"]["fetches_stored"] == 3
     newest = db.query_one(
         "SELECT input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
     )
@@ -148,14 +153,14 @@ def test_a_copy_whose_header_its_columns_do_not_rebuild_is_left_alone(f):
 
 def test_each_answer_finds_its_call(f):
     url = "https://links.test/calls"
-    batched = add_ai_result(url, "passed", "", "closed", batch_id="b-1", total_tokens=110)
-    sibling = add_ai_result(url, "passed", "", "clearance", batch_id="b-1", total_tokens=0)
+    batched = legacy_answer(url, "passed", "", "closed", batch_id="b-1", total_tokens=110)
+    sibling = legacy_answer(url, "passed", "", "clearance", batch_id="b-1", total_tokens=0)
     item = _call(provider_batch_id="b-1", custom_id=url, batched=True)
-    copied = add_ai_result(
+    copied = legacy_answer(
         url, "passed", "", "custom", model="gpt-5-nano", total_tokens=110, duration_ms=900
     )
     copied_call = _call(source="verdict", source_id=copied)
-    booked = add_ai_result(
+    booked = legacy_answer(
         url,
         "passed",
         "",
@@ -169,7 +174,7 @@ def test_each_answer_finds_its_call(f):
     # Two answers and two calls with the same numbers in the same minute:
     # nothing says which paid which, so neither is linked.
     twins = [
-        add_ai_result(
+        legacy_answer(
             url,
             "passed",
             "",

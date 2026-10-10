@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, db
+from core.filters import build_custom_input
 from core.store import Page
 from tasks import filters
 from tests.factories import filter_config
@@ -90,9 +91,10 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
     _uid, cfg, _flt, job, _parent, payload = setup
     calls = []
 
+    text = "fetched posting " * 30
+
     async def fetch(url, **kwargs):
         calls.append(url)
-        text = "fetched posting " * 30
         return Page(f.make_fetch(url, content=text), text), None
 
     async def submit(tid, specs, *args):
@@ -118,7 +120,8 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
     [answer] = f.answer_pointers(job["url"])
     fetch = db.query_one("SELECT id FROM page_texts WHERE url = %s", (job["url"],))["id"]
     assert answer["page_fetch_id"] == fetch
-    assert answer["rebuilt"] == answer["copy"], "the input rebuilds from the fetch it names"
+    assert answer["rebuilt"] == build_custom_input(job["company"], job["title"], text)
+    assert answer["copy"] is None, "the input rebuilds from the fetch it names, uncopied"
     assert answer["model_call_id"] is not None
 
 

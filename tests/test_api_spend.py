@@ -11,6 +11,7 @@ from decimal import Decimal
 import pytest
 
 from core import pricing
+from tests.factories import paid_answer
 
 NANO = "gpt-5-nano"
 
@@ -49,36 +50,41 @@ def spend_rows(f):
     batch  1M in / 1M out          -> 0.225  (half price)
     sync   1M in fully cached      -> 0.005  (cached input at a tenth)
     """
-    from core.store import add_ai_result
 
-    add_ai_result(
+    paid_answer(
         "https://s.test/a",
         "passed",
         check_type="closed",
         model=NANO,
-        prompt_tokens=1_000_000,
-        completion_tokens=1_000_000,
-        total_tokens=2_000_000,
+        usage={
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        },
     )
-    add_ai_result(
+    paid_answer(
         "https://s.test/b",
         "passed",
         check_type="closed",
         model=NANO,
-        prompt_tokens=1_000_000,
-        completion_tokens=1_000_000,
-        total_tokens=2_000_000,
+        usage={
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        },
         batch_id="batch-1",
     )
-    add_ai_result(
+    paid_answer(
         "https://s.test/c",
         "passed",
         check_type="custom",
         model=NANO,
-        prompt_tokens=1_000_000,
-        completion_tokens=0,
-        total_tokens=1_000_000,
-        cached_tokens=1_000_000,
+        usage={
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 0,
+            "total_tokens": 1_000_000,
+            "cached_tokens": 1_000_000,
+        },
     )
 
 
@@ -102,16 +108,17 @@ def test_totals_and_batching(client, admin_headers, spend_rows):
 def test_unpriced_model_is_counted_not_silently_zeroed(client, admin_headers):
     """A model with no published price must show up as missing coverage. If it
     summed as zero, the headline would understate the bill and look healthy."""
-    from core.store import add_ai_result
 
-    add_ai_result(
+    paid_answer(
         "https://s.test/x",
         "passed",
         check_type="closed",
         model="some-new-model",
-        prompt_tokens=1_000_000,
-        completion_tokens=1_000_000,
-        total_tokens=2_000_000,
+        usage={
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+        },
     )
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     assert body["totals"]["unpriced_calls"] == 1
@@ -123,26 +130,21 @@ def test_joint_call_rows_are_surfaced(client, admin_headers):
     it is not counted twice, leaving clearance with zero tokens. That makes
     check_type an invalid cost centre, so the count must be visible rather
     than leaving clearance looking free."""
-    from core.store import add_ai_result
 
-    add_ai_result(
+    paid_answer(
         "https://s.test/j",
         "passed",
         check_type="closed",
         model=NANO,
-        prompt_tokens=1000,
-        completion_tokens=500,
-        total_tokens=1500,
+        usage={"prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500},
         batch_id="b2",
     )
-    add_ai_result(
+    paid_answer(
         "https://s.test/j",
         "passed",
         check_type="clearance",
         model=NANO,
-        prompt_tokens=0,
-        completion_tokens=0,
-        total_tokens=0,
+        usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         batch_id="b2",
     )
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
@@ -154,17 +156,14 @@ def test_joint_call_rows_are_surfaced(client, admin_headers):
 def test_superseded_verdicts_are_counted_as_waste(client, admin_headers):
     """Two decided verdicts on the same (url, check_type): the first was paid
     for and then overwritten, because latest-row-wins."""
-    from core.store import add_ai_result
 
     for status in ("passed", "rejected"):
-        add_ai_result(
+        paid_answer(
             "https://s.test/dup",
             status,
             check_type="closed",
             model=NANO,
-            prompt_tokens=1_000_000,
-            completion_tokens=0,
-            total_tokens=1_000_000,
+            usage={"prompt_tokens": 1_000_000, "completion_tokens": 0, "total_tokens": 1_000_000},
         )
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     assert body["waste"]["superseded_verdicts"] == 1

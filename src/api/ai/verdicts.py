@@ -65,7 +65,6 @@ async def run_check[T: BaseModel](
         company=company,
         job_title=job_title,
         instructions=instructions,
-        input_text=input_text,
         page_fetch_id=page_fetch_id,
         context=context,
         # ai.parse already emits transport metrics for a live call.
@@ -76,15 +75,7 @@ async def run_check[T: BaseModel](
         duration_ms = int((time.monotonic() - start) * 1000)
         with db.transaction():
             call_id = budget.book_live(booking, cfg.model, usage, duration_ms)
-            record_ai_verdict(
-                Verdict(
-                    usage=usage,
-                    model_call_id=call_id,
-                    duration_ms=duration_ms,
-                    **common,
-                    **outcome,
-                )
-            )
+            record_ai_verdict(Verdict(usage=usage, model_call_id=call_id, **common, **outcome))
 
     start = time.monotonic()
     try:
@@ -155,14 +146,12 @@ class Verdict:
     company: str = ""
     job_title: str = ""
     instructions: str | None = ""
-    input_text: str | None = ""
     filter_name: str | None = None
     prompt_hash: str | None = None
     context: str = "worker"
     batched: bool = False
     batch_id: str | None = None
     reasoning_effort: str | None = None
-    duration_ms: int | None = None
     error: str | None = None
     record_call_metrics: bool = True
     shared_call: bool = False
@@ -186,7 +175,6 @@ class Verdict:
         return "failed" if self.rejected is None else "rejected" if self.rejected else "passed"
 
     def row(self) -> dict[str, Any]:
-        usage = self.usage
         return ai_result_row(
             self.url,
             self.status,
@@ -198,18 +186,10 @@ class Verdict:
             company=self.company,
             job_title=self.job_title,
             instructions=self.instructions,
-            input_content=self.input_text,
             parsed_json=self.parsed_json,
-            prompt_tokens=usage.get("prompt_tokens"),
-            completion_tokens=usage.get("completion_tokens"),
-            total_tokens=usage.get("total_tokens"),
             config_name=self.context,
             batch_id=self.batch_id,
-            cached_tokens=usage.get("cached_tokens"),
-            cache_write_tokens=usage.get("cache_write_tokens"),
-            reasoning_tokens=usage.get("reasoning_tokens"),
             reasoning_effort=self.reasoning_effort,
-            duration_ms=self.duration_ms,
             error=self.error,
             request_sha256=self.request_sha256,
             page_fetch_id=self.page_fetch_id,
