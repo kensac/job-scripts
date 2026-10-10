@@ -297,6 +297,14 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("backfill_mail_pointers", {"cycle": cycle}, dedupe_key=f"mail-pointers:{cycle}")
+    # Uploads whose posting_uploads row is missing or behind jobs
+    # (tasks.posting_uploads). A run with nothing to copy reads 11 rows
+    # through an index (2026-10-10). One at a time.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'backfill_posting_uploads' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("backfill_posting_uploads", {"cycle": cycle}, dedupe_key=f"posting-uploads:{cycle}")
     # The .olm copies of messages Takeout also holds (tasks.mail_olm_twins):
     # one run does all of it in one transaction, so it is offered until one
     # has finished.

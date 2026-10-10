@@ -407,6 +407,21 @@ neither the refresh interval nor the TOAST rule has anything to apply to. The
 return events are read from the old row before the upsert, and a return
 changes `active`, so every return is still both written and recorded.
 
+**A person's upload is its own row, not catalog state.** `posting_uploads`
+holds who added a posting by url and where reading it stands (`pending`,
+`done`, `failed`), one row per upload, written only by `core.catalog`. A
+takeover marks it `done` in the upsert's transaction. Saving a url the
+catalog already holds, or an admin's forced reparse of a posting nobody
+uploaded, writes no row: the reparse's outcome is its task's. On 2026-10-10
+production held 11 uploads. The other 6,022 `jobs` rows with
+`extraction_status = 'done'` are not uploads: 6,021 are the one-time sheet
+import of 2026-08-24, which stamped every row it wrote, and one is a forced
+reparse (task 726592). No reader tells `done` from NULL (the board's pending
+flag is set only by `pending`), so they get no row. While `jobs.uploaded_by`
+and `jobs.extraction_status` are still written beside it, every write sets
+both, jobs first, and `backfill_posting_uploads` repairs each cycle what a
+server on the older release wrote to jobs alone.
+
 ## A company board's pull is the closure signal for its rows
 
 After a pull from a board that lists every open posting
