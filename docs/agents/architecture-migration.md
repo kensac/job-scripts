@@ -271,17 +271,43 @@ it showed.
    checkpoint and the live writers. `api_usage` and the copies are still
    written. A test holds the ledger's rows for a collected batch equal to its
    receipts, and its cost to `ai_batches.est_cost_usd`.
-2. Backfill, as a resumable task idempotent by predicate, one source per
-   era: receipts where they exist (2026-09-09 on); paid `ai_queries` rows for
-   verdict work before that; one row per batch with its request count for
-   batches that left neither (about $53, mostly mail and requirements before
-   receipts); `api_usage` only for live calls that wrote no verdict. Verdicts
-   get `model_call_id` in the same pass. Receipts are deleted with their
-   task, so this runs before the oldest of them expire.
+2. Backfill, as a resumable task (`backfill_model_calls`) idempotent by
+   predicate, one source per era. Every backfilled row names its source
+   table and row (`source`, `source_id`), and a cost is copied as recorded,
+   never repriced: repricing every receipt at 2026-10-10's rates came to
+   $7.32 more than the batches recorded.
+   - A paid batched verdict is one batch item, at the cost it recorded.
+   - A receipt no verdict accounts for (failed, superseded, invalid, not
+     yet consumed) is priced from its tokens, the only record of it. A batch
+     of a purpose that writes no verdict is items only where its receipts
+     price to what the batch recorded; otherwise (174 batches, most of them
+     job profiles) it is one row at its recorded cost.
+   - The rest of a batch with no receipts (about $53, mostly mail and
+     requirements before 2026-09-09) is one row with its request count.
+   - Live verdicts and the `api_usage` rows of purposes that write no
+     verdict, before the first live call the ledger recorded itself. Filter
+     and board work never comes from `api_usage`.
+   - Payer: a batch's recorded payer, else the user or board its submitting
+     task named, else the fleet for purposes only the fleet runs. A live
+     verdict's payer is the user or board its `filter_name` names. Where
+     nothing recorded one (14,589 custom answers from named filters before
+     per-user filters, the admin's manual checks) the payer is NULL, not the
+     fleet.
+   - Previewed read-only on production on 2026-10-10: batch work $223.20
+     against $223.56 on `ai_batches` (the gap is batches finished within the
+     day and items repriced where nothing else priced them), live verdicts
+     $30.88, `api_usage`-only calls $2.02.
+   - A verdict's call is a join, not a copied id: a batched verdict's is
+     `(batch_id, url) = (provider_batch_id, custom_id)`, a backfilled live
+     verdict's is `source_id`. A live verdict written after the cutover gets
+     the call's id when the verdict reader switches.
+   - Receipts are deleted with their task, so this runs before they
+     expire. The contract step deletes the task with the columns it reads.
 3. Switch reads one page at a time, each with its equality test. Windows
    that reach before 2026-09-13 move down, because the old ledger
-   double-priced that era; that is stated on the page and to Kanishk before
-   the switch, not discovered after.
+   priced that era's batched filter work at live rates; decided 2026-10-10,
+   the ledger shows the true cost and the response's note says so. A
+   difference a test cannot hold equal is measured and named in its PR.
 4. Contract: stop the copies, then drop `api_usage`, the usage columns on
    `ai_queries`, `review_gate_outcomes` and `job_embeddings`, and the totals
    on `ai_batches`, each with the empty-then-drop sequence (migrations.md).

@@ -36,6 +36,7 @@ from tasks.mail_sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
+from tasks.model_call_backfill import handle_backfill_model_calls
 from tasks.page_fetch_move import handle_move_page_fetches
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
@@ -78,6 +79,7 @@ HANDLERS = {
     "run_managed_board_batch": handle_run_managed_board_batch,
     "classify_job_profiles": handle_classify_job_profiles,
     "move_page_fetches": handle_move_page_fetches,
+    "backfill_model_calls": handle_backfill_model_calls,
 }
 
 __all__ = ["HANDLERS"]
