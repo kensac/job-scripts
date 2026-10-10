@@ -184,6 +184,36 @@ def retire_switched_off(patterns_enforced: bool, refresh_hours: int) -> dict[str
     return {r["source"]: r["n"] for r in rows}
 
 
+PAY_ON_JOBS: LiteralString = (
+    "(comp_extracted OR comp_min IS NOT NULL OR comp_max IS NOT NULL OR comp_text IS NOT NULL "
+    "OR comp_period IS NOT NULL OR comp_currency IS NOT NULL OR comp_basis IS NOT NULL "
+    "OR comp_content_row_id IS NOT NULL)"
+)
+
+
+def clear_pay(limit: int) -> int:
+    """Empties up to `limit` rows of the pay columns job_comp replaced, so the
+    migration that drops them can prove them empty. Several rows, so locked
+    in url order (_LOCK_ORDER); rows an ingest holds are skipped and taken on
+    the next call. Returns the rows cleared."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""
+            WITH locked AS (
+                SELECT id FROM jobs WHERE {PAY_ON_JOBS}
+                ORDER BY url {_LOCK_ORDER} LIMIT %s FOR UPDATE SKIP LOCKED
+            )
+            UPDATE jobs SET comp_min = NULL, comp_max = NULL, comp_text = NULL,
+                comp_period = NULL, comp_currency = NULL, comp_basis = NULL,
+                comp_content_row_id = NULL, comp_extracted = false
+            FROM locked WHERE jobs.id = locked.id
+            RETURNING jobs.id
+            """,
+            (limit,),
+        ).fetchall()
+    return len(rows)
+
+
 # Every write to jobs is in this module; tests/test_catalog_one_writer.py fails
 # on one anywhere else. The writes below are single-row, so they take one row
 # lock and have no order to keep (_LOCK_ORDER is for multi-row writes).
