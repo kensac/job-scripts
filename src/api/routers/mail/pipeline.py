@@ -18,6 +18,7 @@ from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_match
 from api.mail.pipeline import ApplicationEvent, SenderSignal
 from api.models import Ok
 from api.routers.mail.shared import Evidence, _evidence_for
@@ -70,10 +71,9 @@ class _Tier(NamedTuple):
 
 def _tiers_by_application(user_id: int) -> dict[int, _Tier]:
     rows = db.query(
-        """
+        f"""
         WITH current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id, method, confidence
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id", "method", "confidence")}
         )
         SELECT cm.application_id, cm.method, cm.confidence
         FROM current_match cm JOIN applications a ON a.id = cm.application_id
@@ -465,13 +465,12 @@ def pipeline_detail(
     events = mail_pipeline.events_for(application_id)
     matches = db.query_as(
         MatchRow,
-        """
+        f"""
             WITH touched AS (
                 SELECT DISTINCT message_id FROM application_matches WHERE application_id = %(app)s
             ),
             current_match AS (
-                SELECT DISTINCT ON (message_id) message_id, id
-                FROM application_matches ORDER BY message_id, id DESC
+                {current_match("id")}
             )
             SELECT am.id, am.message_id, am.application_id, am.method, am.confidence,
                    am.rationale, am.created_at, am.actor_user_id,

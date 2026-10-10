@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_event, current_match
 from api.resolve.choice_policy import _choice, choices_for_message
 from api.resolve.contracts import (
     ACCEPT_STATUS,
@@ -53,7 +54,7 @@ class QueueEvent(NamedTuple):
 
 # EVERY ROW THE QUEUE RANKS, in one statement that reads the current event and
 # the current match once. It used to be four statements, each recomputing
-# DISTINCT ON (message_id) over every email_events and application_matches
+# the newest row per message over every email_events and application_matches
 # row - 83,846 events four times per request, and again on the limit=1 re-read
 # after every answer.
 #
@@ -75,14 +76,12 @@ class QueueEvent(NamedTuple):
 # Ties on `sent_at` are ordered newest message first. Each of the four
 # statements this replaces ordered by `sent_at` alone, so the order among
 # equal timestamps was whatever the plan produced, not a property of the data.
-_CURRENT_SQL = """
+_CURRENT_SQL = f"""
 WITH current_event AS (
-    SELECT DISTINCT ON (message_id) message_id, id, kind
-    FROM email_events ORDER BY message_id, id DESC
+    {current_event("id", "kind")}
 ),
 current_match AS (
-    SELECT DISTINCT ON (message_id) message_id, id, application_id, method, actor_user_id
-    FROM application_matches ORDER BY message_id, id DESC
+    {current_match("id", "application_id", "method", "actor_user_id")}
 ),
 answered AS (
     SELECT DISTINCT application_id, event_id FROM suggestion_responses

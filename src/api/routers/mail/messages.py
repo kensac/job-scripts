@@ -20,6 +20,7 @@ from api import db
 from api.auth import AuthedUser, require_user
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_event, current_match
 from api.routers.mail.shared import (
     Candidates,
     Reclassification,
@@ -217,12 +218,10 @@ def user_mail(
     base = f"""
         FROM email_messages m
         LEFT JOIN (
-            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "confidence", "detail")}
         ) ce ON ce.message_id = m.id
         LEFT JOIN (
-            SELECT DISTINCT ON (message_id) message_id, application_id, method
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id", "method")}
         ) cm ON cm.message_id = m.id
         LEFT JOIN applications a ON a.id = cm.application_id
         WHERE {predicate}
@@ -627,12 +626,10 @@ def read_thread(
             SELECT {_THREAD_KEY} AS k FROM email_messages m WHERE m.id = %(msg)s
         ),
         current_event AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, confidence, detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "confidence", "detail")}
         ),
         current_match AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id, method
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id", "method")}
         )
         SELECT m.id, m.subject, m.from_email, m.from_name, m.sent_at, m.source,
                m.body_text, m.body_html, ce.kind, ce.confidence,
@@ -744,12 +741,10 @@ def list_threads(
     base = f"""
         FROM email_messages m
         LEFT JOIN (
-            SELECT DISTINCT ON (message_id) message_id, kind FROM email_events
-            ORDER BY message_id, id DESC
+            {current_event("kind")}
         ) ce ON ce.message_id = m.id
         LEFT JOIN (
-            SELECT DISTINCT ON (message_id) message_id, application_id FROM application_matches
-            ORDER BY message_id, id DESC
+            {current_match("application_id")}
         ) cm ON cm.message_id = m.id
         WHERE {predicate}
         GROUP BY {_THREAD_KEY}

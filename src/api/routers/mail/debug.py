@@ -20,6 +20,7 @@ from api import params as params_
 from api.auth import AuthedUser
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.mail.current import current_event, current_match
 from api.mail.match import CurrentMatch
 from api.rates import Rate
 from api.routers.admin import require_admin
@@ -293,10 +294,9 @@ def list_mail(
 # Two copies is the floor because you need two to disagree, and the floor is
 # not load-bearing: the rate is 1.7% at two, 2.2% at three, 2.9% at ten. A
 # number that barely moves across the range is one nobody needs to tune.
-_CONSISTENCY_SQL = """
+_CONSISTENCY_SQL = f"""
 WITH latest AS (
-    SELECT DISTINCT ON (message_id) message_id, kind
-    FROM email_events ORDER BY message_id, id DESC
+    {current_event("kind")}
 ),
 groups AS (
     SELECT lower(m.from_email) AS sender,
@@ -369,10 +369,9 @@ def classification_consistency(
     inconsistent = [r for r in rows if r["kinds"] > 1]
     covered = sum(r["copies"] for r in rows)
     total_row = db.query_one(
-        """
+        f"""
         WITH latest AS (
-            SELECT DISTINCT ON (message_id) message_id FROM email_events
-            ORDER BY message_id, id DESC
+            {current_event()}
         )
         SELECT count(*) AS c FROM latest
         """
@@ -517,15 +516,13 @@ def mail_analytics(
     params: dict[str, Any] = {"days": days} if days else {}
 
     def q[Row](row: type[Row], sql: str) -> list[Row]:
-        return db.query_as(row, sql.format(window=window), params)
+        return db.query_as(row, sql, params)
 
     classification = q(
         ClassificationCell,
-        """
+        f"""
         WITH ce AS (
-            SELECT DISTINCT ON (message_id) message_id, kind, confidence, model, deadline_inferred,
-                   detail
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind", "confidence", "model", "deadline_inferred", "detail")}
         )
         SELECT ce.kind, ce.model, ce.confidence,
                count(*) AS messages,
@@ -539,14 +536,12 @@ def mail_analytics(
 
     matching = q(
         MatchingCell,
-        """
+        f"""
         WITH ce AS (
-            SELECT DISTINCT ON (message_id) message_id, kind
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind")}
         ),
         cm AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id, method
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id", "method")}
         )
         SELECT ce.kind,
                coalesce(cm.method, 'never attempted') AS method,
@@ -566,10 +561,9 @@ def mail_analytics(
     # ongoing feed use one, and it is a question only this endpoint can answer.
     prefilter = q(
         PrefilterCell,
-        """
+        f"""
         WITH ce AS (
-            SELECT DISTINCT ON (message_id) message_id, kind
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind")}
         )
         SELECT coalesce(m.prefilter_hit, false) AS prefilter_hit,
                ce.kind <> 'not_job_related' AS job_related,
@@ -584,14 +578,12 @@ def mail_analytics(
 
     senders = q(
         SenderDomainRow,
-        """
+        f"""
         WITH ce AS (
-            SELECT DISTINCT ON (message_id) message_id, kind
-            FROM email_events ORDER BY message_id, id DESC
+            {current_event("kind")}
         ),
         cm AS (
-            SELECT DISTINCT ON (message_id) message_id, application_id
-            FROM application_matches ORDER BY message_id, id DESC
+            {current_match("application_id")}
         )
         SELECT split_part(lower(m.from_email), '@', 2) AS domain,
                count(*) AS messages,
@@ -628,9 +620,7 @@ def mail_analytics(
     )
     domain_total = db.query_one(
         "SELECT count(DISTINCT split_part(lower(m.from_email), '@', 2)) AS domains "
-        "FROM email_messages m JOIN ("
-        "  SELECT DISTINCT ON (message_id) message_id, kind FROM email_events"
-        "  ORDER BY message_id, id DESC) ce ON ce.message_id = m.id "
+        f"FROM email_messages m JOIN ({current_event('kind')}) ce ON ce.message_id = m.id "
         f"WHERE ce.kind <> 'not_job_related' {window}",
         params,
     )

@@ -24,6 +24,16 @@ Import → classify → match → derive.
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
+**"Latest row per message" has one owner, `api/mail/current.py`.** A
+statement that needs the current event or current match of many messages
+takes its subquery from `current_event(...)` or `current_match(...)`, naming
+the columns it reads; one message's current match is `match.latest`.
+`tests/test_mail_current.py` fails on a `DISTINCT ON (message_id)` written
+anywhere else. There were 36 such copies in nine files. Named columns, not
+every column and not a database view, because a CTE referenced twice is
+materialized whole and a view referenced twice is computed twice: the module
+docstring has the production measurements.
+
 **A request reads the current event and current match once.** "Latest row per
 message" is a pass over every row of both tables, so a surface that needs it
 for several derivations takes it in one statement and derives the rest from
