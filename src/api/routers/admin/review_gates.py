@@ -169,7 +169,7 @@ def report(
           UNION
           SELECT s.prompt_hash, s.recipe, us.source
           FROM screens s JOIN user_filters f ON f.prompt_hash = s.prompt_hash AND f.enabled
-          JOIN user_sources us ON us.user_id = f.user_id
+          JOIN user_source_set us ON us.user_id = f.user_id
           WHERE %(board)s::bigint IS NULL
             AND (%(filter)s::bigint IS NULL OR f.id = %(filter)s)
             AND (cardinality(%(users)s::bigint[]) = 0 OR f.user_id = ANY(%(users)s))
