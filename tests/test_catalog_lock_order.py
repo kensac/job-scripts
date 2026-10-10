@@ -112,3 +112,10 @@ def test_observing_locks_in_url_order():
         ),
     )
     assert db.query_one("SELECT count(*) AS n FROM source_observations")["n"] == 2
+
+
+def test_near_copy_keys_lock_in_url_order():
+    catalog.upsert_postings([_posting(LAST, "v1")], "board-a")
+    catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
+    _contend("jobs", lambda: catalog.set_near_copy_keys({LAST: "twin", FIRST: "twin"}))
+    assert {r["near_copy_key"] for r in db.query("SELECT near_copy_key FROM jobs")} == {"twin"}
