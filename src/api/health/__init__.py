@@ -41,6 +41,7 @@ from api.health.evidence import (
     _pct as _pct,
 )
 from api.health.fleet import _detect_fleet
+from api.health.mail import _detect_mail
 from api.health.queue import _detect_queue
 from api.health.silent import SWEEP_KINDS as SWEEP_KINDS
 from api.health.silent import _detect_silent
@@ -139,6 +140,7 @@ _OWNERS = {
     "task_requeued_forever": "_detect_silent",
     "address_blocked_by_host": "_detect_silent",
     "alerts_unnotified": "_detect_silent",
+    "mail_pointer_stale": "_detect_mail",
 }
 
 
@@ -168,6 +170,7 @@ def detect() -> DetectionRun:
         ("_detect_queue", _detect_queue),
         ("_detect_fleet", _detect_fleet),
         ("_detect_silent", _detect_silent),
+        ("_detect_mail", _detect_mail),
     )
     for name, section in sections:
         try:

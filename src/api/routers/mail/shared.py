@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
+from api.mail import events as mail_events
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event
@@ -108,10 +109,8 @@ def _apply_classification(
         detail["corrected_note"] = body.note
     detail["corrected_by_user"] = True
 
-    db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
-        "VALUES (%s, %s, 'high', %s, NULL, %s)",
-        (message_id, body.kind, db.jsonb(detail), actor_user_id),
+    mail_events.append(
+        message_id, body.kind, confidence="high", detail=detail, actor_user_id=actor_user_id
     )
     affected = _resync_applications(message_id)
     return Reclassified(
@@ -141,17 +140,13 @@ def _apply_revert(message_id: int, *, actor_user_id: int) -> Reverted:
     detail = dict(model_answer["detail"] or {})
     detail.pop("corrected_by_user", None)
     detail.pop("corrected_note", None)
-    db.execute(
-        "INSERT INTO email_events (message_id, kind, confidence, detail, model, actor_user_id) "
-        "VALUES (%s, %s, %s, %s, %s, %s)",
-        (
-            message_id,
-            model_answer["kind"],
-            model_answer["confidence"],
-            db.jsonb(detail),
-            model_answer["model"],
-            actor_user_id,
-        ),
+    mail_events.append(
+        message_id,
+        model_answer["kind"],
+        confidence=model_answer["confidence"],
+        detail=detail,
+        model=model_answer["model"],
+        actor_user_id=actor_user_id,
     )
     # The same affected ids classify returns. A revert moves the derived stage
     # exactly as a correction does, and possibly on an application nobody is

@@ -28,6 +28,19 @@ class EmailMessage(Base):
         Index("idx_email_messages_thread", "user_id", "provider_thread_id"),
         Index("idx_email_messages_sent", "user_id", "sent_at"),
         Index("idx_email_messages_unclassified", "user_id", "id"),
+        # For the foreign keys' ON DELETE SET NULL, which otherwise scans this
+        # table once per deleted event or match (a user deletion cascades
+        # through 84k events).
+        Index(
+            "idx_email_messages_current_event",
+            "current_event_id",
+            postgresql_where=text("current_event_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_email_messages_current_match",
+            "current_match_id",
+            postgresql_where=text("current_match_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
@@ -59,6 +72,29 @@ class EmailMessage(Base):
     prefilter_reason: Mapped[str | None] = mapped_column(Text)
     imported_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
+    )
+    # The event and the match in force: the newest row of each log for this
+    # message. Set by the one writer of each log (`mail.events.append`,
+    # `mail.match.record`) in the statement that appends, so reading the
+    # current row is a join instead of a pass over the whole log. The data
+    # health check compares them with the newest id. NULL means no row yet.
+    current_event_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "email_events.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="email_messages_current_event_id_fkey",
+        ),
+    )
+    current_match_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "application_matches.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="email_messages_current_match_id_fkey",
+        ),
     )
 
 

@@ -24,6 +24,18 @@ Import → classify → match → derive.
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
+**Each log has one writer, and it moves the message's pointer as it
+appends.** `mail.events.append` is the only INSERT into `email_events` and
+`mail.match.record` the only one into `application_matches`
+(`tests/test_mail_pointers.py` fails on another). Each sets
+`email_messages.current_event_id` or `current_match_id` in the same statement,
+to `GREATEST(pointer, new id)` so two appends committing out of order still
+end on the newest. `backfill_mail_pointers` fills messages the writers never
+saw and runs once a cycle; the `mail_pointer_stale` health alert fires when a
+pointer lags after a backfill has finished, which means something appended
+another way. A rule that writes an event with no model names itself in
+`model` (`rule:self_sent`), because no model and no person is a bug.
+
 **"Latest row per message" has one owner, `api/mail/current.py`.** A
 statement that needs the current event or current match of many messages
 takes its subquery from `current_event(...)` or `current_match(...)`, naming
