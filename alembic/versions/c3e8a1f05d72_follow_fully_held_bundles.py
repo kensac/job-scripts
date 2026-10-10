@@ -7,8 +7,10 @@ are followed here, which is the decision that joining means following.
 
 Only a bundle held whole is followed, so no one's set of sources changes
 today. A bundle held in part is not followed, even where the held part is
-exactly its members at join time; whether to follow those is decided apart
-(the members added since would reach the person).
+exactly its members at join time: those stay direct picks (decided
+2026-10-10, reversible by Kanishk). Following them would send the members
+added since, about 3,700 new postings a day per person, through each
+person's enabled filters, against the $0.50 a day spend goal.
 
 Production on 2026-10-10: 2 people, 24 bundles held whole, 8 held as
 exactly the members that existed at join time, 2 held in part otherwise.
