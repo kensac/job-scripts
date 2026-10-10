@@ -733,16 +733,16 @@ def test_a_finished_sweep_is_not_repeated_when_nothing_changed(f):
 
     finished = f.make_task("match_mail", {}, status="done")
     db.execute("UPDATE tasks SET started_at = now() WHERE id = %s", (finished,))
-    since = task.last_sweep_start(uid)
+    since = task.mail_match.last_sweep_start(uid)
     assert since is not None
     assert task.match_pending(uid, since=since) == {}
-    assert not task.changed_since(since, uid)
-    assert not task.changed_since(task.last_sweep_start())
+    assert not task.mail_match.changed_since(since, uid)
+    assert not task.mail_match.changed_since(task.mail_match.last_sweep_start())
 
     # A new candidate is a reason to look again.
     _application(uid, company="Another", title="Role")
-    assert task.changed_since(since, uid)
-    assert task.changed_since(task.last_sweep_start())
+    assert task.mail_match.changed_since(since, uid)
+    assert task.mail_match.changed_since(task.mail_match.last_sweep_start())
     assert task.match_pending(uid, since=since) == {task.mail_match.UNMATCHED: 1}
 
 
@@ -767,8 +767,8 @@ def test_a_partial_sweep_is_not_a_cutoff(f):
     for payload in ({"limit": 5}, {"user_id": uid + 1}):
         other = f.make_task("match_mail", payload, status="done")
         db.execute("UPDATE tasks SET started_at = now() WHERE id = %s", (other,))
-    assert task.last_sweep_start(uid) is None
-    assert task.last_sweep_start() is None
+    assert task.mail_match.last_sweep_start(uid) is None
+    assert task.mail_match.last_sweep_start() is None
 
 
 def test_action_items_are_resynced_only_where_something_moved(f):

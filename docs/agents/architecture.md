@@ -35,7 +35,7 @@ materialized whole and a view referenced twice is computed twice: the module
 docstring has the production measurements.
 
 **A matcher sweep starts from what changed since the last finished sweep.**
-`tasks/mail_match.last_sweep_start` is the cutoff: the start of the newest
+`api/mail/match.last_sweep_start` is the cutoff: the start of the newest
 finished `match_mail` that covered the user and had no `limit`. The worker
 enqueues a sweep only when `changed_since` finds a new application, event or
 match, or a board row moved into an applied status. A sweep skips a user with

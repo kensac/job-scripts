@@ -53,11 +53,6 @@ APPLIED_KINDS = frozenset(
     }
 )
 
-# The tracker statuses that mean an application exists. "No Longer Interested"
-# is excluded: it is the status this user assigns to postings they decided
-# against, and 634 of them would otherwise become applications never made.
-APPLIED_STATUSES = ("Application Submitted", "Follow-up")
-
 DERIVED = "derived"
 
 # Progress is written every this many messages or applications, because a
@@ -112,7 +107,7 @@ def seed_from_tracker(user_id: int) -> int:
           )
         RETURNING id
         """,
-        {"user": user_id, "statuses": list(APPLIED_STATUSES)},
+        {"user": user_id, "statuses": list(mail_match.APPLIED_STATUSES)},
     )
     return len(rows)
 
@@ -527,59 +522,6 @@ def detach_unattachable(user_id: int) -> int:
     return len(rows)
 
 
-def last_sweep_start(user_id: int | None = None) -> datetime.datetime | None:
-    """When the newest finished sweep that covered this user (or, with no
-    user, everybody) started. None when there has never been one.
-
-    Its start, not its finish: anything written while it ran may have landed
-    after it read, so it counts as new to the next sweep. A run with a
-    `limit` decided only part of the mail and does not count."""
-    row = db.query_one(
-        """
-        SELECT started_at FROM tasks
-        WHERE kind = 'match_mail' AND status = 'done' AND started_at IS NOT NULL
-          AND payload->>'limit' IS NULL
-          AND (payload->>'user_id' IS NULL OR payload->>'user_id' = %(user)s::text)
-        ORDER BY id DESC LIMIT 1
-        """,
-        {"user": user_id},
-    )
-    return row["started_at"] if row else None
-
-
-# What a sweep reads that can change its answer: a new application (a
-# candidate that was missing), a new event (a reclassified message), a new
-# match (a person's decision, or a sweep's own), and a board row moving into
-# an applied status (a tracker application to seed). Nothing else does, so a
-# sweep after none of these would decide everything exactly as the last one.
-_CHANGED_SINCE = """
-SELECT EXISTS (
-           SELECT 1 FROM applications
-           WHERE created_at > %(since)s AND (%(user)s::bigint IS NULL OR user_id = %(user)s))
-    OR EXISTS (
-           SELECT 1 FROM email_events e JOIN email_messages m ON m.id = e.message_id
-           WHERE e.created_at > %(since)s AND (%(user)s::bigint IS NULL OR m.user_id = %(user)s))
-    OR EXISTS (
-           SELECT 1 FROM application_matches am JOIN email_messages m ON m.id = am.message_id
-           WHERE am.created_at > %(since)s AND (%(user)s::bigint IS NULL OR m.user_id = %(user)s))
-    OR EXISTS (
-           SELECT 1 FROM user_jobs
-           WHERE updated_at > %(since)s AND status = ANY(%(statuses)s)
-             AND (%(user)s::bigint IS NULL OR user_id = %(user)s))
-    AS changed
-"""
-
-
-def changed_since(since: datetime.datetime | None, user_id: int | None = None) -> bool:
-    if since is None:
-        return True
-    row = db.query_one(
-        _CHANGED_SINCE,
-        {"since": since, "user": user_id, "statuses": list(APPLIED_STATUSES)},
-    )
-    return bool(row and row["changed"])
-
-
 def _applications_touched(user_id: int, since: datetime.datetime | None) -> list[int]:
     """The applications whose action items can have moved since `since`: one
     created since, or one that a message matched or classified since is or
@@ -640,7 +582,7 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
                 SELECT user_id FROM user_jobs WHERE status = ANY(%s)
                 ORDER BY user_id
                 """,
-                (list(APPLIED_STATUSES),),
+                (list(mail_match.APPLIED_STATUSES),),
             )
         ]
     if not user_ids:
@@ -670,8 +612,8 @@ async def handle_match_mail(task_id: int, payload: dict[str, Any]) -> None:
         set_progress(task_id, index, len(user_ids), f"matching user {user_id}")
         step = partial(_step_progress, task_id, index, len(user_ids), user_id)
         # A partial run decides against everything, as it always did.
-        since = None if limit else last_sweep_start(user_id)
-        if not changed_since(since, user_id):
+        since = None if limit else mail_match.last_sweep_start(user_id)
+        if not mail_match.changed_since(since, user_id):
             skipped += 1
             continue
         totals["tracked"] += seed_from_tracker(user_id)

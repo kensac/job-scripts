@@ -29,12 +29,12 @@ from api import (
     queue,
     telemetry,
 )
+from api.mail import match as mail_match
 from api.queue import enqueue
 from core.env import env_list
 from core.fetching.hosts import pace_key
 from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
-from tasks import mail_match as mail_match_task
 from tasks.runtime import (
     CHUNK_KINDS,
     AwaitingBatch,
@@ -346,7 +346,7 @@ def schedule_ingest_cycle() -> None:
     if not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'match_mail' "
         "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
-    ) and mail_match_task.changed_since(mail_match_task.last_sweep_start()):
+    ) and mail_match.changed_since(mail_match.last_sweep_start()):
         enqueue("match_mail", {"cycle": cycle}, dedupe_key=f"mailmatch:{cycle}")
     # Its own kind and its own key, NOT folded into the sync. Dead-credential
     # detection is discovery-on-use, so if it only happened inside the sync
