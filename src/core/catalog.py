@@ -384,33 +384,58 @@ def _set_payload(field: LiteralString) -> LiteralString:
     )
 
 
+def title_pattern_id(pattern: str) -> int:
+    """The id of this exact pattern text in title_patterns, adding it if new.
+    The select is its own statement so that it sees a row a concurrent pull
+    inserted while this insert waited on the unique digest. A digest match
+    with different text is refused rather than pointing a listing at another
+    pattern."""
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO title_patterns (digest, pattern) "
+            "VALUES (sha256(convert_to(%(p)s, 'UTF8')), %(p)s) ON CONFLICT (digest) DO NOTHING",
+            {"p": pattern},
+        )
+        row = conn.execute(
+            "SELECT id FROM title_patterns "
+            "WHERE digest = sha256(convert_to(%(p)s, 'UTF8')) AND pattern = %(p)s",
+            {"p": pattern},
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("title_patterns digest does not identify its exact pattern")
+    return row["id"]
+
+
 # The NOT EXISTS is the update's own SET, evaluated against the row: what the
 # row would hold after it equals what it holds now. date_posted keeps the first
 # date seen, so a board that dates by age ("Posted 3 Days Ago", Workday and the
 # markdown lists), which yields a new timestamp on every pull, is not a change.
+# The pattern is compared by pattern_id, which names exactly one text, so a row
+# written before pattern_id existed (NULL) is a change and gains one on the
+# first pull that still lists it.
 _RECORD_LISTINGS: LiteralString = f"""
     INSERT INTO listings
-        (url, source, company, title, locations, date_posted, pattern, kept,
+        (url, source, company, title, locations, date_posted, pattern, pattern_id, kept,
          description, description_sha256, description_object, description_object_size,
          raw, raw_sha256, raw_object, raw_object_size)
     SELECT v.url, v.source, v.company, v.title, v.locations, v.date_posted,
-           v.pattern, v.kept,
+           v.pattern, v.pattern_id, v.kept,
            v.description, v.description_sha256, v.description_object, v.description_object_size,
            v.raw, v.raw_sha256, v.raw_object, v.raw_object_size
     FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[],
-                  %s::timestamptz, %s::text, %s::boolean,
+                  %s::timestamptz, %s::text, %s::bigint, %s::boolean,
                   %s::text, %s::bytea, %s::bytea, %s::integer,
                   %s::jsonb, %s::bytea, %s::bytea, %s::integer,
                   %s::integer))
-        AS v (url, source, company, title, locations, date_posted, pattern, kept,
+        AS v (url, source, company, title, locations, date_posted, pattern, pattern_id, kept,
               description, description_sha256, description_object, description_object_size,
               raw, raw_sha256, raw_object, raw_object_size, refresh_hours)
     WHERE NOT EXISTS (
         SELECT 1 FROM listings l
         WHERE l.url = v.url
-          AND (l.source, l.company, l.title, l.locations, l.pattern, l.kept)
+          AND (l.source, l.company, l.title, l.locations, l.pattern_id, l.kept)
               IS NOT DISTINCT FROM
-              (v.source, v.company, v.title, v.locations, v.pattern, v.kept)
+              (v.source, v.company, v.title, v.locations, v.pattern_id, v.kept)
           AND (l.date_posted IS NOT NULL OR v.date_posted IS NULL)
           AND {_kept("description", "v", "l")}
           AND {_kept("raw", "v", "l")}
@@ -420,7 +445,7 @@ _RECORD_LISTINGS: LiteralString = f"""
         source = EXCLUDED.source, company = EXCLUDED.company,
         title = EXCLUDED.title, locations = EXCLUDED.locations,
         date_posted = COALESCE(listings.date_posted, EXCLUDED.date_posted),
-        pattern = EXCLUDED.pattern, kept = EXCLUDED.kept,
+        pattern = EXCLUDED.pattern, pattern_id = EXCLUDED.pattern_id, kept = EXCLUDED.kept,
         {_set_payload("description")},
         {_set_payload("raw")},
         last_seen_at = now()
@@ -472,6 +497,7 @@ def record_listings(
     payloads, inline = listing_payloads.reference_columns(
         [(p.url, p.description or "", p.raw or {}) for p in listed]
     )
+    pattern_id = title_pattern_id(pattern)
     rows = [
         (
             p.url,
@@ -483,6 +509,7 @@ def record_listings(
             if p.date_posted
             else None,
             pattern,
+            pattern_id,
             p.url in kept,
             *payload[:4],
             Jsonb(payload[4]),
