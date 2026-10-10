@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
-from api import db, model_calls
+from api import db, model_calls, queue
 from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import (
@@ -155,10 +155,8 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         # Every collected item is paid whatever its consumer later makes of
         # it, so the ledger row is written with its receipt, not by consumers.
         model_calls.record_batch_items(results)
-        db.execute(
-            "UPDATE tasks SET payload=jsonb_set(COALESCE(payload,'{}'::jsonb),'{batch_ids}',%s) "
-            "|| '{\"batch_collection_checkpointed\":true}'::jsonb WHERE id=%s",
-            (db.jsonb(unfinished), task_id),
+        queue.merge_payload(
+            task_id, {"batch_ids": unfinished, "batch_collection_checkpointed": True}
         )
 
 

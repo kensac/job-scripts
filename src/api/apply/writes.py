@@ -4,7 +4,7 @@ import datetime
 import logging
 from collections.abc import Mapping
 
-from api import budget, db
+from api import budget, db, queue
 from api.ai import batch_results
 from core.shapes import APPLICATION_TASK
 
@@ -78,10 +78,7 @@ def reserve_task(task_id: int, user_id: int, rows: list[dict] | None = None) -> 
             )
             requests[custom_id] = {"answer_id": answer["id"], "revision": revision}
             selected[custom_id] = {**requests[custom_id], "question": answer["question"]}
-        db.execute(
-            "UPDATE tasks SET payload = jsonb_set(payload, '{draft_requests}', %s) WHERE id = %s",
-            (db.jsonb(requests), task_id),
-        )
+        queue.merge_payload(task_id, {"draft_requests": requests})
         return selected
 
 
@@ -147,10 +144,7 @@ def record_result(
             user_id, request, answer, usage, key_source, model, kind, batched=batched
         )
         recorded[custom_id] = outcome
-        db.execute(
-            "UPDATE tasks SET payload = jsonb_set(payload, '{draft_results}', %s) WHERE id = %s",
-            (db.jsonb(recorded), task_id),
-        )
+        queue.merge_payload(task_id, {"draft_results": recorded})
     if outcome in {"unknown_request", "superseded"}:
         logger.info("Draft task %s result %s was not applied: %s", task_id, custom_id, outcome)
     return int(outcome == "written")

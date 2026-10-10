@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import budget, db, events, task_jobs
+from api import budget, db, events, queue, task_jobs
 from api.board import criteria as board_criteria
 from api.board import eligibility
 from api.task_admission import ACTIVE_STATUSES, TaskProgress
@@ -735,8 +735,5 @@ def replace_projection(
                     for job in disagreements[:20]
                 ],
             }
-            db.execute(
-                "UPDATE tasks SET payload = payload || %s WHERE id = %s",
-                (db.jsonb({"title_gate_report": report}), task_id),
-            )
+            queue.merge_payload(task_id, {"title_gate_report": report})
     return result.n if result else 0

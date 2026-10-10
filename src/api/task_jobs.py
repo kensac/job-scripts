@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
-from api import db
+from api import db, queue
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
 from core.pool import in_transaction
 
@@ -147,10 +147,7 @@ def _migrate_one(
                 or encode_payload(current["jobs"]) != encode_payload(jobs)
             ):
                 return "changed"
-            db.execute(
-                "UPDATE tasks SET payload = (payload - 'jobs') || %s WHERE id = %s",
-                (db.jsonb(reference(population, jobs, ref)), task_id),
-            )
+            queue.merge_payload(task_id, reference(population, jobs, ref), drop=["jobs"])
         return "externalized"
     if row["ref"] is None:
         return "missing"
@@ -175,11 +172,7 @@ def _migrate_one(
         current = _lock(task_id, jobs=False)
         if current != row:
             return "changed"
-        db.execute(
-            "UPDATE tasks SET payload = (payload - %s::text[]) || "
-            "jsonb_build_object('jobs', %s::jsonb) WHERE id = %s",
-            (list(_REFERENCE_KEYS), db.jsonb(jobs), task_id),
-        )
+        queue.merge_payload(task_id, {"jobs": jobs}, drop=_REFERENCE_KEYS)
     return "restored"
 
 

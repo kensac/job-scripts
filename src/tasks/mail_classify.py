@@ -26,7 +26,13 @@ from api.ai.batch_results import progress_counts
 from api.mail.current import current_event
 from api.task_config import configured_shape
 from core.shapes import BACKFILL_TASK, ONGOING_TASK
-from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
+from tasks.runtime import (
+    consume_result,
+    has_batch_work,
+    merge_payload,
+    run_batched,
+    set_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -595,10 +601,7 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # Claim before submission: the historical duplicate-spend incident had
     # three tasks an hour apart carrying the same 1,156 requests. Resume must
     # not replace these IDs with a fresh selection that was never submitted.
-    db.execute(
-        "UPDATE tasks SET payload = COALESCE(payload, '{}'::jsonb) || %s WHERE id = %s",
-        (db.jsonb({"claimed_message_ids": [r["id"] for r in rows]}), task_id),
-    )
+    merge_payload(task_id, {"claimed_message_ids": [r["id"] for r in rows]})
 
     specs = [
         structured_response_spec(

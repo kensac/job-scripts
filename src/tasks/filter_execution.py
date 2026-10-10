@@ -24,6 +24,7 @@ from tasks.runtime import (
     collect_pending,
     consume_result,
     has_batch_work,
+    merge_payload,
     submit_or_collect,
 )
 
@@ -229,10 +230,7 @@ async def prepare_content(
 
     await asyncio.gather(*(fetch(job) for job in pending))
     unavailable = sum(job["url"] not in contents for job in jobs)
-    db.execute(
-        "UPDATE tasks SET payload = payload || %s WHERE id = %s",
-        (db.jsonb({"content_unavailable": unavailable}), task_id),
-    )
+    merge_payload(task_id, {"content_unavailable": unavailable})
     return contents, unavailable
 
 
