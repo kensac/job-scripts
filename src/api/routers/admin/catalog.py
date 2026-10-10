@@ -218,7 +218,8 @@ def list_reports(
         SELECT r.id, r.user_id, r.job_id, r.kind, r.message, r.corrections, r.status,
                r.resolution_note, r.created_at, r.resolved_at,
                u.email AS reporter_email, u.name AS reporter_name,
-               j.url, j.company, j.title, j.source, j.extraction_status,
+               j.url, j.company, j.title, j.source,
+               (SELECT p.status FROM posting_uploads p WHERE p.job_id = j.id) AS extraction_status,
                COALESCE(c.status = 'rejected', FALSE) AS posting_closed
         FROM reports r
         JOIN users u ON u.id = r.user_id

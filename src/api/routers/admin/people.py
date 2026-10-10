@@ -280,8 +280,8 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
     owner_key, weekly_cap = _budget._owner_budget(groups)
     uploads = db.query_one_as(
         UploadCounts,
-        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE extraction_status = 'failed') AS failed "
-        "FROM jobs WHERE uploaded_by = %s",
+        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'failed') AS failed "
+        "FROM posting_uploads WHERE uploaded_by = %s",
         (user_id,),
     )
     reports = db.query_one_as(

@@ -362,7 +362,8 @@ def apply_context(
         "(SELECT MAX(f.submitted_at) FROM application_fills f "
         " WHERE f.user_id = %s AND f.job_id = j.id) AS submitted_at "
         "FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s "
-        "WHERE j.url = ANY(%s) AND (j.uploaded_by IS NULL OR j.uploaded_by = %s) LIMIT 1",
+        "WHERE j.url = ANY(%s) "
+        "AND j.id NOT IN (SELECT job_id FROM posting_uploads WHERE uploaded_by <> %s) LIMIT 1",
         (user.id, user.id, posting_urls(url), user.id),
     )
     # Only the facts that are set. A blank fact fills nothing, so listing it
@@ -474,7 +475,7 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
     # carry its id into the drafts lookup and, on submit, a board row.
     job = db.query_one(
         "SELECT id FROM jobs WHERE url = ANY(%s) "
-        "AND (uploaded_by IS NULL OR uploaded_by = %s) LIMIT 1",
+        "AND id NOT IN (SELECT job_id FROM posting_uploads WHERE uploaded_by <> %s) LIMIT 1",
         (posting_urls(body.url), user.id),
     )
     job_id = job["id"] if job else None

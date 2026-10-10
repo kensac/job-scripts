@@ -96,7 +96,8 @@ def enqueue(
             )
         else:
             owner = db.query_one(
-                "SELECT id, extraction_status FROM jobs WHERE id = %s FOR UPDATE",
+                "SELECT j.id, p.status AS extraction_status FROM jobs j "
+                "LEFT JOIN posting_uploads p ON p.job_id = j.id WHERE j.id = %s FOR UPDATE OF j",
                 (subject["job_id"],),
             )
         if owner is None:

@@ -78,6 +78,8 @@ def make_job(
     assert row is not None
     if comp_min is not None or comp_max is not None:
         make_comp(url, comp_min=comp_min, comp_max=comp_max)
+    if uploaded_by is not None:
+        upload(row["id"], uploaded_by)
     return row["id"]
 
 
@@ -87,6 +89,16 @@ def make_comp(url: str, **fields: Any) -> None:
     db.execute(
         f"INSERT INTO job_comp ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
         (url, *fields.values()),
+    )
+
+
+def upload(job_id: int, user_id: int, status: str = "done") -> None:
+    """Records job_id as user_id's upload, on both copies while both exist."""
+    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (user_id, job_id))
+    db.execute(
+        "INSERT INTO posting_uploads (job_id, uploaded_by, status) VALUES (%s, %s, %s) "
+        "ON CONFLICT (job_id) DO UPDATE SET uploaded_by = EXCLUDED.uploaded_by",
+        (job_id, user_id, status),
     )
 
 
