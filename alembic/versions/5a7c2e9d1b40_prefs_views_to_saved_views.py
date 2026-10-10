@@ -19,7 +19,7 @@ there; it exists for every other database holding the old shape.
 The schema does not change; there is no downgrade of the data.
 
 Revision ID: 5a7c2e9d1b40
-Revises: db0c14af6775
+Revises: d4813d05adcc
 Create Date: 2026-10-10 01:00:00.000000
 
 """
@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = '5a7c2e9d1b40'
-down_revision: Union[str, None] = 'db0c14af6775'
+down_revision: Union[str, None] = 'd4813d05adcc'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
