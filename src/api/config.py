@@ -15,8 +15,7 @@ from pydantic import (
 )
 
 from api.apply.policy import ExtensionPolicy
-from core.filter_policy import RoutingPolicy
-from core.review_gate import ReviewGatePolicy, VolumeGate
+from core.screening import Recipe
 from core.shapes import (
     CLASSIFY_LOCATIONS_PER_CYCLE,
     CLASSIFY_PER_CYCLE,
@@ -25,6 +24,7 @@ from core.shapes import (
     JOB_PROFILE_TASK,
     LOCATIONS_TASK,
 )
+from core.volume_gate import VolumeGate
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"
@@ -139,24 +139,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "skips titles naming a listed occupation with no technical word. A posting someone "
         "tracks is always read. A new prompt hash is not listed until added here.",
     ),
-    "filter_review_gate": ConfigKey(
+    # Seeded from filter_review_gate's enforced title scopes by acbc00862b2b.
+    "title_screens": ConfigKey(
         section="Boards",
-        default=ReviewGatePolicy().model_dump(mode="json"),
-        value_type=ReviewGatePolicy,
-        help="Independent off/shadow/enforce controls for conservative nontechnical title "
-        "exclusions and shared-profile reuse. Scopes explicitly opt in exact filter prompt "
-        "hashes. Unknown evidence receives detailed review. Never creates cached verdicts "
-        "or cancels submitted batches. Rollback affects new submissions; skipped jobs "
-        "become eligible again on the next run. Task payloads retain the funnel.",
-    ),
-    "filter_routing_policy": ConfigKey(
-        section="Boards",
-        default=RoutingPolicy().model_dump(mode="json"),
-        value_type=RoutingPolicy,
-        help="Independent off/shadow controls for shared profiles, title screening and "
-        "ambiguity-only review. Profiles are keyed by exact filter prompt hash. "
-        "Shadow mode preserves every detailed review and records comparisons on tasks. "
-        "No live skipping is supported until decision quality and rollback are validated.",
+        default={},
+        value_type=dict[str, Recipe],
+        help="Exact board or filter prompt hash to the title screen (core/screening.py) "
+        "its candidates leave out. A posting the screen skips is never chunked, read or "
+        "judged for that prompt, and writes nothing; removing a hash returns its postings "
+        "on the next run. A prose edit changes the hash and so drops the screen.",
     ),
     "compensation_demand_gate_enabled": ConfigKey(
         section="Catalog",

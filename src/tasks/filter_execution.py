@@ -9,7 +9,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
-from api import ai, budget, db, filter_routing, review_gate, review_gate_records
+from api import ai, budget, db
 from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
 from api.model_calls import Payer
@@ -73,7 +73,6 @@ async def check_filter(
     content: str,
     snapshot: FilterSnapshot,
     verdict_label: str,
-    decision_id: int | None = None,
 ) -> dict[str, int | None]:
     """Run one check. The caller has already excluded what is decided."""
     _, usage = await verdicts.run_check(
@@ -89,7 +88,6 @@ async def check_filter(
         filter_name=verdict_label,
         prompt_hash=snapshot.prompt_hash,
         context="filter-run",
-        on_record=lambda query_id: review_gate_records.record_outcome(decision_id, query_id),
     )
     return usage
 
@@ -100,18 +98,7 @@ async def execute_live(
     snapshot: FilterSnapshot,
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
-    *,
-    filter_id: int | None = None,
 ) -> None:
-    jobs, _gate_decisions = review_gate.partition(
-        task_id,
-        snapshot.prompt_hash,
-        jobs,
-        None,
-        model=cfg.model,
-        transport="live",
-        filter_id=filter_id,
-    )
     # One read of each for the whole run, before the first paid call. Per job,
     # each cost its own BEGIN, read and COMMIT for every candidate, which a
     # worker far from the database pays at full latency (observability.md).
@@ -148,14 +135,7 @@ async def execute_live(
             )
         if not content:
             return None
-        return await check_filter(
-            cfg,
-            job,
-            content,
-            snapshot,
-            hooks.verdict_label,
-            (_gate_decisions.get(job["url"]) or {}).get("decision_id"),
-        )
+        return await check_filter(cfg, job, content, snapshot, hooks.verdict_label)
 
     index = 0
     pending: dict[asyncio.Task, dict[str, Any]] = {}
@@ -246,7 +226,6 @@ async def execute_batch(
     purpose: str = "filter",
     max_output_tokens: int = 6000,
     complete_without_submission: bool = False,
-    filter_id: int | None = None,
     collect: Callable[..., Awaitable[list[Any]]] = collect_pending,
     submit: Callable[..., Awaitable[list[Any]]] = submit_or_collect,
 ) -> None:
@@ -262,28 +241,6 @@ async def execute_batch(
             and not db.get_config("managed_board_cache_writes_enabled")
         ):
             cache_policy = "no_cache"
-    gate_decisions = {}
-    gate_skipped = 0
-    if not existing:
-        before_gate = len(jobs)
-        jobs, gate_decisions = review_gate.partition(
-            task_id,
-            snapshot.prompt_hash,
-            jobs,
-            contents,
-            model=cfg.model if cfg else None,
-            transport="batch",
-            filter_id=filter_id,
-            observe=lambda kept: filter_routing.observations(
-                filter_routing.load_policy(),
-                snapshot.prompt_hash,
-                kept,
-                contents,
-                model=cfg.model if cfg else None,
-            ),
-        )
-        gate_skipped = before_gate - len(jobs)
-    routing = {url: decision.get("routing") for url, decision in gate_decisions.items()}
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
     specs, by_url = [], {}
     for job in jobs:
@@ -302,8 +259,6 @@ async def execute_batch(
                 FilterDecision,
                 context={
                     **({"prompt_cache_policy": cache_policy} if cache_policy else {}),
-                    "routing": routing.get(job["url"]),
-                    "review_gate": gate_decisions.get(job["url"]),
                     "job": job,
                     "filter": snapshot.__dict__,
                     "reasoning_effort": cfg.params.get("reasoning_effort")
@@ -316,13 +271,8 @@ async def execute_batch(
         by_url[job["url"]] = (job, input_text)
     total = len(jobs)
     if not specs and not existing:
-        label = (
-            f"{gate_skipped} pre-review exclusions; {total} awaiting content"
-            if gate_skipped
-            else "no content-ready jobs; waiting for a later cycle"
-        )
-        hooks.progress(0, total, label)
-        if complete_without_submission or (gate_skipped and not jobs):
+        hooks.progress(0, total, "no content-ready jobs; waiting for a later cycle")
+        if complete_without_submission:
             hooks.complete()
         return
     hooks.progress(
@@ -376,7 +326,6 @@ class _Collected:
     model: str | None
     outcome: str
     verdict: verdicts.Verdict | None = None
-    decision_id: int | None = None
 
 
 def _plan(
@@ -421,13 +370,7 @@ def _plan(
         error=result.error,
         reasoning_effort=context.get("reasoning_effort"),
     )
-    return _Collected(
-        usage,
-        result.model,
-        "written" if parsed else "failed",
-        verdict,
-        (context.get("review_gate") or {}).get("decision_id"),
-    )
+    return _Collected(usage, result.model, "written" if parsed else "failed", verdict)
 
 
 def _collect_chunk(
@@ -437,7 +380,7 @@ def _collect_chunk(
     by_url: dict[str, tuple[dict[str, Any], str | None]],
     hooks: ExecutionHooks,
 ) -> None:
-    """Write a chunk's verdicts, usage, outcomes and receipts in one transaction.
+    """Write a chunk's verdicts, usage and receipts in one transaction.
 
     Ordered so that what can fail does so before any hook runs: the hooks'
     process metrics cannot be rolled back, and a failed chunk is collected
@@ -451,15 +394,12 @@ def _collect_chunk(
                 planned = _plan(result, snapshot, by_url, hooks)
                 receipt.outcome = planned.outcome
                 collected.append(planned)
-        written = [(p.verdict, p.decision_id) for p in collected if p.verdict is not None]
-        query_ids = verdicts.record_ai_verdicts([verdict for verdict, _ in written])
-        with db.pipeline():
-            for (_, decision_id), query_id in zip(written, query_ids, strict=True):
-                review_gate_records.record_outcome(decision_id, query_id)
+        written = [p.verdict for p in collected if p.verdict is not None]
+        verdicts.record_ai_verdicts(written)
         with db.pipeline():
             for planned in collected:
                 hooks.record_usage(planned.usage, planned.model, True)
-    for verdict, _ in written:
+    for verdict in written:
         verdict.count()
 
 
@@ -475,6 +415,6 @@ def _collect_one(
             return
         planned = _plan(result, snapshot, by_url, hooks)
         receipt.outcome = planned.outcome
-        query_id = verdicts.record_ai_verdict(planned.verdict) if planned.verdict else None
+        if planned.verdict:
+            verdicts.record_ai_verdict(planned.verdict)
         hooks.record_usage(planned.usage, planned.model, True)
-        review_gate_records.record_outcome(planned.decision_id, query_id)

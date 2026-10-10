@@ -16,8 +16,7 @@ from api.ai import verdicts
 from api.auth import AuthedUser
 from api.orm.ai import AiQuery
 from api.problem import refuse
-from api.review_decision_storage import URL_MATCH
-from api.review_gate_reads import ReviewDecisions, read_decisions
+from api.routers.admin.review_gates import ReviewDecisions
 from api.routers.admin.shared import require_admin
 from core import query_instructions, reason_taxonomy
 
@@ -667,12 +666,7 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             "FROM ledger_rows WHERE url = %s ORDER BY id ASC",
             (url,),
         ),
-        decisions=read_decisions(
-            URL_MATCH,
-            {"url": url},
-            pagination.Page.from_params(1, 25, maximum=100),
-            {"url": [url]},
-        ),
+        decisions=ReviewDecisions(),
     )
 
 

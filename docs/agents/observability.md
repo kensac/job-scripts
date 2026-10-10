@@ -193,23 +193,12 @@ Use receipt outcome counts for cumulative progress across partial collection and
 replay. Both checkpoint tables expire with their owning task. Legacy requests
 without a snapshot retain unknown input rather than using a current page.
 
-Review-gate admissions have their own durable record in `review_gate_decisions`.
-Each task and posting URL has one immutable decision, including detailed-review
-admissions, with its exact policy, title, available content hash, proven profile
-evidence and shadow-routing observation. Retries preserve that decision;
-different inputs within the same run are refused rather than silently assigned
-its provenance. Configuration changes apply to new runs. These records have no
-cascading references to task or catalog retention. Managed projections prefer
-them and read the legacy task plan only where no durable admissions exist.
-
-`review_gate_outcomes` links an admission to the exact paid verdict written by
-the shared verdict service. Live writes commit their outcome with the verdict;
-batch writes commit it within receipt consumption. Replaying a receipt cannot
-duplicate its outcome, while distinct paid retries remain distinct attempts.
-The stored verdict price is copied at write time, never repriced on read or
-charged again. Missing usage and pre-admission legacy requests stay unknown.
-An admission alone proves neither provider submission nor a successful review;
-skip counts are avoided requests, not observed dollar savings.
+**A rule that keeps a posting from a paid review writes nothing per posting.**
+A title screen (core/screening.py) leaves the posting out of the candidate
+SELECT, and the posting path and the admin funnel run it again when read. The
+stored alternative, one decision row per task and posting with an outcome row
+per paid verdict, reached 9.76M decisions (1.64 GB) by 2026-10-10, 93.6% of
+them repeating one already stored, and its only readers were admin reports.
 
 Distinguish submission rejection from per-request failure using the stored
 provider errors. Failure counts alone do not establish the cause.
@@ -712,108 +701,14 @@ projection is replaced only after every provider batch in the immutable run
 has reached a terminal state. `sponsor_filter_reuse` remains projection-only
 and makes no inference call.
 
-## Filter routing observations
-
-`filter_routing_policy` provides independent off/shadow controls for shared-profile
-constraints, evidence-backed title screening and an ambiguity-only routing proposal.
-It applies to new submissions through the shared personal/managed batch executor;
-interactive live calls keep their existing path. All controls default off. Shadow
-mode still submits every original request, with the same instructions and schema.
-It makes no additional inference calls and does not promise immediate savings.
-
-Profiles are compared against the exact posting content submitted for review and
-the supported profile version. Policies name the exact filter prompt hash; no
-policy is inferred from prose. Satisfying partial taxonomy rules cannot establish
-acceptance of the entire filter. Missing or unsupported evidence abstains.
-
-The route proposal is retained in the run's `review_gate_decisions.evidence`,
-and collection records the paid result in `review_gate_outcomes` inside the
-receipt transaction, so a replayed receipt adds nothing.
-`review_gate_reads.comparisons(task_id)` derives agreements, false rejects, false
-accepts, abstentions and unresolved reference results from those rows. These are
-agreement measurements against the existing filter, not ground-truth accuracy.
-Old paid requests without a proposal collect normally. Observations never enter
-the verdict cache, usage ledger or board projection.
+## Per-result observations
 
 **Nothing increments a counter inside `tasks.payload` per collected result.** A
 managed batch payload carries its whole job list (up to 1.9 MB), so every
 `jsonb_set` rewrites the entire TOASTed value and locks the task row. Measured
 2026-10-03: 259 managed batches took 74,432 such increments, about 104 GB of
 rewritten payload, for counters with no reader. Per-result observations go in a
-row keyed by what they observe and are derived when read. The `routing_report`
-and `review_gate_comparison` keys in older payloads are historical, written by
-releases before this rule, and nothing reads or extends them.
-
-Live enforcement is intentionally not an accepted mode. It requires representative
-held-out validation and a versioned decision/projection invalidation contract so
-disabling a shortcut cannot leave its decisions cached as ordinary paid verdicts.
-
-## Reject-only review gates
-
-`filter_review_gate` is separate from the experimental routing observer. Its
-title and profile controls independently accept off, shadow and enforce. Exact
-prompt-hash scopes opt into versioned nontechnical occupation/family recipes;
-unconfigured revisions and uncertain evidence receive detailed review. Profiles
-never accept a posting or decide experience, compensation or prestige.
-
-The shared live/batch executor applies the gates only before new review calls.
-Profile reuse requires exact cached content and a retained, consumed profile
-request proving the original title, instructions, version, model and response.
-Missing provenance or bounded lookup failure retains detailed review. Reuse
-creates no additional classification calls; the existing profile derivation is
-still responsible for producing shared profiles.
-
-**A profile request held by reference is proven by its digest, not read.**
-`review_gate.proven_profiles` rebuilds the request the proof wants with
-`job_profile_spec`, the recipe the profile handler submits, and compares
-`batch_results.snapshot_sha256` of it with the digest the reference records. Equal
-digests mean the stored request is that request byte for byte, so every field
-comparison holds and only the response is checked. A request that differs
-anywhere, even in a field the proof does not compare, is read from storage and
-compared as before. Reads happen outside any transaction, one per object
-concurrently, each with its own `BundleCache`. The policy's
-`lookup_timeout_ms` (`filter_review_gate` in `app_config`) bounds the whole
-lookup, the database query and the object reads together; the object client's
-connect and read timeouts are set to what remains, with no retries. Past the
-budget, or on an unreadable object, the lookup raises and admission retains
-detailed review, the same fallback as any other lookup failure.
-
-Measured 2026-10-03 on a local test database, with the in-memory test store
-(so object reads cost CPU, not network): profile requests of 8,000 characters,
-500 per profile task, every candidate proven, median of five calls.
-
-| candidates | inline, before | by reference, digest | every reference read |
-|---|---|---|---|
-| 100 | 26 ms | 19 ms | 29 ms |
-| 1,000 | 259 ms | 177 ms | 265 ms |
-| 5,000 | 1,270 ms | 892 ms | 1,398 ms |
-
-The digest path is faster than the inline path it replaced. An inline request
-is fetched from TOAST and parsed into a spec, and the same new code reading
-inline rows took 28, 250 and 1,368 ms. Before the change, 65
-percent of a 1,000-candidate admission was regenerating the profile JSON
-schema per candidate. `job_profile_spec` now builds it once. The read column
-excludes network time. Each object Garage serves adds a GET of up to a
-whole bundle, so that path is what `lookup_timeout_ms` exists to bound. At
-5,000 candidates even the inline path took longer than the 1,000 ms default.
-That was true before this change too.
-
-Task payload `review_gate` records the policy, candidate, proven-profile,
-proposed-exclusion and remainder counts, written once at admission. **The
-skipped URLs live only in `review_gate_decisions`**, and
-`review_gate_records.exclusions` derives them: `persist` writes a row for every
-job in the transaction that writes the plan, so the derived set is exactly
-what the payload used to copy. That copy was 53 percent of filter-chunk
-payload text over 7 days (measured 2026-10-03) and was rewritten with every
-later payload write. Plans written before #638 (2026-09-16) recorded decisions
-carry `skipped` and no rows; `replace_projection` reads it only then. Never
-write it again. Shadow comparisons against the paid result are derived from
-`review_gate_outcomes` by `review_gate_reads.comparisons`, never counted into the
-payload. Paid batches bypass replanning, including
-after a switch changes. Skips are not paid verdicts, do not enter the verdict
-cache, and create no usage. Managed projection explicitly excludes this run's
-skips even when fail-open is configured. Switching off restores eligibility on
-the next new run without deleting historical decisions or person-owned state.
+row keyed by what they observe, or are derived when read.
 
 ## Historical embedding receipt payloads
 
@@ -916,72 +811,6 @@ archival does not alter those vectors or board membership. Report verified
 logical bytes separately from table size and filesystem space: removal alone
 does not return filesystem space, and no table rewrite is part of this command.
 
-## Shared review decision bodies and policies
-
-A review decision is a per-task row plus content that is stored once.
-`review_gate_policies` holds each exact policy, `review_gate_decision_bodies`
-each distinct decision (prompt hash, stage, mode, action, reason, profile id,
-title, content hash, policy id, evidence) and `review_gate_urls` each URL. The
-per-task row keeps task, job, user, filter, board, revision and creation time.
-On 2026-10-02 production wrote 570,747 decisions holding 38,017 distinct
-bodies, because every task re-admits the same postings under the same prompt
-and policy. Interning uses PostgreSQL's JSONB serialization for digests and
-checks exact equality of every column after a digest conflict. Never
-reconstruct a historical policy or body from current configuration or a
-filter hash. None of the three tables cascades from task, posting or filter
-retention.
-
-**Admission writes only references.** `review_gate_records.persist` interns
-the policy, the URLs and the bodies inside the admission transaction, each as
-one set-based conflict-safe insert followed by a read, and inserts per-task
-rows holding `url_id` and `body_id` with `ON CONFLICT (task_id, url_id)`.
-Never write the inline columns again: a second copy is the 1,242 B a row this
-replaced, and the backfill would have to move it later.
-
-**Every reader selects from `review_decision_storage.DECISIONS`**, which joins
-a row's `url_id` and `body_id` and presents the columns the inline table had;
-`RESOLVED_FROM` adds the body's policy snapshot. Filter a URL with
-`URL_MATCH`, which compares `url_id` and uses
-`idx_review_gate_decisions_url_id`; the resolved `url` has no index.
-
-**An aggregate over many decisions reads the stored row, not DECISIONS.**
-DECISIONS resolves a body once per decision, and a body's evidence is read
-with it. GET /admin/review-gates/report over 7.9M decisions spent 431 s in
-that join and 61.7 s in a `min(created_at)` the join kept off the index
-(2026-10-03). The report selects `id, body_id, url_id` from
-`review_gate_decisions`, filters a body column with `body_id IN (SELECT id
-FROM review_gate_decision_bodies WHERE ...)` (`selection(stored=True)`),
-groups by `(body_id, url_id)`, and joins each distinct body once. Counts and
-numeric sums decompose exactly over that grouping, and `count(DISTINCT
-url_id)` equals `count(DISTINCT url)` because the URL is unique. A mean of
-per-decision floats does not: keep it per decision.
-`tests/test_review_gate_report_equivalence.py` holds the per-decision
-definition and compares every column against it.
-
-The report is one statement, so its coverage, funnel and estimate share a
-snapshot without a REPEATABLE READ transaction. The snapshot still lasts as
-long as the statement, and vacuum and `CREATE INDEX CONCURRENTLY` wait on
-it, so the statement has to stay fast: the three-statement version held its
-snapshot for minutes. A float sum such as the avoided cost depends on the order the plan
-adds its terms in. It can differ from an earlier plan in the last bits, and
-the equivalence test allows that difference only for that column.
-
-**The per-task row holds nothing but identity and the two references.**
-`url_id` and `body_id` are NOT NULL under validated foreign keys, so the
-readers' inner joins cannot drop a decision. `(task_id, url_id)` is unique,
-and a URL has one id, so a task cannot hold a URL twice. 7ca95d34ef5f dropped
-the twelve inline columns, `uq_review_gate_decisions_task_url` and
-`idx_review_gate_decisions_url_created` (3.1 GB of index on 2026-10-03) once
-every production row held its references and no inline value. The table
-shrinks only with a rewrite, which no migration performs.
-
-Downgrading past 7ca95d34ef5f adds the columns back empty. That is enough for
-every release from #751 on, because they read references. A release older than
-#751 reads only the inline columns: deploy the #753 image and run its
-`api.migrate_review_decisions restore` before rolling further back. Keep
-bodies, snapshots and decision identities throughout; do not alter paid
-outcomes or reprice usage.
-
 ## Request snapshot storage and recovery
 
 `api.ai.request_snapshots` is the shared reader for inline and external request
@@ -995,8 +824,8 @@ reference, with nothing inline.** There is no exception by kind, task status or
 receipt state. Two shapes for one population means every reader, test and
 audit must handle both, and the second shape becomes the place where the next
 rule quietly does not apply. A hot path that needs care gets a solution, such
-as the digest proof the review gate uses (above). It never gets an exempt
-population. Readers still accept inline values and version 1 and 2 references,
+as proving a stored request by its digest (`batch_results.snapshot_sha256`)
+instead of reading it. It never gets an exempt population. Readers still accept inline values and version 1 and 2 references,
 so a rollback past this release can read what it wrote.
 
 **A new request is written to object storage before its row exists, and the row
@@ -1101,9 +930,6 @@ Every reader of `snapshot_ref` goes through `request_snapshots.resolve` or
 `payload_recovery.retry`, and `snapshot_payloads.migrate_many`, which reads
 every bundle a chunk references before verifying, compacting or restoring its
 members. The cache lives for one call and is never filled inside a transaction.
-`review_gate.proven_profiles` reads only requests it cannot prove by digest,
-one cache per object it reads, inside its lookup budget (see the review gate
-section).
 
 **Rollout order for bundles.** Deploy the readers to every API and worker
 before any member reference is written; the bundle backfill is a separate,
@@ -1222,7 +1048,7 @@ verified object. Two populations carry one (`task_jobs.POPULATIONS`):
   every active chunk of a user on every split and every submission.
 
 Either way the list rode along on every whole-payload write (batch id
-appends, the review gate plan, `finish`) and every whole-payload read (the
+appends, `finish`) and every whole-payload read (the
 claim, progress events, the admin queue). A missing or unreadable object
 raises `PayloadUnavailable`, so the task takes the payload recovery path
 above; a payload with neither shape is refused the same way, never run as an

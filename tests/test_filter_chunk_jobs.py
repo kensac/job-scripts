@@ -269,16 +269,15 @@ async def test_a_title_the_review_gate_screens_is_never_chunked(
         for t in ("Registered Nurse", "Software Engineer")
     )
     monkeypatch.setattr(filters, "candidates_for", lambda _uid: [nurse, engineer])
-    scope = {flt["prompt_hash"]: {"title_recipe": "nontechnical_occupations_v1"}}
-    set_config("filter_review_gate", {"title_mode": "enforce", "scopes": scope})
+    set_config("title_screens", {flt["prompt_hash"]: "nontechnical_occupations_v1"})
 
     await filters._run_filters(parent, uid, [flt], batched=True)
 
     (child,) = db.query("SELECT payload FROM tasks WHERE parent_id = %s", (parent,))
     assert child["payload"]["urls"] == [engineer["url"]]
 
-    # Switching the stage off returns the posting on the next run.
-    set_config("filter_review_gate", {"title_mode": "off", "scopes": scope})
+    # Removing the screen returns the posting on the next run.
+    set_config("title_screens", {})
     again = make_task("run_all_filters", {"user_id": uid, "batched": True}, status="running")
     db.execute("UPDATE tasks SET status = 'done' WHERE parent_id = %s", (parent,))
     await filters._run_filters(again, uid, [flt], batched=True)

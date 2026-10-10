@@ -107,8 +107,7 @@ def build_job_profile_input(title: str, content: str) -> str:
 def job_profile_spec(
     url: str, content_row_id: int, title: str, content: str, content_hash: str
 ) -> BatchSpec:
-    """The one request a profile is classified from. Review gate admission
-    rebuilds it to prove a stored request by digest, so both build it here."""
+    """The one request a profile is classified from."""
     return dataclasses.replace(
         _job_profile_template(),
         custom_id=str(content_row_id),

@@ -52,19 +52,13 @@ def test_a_title_the_review_gate_screens_never_enters_the_run(
     _admissible(monkeypatch)
     board, job_id, _url = _board_and_job(client, admin_headers, f)
     f.make_ready_job(source="managed-source", title="Registered Nurse")
-    set_config(
-        "filter_review_gate",
-        {
-            "title_mode": "enforce",
-            "scopes": {board["prompt_hash"]: {"title_recipe": "nontechnical_occupations_v1"}},
-        },
-    )
+    set_config("title_screens", {board["prompt_hash"]: "nontechnical_occupations_v1"})
 
     response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
 
     payload = _payload(response.json()["task_id"])
     assert [job["id"] for job in runs.run_jobs(payload, objects)] == [job_id]
-    assert payload["title_recipe"] == "nontechnical_occupations_v1"
+    assert payload["title_screens"] == ["nontechnical_occupations_v1"]
 
 
 def test_storage_outage_at_admission_queues_nothing(client, admin_headers, f, monkeypatch, objects):
@@ -103,10 +97,7 @@ async def test_handler_runs_and_resumes_from_the_stored_candidates(
     await managed_task.handle_run_managed_board_batch(task_id, _payload(task_id))
     await managed_task.handle_run_managed_board_batch(task_id, _payload(task_id))
 
-    # The internship board's shadow title gate keeps every candidate.
     assert seen == [[job_id], [job_id]]
-    report = _payload(task_id)["title_gate_report"]
-    assert report["candidate_count"] == 1
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from api import budget, db, metrics, review_gate, task_jobs
+from api import budget, db, metrics, task_jobs
 from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
@@ -106,7 +106,6 @@ async def _process_jobs(
         FilterSnapshot.from_mapping(flt),
         jobs,
         _personal_hooks(task_id, user_id, ent, cfg, flt, parent_id),
-        filter_id=flt.get("id") or flt.get("filter_id"),
     )
 
 
@@ -126,7 +125,7 @@ async def _run_filters(
     units: list[tuple] = []
     chunk_size = int(db.get_config("filter_chunk_size"))
     batch_chunk_size = int(db.get_config("filter_batch_chunk_size"))
-    recipes = review_gate.load_policy().title_recipes()
+    recipes = db.get_config("title_screens")
     for flt in filters:
         decided = decided_custom_urls(urls, flt["prompt_hash"], cfg.model)
         todo = [j for j in candidates if j["url"] not in decided]
@@ -264,7 +263,6 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
         hooks,
         contents=contents,
         unavailable=unavailable,
-        filter_id=payload.get("filter_id"),
         collect=collect_pending,
         submit=submit_or_collect,
     )
