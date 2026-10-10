@@ -349,7 +349,7 @@ def schedule_ingest_cycle() -> None:
         SELECT id FROM users u
         WHERE (EXISTS (SELECT 1 FROM user_source_set s WHERE s.user_id = u.id)
                OR EXISTS (SELECT 1 FROM user_jobs j WHERE j.user_id = u.id)
-               OR EXISTS (SELECT 1 FROM jobs j WHERE j.uploaded_by = u.id))
+               OR EXISTS (SELECT 1 FROM posting_uploads p WHERE p.uploaded_by = u.id))
           AND NOT {visibility.RECOMPUTE_PENDING}
         ORDER BY id
         """

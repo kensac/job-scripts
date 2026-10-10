@@ -77,7 +77,19 @@ def make_job(
         (url, url, source, company, title, active, uploaded_by, comp_min, comp_max),
     )
     assert row is not None
+    if uploaded_by is not None:
+        upload(row["id"], uploaded_by)
     return row["id"]
+
+
+def upload(job_id: int, user_id: int, status: str = "done") -> None:
+    """Records job_id as user_id's upload, on both copies while both exist."""
+    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (user_id, job_id))
+    db.execute(
+        "INSERT INTO posting_uploads (job_id, uploaded_by, status) VALUES (%s, %s, %s) "
+        "ON CONFLICT (job_id) DO UPDATE SET uploaded_by = EXCLUDED.uploaded_by",
+        (job_id, user_id, status),
+    )
 
 
 def make_verdict(

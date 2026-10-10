@@ -2262,6 +2262,41 @@
    "rows": 924644,
    "sampled": 4000
   },
+  "posting_uploads": {
+   "columns": {
+    "created_at": {
+     "age_days": [
+      0.045,
+      0.045,
+      0.045,
+      0.045,
+      0.045,
+      0.045,
+      0.045
+     ],
+     "kind": "timestamp",
+     "naive_rate": 0.0,
+     "null_rate": 0.0
+    },
+    "job_id": {
+     "kind": "key",
+     "null_rate": 0.0
+    },
+    "status": {
+     "kind": "categorical",
+     "null_rate": 0.0,
+     "values": {
+      "done": 1.0
+     }
+    },
+    "uploaded_by": {
+     "kind": "key",
+     "null_rate": 0.0
+    }
+   },
+   "rows": 11,
+   "sampled": 11
+  },
   "reports": {
    "columns": {
     "corrections": {

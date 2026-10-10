@@ -68,7 +68,7 @@ LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
 -- 13,566 times per board read.
 LEFT JOIN filter_pass fp ON fp.url = j.url
 WHERE (
-    j.uploaded_by = %(uid)s
+    j.id IN (SELECT job_id FROM posting_uploads WHERE uploaded_by = %(uid)s)
     -- A board row the person ACTED on (a status, a note, a date applied) is
     -- theirs whatever the criteria or the verdicts say. A row the worker
     -- materialised for a passing posting and nobody touched is not a
@@ -95,7 +95,7 @@ SELECT {{columns}}
 FROM (
     SELECT job_id FROM board_visible WHERE user_id = %(uid)s
     UNION
-    SELECT id FROM jobs WHERE uploaded_by = %(uid)s
+    SELECT job_id FROM posting_uploads WHERE uploaded_by = %(uid)s
     UNION
     SELECT uj.job_id FROM user_jobs uj
     WHERE uj.user_id = %(uid)s AND {_ACTED_ON}
@@ -118,7 +118,7 @@ def across_users(columns: str) -> str:
     return f"""
         SELECT {columns} FROM jobs j JOIN (
             SELECT job_id FROM board_visible
-            UNION SELECT id FROM jobs WHERE uploaded_by IS NOT NULL
+            UNION SELECT job_id FROM posting_uploads
             UNION SELECT uj.job_id FROM user_jobs uj WHERE {_ACTED_ON}
         ) visible_ids ON visible_ids.job_id=j.id
     """

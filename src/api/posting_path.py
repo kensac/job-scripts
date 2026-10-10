@@ -92,8 +92,9 @@ def _origin(config_name: str | None) -> str:
 def _job(where: str, value: Any) -> dict[str, Any] | None:
     return db.query_one(
         "SELECT j.id, j.url, j.title, j.company, j.source, "
-        f"{catalog.IS_AVAILABLE.format(job='j')} AS active, j.uploaded_by, j.near_copy_key, "
-        f"j.date_posted, j.created_at FROM jobs j WHERE j.{where} = %s",
+        f"{catalog.IS_AVAILABLE.format(job='j')} AS active, "
+        "(SELECT p.uploaded_by FROM posting_uploads p WHERE p.job_id = j.id) AS uploaded_by, "
+        f"j.near_copy_key, j.date_posted, j.created_at FROM jobs j WHERE j.{where} = %s",
         (value,),
     )
 

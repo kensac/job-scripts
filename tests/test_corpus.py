@@ -227,14 +227,17 @@ def test_a_board_query_over_real_volume_never_returns_another_users_rows():
                 (uid, uid),
             )
         }
-        leaked = visible & others
+        # The person's own upload is visible on its own merits, active or not.
+        own = {
+            r["job_id"]
+            for r in db.query("SELECT job_id FROM posting_uploads WHERE uploaded_by = %s", (uid,))
+        }
+        leaked = (visible & others) - own
         # A job another user has touched can still be visible on its own
         # merits - it is in the catalog. What must not happen is it becoming
         # visible BECAUSE they touched it.
         for job_id in leaked:
-            row = db.query_one(
-                "SELECT active, source, uploaded_by FROM jobs WHERE id = %s", (job_id,)
-            )
+            row = db.query_one("SELECT active, source FROM jobs WHERE id = %s", (job_id,))
             assert row is not None and row["active"], (
                 f"job {job_id} is visible to user {uid} but is inactive; the only "
                 "thing putting it there is another user's board row"
