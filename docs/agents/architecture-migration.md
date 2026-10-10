@@ -131,7 +131,7 @@ reader:
    - Then: an answer points at the fetch it judged, and the copies of page
      text on answers are cleared.
 4. Call usage as one ledger that other tables point at instead of copying
-   cost into themselves.
+   cost into themselves. See "The ledger of paid model calls" below.
 
 A failed attempt is a call, not a verdict, so readers that count calls
 (spend, review gate outcomes) stay on `ai_queries` until step 4.
@@ -145,6 +145,144 @@ answer shows a person (`closed_verdict`), whether any answer exists
 when a module outside it writes a latest-answer shape (`ORDER BY id DESC`
 over the view, or an `EXISTS` on one posting's answers); its allow-list
 names each exception and why.
+
+### The ledger of paid model calls
+
+**One row per paid provider request, in `model_calls`, written only by
+`api.model_calls.record`.** A batch item is a request: its identity is
+`(provider_batch_id, custom_id)`, unique, so a replayed receipt adds nothing.
+A live call has no provider identity and gets one row when its response
+returns. The row carries purpose, model, transport, the five token counts,
+`cost_usd` priced once at write time (architecture.md), duration, task, and
+who pays: `user_id`, `managed_board_id`, or neither for the fleet. Nothing
+else stores a token count or a cost for a call.
+
+**Why.** On 2026-10-10 one call's numbers were written in up to five places,
+each by its own code:
+
+| Place | Grain | Written by | Read by |
+|---|---|---|---|
+| `ai_queries` usage columns | verdict row; tokens on the first row of a call, zeros on its siblings | `core.store.ai_result_row` | /admin/spend verdict diagnostics, board spend, the admin ledger |
+| `api_usage` | one row per user or board request; one row per whole batch for the fleet | the three writers in `api.budget` | the weekly user budget, the fleet ceiling, /admin/spend ledger and calls, per-user spend |
+| `ai_batches` token totals and `est_cost_usd` | one row per provider batch | `batch_event_hook` | fleet and task model screens |
+| `batch_result_receipts.response.usage` | one row per batch item | `batch_results.checkpoint` | nothing reads it as money |
+| `review_gate_outcomes.recorded_cost_usd`, `usage` | copied from `ai_queries` | `review_gate_records.record_outcome` | review gate pages |
+| `job_embeddings.input_tokens`, `cost_usd` | a packed request split per posting | `tasks.embeddings` | nothing |
+| `ai_experiment_results.cost_usd`, `usage` | one row per arm and url | `tasks.experiments` | the experiment summary |
+
+The same verify call was a fleet row in `api_usage` with the batch's totals,
+the same totals on `ai_batches`, a receipt, and a `closed` verdict holding
+the tokens beside a `clearance` verdict holding zeros. Five copies is how
+they came to disagree.
+
+**What reconciles, measured 2026-10-10 against production.**
+
+- For every provider batch submitted since 2026-09-13 that has receipts
+  (7,466 of 7,541), the receipts' input and output tokens equal `ai_batches`
+  exactly. The other 75 record no tokens: 70 are still open at the provider,
+  one expired, and four are `completed` with 794 requests between them and
+  neither tokens nor receipts, which is either unbilled work or calls nobody
+  recorded. Receipts are the grain the ledger needs.
+- `ai_queries` matches `ai_batches` token for token in 7,131 of 7,408
+  batches that wrote verdicts. In the rest the batch is larger by the calls
+  that wrote no verdict (invalid output, superseded, failed), $0.39 in all.
+  No `(batch_id, url)` group holds more than one row with tokens, so a paid
+  verdict row is exactly one call: 438,844 calls map to 931,033 verdict rows
+  (up to five: closed, clearance and managed board customs from one verify
+  answer).
+- 2026-09-12 to 2026-10-10: `api_usage` $152.32; `ai_batches` completed in
+  the window $141.40 plus live calls $10.99, $152.39. `ai_queries` holds
+  $123.89 because mail, comp, job profiles, requirements, locations,
+  embeddings and application drafts write no verdict. Filter work from
+  2026-09-14 matches between `api_usage` and `ai_queries` to the row and the
+  token (226,392 rows, $30.67).
+- `review_gate_outcomes` differs from the `ai_queries` row it copied in 0 of
+  552,317 rows. It is a pure copy.
+- `ai_experiment_results` sums to $0.8685, the same as the 3,274 fleet
+  `api_usage` rows for `experiment` (all on 2026-09-07); the 34 experiment
+  batches carry no `est_cost_usd`.
+
+**What does not reconcile, and is therefore not a backfill source.**
+
+- `api_usage` before 2026-09-13 for user filter work. Batched requests were
+  booked as `batched = false` at live prices: the week of 2026-08-31 has
+  32,182 user rows at $21.60 against 32,128 batched verdict rows at $11.42
+  with the same tokens. 5,926 user rows from 2026-08-24 have no price, and 87
+  fleet `filter` rows (2026-08-26 to 2026-09-03, $1.04) book batches whose
+  requests the user rows also booked. For that work and era `ai_queries` and
+  `ai_batches` are right and `api_usage` is not.
+- `job_embeddings` sums to 197.8M tokens and $2.69 against 127.0M tokens and
+  $1.27 on the embedding batches. It is an allocation, nothing reads it, and
+  its columns are dropped rather than carried.
+
+**Who points at the ledger instead of copying it.**
+
+- A verdict carries `model_call_id`. Siblings from one answer carry the same
+  id, so "this verdict's call was paid on another row" is a join, not the
+  zero-token guess `joint_call_rows` makes today. A verdict no call produced
+  (`reverify-unchanged`, `verify-near-copy`, ingest, manual) has none, which
+  says so. Its token and cost columns are then cleared and dropped.
+- `review_gate_outcomes` reads cost through `query_id`; its copied columns
+  are dropped.
+- `ai_batches` keeps the batch lifecycle (status, requests, completed,
+  `est_tokens` for chunking). Its totals become a sum over the batch's calls.
+- `api_usage` is replaced, not pointed at: payer is a column of the call.
+  The weekly user budget is `SUM(total_tokens)` over the person's calls on
+  the owner key in seven days, and the fleet ceiling the same over calls with
+  no user (managed boards included, as today).
+- `ai_experiment_results` points at its call if experiments stay (stream I
+  decides whether they do).
+
+**Where a row is written.** Batch items in `batch_results.checkpoint`, the
+one place every collected result passes through, from the receipt and the
+batch: purpose and model from `ai_batches`, payer recorded on `ai_batches` at
+submission by whoever submits, never inferred from a task payload. That
+retires `charged_to_user` and the per-item `record_tokens` calls in
+consumers: a consumer that wrote a verdict did not make the call, the
+checkpoint saw it first, and a failed or superseded item is paid either way.
+Live calls are written by the live writers of `api.budget`, which every live
+caller already reaches with its payer, plus the admin manual check, which
+today writes a verdict and no usage row at all.
+
+**How pages read it.** /admin/spend's ledger, /admin/spend/calls and the
+budget read `model_calls`. The verdict diagnostics (by check type, reach,
+waste) join verdicts to their call and count each call once, so "calls"
+means provider requests and not rows. Every page keeps the one-pass shape
+(engineering-standards.md, `tests/test_spend_stats_single_pass.py`), and a
+switched read ships with a test that holds the new query equal to the old
+one on the same rows for the era where both are right.
+
+**Board spend counts calls, not fetches.** `routers/analytics._SPEND_SQL`
+reads `ledger_rows`, so a page fetch is a "call" with no price. Measured
+2026-10-10, all time, joined to `jobs`: 2,800,724 "calls", 67.0 percent
+priced. Without fetches: 1,889,467 and 99.4 percent; the remaining 0.6
+percent are verdicts no call produced. On the ledger: 1,384,802 calls, 100
+percent priced, the same dollars. A fetch costs bandwidth, not a model call,
+and showing it as an unpriced call reads as a gap in pricing that does not
+exist. `priced_coverage` moving from 67 to 100 is that correction, and the
+change says so on the page in the same release.
+
+**The sequence.** Each step ships alone and leaves every page showing what
+it showed.
+
+1. Expand: the table, `payer` on `ai_batches`, and `record` called from the
+   checkpoint and the live writers. `api_usage` and the copies are still
+   written. A test holds the ledger's rows for a collected batch equal to its
+   receipts, and its cost to `ai_batches.est_cost_usd`.
+2. Backfill, as a resumable task idempotent by predicate, one source per
+   era: receipts where they exist (2026-09-09 on); paid `ai_queries` rows for
+   verdict work before that; one row per batch with its request count for
+   batches that left neither (about $53, mostly mail and requirements before
+   receipts); `api_usage` only for live calls that wrote no verdict. Verdicts
+   get `model_call_id` in the same pass. Receipts are deleted with their
+   task, so this runs before the oldest of them expire.
+3. Switch reads one page at a time, each with its equality test. Windows
+   that reach before 2026-09-13 move down, because the old ledger
+   double-priced that era; that is stated on the page and to Kanishk before
+   the switch, not discovered after.
+4. Contract: stop the copies, then drop `api_usage`, the usage columns on
+   `ai_queries`, `review_gate_outcomes` and `job_embeddings`, and the totals
+   on `ai_batches`, each with the empty-then-drop sequence (migrations.md).
 
 ## What may be done unattended
 
