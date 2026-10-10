@@ -214,45 +214,6 @@ class AiBatchError(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
-class AiExperiment(Base):
-    """Runs of the removed admin experiments screen. Nothing reads or writes
-    it; experiments run from `api.run_experiment` and keep their answers in
-    files. Dropped once no running image names it."""
-
-    __tablename__ = "ai_experiments"
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    purpose: Mapped[str] = mapped_column(Text)
-    params: Mapped[Any] = mapped_column(JSONB)
-    status: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
-    created_by: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
-    )
-    task_id: Mapped[int | None] = mapped_column(BigInteger)
-    summary: Mapped[Any | None] = mapped_column(JSONB)
-    error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-    finished_at: Mapped[datetime.datetime | None] = mapped_column()
-
-
-class AiExperimentResult(Base):
-    """One arm's answer for one posting in an experiment."""
-
-    __tablename__ = "ai_experiment_results"
-    __table_args__ = (UniqueConstraint("experiment_id", "arm", "url"),)
-
-    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    experiment_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("ai_experiments.id", ondelete="CASCADE")
-    )
-    arm: Mapped[str] = mapped_column(Text)
-    url: Mapped[str] = mapped_column(Text)
-    output: Mapped[Any | None] = mapped_column(JSONB)
-    usage: Mapped[Any | None] = mapped_column(JSONB)
-    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
-    error: Mapped[str | None] = mapped_column(Text)
-
-
 class ApiUsage(Base):
     __tablename__ = "api_usage"
     __table_args__ = (
