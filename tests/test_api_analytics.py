@@ -205,46 +205,70 @@ def test_board_yield_counts_applications_per_source(client, admin_headers, f):
     assert row["board_yield"]["users"] == 1
 
 
+def _verify_call(url: str, model: str, batch: str = "b-verify") -> None:
+    """One paid verify request about this posting, through the ledger's writer."""
+    from api import model_calls
+
+    model_calls.record(
+        [
+            model_calls.Call(
+                "verify",
+                model,
+                model_calls.FLEET,
+                "server",
+                {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 100,
+                    "total_tokens": 1100,
+                    "cached_tokens": 0,
+                    "cache_write_tokens": 0,
+                },
+                provider_batch_id=batch,
+                custom_id=url,
+            )
+        ]
+    )
+
+
 def test_spend_sums_the_cost_recorded_at_call_time(client, admin_headers, f):
     """cost_usd is written when the call is made, against the price in force
     then. Summing it is the only reading that does not restate history when
     the price table changes."""
     f.make_source("spendy")
     _, url = f.make_ready_job(source="spendy")
-    db.execute("UPDATE ai_queries SET cost_usd = 0.25 WHERE url = %s AND model IS NOT NULL", (url,))
+    _verify_call(url, "gpt-5-mini")
+    db.execute("UPDATE model_calls SET cost_usd = 0.25")
 
     row = _row(client.get(ENDPOINT, headers=admin_headers).json(), "spendy")
-    priced = db.query_one(
-        "SELECT count(cost_usd) AS c, sum(cost_usd) AS s FROM ai_queries WHERE url = %s", (url,)
-    )
-    assert priced is not None
-    assert row["spend"]["cost_usd"] == pytest.approx(float(priced["s"]))
-    assert row["spend"]["priced_coverage"]["numerator"] == priced["c"]
+    assert row["spend"]["cost_usd"] == pytest.approx(0.25)
+    assert row["spend"]["calls"] == 1
+
+
+def test_spend_counts_calls_not_fetches_or_sibling_verdicts(client, admin_headers, f):
+    """One verify answer writes a closed and a clearance verdict and its page
+    was fetched first: one paid call. Counting every row read the fetch as an
+    unpriced call (67 percent priced on 2026-10-10 where 100 percent was)."""
+    f.make_source("counted")
+    _, url = f.make_ready_job(source="counted")
+    _verify_call(url, "gpt-5-mini")
+    row = _row(client.get(ENDPOINT, headers=admin_headers).json(), "counted")
+    assert row["spend"]["calls"] == 1
+    assert row["spend"]["priced_coverage"]["numerator"] == 1
 
 
 def test_spend_coverage_separates_unpriced_calls_from_free_ones(client, admin_headers, f):
-    """In production the scrape-only checks carry no model and no cost. Their
-    absence must read as "we do not know what this cost", not as a zero that
-    quietly understates the board's bill."""
+    """A model missing from the price table is a call whose cost nobody
+    knows, not a free one, and must not quietly understate the bill."""
     f.make_source("uncosted")
     _, url = f.make_ready_job(source="uncosted")
-    # This fixture represents two explicitly free checks, not missing usage.
-    db.execute(
-        "UPDATE ai_queries SET prompt_tokens=0, completion_tokens=0, cost_usd=0 "
-        "WHERE url=%s AND check_type IN ('closed','clearance')",
-        (url,),
-    )
-    db.execute(
-        "UPDATE ai_queries SET model = NULL, cost_usd = NULL "
-        "WHERE url = %s AND check_type = 'content'",
-        (url,),
-    )
+    _verify_call(url, "gpt-5-mini")
+    _verify_call(url, "some-unreleased-model", batch="b-later")
 
     row = _row(client.get(ENDPOINT, headers=admin_headers).json(), "uncosted")
     coverage = row["spend"]["priced_coverage"]
-    assert coverage["denominator"] == 3
-    assert coverage["numerator"] == 2
-    unpriced = [g for g in row["spend"]["by_model"] if g["model"] is None]
+    assert coverage["denominator"] == 2
+    assert coverage["numerator"] == 1
+    unpriced = [g for g in row["spend"]["by_model"] if g["model"] == "some-unreleased-model"]
     assert unpriced and unpriced[0]["cost_usd"] is None
 
 

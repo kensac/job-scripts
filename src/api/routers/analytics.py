@@ -128,33 +128,44 @@ FROM per_job GROUP BY source
 # "first verdict per posting" query is how the two readings would drift.
 _FIRST_CLOSED_SQL = signals.first_closed_sql()
 
-# cost_usd is summed, never recomputed. It is written at call time against the
-# price that was in force then, so re-deriving it on read would silently
-# restate history every time the price table changes.
+# What a board's postings cost to check: the paid calls that asked a check
+# about one of its postings, from the call ledger (model_calls). cost_usd is
+# summed, never recomputed: it is written at call time against the price in
+# force then, so re-deriving it on read would restate history every time the
+# price table changes.
 #
-# Grouped by model because a board's bill is only interpretable next to what
-# was run on it, and `priced` separates "this cost nothing" from "we do not
-# know what this cost": content and extraction rows carry no model and no
-# cost, and folding them into a zero would understate the bill.
-# ALL TIME, deliberately, and now said out loud in the response.
+# A call, not a row. One verify answer writes a closed, a clearance and
+# sometimes a board's custom verdict; it was one request and is counted once.
+# A page fetch is not a model call and is not counted: read over every row
+# ai_queries ever held, a board's "calls" included its fetches as unpriced,
+# 2,800,724 calls at 67.0 percent priced on 2026-10-10, against 1,384,802
+# paid calls at 100 percent with the same dollars.
 #
-# /admin/spend defaults to 30 days and this takes no window at all, so a reader
-# comparing the two was comparing a lifetime against a month with nothing on
-# either page saying so. Found by personal-portfolio-e3 while checking whether
-# the two spend figures could be reconciled - they cannot, and this was the
-# difference nobody could see.
+# A batch item's custom_id is the posting's url for the check purposes; a live
+# call backfilled from its verdict reaches the url through that verdict. A
+# live call recorded since the ledger began names no url and is not counted
+# here (about ten a week on 2026-10-10).
 #
-# All-time is the right window HERE: the question is whether a board has earned
-# its keep, which is a question about its whole life, not the last month.
+# `priced` separates "this cost nothing" from "we do not know what this
+# cost": a model missing from the price table is counted, never summed as zero.
+#
+# ALL TIME, deliberately, and said out loud in the response. /admin/spend
+# defaults to 30 days and this takes no window at all, so a reader comparing
+# the two was comparing a lifetime against a month with nothing on either page
+# saying so (found by personal-portfolio-e3). All-time is the right window
+# HERE: whether a board has earned its keep is a question about its whole life.
 _SPEND_SQL = """
-SELECT j.source AS source, a.model,
-       count(*) AS calls,
-       count(a.cost_usd) AS priced_calls,
-       sum(coalesce(a.total_tokens, 0)) AS total_tokens,
-       sum(a.cost_usd) AS cost_usd
-FROM ledger_rows a
-JOIN jobs j ON j.url = a.url
-GROUP BY j.source, a.model
+SELECT j.source AS source, m.model,
+       sum(m.requests) AS calls,
+       coalesce(sum(m.requests) FILTER (WHERE m.cost_usd IS NOT NULL), 0) AS priced_calls,
+       sum(m.total_tokens) AS total_tokens,
+       sum(m.cost_usd) AS cost_usd
+FROM model_calls m
+LEFT JOIN ai_queries q
+       ON m.source = 'verdict' AND m.provider_batch_id IS NULL AND q.id = m.source_id
+JOIN jobs j ON j.url = COALESCE(m.custom_id, q.url)
+WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
+GROUP BY j.source, m.model
 """
 
 # last_success_at is when the ingest last ran cleanly; jobs.last_loaded_at (from
@@ -402,8 +413,7 @@ class BoardDecay(BaseModel):
 
 
 class ModelSpend(BaseModel):
-    """`model` is null for the scrape-only checks, which record an attempt
-    rather than a judgement and carry neither a model nor a cost."""
+    """`model` is null only for a paid call whose model was never recorded."""
 
     model: str | None
     calls: int
@@ -423,7 +433,7 @@ class BoardSpend(BaseModel):
     `closed` row and writes the clearance verdict from the same response, so a
     split would read as though clearance were free on some paths.
     `priced_coverage` keeps "this cost nothing" apart from "we do not know what
-    this cost".
+    this cost". `calls` are paid provider requests: a page fetch is not one.
     """
 
     window: str
@@ -691,9 +701,9 @@ def _spend_summary(rows: list[_SpendRow], min_sample: int) -> BoardSpend:
         calls=calls,
         total_tokens=sum(r.total_tokens for r in rows),
         cost_usd=float(cost),
-        # Rows with no price are the scrape-only checks (content, extraction)
-        # and any model missing from the price table. Reporting coverage keeps
-        # "cheap" distinguishable from "partly unpriced".
+        # A call with no price is a model missing from the price table.
+        # Reporting coverage keeps "cheap" distinguishable from "partly
+        # unpriced".
         priced_coverage=_rate(priced_calls, calls, min_sample),
         by_model=[
             ModelSpend(
