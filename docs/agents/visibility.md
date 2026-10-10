@@ -3,20 +3,22 @@
 Who sees which posting, who owns a row, and the response shapes every list
 endpoint keeps to.
 
-## A board row is scope, not visibility
+## The working set is scope, not visibility
 
-`user_jobs` answers two questions and is named for one of them.
+Two tables, two questions.
 
-An UNTOUCHED row is the working set, and its own table is
-`user_job_working_set`. Paid scope (`core/store.py` `ON_A_BOARD`) reads that
-table plus person rows, so it does not depend on machine rows staying in
-`user_jobs`. It is also where the re-verification sweep finds its candidates. It does not make the posting visible: FULL admits an
-untouched row only through its structural branch, which never references
-`user_jobs`. Deleting one removes nothing from anybody's board.
+`user_job_working_set` is what a person's filters picked. `materialize_passing`
+writes it and `demote_closed` prunes it. Paid scope (`core/store.py`
+`ON_A_BOARD`) reads it plus person rows, and the re-verification sweep finds
+its candidates in it, leaving out a pair the person acted on. It does not make
+a posting visible: FULL admits a picked posting only through its structural
+branch. Deleting a pair removes nothing from anybody's board.
 
-A TOUCHED row, one carrying a status, a note or a date applied, is the
-person's. It is visible whatever the criteria or the verdicts say, and both
-`materialize_passing` and `demote_closed` leave it alone.
+`user_jobs` is what a person did: a status, a note, a date, a hide, or a
+tracking stamp (`person_touched_at`). A row with a status, a note or a date
+applied is visible whatever the criteria or the verdicts say. The worker
+wrote empty machine rows here too until 2026-10-10 (phase 2b); a legacy
+all-default row is working-set membership, not person state.
 
 Reading the first as the second is how a board question was answered wrongly
 on 2026-09-10. `tests/test_worker_board.py` pins the two apart.
@@ -78,8 +80,7 @@ the same `FAST` template.
 
 ## A board row is a grant only when the person acted on it
 
-The worker materialises an empty row for every posting that passes a person's
-filters. That row is bookkeeping, not a decision, so it obeys the whole
+A picked posting is bookkeeping, not a decision, so it obeys the whole
 predicate like any other posting: the person's criteria (locations, posted
 date) and the verdicts. The first version re-checked only the criteria, so
 a filter that later rejected a posting could not remove the row the earlier

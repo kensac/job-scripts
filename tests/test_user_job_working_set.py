@@ -68,11 +68,10 @@ def test_automated_materialization_does_not_mark_person_state(f):
     assert materialize_passing(user_id) == 1
     assert (
         db.query_one(
-            "SELECT person_touched_at FROM user_jobs WHERE user_id = %s AND job_id = %s",
-            (user_id, job_id),
-        )["person_touched_at"]
+            "SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s", (user_id, job_id)
+        )
         is None
-    )
+    ), "automated discovery writes the working set, never a person row"
 
 
 def test_an_accepted_noop_person_patch_marks_an_existing_legacy_row(client, user_headers, f):

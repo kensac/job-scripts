@@ -583,7 +583,8 @@ async def test_chunked_run_all_filters_lifecycle(set_config, monkeypatch, user_h
     board_urls = {
         r["url"]
         for r in db.query(
-            "SELECT j.url FROM user_jobs uj JOIN jobs j ON j.id = uj.job_id WHERE uj.user_id = %s",
+            "SELECT j.url FROM user_job_working_set ws JOIN jobs j ON j.id = ws.job_id "
+            "WHERE ws.user_id = %s",
             (user_id,),
         )
     }

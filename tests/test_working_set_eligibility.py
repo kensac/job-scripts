@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from api import db
 from core.store import AI_ELIGIBLE_JOB
 
@@ -32,14 +30,3 @@ def test_working_set_and_person_rows_each_carry_an_unsubscribed_posting(f):
 
     assert _eligible(AI_ELIGIBLE_JOB) == {picked, acted}
     assert neither not in _eligible(AI_ELIGIBLE_JOB)
-
-
-@pytest.mark.corpus
-def test_cutover_matches_the_legacy_predicate_on_the_corpus():
-    """Every corpus untouched row was written by materialize_passing, which
-    writes the working set beside it, as the split backfill does for legacy
-    rows. So the two predicates must agree here; on production the same
-    comparison is the PR's shadow SQL."""
-    old, new = _eligible(OLD_AI_ELIGIBLE), _eligible(AI_ELIGIBLE_JOB)
-    assert old, "the corpus must hold eligible postings or this compares nothing"
-    assert new == old
