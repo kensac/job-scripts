@@ -101,13 +101,21 @@ A 429 doubles the gap and defers the pull (`Deferred`: back to pending with
 same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
 Counted as a failure it would switch the board off.
 
-**A pace key can cover many hosts.** One WAF fronts the Eightfold tenants on
-whatever domain they serve, and once it challenged an address on 2026-10-05,
-Lockheed Martin, Northrop Grumman, CACI, PayPal and Netflix all answered 405
-for a few minutes (Microsoft's tenant did not). So every Eightfold page waits
-on the `eightfold.ai` entry of `ingest_host_pace_seconds`, not on its own
-host's. About 110 requests a minute from one address held for ten minutes;
-the limit itself was not measured.
+**A pace is kept under one key, and `core.fetching.hosts.pace_key` is the
+only thing that computes it.** The `host_budget` row a pull takes, the
+`ingest_host_pace_seconds` entry, the page pace inside a pull and a form
+read's budget all ask it, so a refusal learned by one is the pace of the
+others. A key can cover many hosts: Workday tenants are `myworkdayjobs.com`,
+every Greenhouse host is `boards-api.greenhouse.io`, and every Eightfold
+tenant is `eightfold.ai` whatever domain it serves from. One WAF fronts the
+Eightfold tenants, and once it challenged an address on 2026-10-05, Lockheed
+Martin, Northrop Grumman, CACI, PayPal and Netflix all answered 405 for a few
+minutes (Microsoft's tenant did not). About 110 requests a minute from one
+address held for ten minutes; the limit itself was not measured. A change to
+the key folds the rows kept under the old one in the same change, widest gap
+and summed counts, or they sit on the host budgets page and in the blocked
+detector forever (`bc1978f126b4`). A host matched against a URL prefix
+(`fetch_host_limits`) is the literal `hosts.hostname`, not the pace key.
 
 apply.workable.com refused 143 of 172 boards the hour a bundle first pulled,
 on one address two workers shared. That is why the row is per address, and why

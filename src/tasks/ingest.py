@@ -10,10 +10,10 @@ import asyncio
 import logging
 import re
 from typing import Any
-from urllib.parse import urlparse
 
 from api import db, filter_runs, hosts, metrics, queue, telemetry
 from api.ai import verdicts
+from core.fetching.hosts import pace_key
 from core.store import add_ai_result
 from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
@@ -52,7 +52,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         raise LookupError(queue.INACTIVE_SOURCE_ERROR)
 
     boards.set_pace(db.get_config("ingest_host_pace_seconds") or {})
-    host = hosts.host_of(source["listings_url"])
+    host = pace_key(source["listings_url"])
     # This address's slot for the host, or the task waits for it: the claim
     # checks the same row, so this is the race of two workers on one address.
     opens = hosts.take(host)
@@ -88,7 +88,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             "ingest_pull_failed",
             properties={
                 "source": source["name"],
-                "fetch_host": urlparse(source["listings_url"]).netloc.lower(),
+                "fetch_host": host,
                 "status": getattr(response, "status_code", None),
                 "error_class": type(exc).__name__,
                 "error": str(exc)[:500],

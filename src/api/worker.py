@@ -30,6 +30,7 @@ from api import (
     telemetry,
 )
 from api.queue import enqueue
+from core.fetching.hosts import pace_key
 from core.payload_objects import PayloadUnavailable
 from tasks import HANDLERS
 from tasks.runtime import (
@@ -254,7 +255,7 @@ def schedule_ingest_cycle() -> None:
             continue
         enqueue(
             "ingest_source",
-            {"source": s["name"], "cycle": cycle, "host": hosts.host_of(s["listings_url"])},
+            {"source": s["name"], "cycle": cycle, "host": pace_key(s["listings_url"])},
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
     # The other half of the query above: a source it no longer selects is

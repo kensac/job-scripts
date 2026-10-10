@@ -14,6 +14,9 @@ mind, with no number to maintain by hand. app_config ingest_host_pace_seconds
 is a FLOOR per host, never a ceiling; a host with no entry starts unpaced and
 learns its gap from its first refusal.
 
+A host here is core.fetching.hosts.pace_key of the URL the caller speaks to,
+so a platform that serves many hosts from one upstream is one row.
+
 Every worker in a container carries JOBTRACKER_EGRESS_GROUP naming the
 address it speaks from; without it the worker name stands in, which is right
 for a host running one worker and wrong for a box running two.
@@ -24,7 +27,6 @@ from __future__ import annotations
 import datetime
 import os
 import socket
-from urllib.parse import urlparse
 
 from api import db
 
@@ -41,17 +43,6 @@ CAP_SECONDS = 900.0
 # How much of the gap a success gives back. 0.9 takes a 30 s gap to under
 # 5 s in twenty good pulls and never below the floor.
 DECAY = 0.9
-
-
-def host_of(url: str) -> str:
-    host = urlparse(url).netloc.lower()
-    # Workday tenants have distinct subdomains but share one upstream
-    # platform. A budget per tenant lets a single egress address issue one
-    # simultaneous burst per company and never learn from another tenant's
-    # refusal. Keep one adaptive clock for the platform instead.
-    if host == "myworkdayjobs.com" or host.endswith(".myworkdayjobs.com"):
-        return "myworkdayjobs.com"
-    return host
 
 
 def floor_for(host: str) -> float:

@@ -34,8 +34,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from core.fetching.ats import (
-    EIGHTFOLD_PCSX,
-    EIGHTFOLD_V2,
     ashby_text,
     clean_html,
     goldman_place,
@@ -44,6 +42,7 @@ from core.fetching.ats import (
     join,
     lever_text,
 )
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2, pace_key
 from core.fetching.listings import fetch_job_postings
 from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
@@ -600,7 +599,8 @@ def _oracle(url: str, company: str) -> list[JobPosting]:
             return out
 
 
-# Host -> seconds between requests from this process. apply.workable.com
+# Pace key (core.fetching.hosts) -> seconds between requests from this
+# process, the same key the pull's host_budget row is. apply.workable.com
 # answers 429 to a burst: 143 of 172 boards failed the hour the bundle first
 # pulled (2026-09-05), and six seconds was not enough where two workers share
 # one egress address. The values are app_config ingest_host_pace_seconds,
@@ -615,7 +615,8 @@ def set_pace(hosts: dict) -> None:
     _PACE_SECONDS.update({str(h): float(s) for h, s in (hosts or {}).items() if s})
 
 
-def _pace(host: str) -> None:
+def _pace(url: str) -> None:
+    host = pace_key(url)
     wait = _PACE_SECONDS.get(host)
     if not wait:
         return
@@ -637,7 +638,7 @@ def _workable(url: str, company: str) -> list[JobPosting]:
     body: dict = {"query": "", "location": [], "department": [], "worktype": [], "remote": []}
     out: list[JobPosting] = []
     while True:
-        _pace("apply.workable.com")
+        _pace(url)
         resp = _session.post(url, json=body, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
@@ -683,7 +684,7 @@ def _apple(url: str, company: str) -> list[JobPosting]:
     """
 
     def page(number: int) -> tuple[list[dict], int]:
-        _pace("jobs.apple.com")
+        _pace(url)
         resp = _session.post(
             url,
             # Without "format" every page is empty and says totalRecords 0,
@@ -1142,15 +1143,6 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     return out
 
 
-# Eightfold's two careers-site generations live in core.fetching.ats beside
-# the resolver, which recognises a tenant by its listings URL the same way.
-# One pace for every tenant, whatever domain it serves from: one AWS WAF fronts
-# them, and once it challenged an address on 2026-10-05 Lockheed, Northrop,
-# CACI, PayPal and Netflix all answered 405 with x-amzn-waf-action: captcha
-# for a few minutes (Microsoft's did not). See ingest_host_pace_seconds.
-_EIGHTFOLD_PACE = "eightfold.ai"
-
-
 def _eightfold(url: str, company: str) -> list[JobPosting]:
     """GET https://{host}/api/pcsx/search?domain={domain}
     or  https://{host}/api/apply/v2/jobs?domain={domain}
@@ -1176,7 +1168,7 @@ def _eightfold(url: str, company: str) -> list[JobPosting]:
     stated = 0
     start = 0
     while True:
-        _pace(_EIGHTFOLD_PACE)
+        _pace(url)
         resp = _session.get(_with_query(url, start=str(start)), timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
@@ -1227,7 +1219,7 @@ def _avature(url: str, company: str) -> list[JobPosting]:
     incomplete = False
     page_url: str | None = url
     while page_url:
-        _pace(urlparse(page_url).netloc)
+        _pace(page_url)
         resp = _session.get(page_url, timeout=TIMEOUT)
         if resp.status_code == 406 and seen:
             # Past the window (below); the rest are unseen, not closed.
@@ -1366,7 +1358,7 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     seen: dict[str, JobPosting] = {}
     page_no = total = last = 1
     while True:
-        _pace(parsed.netloc)
+        _pace(url)
         resp = _session.post(
             f"{endpoint}?lang={lang}&portal={portal}",
             json={

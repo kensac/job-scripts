@@ -190,13 +190,6 @@ class TestReadingTheForm:
         from api import db, hosts
         from tasks import application as drafts
 
-        assert forms.budget_host("https://job-boards.greenhouse.io/x/jobs/1") == (
-            "boards-api.greenhouse.io"
-        )
-        assert forms.budget_host("https://boards.greenhouse.io/x/jobs/1") == (
-            "boards-api.greenhouse.io"
-        )
-        assert forms.budget_host("https://jobs.lever.co/x/1") == "jobs.lever.co"
         monkeypatch.setattr(forms, "_get", lambda url: GREENHOUSE)
         db.execute(
             "INSERT INTO host_budget (host, egress_group, pace_seconds, next_allowed_at) "

@@ -29,22 +29,30 @@ def _budget(host, egress):
     )
 
 
-def test_workday_tenants_share_one_budget_host():
-    from core.fetching import forms
+def test_a_platform_is_one_pace_key_whichever_host_it_serves_from():
+    from core.fetching.hosts import pace_key
 
     boeing = "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/jobs"
     nvidia = "https://nvidia.wd5.myworkdayjobs.com/en-US/jobs/job/engineer/apply"
+    northrop = "https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com"
+    caci = "https://caci.eightfold.ai/api/pcsx/search?domain=caci.com"
+    microsoft = "https://apply.careers.microsoft.com/api/apply/v2/jobs?domain=microsoft.com"
 
-    assert hosts.host_of(boeing) == "myworkdayjobs.com"
-    assert hosts.host_of(nvidia) == "myworkdayjobs.com"
-    assert forms.budget_host(boeing) == "myworkdayjobs.com"
-    assert forms.budget_host(nvidia) == "myworkdayjobs.com"
-    assert hosts.host_of("https://api.ashbyhq.com/posting-api/job-board/acme") == (
-        "api.ashbyhq.com"
-    )
+    assert pace_key(boeing) == pace_key(nvidia) == "myworkdayjobs.com"
+    # One WAF fronts every Eightfold tenant, so a pull's budget row is the key
+    # its pages wait on, not the tenant's own host.
+    assert pace_key(northrop) == pace_key(caci) == pace_key(microsoft) == "eightfold.ai"
+    for greenhouse in (
+        "https://job-boards.greenhouse.io/x/jobs/1",
+        "https://boards.greenhouse.io/x/jobs/1",
+        "https://boards-api.greenhouse.io/v1/boards/x/jobs",
+    ):
+        assert pace_key(greenhouse) == "boards-api.greenhouse.io"
+    assert pace_key("https://jobs.lever.co/x/1") == "jobs.lever.co"
+    assert pace_key("https://API.ashbyhq.com:443/posting-api/job-board/acme") == ("api.ashbyhq.com")
     _config("ingest_host_pace_seconds", {"myworkdayjobs.com": 1})
-    assert hosts.take(hosts.host_of(boeing), "shared-address") is None
-    assert hosts.take(hosts.host_of(nvidia), "shared-address") is not None
+    assert hosts.take(pace_key(boeing), "shared-address") is None
+    assert hosts.take(pace_key(nvidia), "shared-address") is not None
 
 
 def test_a_slot_is_taken_once_per_gap_and_the_gap_learns():
@@ -164,7 +172,7 @@ async def test_a_waf_challenge_is_a_refusal_not_a_failed_pull(monkeypatch, f):
     )
     task_id = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('ingest_source', %s, 'running') RETURNING id",
-        (db.jsonb({"source": "ngc", "host": "jobs.northropgrumman.com"}),),
+        (db.jsonb({"source": "ngc", "host": "eightfold.ai"}),),
     )["id"]
     resp = requests.Response()
     resp.status_code = 405
@@ -178,7 +186,9 @@ async def test_a_waf_challenge_is_a_refusal_not_a_failed_pull(monkeypatch, f):
     monkeypatch.setattr(boards, "fetch_listings", challenge)
     with pytest.raises(Deferred):
         await ingest.handle_ingest_source(task_id, {"source": "ngc"})
-    assert _budget("jobs.northropgrumman.com", hosts.EGRESS_GROUP)["refused"] == 1
+    # The WAF fronts every tenant, so the refusal widens the gap they share.
+    assert _budget("eightfold.ai", hosts.EGRESS_GROUP)["refused"] == 1
+    assert _budget("jobs.northropgrumman.com", hosts.EGRESS_GROUP) is None
 
 
 def test_an_idle_worker_beside_only_throttled_or_deferred_work_is_not_stalled(f):

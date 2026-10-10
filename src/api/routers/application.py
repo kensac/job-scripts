@@ -27,6 +27,7 @@ from api.models import Ok
 from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
 from core.answers import DEFAULT_STYLE
 from core.fetching import forms
+from core.fetching.hosts import hostname
 from core.store import get_content
 
 router = APIRouter()
@@ -317,7 +318,7 @@ def get_application(job_id: int, user: AuthedUser = Depends(require_user)) -> Ap
         job=JobRef(**job),
         form=FormState(
             supported=forms.supported(job["url"]),
-            host=forms.host_of(job["url"]),
+            host=hostname(job["url"]),
             fetched_at=(form or {}).get("fetched_at"),
             error=(form or {}).get("error"),
             questions=len(asked),

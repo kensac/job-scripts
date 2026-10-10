@@ -7,13 +7,13 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
-from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
 from api import ai, db, metrics, telemetry
 from api.ai import AIConfig
 from core import pricing
+from core.fetching.hosts import hostname
 from core.store import add_ai_result, add_ai_results, ai_result_row
 
 logger = logging.getLogger(__name__)
@@ -253,7 +253,7 @@ def host_paced(url: str) -> bool:
     32) is drip-fed at the rate it tolerates instead of being pulled off.
     """
     limits = db.get_config("fetch_host_limits") or {}
-    host = urlparse(url).netloc.lower()
+    host = hostname(url)
     per_hour = limits.get(host)
     if not per_hour:
         return False
@@ -466,7 +466,7 @@ async def refresh_content(
         )
         telemetry.capture(
             "fetch_failed",
-            properties={"url": url, "fetch_host": urlparse(url).netloc.lower(), "context": context},
+            properties={"url": url, "fetch_host": hostname(url), "context": context},
         )
     return content, None
 

@@ -16,6 +16,8 @@ import ftfy
 import requests
 from bs4 import BeautifulSoup
 
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
+
 logger = logging.getLogger(__name__)
 
 TIMEOUT = 20.0
@@ -695,14 +697,6 @@ class Ibm(AtsResolver):
         if resp.status_code in (301, 302) and location.endswith("/careers/Error"):
             return AtsResult(Status.GONE, source=self.name)
         return UNSUPPORTED
-
-
-# Eightfold's two careers-site generations, as the path of a listings URL. A
-# tenant answers one and refuses the other with 403 ("Not authorized for PCSX"
-# on v2, "PCSX is not enabled" on pcsx). core.fetching.boards reads the same
-# two paths to pick its fetcher.
-EIGHTFOLD_PCSX = "/api/pcsx/search"
-EIGHTFOLD_V2 = "/api/apply/v2/jobs"
 
 
 class Eightfold(AtsResolver):
