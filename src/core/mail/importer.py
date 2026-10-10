@@ -35,20 +35,10 @@ from html import unescape
 from pathlib import Path
 from xml.etree import ElementTree
 
-# Bodies are stored to be read by a model and by a human in the debug view.
-# Past this length a job email is quoted history, signatures and legal
-# boilerplate, none of which changes a classification - and the tail is what
-# makes 38,685 messages expensive.
+# Bodies are stored whole: always retain all data
+# (docs/agents/engineering-standards.md). A reader that feeds a model or a
+# display bounds what it reads, not what is kept.
 logger = logging.getLogger(__name__)
-
-MAX_BODY_CHARS = 20_000
-
-# Markup is mostly tags, so the same cap applied to HTML would keep far less
-# readable text than it does for plain text. Measured over 592 untruncated
-# .olm bodies, the markup-to-text size ratio is 5.2x at the median and 15.7x
-# at p90, so sixteen times the text cap preserves the FULL readable body for
-# about nine messages in ten while still bounding a pathological one.
-MAX_HTML_CHARS = MAX_BODY_CHARS * 16
 
 _WS = re.compile(r"[ \t]+")
 _BLANKS = re.compile(r"\n{3,}")
@@ -183,7 +173,7 @@ def _olm_body(body: str | None, html: str | None) -> tuple[str | None, str | Non
     markup = html or body
     if not markup:
         return None, None
-    return html_to_text(markup)[:MAX_BODY_CHARS] or None, markup[:MAX_HTML_CHARS]
+    return html_to_text(markup) or None, markup
 
 
 def _part_content(msg: Message, kind: str) -> str | None:
@@ -226,7 +216,7 @@ def _body(msg: Message) -> tuple[str | None, str | None]:
         if not isinstance(payload, bytes):
             return None, None
         text = payload.decode("utf-8", errors="replace")
-    return clean_text(text)[:MAX_BODY_CHARS] or None, (html[:MAX_HTML_CHARS] if html else None)
+    return clean_text(text) or None, html or None
 
 
 def parse_sent_at(raw: str | None) -> datetime | None:
@@ -435,7 +425,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
             to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
             subject=_clean_header(_olm_text(node, "OPFMessageCopySubject")),
             sent_at=_olm_sent_at(node),
-            body_text=(clean_text(text)[:MAX_BODY_CHARS] if text else None),
+            body_text=(clean_text(text) if text else None),
             body_html=html_source,
         )
 
