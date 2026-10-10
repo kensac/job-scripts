@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import db
+from api import db, user_settings
 from api.apply.writes import PURPOSE as PURPOSE
 from core.answers import DEFAULT_STYLE
 
@@ -131,5 +131,4 @@ def resume_text(user_id: int, resume_id: int | None) -> str | None:
 
 
 def writing_style(user_id: int) -> str | None:
-    row = db.query_one("SELECT writing_style FROM user_settings WHERE user_id = %s", (user_id,))
-    return (row or {}).get("writing_style") or None
+    return user_settings.writing_style(user_id)

@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from api import db
+from api import db, user_settings
 from api.ai import verdicts
 from api.board import criteria as board_criteria
 from core import verdict_reads
@@ -552,17 +552,14 @@ def _managed_board(job: dict[str, Any], board: dict[str, Any], gate: VolumeGate)
 def _filters(
     job: dict[str, Any], user_id: int, gate: VolumeGate, owner: str | None
 ) -> list[ConsumerPath]:
-    settings = db.query_one(
-        "SELECT criteria, bypass_sponsorship_filter FROM user_settings WHERE user_id = %s",
-        (user_id,),
-    )
+    settings = user_settings.criteria(user_id)
     subscribed = job["uploaded_by"] == user_id or bool(
         db.query_one(
             "SELECT 1 FROM user_sources WHERE user_id = %s AND source = %s",
             (user_id, job["source"]),
         )
     )
-    bypass = settings["bypass_sponsorship_filter"] if settings else True
+    bypass = settings.bypass_sponsorship_filter
     paths = []
     for f in db.query(
         "SELECT id, name, prompt_hash FROM user_filters WHERE user_id = %s AND enabled ORDER BY id",
@@ -579,7 +576,9 @@ def _filters(
                 )
             )
         else:
-            steps.append(_criteria_step(job, board_criteria.params(settings)))
+            steps.append(
+                _criteria_step(job, board_criteria.params({"criteria": settings.criteria}))
+            )
             if volume := _volume_step(job, gate, f["prompt_hash"]):
                 steps.append(volume)
             if review := _review_step(job, "filter_id", f["id"]):

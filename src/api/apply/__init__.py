@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, user_settings
 
 DECLINE = "Decline to self-identify"
 
@@ -444,8 +444,7 @@ def _pick_one(value: str, options: list[str]) -> str | None:
 
 
 def load_profile(user_id: int) -> Profile:
-    row = db.query_one("SELECT profile FROM user_settings WHERE user_id = %s", (user_id,))
-    return Profile.model_validate((row or {}).get("profile") or {})
+    return Profile.model_validate(user_settings.profile(user_id))
 
 
 def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[ResolvedField]:

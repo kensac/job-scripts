@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from api import crypto, db, model_calls
+from api import crypto, db, model_calls, user_settings
 from api.auth import AuthedUser
 from core import pricing, providers, routing
 
@@ -112,15 +112,11 @@ def spent_this_week(user_id: int) -> int:
 
 def get_entitlement(user: AuthedUser) -> Entitlement:
     owner, weekly = _owner_budget(user.groups)
-    settings = db.query_one(
-        "SELECT api_key_enc IS NOT NULL AS has_key FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
     return Entitlement(
         owner_key=owner,
         weekly_token_budget=weekly,
         spent_this_week=spent_this_week(user.id) if owner else 0,
-        has_byo_key=bool(settings and settings["has_key"]),
+        has_byo_key=user_settings.has_own_key(user.id),
         groups=list(user.groups),
     )
 
@@ -158,27 +154,20 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
 
     from api import ai
 
-    settings = (
-        db.query_one(
-            "SELECT api_key_enc, ai_provider, ai_base_url, ai_model, ai_params "
-            "FROM user_settings WHERE user_id = %s",
-            (user_id,),
-        )
-        or {}
-    )
-    params = settings.get("ai_params") or {}
+    creds = user_settings.credentials(user_id)
+    params = creds.ai_params
 
-    if entitlement.has_byo_key and settings.get("api_key_enc"):
-        provider = settings.get("ai_provider") or "openai"
-        model = settings.get("ai_model") or ai.DEFAULT_MODELS.get(provider)
+    if entitlement.has_byo_key and creds.api_key_enc:
+        provider = creds.ai_provider
+        model = creds.ai_model or ai.DEFAULT_MODELS.get(provider)
         if not model:
             raise AIConfigUnavailable("NO_MODEL", entitlement)
         return ai.AIConfig(
             provider=provider,
-            api_key=crypto.decrypt(settings["api_key_enc"]),
+            api_key=crypto.decrypt(creds.api_key_enc),
             key_source="byo",
             model=model,
-            base_url=settings.get("ai_base_url"),
+            base_url=creds.ai_base_url,
             params=params,
         )
     if entitlement.owner_key:
@@ -188,7 +177,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
         ):
             raise AIBudgetExceeded(BUDGET_EXCEEDED, entitlement)
         allowed = owner_allowed_models(entitlement.groups or [])
-        chosen = settings.get("ai_model")
+        chosen = creds.ai_model
         model = chosen
         substituted_from = reason = None
         if model not in allowed:

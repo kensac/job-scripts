@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass
 
-from api import db
+from api import db, user_settings
 from api.board.person_state import UNTOUCHED
 from core.store import SUBSCRIBED_SOURCE
 
@@ -230,7 +230,7 @@ def report() -> ShadowReport:
                        AS old_candidates,
                    (SELECT COUNT(*) FROM user_job_working_set ws WHERE ws.user_id = u.id)
                        AS cannot_tell
-            FROM users u LEFT JOIN user_settings s ON s.user_id = u.id
+            FROM users u {user_settings.join("s", "u.id")}
             WHERE EXISTS (SELECT 1 FROM legacy_pairs p WHERE p.user_id = u.id)
                OR EXISTS (SELECT 1 FROM proposed_pairs p WHERE p.user_id = u.id)
         )

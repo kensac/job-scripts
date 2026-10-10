@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import ai, db, model_calls
+from api import ai, db, model_calls, user_settings
 from api.auth import AuthedUser
 from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
@@ -25,28 +25,14 @@ def _recheck_models(user: AuthedUser) -> list[str]:
 
 def _recheck_defaults(user_id: int) -> dict[str, str]:
     """Per check option, the model this person last chose for a re-check.
-    Lives in user_settings.prefs so it needs no schema and travels with the
+    Lives in the person's prefs so it needs no schema and travels with the
     rest of their preferences."""
-    row = db.query_one("SELECT prefs FROM user_settings WHERE user_id = %s", (user_id,))
-    prefs = (row or {}).get("prefs") or {}
-    defaults = prefs.get("recheck_models") or {}
+    defaults = user_settings.prefs(user_id).get("recheck_models") or {}
     return {k: v for k, v in defaults.items() if isinstance(v, str)}
 
 
 def _remember_recheck_model(user_id: int, check: str, model: str) -> None:
-    db.execute(
-        """
-        INSERT INTO user_settings (user_id, prefs)
-        VALUES (%(uid)s, jsonb_build_object('recheck_models', jsonb_build_object(%(check)s::text, %(model)s::text)))
-        ON CONFLICT (user_id) DO UPDATE SET prefs =
-            COALESCE(user_settings.prefs, '{}'::jsonb)
-            || jsonb_build_object('recheck_models',
-                 COALESCE(user_settings.prefs->'recheck_models', '{}'::jsonb)
-                 || jsonb_build_object(%(check)s::text, %(model)s::text)),
-            updated_at = now()
-        """,
-        {"uid": user_id, "check": check, "model": model},
-    )
+    user_settings.merge_pref(user_id, "recheck_models", check, model)
 
 
 class RecheckOptions(BaseModel):

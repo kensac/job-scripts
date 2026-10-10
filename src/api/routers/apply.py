@@ -20,6 +20,7 @@ from api import (
     db,
     events,
     telemetry,
+    user_settings,
 )
 from api.ai import access as ai_access
 from api.apply import drafting as drafts
@@ -334,13 +335,7 @@ def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)) -> a
         (body.default_resume_id, user.id),
     ):
         body.default_resume_id = None
-    db.execute(
-        """
-        INSERT INTO user_settings (user_id, profile, updated_at) VALUES (%s, %s, now())
-        ON CONFLICT (user_id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = now()
-        """,
-        (user.id, db.jsonb(body.model_dump())),
-    )
+    user_settings.save_profile(user.id, body.model_dump())
     return body
 
 

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
-from api.board import criteria, visibility
+from api.board import eligibility, visibility
 from api.board.access import require_visible_job
 from api.problem import refuse
 from core.requirements import (
@@ -153,16 +153,10 @@ def _slice_sql(body: str) -> str:
 
 
 def _params(user: AuthedUser, seniority: str | None, employment_type: str | None) -> dict[str, Any]:
-    settings = db.query_one(
-        "SELECT bypass_sponsorship_filter, criteria FROM user_settings WHERE user_id = %s",
-        (user.id,),
-    )
     return {
-        "uid": user.id,
-        "bypass_sponsorship": settings["bypass_sponsorship_filter"] if settings else True,
+        **eligibility.settings_params(user.id),
         "seniority": seniority,
         "employment_type": employment_type,
-        **criteria.params(settings),
     }
 
 

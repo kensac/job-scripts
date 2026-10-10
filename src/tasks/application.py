@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import ai, budget, db, hosts
+from api import ai, budget, db, hosts, user_settings
 from api.apply import writes as application_writes
 from api.apply.drafting import Draft, instructions, question_input, resume_text, writing_style
 from api.board import visibility
@@ -140,10 +140,10 @@ def ensure_answer_rows(
 def auto_draft(user_id: int) -> bool:
     """Whether the sweep drafts for this person. On unless they turned it off
     (prefs.auto_draft = false); the resume is what opts a person in."""
-    row = db.query_one(
-        "SELECT prefs->>'auto_draft' AS v FROM user_settings WHERE user_id = %s", (user_id,)
-    )
-    return (row or {}).get("v") != "false"
+    # JSON false and the string "false" both read 'false' through ->>, which
+    # is what this asked before it read prefs through the owner.
+    value = user_settings.prefs(user_id).get("auto_draft")
+    return value is not False and value != "false"
 
 
 def _set_draft_progress(task_id: int, label: str, minimum_total: int) -> None:
