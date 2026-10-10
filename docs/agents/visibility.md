@@ -99,6 +99,13 @@ cap, resets weekly) and names the way past it: the person's own key,
 under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
+**"Is this person an admin" has one answer: `api.auth.is_admin(groups)`.**
+It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`), and
+`require_admin` is that test as a route dependency. Code never names the
+group: the signup gate and the health alert recipients each hard-coded
+`infra-admins` and ignored the variable, so renaming the group would have
+moved admin routes and left signups and alert mail behind.
+
 **A non-admin's board keeps postings at most 30 days old.** The age window
 (`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
 and 30 at most; a wider value is refused at the write (400 `MAX_AGE_DAYS`)

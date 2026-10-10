@@ -124,6 +124,22 @@ def test_admin_signups_toggle_blocks_new_but_not_existing(client, admin_headers,
     assert still_ok.status_code == 200
 
 
+def test_closed_signups_admit_the_configured_admin_groups(client, admin_headers, monkeypatch):
+    from api import auth
+
+    client.put("/v1/admin/config/signups_enabled", json={"value": False}, headers=admin_headers)
+    monkeypatch.setattr(auth, "ADMIN_GROUPS", frozenset({"ops"}))
+    renamed = client.post(
+        "/v1/users/bootstrap", headers=_headers("ops-admin", "ops@example.com", ["ops"])
+    )
+    assert renamed.status_code == 200
+    stale = client.post(
+        "/v1/users/bootstrap",
+        headers=_headers("old-admin", "old@example.com", ["infra-admins"]),
+    )
+    assert stale.status_code == 403
+
+
 def test_admin_group_budgets_roundtrip(client, admin_headers):
     put = client.put(
         "/v1/admin/group-budgets/test-group",

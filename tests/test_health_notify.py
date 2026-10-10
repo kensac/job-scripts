@@ -68,4 +68,20 @@ def test_no_admins_leaves_it_unrecorded(alert_row, monkeypatch, caplog):
     monkeypatch.setattr(db, "query", lambda *a, **k: [])
     health_task._notify(_fresh(alert_row))
     assert _notified(alert_row) is None
-    assert "no infra-admins" in caplog.text
+    assert "no admins with an address" in caplog.text
+
+
+def test_alerts_go_to_the_configured_admin_groups(alert_row, monkeypatch):
+    """The recipients come from JOBTRACKER_ADMIN_GROUPS, not a literal group name.
+    A member of only the default group must not be mailed once it is renamed."""
+    from api import auth
+    from tests import factories as f
+
+    f.make_user(email="ops@example.com", groups=["ops"])
+    f.make_user(email="old@example.com", groups=["infra-admins"])
+    monkeypatch.setattr(auth, "ADMIN_GROUPS", frozenset({"ops"}))
+    sent: list[str] = []
+    monkeypatch.setattr("api.mail.configured", lambda: True)
+    monkeypatch.setattr("api.mail.send_health_alert", lambda to, alerts: sent.append(to))
+    health_task._notify(_fresh(alert_row))
+    assert sent == ["ops@example.com"]

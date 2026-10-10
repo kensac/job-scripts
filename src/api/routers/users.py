@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api import ai, budget, crypto, db
-from api.auth import AuthedUser, require_service, require_user
+from api.auth import AuthedUser, is_admin, require_service, require_user
 from api.board import visibility
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
 from core import providers as core_providers
@@ -95,7 +94,7 @@ def _grants(user: AuthedUser) -> Grants:
         owner_key_models=budget.owner_allowed_models(user.groups) if ent.owner_key else [],
         limits=GrantLimits(
             enabled_filters=1,
-            max_age_days=None if _is_admin(user.groups) else MAX_AGE_CAP_DAYS,
+            max_age_days=None if is_admin(user.groups) else MAX_AGE_CAP_DAYS,
         ),
     )
 
@@ -457,20 +456,11 @@ _SETTINGS_DEFAULTS = {
 # 30 when they set nothing, never more (Kanishk, 2026-09-08). Checked where
 # the criteria are written; the same groups gate the admin routes.
 MAX_AGE_CAP_DAYS = 30
-_ADMIN_GROUPS = {
-    g.strip()
-    for g in os.environ.get("JOBTRACKER_ADMIN_GROUPS", "infra-admins").split(",")
-    if g.strip()
-}
-
-
-def _is_admin(groups: list[str] | None) -> bool:
-    return bool(_ADMIN_GROUPS.intersection(groups or []))
 
 
 @router.put("/user/settings")
 def put_settings(body: SettingsPut, user: AuthedUser = Depends(require_user)) -> UserSettingsSaved:
-    if body.criteria is not None and not _is_admin(user.groups):
+    if body.criteria is not None and not is_admin(user.groups):
         if (body.criteria.max_age_days or 0) > MAX_AGE_CAP_DAYS:
             raise HTTPException(
                 400,

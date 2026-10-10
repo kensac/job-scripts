@@ -34,7 +34,7 @@ from api.routers.admin import (
     user_job_populations,
     working_set_shadow,
 )
-from api.routers.admin.shared import ADMIN_GROUPS, require_admin
+from api.routers.admin.shared import require_admin
 
 router = APIRouter(prefix="/admin")
 
@@ -54,4 +54,4 @@ router.include_router(queries.router)
 router.include_router(review_gates.router)
 router.include_router(extension.router)
 
-__all__ = ["ADMIN_GROUPS", "require_admin", "router"]
+__all__ = ["require_admin", "router"]
