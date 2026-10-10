@@ -47,7 +47,7 @@ def observations(
                 )
                 rows = db.query(
                     "SELECT DISTINCT ON (p.url) p.* FROM job_profiles p "
-                    "JOIN ai_queries q ON q.id = p.content_row_id "
+                    "JOIN page_texts q ON q.id = p.content_row_id "
                     "JOIN unnest(%s::text[], %s::text[]) AS inputs(url, content) "
                     "ON inputs.url = p.url AND inputs.content = q.input_content "
                     "WHERE p.classifier_version = %s AND p.model = %s "

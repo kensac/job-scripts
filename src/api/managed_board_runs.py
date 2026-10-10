@@ -211,9 +211,8 @@ def _candidates(board: _Board) -> list[_Candidate]:
                content.id AS content_query_id, content.input_content AS content
         FROM jobs j
         LEFT JOIN LATERAL (
-          SELECT q.id, q.input_content FROM ai_queries q
-          WHERE q.url = j.url AND q.check_type = 'content'
-            AND q.status = 'passed' AND q.input_content IS NOT NULL
+          SELECT q.id, q.input_content FROM page_texts q
+          WHERE q.url = j.url AND NOT q.on_verdict
           ORDER BY q.id DESC LIMIT 1
         ) content ON true
         WHERE j.source = ANY(%(sources)s)

@@ -108,8 +108,7 @@ async def _handle_managed_filter(
         row.id: row.input_content
         for row in db.query_as(
             _Content,
-            "SELECT id, input_content FROM ai_queries "
-            "WHERE id = ANY(%s) AND check_type = 'content'",
+            "SELECT id, input_content FROM page_texts WHERE id = ANY(%s) AND NOT on_verdict",
             (content_ids,),
         )
     }
