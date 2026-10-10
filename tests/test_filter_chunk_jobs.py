@@ -33,6 +33,18 @@ def _texts() -> dict[int, str]:
     return {row["id"]: row["t"] for row in db.query("SELECT id, payload::text AS t FROM tasks")}
 
 
+def _filter(prompt_hash: str) -> int:
+    return run_configs.intern(
+        run_configs.FILTER,
+        {
+            "name": "test",
+            "prompt": "criteria",
+            "on_ambiguous": "filter",
+            "prompt_hash": prompt_hash,
+        },
+    )
+
+
 def _jobs(*names: str) -> list[dict]:
     return [{"url": f"https://{n}", "company": f"Co {n}", "title": f"Role {n}"} for n in names]
 
@@ -40,7 +52,7 @@ def _jobs(*names: str) -> list[dict]:
 def _chunk(jobs, *, uid=7, prompt_hash="criteria", status="running", kind=None, **extra):
     return make_task(
         kind or "run_filter_batch_chunk",
-        {"user_id": uid, "filter": {"prompt_hash": prompt_hash}, "jobs": jobs, **extra},
+        {"user_id": uid, "config_id": _filter(prompt_hash), "jobs": jobs, **extra},
         status=status,
     )
 
@@ -63,7 +75,7 @@ def test_sql_readers_see_the_urls_of_a_referenced_chunk():
         "run_filter_batch_chunk",
         {
             "user_id": 7,
-            "filter": {"prompt_hash": "criteria"},
+            "config_id": _filter("criteria"),
             "urls": ["https://a", "https://b"],
             **referenced,
         },
@@ -134,7 +146,6 @@ async def test_batch_chunk_handler_reads_its_jobs_from_the_reference(objects, mo
     _reference_every_chunk(objects)
     payload = _payload(task)
     assert "jobs" not in payload
-    payload["filter"].update(name="test", prompt="criteria", on_ambiguous="filter")
     cfg = ai.AIConfig("openai", "test", "owner", "m")
     monkeypatch.setattr(filters, "load_config", lambda *args: (None, cfg))
     monkeypatch.setattr(filters.batch_policy, "transport", lambda *args: "batch")

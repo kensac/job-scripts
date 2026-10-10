@@ -26,17 +26,15 @@ def test_a_row_whose_body_does_not_match_its_digest_is_refused():
         run_configs.intern(run_configs.FILTER, body)
 
 
-def test_readers_take_settings_from_config_id_or_from_an_old_copy():
+def test_readers_take_settings_from_config_id():
     flt = {"name": "n", "prompt": "p", "on_ambiguous": "keep", "prompt_hash": "h"}
-    assert run_configs.filter_of({"filter": flt}) == flt
-    stored = {"config_id": run_configs.intern(run_configs.FILTER, flt)}
-    assert run_configs.filter_of(stored) == flt
+    assert run_configs.filter_of({"config_id": run_configs.intern(run_configs.FILTER, flt)}) == flt
 
-    old = {"revision": 3, "prompt": "p", "sources": ["a"]}
-    assert run_configs.with_board_settings(old) == old
     config_id = run_configs.intern(run_configs.BOARD, {"prompt": "p", "sources": ["a"]})
     assert run_configs.with_board_settings({"revision": 3, "config_id": config_id}) == {
-        **old,
+        "revision": 3,
+        "prompt": "p",
+        "sources": ["a"],
         "config_id": config_id,
     }
 

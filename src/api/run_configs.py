@@ -14,18 +14,6 @@ from api import db
 FILTER = "filter"
 BOARD = "managed_board"
 
-# The board settings a run snapshots. A board run's payload keeps what
-# changes per run (revision, resolved model, reservation, execution contract).
-BOARD_KEYS = (
-    "prompt",
-    "prompt_hash",
-    "on_ambiguous",
-    "fail_closed",
-    "bypass_sponsorship_filter",
-    "sources",
-    "criteria",
-)
-
 
 class RunConfigUnavailable(RuntimeError):
     pass
@@ -63,17 +51,10 @@ def _body(config_id: int, kind: str) -> dict[str, Any]:
 
 
 def filter_of(payload: dict[str, Any]) -> dict[str, Any]:
-    """The filter a chunk runs. A payload written before config_id holds a copy."""
-    if "config_id" in payload:
-        return _body(payload["config_id"], FILTER)
-    return payload["filter"]
+    """The filter a chunk runs."""
+    return _body(payload["config_id"], FILTER)
 
 
 def with_board_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    """A board run's payload with its board's settings in place.
-
-    A payload written before config_id holds the settings itself.
-    """
-    if "config_id" in payload:
-        return {**payload, **_body(payload["config_id"], BOARD)}
-    return payload
+    """A board run's payload with its board's settings in place."""
+    return {**payload, **_body(payload["config_id"], BOARD)}

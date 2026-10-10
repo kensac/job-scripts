@@ -4,6 +4,7 @@ from api import db
 from core.batch import BatchResult
 from tasks import filters, runtime
 from tasks.runtime import batching
+from tests.factories import filter_config
 
 
 @pytest.mark.asyncio
@@ -29,7 +30,7 @@ async def test_replaying_consumed_filter_result_does_not_duplicate_user_usage(f,
     flt = f.make_filter(uid, on_ambiguous="keep")
     payload = {
         "user_id": uid,
-        "filter": flt,
+        "config_id": filter_config(flt),
         "jobs": [job],
         "parent_id": None,
         "batch_ids": ["paid"],
