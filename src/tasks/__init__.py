@@ -17,7 +17,7 @@ from tasks.board import handle_recompute_board
 from tasks.comp import handle_extract_comp
 from tasks.content import handle_fetch_missing_content
 from tasks.digests import handle_send_digests
-from tasks.embeddings import handle_embed_postings, handle_embed_postings_batch
+from tasks.embeddings import handle_embed_postings_batch
 from tasks.experiments import handle_run_experiment
 from tasks.filters import (
     handle_run_all_filters,
@@ -37,7 +37,6 @@ from tasks.mail_sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
-from tasks.message_html import handle_backfill_message_html
 from tasks.requirements import handle_extract_requirements
 from tasks.uploads import handle_extract_upload
 from tasks.user_job_backfill import handle_backfill_user_job_split
@@ -50,7 +49,6 @@ from tasks.verify import (
 HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "classify_mail": handle_classify_mail,
-    "backfill_message_html": handle_backfill_message_html,
     "match_mail": handle_match_mail,
     "sync_gmail": handle_sync_gmail,
     "import_archive": handle_import_archive,
@@ -67,7 +65,6 @@ HANDLERS = {
     "extract_requirements": handle_extract_requirements,
     "classify_locations": handle_classify_locations,
     "recompute_board": handle_recompute_board,
-    "embed_postings": handle_embed_postings,
     "embed_postings_batch": handle_embed_postings_batch,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,

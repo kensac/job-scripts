@@ -24,7 +24,6 @@ from tasks import rescrape
 from tasks.runtime import (
     batch_event_hook,
     consume_result,
-    enqueue,
     has_batch_work,
     set_progress,
     submit_or_collect,
@@ -112,15 +111,6 @@ def _store(rows: list[dict[str, Any]]) -> int:
         """,
         (db.jsonb(rows),),
     )
-
-
-async def handle_embed_postings(task_id: int, payload: dict[str, Any]) -> None:
-    # Older images know only this kind. The new kind keeps them from claiming
-    # paid embedding snapshots with the former synchronous implementation.
-    child = enqueue(
-        "embed_postings_batch", payload, dedupe_key=f"embed-batch:{payload.get('cycle', task_id)}"
-    )
-    set_progress(task_id, 0, 0, f"queued embedding batch task {child}")
 
 
 async def handle_embed_postings_batch(task_id: int, payload: dict[str, Any]) -> None:
