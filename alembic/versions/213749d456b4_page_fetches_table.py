@@ -7,18 +7,19 @@ text, 11,272 of them made from those copies by the move). So:
 
 - page_fetch_rows becomes page_fetches, replacing the view of that name,
   which was the table plus the ai_queries content arm (now empty).
-- page_texts is the fetched text alone. Its on_verdict column is gone: the
-  copies on answers are no longer page text. On the 4,847 urls (of 839,949)
-  where a copy was the newest text, it was the same text as the url's newest
-  fetch on 4,846.
+- page_texts is the fetched text alone: the copies on answers are no
+  longer page text. On the 4,847 urls (of 839,949) where a copy was the
+  newest text, it was the same text as the url's newest fetch on 4,846.
 - ledger_rows keeps its columns, over the renamed table.
 
 The migration refuses to run if either count is not 0, before it changes
 anything. Both checks took 9 s on production.
 
-Every image that names page_fetch_rows or on_verdict fails those statements
-once this applies, so it is not additive: the fleet rolls onto the release
-that carries it.
+Images still running when this applies name page_fetch_rows (the fetch
+writer, the admin delete) and page_texts.on_verdict. A view page_fetch_rows
+over the table takes their reads, inserts and deletes, and on_verdict stays
+as a column that is always false. No code in this release names either; the
+next release drops both.
 
 Revision ID: 213749d456b4
 Revises: c0acfe30a567
@@ -59,9 +60,15 @@ _PREFLIGHT = """
 
 _PAGE_TEXTS = """
     CREATE VIEW page_texts AS
-    SELECT id, url, content AS input_content, created_at
+    SELECT id, url, content AS input_content, created_at, false AS on_verdict
     FROM page_fetches WHERE content IS NOT NULL AND content <> ''
 """
+
+# For the images still running when this applies: their fetch writer and
+# admin delete name page_fetch_rows, and a plain view of one table is
+# updatable, so their inserts and deletes reach the table. Dropped with
+# page_texts.on_verdict by the next release, once no image names either.
+_COMPAT = "CREATE VIEW page_fetch_rows AS SELECT * FROM page_fetches"
 
 # The admin ledger, board spend and the derivation scopes read every row
 # ai_queries holds plus every fetch, in ai_queries' shape. A fetch made from
@@ -123,6 +130,7 @@ def upgrade() -> None:
     op.execute("DROP VIEW page_texts")
     op.execute("DROP VIEW page_fetches")
     _rename("page_fetch_rows", "page_fetches")
+    op.execute(_COMPAT)
     op.execute(_PAGE_TEXTS)
     op.execute(_LEDGER_ROWS.format(table="page_fetches"))
 
@@ -131,6 +139,7 @@ def downgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '10s'")
     op.execute("DROP VIEW ledger_rows")
     op.execute("DROP VIEW page_texts")
+    op.execute("DROP VIEW page_fetch_rows")
     _rename("page_fetches", "page_fetch_rows")
     op.execute(_PAGE_FETCHES_BEFORE)
     op.execute(_PAGE_TEXTS_BEFORE)
