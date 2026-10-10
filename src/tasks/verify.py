@@ -13,7 +13,7 @@ from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.board.person_state import UNTOUCHED
 from api.task_config import configured_model, configured_shape
-from core import near_copy, routing, verdict_reads
+from core import catalog, near_copy, routing, verdict_reads
 from core.answers import (
     VERIFICATION_REQUEST,
     FilterDecision,
@@ -395,7 +395,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'
+            WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'
             ORDER BY j.id
             """
         )
@@ -436,7 +436,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             --
             -- Self-clearing: the fresh verdict is newer than the return.
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
+            WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")}
               AND (SELECT MAX(e.at) FROM job_listing_events e
                    WHERE e.job_id = j.id AND e.listed) > COALESCE(
                     (SELECT MAX(q.created_at) FROM ai_queries q
@@ -629,7 +629,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                    NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
             FROM jobs j
             {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
-            WHERE j.active AND {verification_candidates.REACHABLE}
+            WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {verification_candidates.REACHABLE}
               AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
                 NOT {verdict_reads.has_verdict("j.url", "closed")}
                 -- Short-circuited pipelines (and any upstream verdict that later

@@ -304,8 +304,10 @@ PERSON_SOURCE = """
 # Reachable is WIDER than subscribed, and the two must not be collapsed.
 # Gating on subscription alone would have stopped re-checking 5,342 active
 # `sheet_import` postings - a person's own imported application history, which
-# board.py serves to every user and which no board supplies. So two more
-# clauses:
+# board.py serves to every user and which no board supplies. (Since
+# 2026-10-10 sheet_import is a switched-off source, so the sweeps' availability
+# gate, catalog.IS_AVAILABLE, keeps them out before reachability is asked.)
+# So two more clauses:
 #
 #   - It did not come from a board at all. A source absent from the catalogue
 #     is one a PERSON put there: an upload, a sheet import. There is no

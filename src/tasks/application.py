@@ -26,6 +26,7 @@ from api.apply.drafting import Draft, instructions, question_input, resume_text,
 from api.board import visibility
 from api.budget import load_config
 from api.model_calls import Payer
+from core import catalog
 from core.fetching import forms
 from core.fetching.hosts import pace_key
 from core.shapes import APPLICATION_TASK
@@ -40,6 +41,9 @@ from tasks.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Forms are read and drafted only for postings still available.
+_AVAILABLE = catalog.IS_AVAILABLE.format(job="j")
 
 PURPOSE = application_writes.PURPOSE
 IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
@@ -379,7 +383,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         visibility.FAST.format(
             columns="j.url",
             extra=(
-                "AND j.active AND NOT EXISTS "
+                f"AND {_AVAILABLE} AND NOT EXISTS "
                 "(SELECT 1 FROM application_forms f WHERE f.url = j.url) "
                 "ORDER BY j.created_at DESC LIMIT %(n)s"
             ),
@@ -411,7 +415,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
                 "WHERE f.url = j.url) AS questions"
             ),
             extra=(
-                "AND j.active "
+                f"AND {_AVAILABLE} "
                 "AND EXISTS (SELECT 1 FROM application_forms f "
                 "            WHERE f.url = j.url AND f.questions IS NOT NULL) "
                 "AND NOT EXISTS (SELECT 1 FROM application_answers a "
@@ -430,7 +434,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
             visibility.FAST.format(
                 columns="j.id",
                 extra=(
-                    "AND j.active AND EXISTS (SELECT 1 FROM application_answers a "
+                    f"AND {_AVAILABLE} AND EXISTS (SELECT 1 FROM application_answers a "
                     "WHERE a.user_id = %(uid)s AND a.job_id = j.id AND a.draft IS NULL)"
                 ),
             ),

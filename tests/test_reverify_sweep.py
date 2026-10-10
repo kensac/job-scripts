@@ -170,9 +170,12 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
     # theirs now and stays answerable.
     kept_id, kept_url = f.make_ready_job(source=unsubscribed)
     f.make_board_row(uid, kept_id, status="Saved")
-    # A source no board supplies (a sheet import, an upload) has no
-    # subscription to look for and must not fall through the gate.
-    _, imported_url = f.make_ready_job(source="sheet_import")
+    # A source no board supplies (an upload) has no subscription to look for
+    # and must not fall through the gate.
+    _, imported_url = f.make_ready_job(source="upload")
+    # sheet_import is a switched-off source (catalog.AVAILABLE): not available,
+    # so nothing spends on it.
+    _, sheet_url = f.make_ready_job(source="sheet_import")
 
     task_id = f.make_task("reverify_open", {}, status="running")
     await tasks_verify.handle_reverify_open(task_id, {"full": True})
@@ -181,6 +184,7 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
     assert closed_url not in _urls(taken), "a full run asks for verdicts that passed"
     assert closed_since_url not in _urls(taken), "the latest closed answer decides"
     assert inactive_url not in _urls(taken)
+    assert sheet_url not in _urls(taken)
     assert unreachable_url not in _urls(taken), "no user can open it, so no tokens go to it"
     assert taken[0]["force"] is True, "a forced sweep must not skip a verdict made today"
 

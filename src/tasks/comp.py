@@ -8,7 +8,7 @@ from typing import Any
 from api import compensation_candidates, db
 from api.ai import batch_results
 from api.task_config import configured_shape
-from core import verdict_reads
+from core import catalog, verdict_reads
 from core.comp import (
     COMP_BASES,
     COMP_INPUT_CHARS,
@@ -69,7 +69,7 @@ async def handle_extract_comp(task_id: int, payload: dict[str, Any]) -> None:
         WHERE (NOT j.comp_extracted
                OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
                OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
-          AND j.active
+          AND {catalog.IS_AVAILABLE.format(job="j")}
           AND {eligible}
           AND {verdict_reads.verified_open("j.url")}
         ORDER BY j.id DESC
