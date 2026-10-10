@@ -35,7 +35,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from api import db
+from api import db, source_selection
 from core.disposable_db import require_disposable_name
 
 DEV_SUB = "dev-user"
@@ -80,10 +80,7 @@ def seed() -> dict[str, int]:
             "ON CONFLICT (name) DO UPDATE SET active = EXCLUDED.active",
             (name, f"https://{name}.test/list.json", active),
         )
-    db.execute(
-        "INSERT INTO user_sources (user_id, source) VALUES (%s, 'devboard') ON CONFLICT DO NOTHING",
-        (user_id,),
-    )
+    source_selection.change(user_id, ["devboard"], [])
 
     jobs = [
         # (company, title, active, comp_min, comp_max, currency, closed_verdict)

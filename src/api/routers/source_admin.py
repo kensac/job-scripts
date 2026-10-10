@@ -24,7 +24,7 @@ import re
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, source_selection
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
@@ -453,12 +453,7 @@ def delete_source(
                 "ELSE public_revision END, updated_at = now() WHERE id = ANY(%s)",
                 ([board.id for board in affected_boards],),
             )
-        db.execute("DELETE FROM user_sources WHERE source = %s", (name,))
-        db.execute(
-            "UPDATE source_groups SET members = array_remove(members, %s) WHERE %s = ANY(members)",
-            (name, name),
-        )
-        db.execute("DELETE FROM managed_board_sources WHERE source = %s", (name,))
+        source_selection.forget_source(name)
         db.execute("DELETE FROM sources WHERE name = %s", (name,))
     return SourceDeleted(ok=True, deleted=name, was_attached=Attached(**attached))
 
