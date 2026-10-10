@@ -180,8 +180,9 @@ class BatchRequest(Base):
         BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
     custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    snapshot: Mapped[dict | None] = mapped_column(JSONB)
-    snapshot_ref: Mapped[dict | None] = mapped_column(JSONB)
+    # A version 3 bundle member reference, the only stored shape
+    # (observability.md, request snapshot storage).
+    snapshot_ref: Mapped[dict] = mapped_column(JSONB)
 
 
 class BatchResultReceipt(Base):

@@ -79,7 +79,7 @@ async def test_a_new_sweep_skips_what_a_parked_sweep_already_submitted(f, submit
     _, fresh_url = f.make_ready_job(source=source, closed="", clearance="")
     parked = f.make_task("verify_new", {}, status="awaiting_batch")
     db.execute(
-        "INSERT INTO batch_requests (task_id, custom_id, snapshot) VALUES (%s, %s, '{}'::jsonb)",
+        "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref) VALUES (%s, %s, '{}'::jsonb)",
         (parked, parked_url),
     )
 
