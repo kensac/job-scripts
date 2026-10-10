@@ -137,11 +137,22 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # rather than an empty board. Nothing did this before: 4,554 of 6,306
     # active company-board rows on 2026-09-04 were titles the pattern no
     # longer admitted, each still eligible for every sweep.
-    if fetched and complete and boards.kind(source["listings_url"]) in boards.AUTHORITATIVE:
+    authoritative = boards.kind(source["listings_url"]) in boards.AUTHORITATIVE
+    if fetched and complete and authoritative:
         retired = catalog.retire_unlisted(source["name"], [p.url for p in postings])
         metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
     else:
         retired = 0
+    # The same pull as facts, beside jobs.active until availability is read
+    # from them (docs/agents/architecture-migration.md, phase 3). Absence
+    # from a pull that cannot show it saw everything is not recorded.
+    observed = catalog.observe(
+        source["name"],
+        task_id,
+        listed,
+        {p.url for p in pattern_matched},
+        None if not (fetched and complete) else "unlisted" if authoritative else "not_listed",
+    )
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
     metrics.INGEST_JOBS.labels(source["name"], "title_pattern_missed").inc(
         fetched - len(pattern_matched)
@@ -236,6 +247,8 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             "fetch_failed": fetch_failed,
             "gone": gone,
             "retired": retired,
+            "complete": complete,
+            "observed": observed,
             "listings_inline": listings_inline,
         },
     )

@@ -390,6 +390,17 @@ Inactive rows are excluded from every sweep and leave boards through
 An aggregator list is not such a signal, and an empty pull is a broken fetch
 rather than an empty board, so neither retires anything.
 
+**Every pull is also recorded as observations.** `catalog.observe` appends
+to `source_observations` what the pull says about each catalog row whose
+source's latest observation said something else: `appeared`, `reappeared`,
+`filtered` (listed, the pattern does not match), `unlisted` (left out of a
+complete authoritative pull, or flagged inactive by its feed) or `not_listed`
+(left out of an aggregator's pull). A partial or empty pull records no
+absence. Its inserts share-lock job rows through the foreign key, so they run
+in url order in their own transaction. What each kind means, and the
+availability projection read from them, is phase 3 of
+[architecture-migration.md](architecture-migration.md).
+
 **A pull that cannot prove it saw everything retires nothing.** Some Workday
 tenants stop a search at 2,000 results (first page total=2000, later pages wrap
 to the first): 19 of 355 measured on 2026-10-05, among them Airbus, NVIDIA and
