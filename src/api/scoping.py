@@ -8,7 +8,7 @@ cannot scope one table one way and another table another way, and a new
 list endpoint takes scoping by naming the table rather than by writing SQL.
 
 Which tables own rows per user:
-- users, reports, email_messages, api_usage: a user_id column.
+- users, reports, email_messages, model_calls: a user_id column.
 - tasks (and batches through their task): user_id in the payload, on the
   kinds that run for a person; fleet work carries none and is out of every
   user's scope.

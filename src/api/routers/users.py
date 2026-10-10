@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import ai, budget, crypto, db, user_settings
+from api import ai, budget, crypto, db, model_calls, user_settings
 from api.auth import AuthedUser, is_admin, require_service, require_user
 from api.board import visibility
 from api.models import ApiKeyPut, Criteria, Ok, SettingsPut
@@ -59,7 +59,9 @@ class Bootstrap(BaseModel):
 # declared float, which is what a Decimal already became on the way out.
 class UserSpendDay(BaseModel):
     day: datetime.date
-    key_source: str
+    # Null: the call's record did not say whose key (live filter answers
+    # before 2026-09-13).
+    key_source: str | None
     tokens: int
     calls: int
     cost_usd: float
@@ -120,31 +122,10 @@ def usage(user: AuthedUser = Depends(require_user)) -> Usage:
     """
     return Usage(
         **_grants(user).model_dump(),
-        spend_by_day=db.query_as(
-            UserSpendDay,
-            """
-            SELECT created_at::date AS day, key_source,
-                   SUM(total_tokens) AS tokens, COUNT(*) AS calls,
-                   COALESCE(SUM(cost_usd), 0) AS cost_usd,
-                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
-            FROM api_usage WHERE user_id = %s AND created_at > now() - interval '30 days'
-            GROUP BY 1, 2 ORDER BY 1
-            """,
-            (user.id,),
-        ),
-        spend_by_purpose=db.query_as(
-            UserSpendPurpose,
-            """
-            SELECT purpose, model, SUM(total_tokens) AS tokens, COUNT(*) AS calls,
-                   COALESCE(SUM(cost_usd), 0) AS cost_usd,
-                   COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-                   SUM(cache_write_tokens) AS cache_write_tokens,
-                   COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
-                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
-            FROM api_usage WHERE user_id = %s GROUP BY 1, 2 ORDER BY 3 DESC
-            """,
-            (user.id,),
-        ),
+        spend_by_day=[UserSpendDay(**r) for r in model_calls.user_spend_by_day(user.id)],
+        spend_by_purpose=[
+            UserSpendPurpose(**r) for r in model_calls.user_spend_by_purpose(user.id)
+        ],
     )
 
 

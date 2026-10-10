@@ -426,8 +426,10 @@ def test_latest_and_cost_routes_are_board_scoped(client, admin_headers, f, monke
         status="done",
     )
     db.execute(
-        "INSERT INTO api_usage (managed_board_id, key_source, purpose, model, total_tokens, cost_usd) "
-        "VALUES (%s, 'owner', 'managed_board', 'gpt-5.6-luna', 25, %s)",
+        "INSERT INTO model_calls (managed_board_id, payer, key_source, batched, purpose, model, "
+        "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd) "
+        "VALUES (%s, 'managed_board', 'owner', false, 'managed_board', 'gpt-5.6-luna', "
+        "20, 5, 25, 0, %s)",
         (board["id"], Decimal("0.012345")),
     )
     latest = client.get(

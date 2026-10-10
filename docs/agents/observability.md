@@ -169,9 +169,17 @@ writes nothing for an item has not left it unbooked; a batch whose payer was
 never recorded writes nothing, and the task collecting it records its payer.
 Live calls are written by `budget.record_tokens` and
 `budget.record_managed_board_tokens` when not batched, and the admin re-check
-by its route. Nothing reads the table yet: it is the expand step of the ledger
-in architecture-migration.md, and `tests/test_model_calls.py` holds its rows
-equal to their batch and fails on a second writer.
+by its route. `tests/test_model_calls.py` holds its rows equal to their batch
+and fails on a second writer.
+
+**Spend and budget read `model_calls`, never `api_usage`.** The weekly user
+budget, the fleet ceiling, /admin/spend's ledger and call list, a person's
+usage, the admin's view of a person, and a board's cost all do. A count of
+calls is `SUM(requests)`: a backfilled batch that kept no per-request record
+is one row standing for its requests. `tests/test_ledger_readers.py` holds each
+reader to the number it gave on `api_usage` for calls both tables recorded;
+the fleet differs only in counting requests rather than batches. `api_usage`
+is still written until the contract step removes it.
 
 On resume, `collect_pending` attaches model provenance from each `ai_batches`
 row. `run_batched` resolves routing only for new submissions; absent persisted

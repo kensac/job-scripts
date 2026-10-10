@@ -104,26 +104,29 @@ def _ledger_breakdowns(params: dict) -> Ledger:
         WITH daily_models AS (
             SELECT purpose, NULLIF(BTRIM(model), '') AS model,
                    (created_at AT TIME ZONE 'UTC')::date AS day,
-                   COUNT(*) AS calls,
-                   COUNT(*) FILTER (WHERE cost_usd IS NOT NULL) AS priced_calls,
-                   COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
-                   COUNT(*) FILTER (WHERE NULLIF(BTRIM(model), '') IS NULL) AS unknown_model_calls,
+                   SUM(requests) AS calls,
+                   COUNT(*) AS ledger_rows,
+                   COALESCE(SUM(requests) FILTER (WHERE cost_usd IS NOT NULL), 0) AS priced_calls,
+                   COALESCE(SUM(requests) FILTER (WHERE cost_usd IS NULL), 0) AS unpriced_calls,
+                   COALESCE(SUM(requests) FILTER (WHERE NULLIF(BTRIM(model), '') IS NULL), 0)
+                       AS unknown_model_calls,
                    COALESCE(SUM(cost_usd), 0) AS cost_usd,
                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
                    COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
                    SUM(cache_write_tokens) AS cache_write_tokens,
-                   COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
-                   COUNT(*) FILTER (WHERE batched) AS batched_calls,
+                   COALESCE(SUM(requests) FILTER (WHERE cache_write_tokens IS NULL), 0)
+                       AS cache_write_unknown_calls,
+                   COALESCE(SUM(requests) FILTER (WHERE batched), 0) AS batched_calls,
                    MIN(created_at) AS first_call,
                    MAX(created_at) AS last_call
-            FROM api_usage WHERE {_WINDOW}
+            FROM model_calls WHERE {_WINDOW}
             GROUP BY 1, 2, 3
         )
         SELECT purpose, model, day, GROUPING(purpose, model, day) AS grouping,
                COALESCE(SUM(calls), 0)::bigint AS calls,
-               COALESCE(SUM(calls), 0)::bigint AS ledger_rows,
+               COALESCE(SUM(ledger_rows), 0)::bigint AS ledger_rows,
                COALESCE(SUM(priced_calls), 0)::bigint AS priced_calls,
                COALESCE(SUM(unpriced_calls), 0)::bigint AS unpriced_calls,
                COALESCE(SUM(unknown_model_calls), 0)::bigint AS unknown_model_calls,
@@ -164,16 +167,18 @@ def _ledger_breakdowns(params: dict) -> Ledger:
     buckets["model"].sort(key=lambda r: (-r.cost_usd, r.model or ""))
     buckets["day"].sort(key=lambda r: r.day)
     return Ledger(
-        source="api_usage",
+        source="model_calls",
         basis="recorded_estimate",
         timezone="UTC",
         window_days=params["days"],
         note=(
-            "Costs sum stored estimates for recorded usage, not provider invoices or "
-            "proof that every call was recorded. Unpriced rows are excluded from costs "
-            "and counted separately. Batched flags are recorded metadata, not verified "
-            "historical transport provenance. Counts are ledger rows, which may represent "
-            "individual requests or batch aggregates."
+            "Costs sum the estimate stored for each paid call when it was made, not "
+            "provider invoices or proof that every call was recorded. Unpriced calls are "
+            "excluded from costs and counted separately. calls counts provider requests; "
+            "ledger_rows counts rows, one of which can stand for a whole batch that kept "
+            "no per-request record (before 2026-09-09). Windows reaching before "
+            "2026-09-13 show less than the old usage ledger did: it priced batched filter "
+            "work at live rates, and these are the batch rates that were paid."
         ),
         totals=totals,
         by_purpose=buckets["purpose"],
@@ -566,9 +571,9 @@ def spend(
     # no verdict rows, then the largest reported line item. Preserve that
     # measurement as the reason for this separate population, not as a current
     # invoice total or a claim that every paid request is now recorded.
-    # Fleet batch hooks and user-call writers record api_usage by purpose;
-    # their rows may represent different request counts. New call paths must
-    # still be audited for ledger coverage, including failed paid responses.
+    # The ledger is model_calls: one row per paid request, written by
+    # api.model_calls whichever path made the call, failed responses included.
+    # A new call path must still reach one of its writers.
     ledger = _ledger_breakdowns(params)
     diagnostics = VerdictDiagnostics(
         source="ai_queries",
@@ -620,8 +625,13 @@ class UsageCall(BaseModel):
     created_at: datetime.datetime
     purpose: str
     model: str | None
-    key_source: str
+    # Null: the call's record did not say whose key (live filter answers
+    # before 2026-09-13).
+    key_source: str | None
     batched: bool
+    # More than one only on a row standing for a batch that kept no
+    # per-request record.
+    requests: int
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
@@ -663,7 +673,7 @@ def spend_calls(
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_admin),
 ) -> SpendCalls:
-    """Recorded usage rows; null cost means unknown price, not a free call."""
+    """Recorded calls; null cost means unknown price, not a free call."""
     where = ["created_at >= now() - make_interval(days => %(days)s)"]
     params: dict[str, Any] = {"days": days, "limit": limit, "offset": offset}
     if purpose:
@@ -686,14 +696,15 @@ def spend_calls(
     totals = db.query_one_as(
         CallTotals,
         f"""
-        SELECT COUNT(*) AS calls,
+        SELECT COALESCE(SUM(requests), 0) AS calls,
                COALESCE(SUM(cost_usd), 0) AS cost_usd,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+               COALESCE(SUM(requests) FILTER (WHERE cost_usd IS NULL), 0) AS unpriced_calls,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls
-        FROM api_usage WHERE {predicate}
+               COALESCE(SUM(requests) FILTER (WHERE cache_write_tokens IS NULL), 0)
+                   AS cache_write_unknown_calls
+        FROM model_calls WHERE {predicate}
         """,
         params,
     )
@@ -703,11 +714,11 @@ def spend_calls(
         calls=db.query_as(
             UsageCall,
             f"""
-            SELECT id, created_at, purpose, model, key_source, batched,
+            SELECT id, created_at, purpose, model, key_source, batched, requests,
                    prompt_tokens, completion_tokens, total_tokens, cached_tokens,
                    cache_write_tokens,
                    cost_usd, user_id
-            FROM api_usage WHERE {predicate}
+            FROM model_calls WHERE {predicate}
             ORDER BY created_at DESC, id DESC
             LIMIT %(limit)s OFFSET %(offset)s
             """,

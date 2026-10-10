@@ -102,7 +102,7 @@ def owner_budget(groups: list[str]) -> tuple[bool, int | None]:
 
 def spent_this_week(user_id: int) -> int:
     row = db.query_one(
-        "SELECT COALESCE(SUM(total_tokens), 0) AS spent FROM api_usage "
+        "SELECT COALESCE(SUM(total_tokens), 0) AS spent FROM model_calls "
         "WHERE user_id = %s AND key_source = 'owner' "
         "AND created_at >= now() - interval '7 days'",
         (user_id,),
@@ -238,11 +238,12 @@ def fleet_cycle_cost_usd() -> Decimal:
 def fleet_spend_this_week() -> Decimal:
     """Fleet spend since the start of the current week, in UTC.
 
-    user_id IS NULL is what makes a row fleet work rather than a person's -
-    the same predicate record_fleet_usage writes.
+    user_id IS NULL is what makes a call fleet work rather than a person's,
+    managed boards included, as it was when this read api_usage. A call with
+    no recorded payer is older than any week this is asked about.
     """
     row = db.query_one(
-        "SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM api_usage "
+        "SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM model_calls "
         "WHERE user_id IS NULL AND created_at >= date_trunc('week', now() AT TIME ZONE 'UTC')"
     )
     return Decimal(str((row or {}).get("spent") or 0))
