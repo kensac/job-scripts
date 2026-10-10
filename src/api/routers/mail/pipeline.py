@@ -370,19 +370,20 @@ def pipeline(
     key = _PIPELINE_SORTS.get(sort, _PIPELINE_SORTS["applied_at"])
     rows.sort(key=key, reverse=dir != "asc")
     page = rows[offset : offset + limit]
-    actions = mail_pipeline.with_settling(
-        db.query(
-            """
-            SELECT ai.id, ai.user_id, ai.application_id, ai.event_id, ai.kind, ai.due_at,
-                   ai.resolved_at, ai.resolution, ai.resolved_by_event_id, ai.created_at,
-                   a.company_name, a.title
-            FROM action_items ai LEFT JOIN applications a ON a.id = ai.application_id
-            WHERE ai.user_id = %s AND ai.resolved_at IS NULL
-            ORDER BY ai.due_at NULLS LAST, ai.id
-            """,
-            (user.id,),
+    names = {
+        r["id"]: r
+        for r in db.query(
+            "SELECT id, company_name, title FROM applications WHERE user_id = %s", (user.id,)
         )
-    )
+    }
+    actions = [
+        {
+            **item.model_dump(),
+            "company_name": names[item.application_id]["company_name"],
+            "title": names[item.application_id]["title"],
+        }
+        for item in mail_pipeline.action_items(user.id, open_only=True)
+    ]
     return Pipeline(
         applications=page,
         total=len(rows),
@@ -492,14 +493,7 @@ def pipeline_detail(
     # Both additions kept: #227 wraps actions in their settling state, this
     # branch adds who corrected each match. Independent answers to the same
     # question - what does this row let a person question.
-    actions = mail_pipeline.with_settling(
-        db.query(
-            "SELECT id, user_id, application_id, event_id, kind, due_at, resolved_at, "
-            "resolution, resolved_by_event_id, created_at FROM action_items "
-            "WHERE application_id = %s ORDER BY due_at NULLS LAST, id",
-            (application_id,),
-        )
-    )
+    actions = [item.model_dump() for item in mail_pipeline.action_items(user.id, application_id)]
     return PipelineDetail(
         **app.model_dump(),
         stage=mail_pipeline.stage_for(events, app.board_status),
@@ -577,7 +571,6 @@ def detach_match(
     mail_match.reject(
         match["message_id"], actor_user_id=user.id, note=body.note or "detached by the user"
     )
-    mail_pipeline.sync_action_items(application_id)
     return MatchMoved(ok=True, message_id=match["message_id"])
 
 
@@ -608,7 +601,6 @@ def reattach_match(
         ),
         actor_user_id=user.id,
     )
-    mail_pipeline.sync_action_items(application_id)
     return MatchMoved(ok=True, message_id=match["message_id"])
 
 

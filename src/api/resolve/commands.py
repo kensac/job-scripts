@@ -57,7 +57,6 @@ def _resolve_message(
             ),
             actor_user_id=actor_user_id,
         )
-        mail_pipeline.sync_action_items(body.target)
         return ResolveResult(ok=True, choice=body.choice, application_id=body.target)
 
     if body.choice == NOT_AN_APPLICATION:
@@ -125,10 +124,6 @@ def _resolve_match(
         return ResolveResult(ok=True, choice=body.choice, application_id=row["application_id"])
 
     mail_match.reject(row["message_id"], actor_user_id=actor_user_id, note=body.note)
-    # The events this message carried stop reaching the application, so
-    # anything they opened has to follow rather than sit there asking about an
-    # application it is no longer part of.
-    mail_pipeline.sync_action_items(row["application_id"])
     return ResolveResult(ok=True, choice=body.choice)
 
 
@@ -154,16 +149,12 @@ def _resolve_proposal(
 
 
 def _resolve_action(action_id: int, body: ResolveRequest, owner_id: int) -> ResolveResult:
-    row = db.query_one(
-        "SELECT id, resolved_at FROM action_items WHERE id = %s AND user_id = %s",
-        (action_id, owner_id),
-    )
-    if row is None:
+    item = mail_pipeline.action_item(owner_id, action_id)
+    if item is None:
         raise refuse(404, "NOT_FOUND", "unknown queue item")
-    if row["resolved_at"] is None:
-        db.execute(
-            "UPDATE action_items SET resolved_at = now(), resolution = %s WHERE id = %s",
-            (body.note or "marked done", action_id),
+    if item.resolved_at is None:
+        mail_pipeline.answer(
+            owner_id, action_id, mail_pipeline.ACTION_QUESTION, mail_pipeline.DONE, body.note
         )
     return ResolveResult(ok=True, choice=body.choice)
 

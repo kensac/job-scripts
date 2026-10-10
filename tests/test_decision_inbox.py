@@ -243,9 +243,12 @@ def test_accepting_a_proposal_reports_what_it_actually_touched(client, me):
     # Recorded either way: a proposal that cannot move the board is still an
     # answer, and it is the only evidence the mapping was right.
     assert (
-        db.query_one("SELECT response FROM suggestion_responses WHERE application_id = %s", (app,))[
-            "response"
-        ]
+        db.query_one(
+            "SELECT answer FROM event_answers WHERE question = 'status' AND event_id IN "
+            "(SELECT e.id FROM email_events e JOIN application_matches am "
+            "ON am.message_id = e.message_id WHERE am.application_id = %s)",
+            (app,),
+        )["answer"]
         == "accepted"
     )
 
@@ -320,20 +323,18 @@ def test_a_proposal_carries_what_a_person_needs_to_check_it(client, me, f):
 def test_an_action_says_what_would_close_it_without_a_person(client, me):
     """`settles_on` is what tells "waiting on the next email" from "waiting on
     you", and it is a property of the kind rather than of the item's age. An
-    approach you never answered has an empty one by construction; an assessment
-    invite is closed by the acknowledgement that follows it."""
-    from api.mail import pipeline as mail_pipeline
-
+    offer is closed by nothing but a rejection; an assessment invite is closed
+    by the acknowledgement that follows it. A recruiter approach asks nothing:
+    it is attached to no application."""
     headers, uid = me
     app = _app(uid)
     _attach(_msg(uid, "<assess@x>", "assessment_invite", "Acme"), app)
-    outreach = _msg(uid, "<recruit@x>", "recruiter_outreach", "Acme")
-    _attach(outreach, app)
-    mail_pipeline.sync_action_items(app)
+    _attach(_msg(uid, "<offer@x>", "offer", "Acme"), app)
+    _attach(_msg(uid, "<recruit@x>", "recruiter_outreach", "Acme"), app)
 
     by_kind = {i["action"]["kind"]: i for i in _items(client, headers, "action_item")}
-    assert by_kind["reply_to_recruiter"]["action"]["settles_on"] == []
-    assert "only you can" in by_kind["reply_to_recruiter"]["rank_reason"]
+    assert set(by_kind) == {"complete_assessment", "respond_to_offer"}
+    assert by_kind["respond_to_offer"]["action"]["settles_on"] == ["rejection"]
     assert "acknowledgement" in by_kind["complete_assessment"]["action"]["settles_on"]
     assert "would close this" in by_kind["complete_assessment"]["rank_reason"]
     # One rank for both. Marking either done closes the ask and moves no stage,
@@ -355,10 +356,6 @@ def test_one_response_carries_all_four_kinds(client, me, f):
     _attach(_msg(uid, "<all1@x>", "rejection", "Acme"), app)
     _attach(_msg(uid, "<all2@x>", "offer", "Acme"), app)
     _msg(uid, "<all3@x>", "rejection", "Nowhere")
-    from api.mail import pipeline as mail_pipeline
-
-    mail_pipeline.sync_action_items(app)
-
     body = client.get("/v1/user/resolve/queue?limit=200", headers=headers).json()
     assert set(body["by_kind"]) == {
         "unmatched_message",

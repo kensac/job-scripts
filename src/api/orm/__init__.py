@@ -59,6 +59,7 @@ from api.orm.mail import (
     ApplicationMatch,
     EmailEvent,
     EmailMessage,
+    EventAnswer,
     UserOAuthToken,
 )
 from api.orm.managed_boards import ManagedBoard, ManagedBoardJob, ManagedBoardSource
@@ -98,6 +99,7 @@ __all__ = [
     "BoardVisible",
     "EmailEvent",
     "EmailMessage",
+    "EventAnswer",
     "ExtensionRecipe",
     "FilterPreset",
     "GroupBudget",

@@ -692,7 +692,7 @@ async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
     """Progress written once per user made a whole run one step: production
     has one user, so a 110-minute sweep on a far host looked stalled to the
     detector for all of it. The task row must move inside the sweep, over
-    messages and over applications, not only between users."""
+    messages, not only between users."""
     monkeypatch.setattr(task, "PROGRESS_EVERY", 2)
     uid = f.make_user()
     for i in range(3):
@@ -719,8 +719,6 @@ async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
     assert [label for label in written if label.startswith(f"matching user {uid}:")] == [
         f"matching user {uid}: messages 0/3",
         f"matching user {uid}: messages 2/3",
-        f"matching user {uid}: applications 0/3",
-        f"matching user {uid}: applications 2/3",
     ]
 
 
@@ -777,32 +775,3 @@ def test_a_partial_sweep_is_not_a_cutoff(f):
         db.execute("UPDATE tasks SET started_at = now() WHERE id = %s", (other,))
     assert task.mail_match.last_sweep_start(uid) is None
     assert task.mail_match.last_sweep_start() is None
-
-
-def test_action_items_are_resynced_only_where_something_moved(f):
-    uid = f.make_user()
-    old = _application(uid, company="Old")
-    mid = _message(uid)
-    _event(mid, "rejection", company="Moved")
-    moved = _application(uid, company="Moved")
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
-        "VALUES (%s, %s, 'manual', 'high')",
-        (mid, old),
-    )
-    db.execute("UPDATE applications SET created_at = now() - interval '1 day'")
-    db.execute(
-        "UPDATE application_matches SET created_at = now() - interval '1 day'; "
-        "UPDATE email_events SET created_at = now() - interval '1 day'"
-    )
-    since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)
-    untouched = _application(uid, company="Untouched")
-    assert task._applications_touched(uid, since) == [untouched]
-    db.execute(
-        "INSERT INTO application_matches (message_id, application_id, method, confidence) "
-        "VALUES (%s, %s, 'manual', 'high')",
-        (mid, moved),
-    )
-    # The application the message left is resynced too, to close what it strands.
-    assert task._applications_touched(uid, since) == sorted([old, moved, untouched])
-    assert len(task._applications_touched(uid, None)) == 3

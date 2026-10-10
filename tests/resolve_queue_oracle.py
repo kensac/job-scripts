@@ -18,6 +18,7 @@ from typing import Any
 from api import db
 from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
+from api.resolve import queue_items
 from api.resolve.choice_policy import _choice, _thread_sizes, by_company, choices_for_message
 from api.resolve.contracts import (
     ACCEPT_STATUS,
@@ -26,13 +27,12 @@ from api.resolve.contracts import (
     CONFIRM_MATCH,
     DECLINE_STATUS,
     ITEM_KINDS,
-    MARK_DONE,
     REJECT_MATCH,
     STATUS_PROPOSAL,
     UNCONFIRMED_MATCH,
     UNMATCHED_MESSAGE,
 )
-from api.resolve.queue_items import _ACTIONS_SQL, _AWAITING_KINDS
+from api.resolve.queue_items import _AWAITING_KINDS
 from api.resolve.ranking import (
     MESSAGE_RANK_REASONS,
     RANK_ATTACHABLE,
@@ -231,47 +231,9 @@ def _proposal_items(owner_id, events):
 
 
 def _action_items(owner_id, events):
-    items = []
-    for row in db.query(_ACTIONS_SQL, {"user": owner_id}):
-        settling = mail_pipeline.settles_on(row["kind"])
-        items.append(
-            {
-                "id": f"action:{row['id']}",
-                "kind": ACTION_ITEM,
-                "rank": RANK_ATTACHABLE,
-                "rank_reason": f"an incoming {' or '.join(settling)} would close this"
-                if settling
-                else "nothing that arrives can close this; only you can",
-                "message": {
-                    "id": row["message_id"],
-                    "subject": row["subject"],
-                    "from_email": row["from_email"],
-                    "sent_at": row["sent_at"],
-                }
-                if row["message_id"]
-                else None,
-                "application": {
-                    "id": row["application_id"],
-                    "company_name": row["company_name"],
-                    "title": row["title"],
-                    "stage": mail_pipeline.stage_for(
-                        events.get(row["application_id"], []), row["board_status"]
-                    ),
-                    "on_board": bool(row["on_board"]),
-                    "job_id": row["job_id"],
-                }
-                if row["application_id"]
-                else None,
-                "action": {
-                    "id": row["id"],
-                    "kind": row["kind"],
-                    "due_at": row["due_at"],
-                    "settles_on": settling,
-                },
-                "choices": [_choice(MARK_DONE, "Done")],
-            }
-        )
-    return items
+    # The asks are derived by api.mail.pipeline.action_items, which both
+    # queues read; the one-pass queue's rows for them are the oracle's too.
+    return [ranked.row for ranked in queue_items.action_items(owner_id, events)]
 
 
 def queue_for(owner_id: int, limit: int, offset: int, kinds: list[str] | None = None):

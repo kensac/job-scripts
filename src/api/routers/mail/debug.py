@@ -19,7 +19,6 @@ from api import db, pagination, rates, scoping, sorting
 from api import params as params_
 from api.auth import AuthedUser
 from api.mail import match as mail_match
-from api.mail import pipeline as mail_pipeline
 from api.mail.current import current_event, current_match
 from api.mail.match import CurrentMatch
 from api.problem import refuse
@@ -915,6 +914,4 @@ def override_match(
         actor_user_id=user.id,
         match=mail_match.Match(body.application_id, method, confidence, f"set by admin {user.sub}"),
     )
-    if body.application_id is not None:
-        mail_pipeline.sync_action_items(body.application_id)
     return MatchOverridden(ok=True, current=mail_match.latest(message_id))
