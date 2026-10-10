@@ -62,7 +62,7 @@ def test_the_undeclared_joins_actually_join():
     generator that filled those columns with anything else would produce four
     large, plausible-looking tables that match no job - and every assertion
     over them would pass on an empty result set."""
-    for table in ("job_skills", "job_requirements", "job_embeddings"):
+    for table in ("job_skills", "job_requirements", "job_embeddings", "job_comp"):
         orphans = _one(
             f"SELECT count(*) FROM {table} t LEFT JOIN jobs j ON j.url = t.url WHERE j.url IS NULL"
         )
@@ -119,7 +119,7 @@ def test_every_measured_value_appears_somewhere_in_the_corpus():
     """The whole claim this design rests on.
 
     Weighted sampling silently drops the rare values, and the rare value is
-    reliably the one that breaks a consumer: jobs.comp_period is 0.2% 'weekly'
+    reliably the one that breaks a consumer: job_comp.comp_period is 0.6% 'weekly'
     and that shape is why the comp column was unsortable. If the generator
     stops reproducing a measured value, the corpus quietly stops being a
     measurement, and this is the thing that says so.
@@ -161,7 +161,7 @@ def test_the_awkward_cases_the_tests_were_written_for_are_present():
     """The three named in the ticket, spelled out rather than left to the
     generic check above, because these are the ones whose absence made real
     detectors blind."""
-    assert _one("SELECT count(*) FROM jobs WHERE comp_period = 'weekly'") > 0, (
+    assert _one("SELECT count(*) FROM job_comp WHERE comp_period = 'weekly'") > 0, (
         "no weekly-pay posting; that shape is why sort=comp was meaningless"
     )
     assert _one("SELECT count(*) FROM page_fetches WHERE method = 'ats text'") > 0, (
