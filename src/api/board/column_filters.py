@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.mail import applications
 from api.problem import refuse
+from core import catalog
 
 
 class ColumnFilter(BaseModel):
@@ -54,7 +55,7 @@ _FIELDS: dict[str, tuple[str, FilterKind, str]] = {
     "date_posted": ("Posted date (UTC)", "date", "(j.date_posted AT TIME ZONE 'UTC')::date"),
     "date_applied": ("Applied date", "date", applications.applied_on("uj")),
     "added_at": ("Added date (UTC)", "date", "(j.created_at AT TIME ZONE 'UTC')::date"),
-    "active": ("Listed by source", "boolean", "j.active"),
+    "active": ("Listed by source", "boolean", catalog.IS_AVAILABLE.format(job="j")),
 }
 
 

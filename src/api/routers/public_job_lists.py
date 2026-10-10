@@ -17,7 +17,7 @@ from api import db
 from api.params import csv
 from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
-from core import verdict_reads
+from core import catalog, verdict_reads
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]
@@ -237,7 +237,8 @@ GROUP BY b.id
 
 _CARD_COLUMNS = f"""
 mj.job_id, {{sort_expression}} AS sort_value, j.company, j.title, j.locations, j.terms,
-j.source, ({ATS_SQL}) AS ats, j.date_posted, j.created_at AS added_at, j.active,
+j.source, ({ATS_SQL}) AS ats, j.date_posted, j.created_at AS added_at,
+{catalog.IS_AVAILABLE.format(job="j")} AS active,
 {verdict_reads.closed_verdict("j.url")} AS closed_verdict,
 j.comp_min, j.comp_max, j.comp_currency, j.comp_period, j.comp_basis, j.comp_text, j.url
 """
