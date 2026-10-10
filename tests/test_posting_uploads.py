@@ -1,14 +1,11 @@
-"""posting_uploads is the only record of an upload, and the clearing task
-empties the jobs columns it replaced without losing an owner."""
+"""posting_uploads is the only record of an upload; jobs.extraction_status
+is frozen."""
 
 from __future__ import annotations
-
-import asyncio
 
 from api import db
 from core import catalog
 from core.fetching.posting import JobPosting
-from tasks import posting_uploads
 
 
 def _uploads() -> dict[int, tuple[int, str]]:
@@ -57,70 +54,17 @@ def test_a_pull_that_takes_an_upload_over_marks_it_done(f):
     assert _uploads() == {job_id: (uid, "done")}
 
 
-def _jobs_columns() -> dict[int, tuple[int | None, str | None]]:
-    return {
-        r["id"]: (r["uploaded_by"], r["extraction_status"])
-        for r in db.query(
-            "SELECT id, uploaded_by, extraction_status FROM jobs "
-            "WHERE uploaded_by IS NOT NULL OR extraction_status IS NOT NULL"
-        )
-    }
-
-
-def _run_clear(f) -> dict:
-    task_id = f.make_task("clear_upload_columns", status="running")
-    asyncio.run(posting_uploads.handle_clear_upload_columns(task_id, {}))
-    row = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))
-    assert row is not None
-    return row["progress"]
-
-
-def test_the_upload_writers_leave_the_jobs_columns_alone(f):
+def test_the_upload_writers_leave_extraction_status_alone(f):
     uid = f.make_user()
     job_id = catalog.add_upload("https://x.test/cols", "https://x.test/cols", uid)["id"]
     catalog.set_extraction_status(job_id, "failed")
     catalog.record_extraction(job_id, "Acme", "Engineer", [], [])
-    assert _jobs_columns() == {}
-
-
-def test_clearing_keeps_every_owner_and_every_stamp_then_finds_nothing(f, monkeypatch):
-    uid, other = f.make_user(), f.make_user()
-    # What a server on the release before this one wrote: both copies.
-    upload = f.make_job(source="upload")
-    f.upload(upload, uid)
-    db.execute(
-        "UPDATE jobs SET uploaded_by = %s, extraction_status = 'done' WHERE id = %s", (uid, upload)
-    )
-    # Its status written to jobs on an upload whose jobs row names nobody.
-    status_only = f.make_job(source="upload")
-    f.upload(status_only, uid, status="failed")
-    db.execute("UPDATE jobs SET extraction_status = 'failed' WHERE id = %s", (status_only,))
-    # Not an upload: the sheet import's stamp is the only record of it.
-    stamped = f.make_job(source="sheet_import")
-    db.execute("UPDATE jobs SET extraction_status = 'done' WHERE id = %s", (stamped,))
-    # An owner posting_uploads does not name is not cleared.
-    orphan = f.make_job(source="upload")
-    f.upload(orphan, uid)
-    db.execute("UPDATE jobs SET uploaded_by = %s WHERE id = %s", (other, orphan))
-    # One upload per statement, so the walk crosses chunk boundaries.
-    monkeypatch.setattr(posting_uploads, "BATCH", 1)
-
-    first = _run_clear(f)
-    assert (first["cleared"], first["unmatched"]) == (2, 1)
-    assert _jobs_columns() == {orphan: (other, None), stamped: (None, "done")}
-    assert _uploads() == {
-        upload: (uid, "done"),
-        status_only: (uid, "failed"),
-        orphan: (uid, "done"),
-    }
-
-    second = _run_clear(f)
-    assert (second["cleared"], second["unmatched"]) == (0, 1)
+    assert db.query("SELECT id FROM jobs WHERE extraction_status IS NOT NULL") == []
 
 
 def test_readers_take_ownership_from_posting_uploads_alone(f):
-    """jobs.uploaded_by is left NULL, so a reader still on it would treat the
-    upload as public catalog: reachable by a stranger, not its owner's."""
+    """The jobs row names no owner, so a reader that looked anywhere but
+    posting_uploads would treat the upload as public catalog."""
     from api import posting_path
     from api.board import person_state, visibility
 

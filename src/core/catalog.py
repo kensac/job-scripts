@@ -253,13 +253,11 @@ def fill_date_posted(url: str, posted: datetime.date) -> None:
         )
 
 
-# An upload's state lives in posting_uploads alone. jobs.uploaded_by and
-# jobs.extraction_status are no longer written; clear_upload_columns empties
-# the copies uploads left in them, so a later migration can prove
-# uploaded_by empty and drop it. extraction_status keeps the values that are
-# not copies, so it is frozen rather than dropped. A writer that touches both
-# tables takes the jobs row first, so the two locks are never taken in
-# opposite orders.
+# An upload's state lives in posting_uploads alone. jobs.extraction_status
+# is frozen: nothing writes it, and it keeps the done stamp the 2026-08-24
+# sheet import put on its rows and one forced reparse left (6,022 rows), which
+# is recorded nowhere else. A writer that touches both tables takes the jobs
+# row first, so the two locks are never taken in opposite orders.
 
 
 def add_upload(url: str, raw_url: str, user_id: int) -> dict:
@@ -315,49 +313,6 @@ def record_extraction(
             (company, title, locations, terms, job_id),
         )
         conn.execute("UPDATE posting_uploads SET status = 'done' WHERE job_id = %s", (job_id,))
-
-
-# One chunk of uploads after id {after}: the copy of each upload on its jobs
-# row set to NULL. A candidate is a row holding an uploader
-# (idx_jobs_uploaded_by) or a row posting_uploads holds; both are small (11 on
-# 2026-10-10). A row is cleared only where posting_uploads names the same
-# person, or the jobs row names nobody, so no owner is lost; a row naming an
-# owner posting_uploads does not is left and counted. extraction_status on a
-# row with no upload row is not a copy of anything and is never touched: 6,021
-# sheet import rows stamped done on 2026-08-24 and one forced reparse
-# (task 726592) hold the only record of it. Locks in url order (_LOCK_ORDER)
-# and skips rows another writer holds; the next run takes them.
-def clear_upload_columns(after: int, limit: int) -> dict:
-    """One chunk: `last` is the id to continue after, None when there is
-    nothing past `after`."""
-    sql: LiteralString = f"""
-WITH candidates AS (
-    SELECT id FROM (
-        SELECT id FROM jobs WHERE uploaded_by IS NOT NULL AND id > %(after)s
-        UNION SELECT job_id FROM posting_uploads WHERE job_id > %(after)s
-    ) u ORDER BY id LIMIT %(limit)s
-), held AS (
-    SELECT j.id,
-           p.job_id IS NOT NULL AND (j.uploaded_by IS NULL OR p.uploaded_by = j.uploaded_by)
-               AS owner_kept
-    FROM jobs j JOIN candidates c ON c.id = j.id
-    LEFT JOIN posting_uploads p ON p.job_id = j.id
-    WHERE j.uploaded_by IS NOT NULL OR j.extraction_status IS NOT NULL
-), doomed AS (
-    SELECT j.id FROM jobs j JOIN held h ON h.id = j.id AND h.owner_kept
-    ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
-), cleared AS (
-    UPDATE jobs SET uploaded_by = NULL, extraction_status = NULL FROM doomed
-    WHERE jobs.id = doomed.id RETURNING jobs.id
-)
-SELECT (SELECT max(id) FROM candidates) AS last,
-       (SELECT count(*) FROM cleared) AS cleared,
-       (SELECT count(*) FROM held WHERE NOT owner_kept) AS unmatched
-"""
-    with statement() as conn:
-        row = conn.execute(sql, {"after": after, "limit": limit}).fetchone()
-    assert row is not None
-    return row
 
 
 _ADMITTED = frozenset({"appeared", "reappeared"})
