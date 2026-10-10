@@ -626,7 +626,10 @@ for active rows hold only explained classes.
 2.0 s to 6.5 s and a board recompute from 27 s to 38 s, at 992 recomputes a
 day, about three hours of database time a day (production, 2026-10-10).
 `IS_AVAILABLE` now reads `COALESCE(j.available, j.active)`, which costs
-what `j.active` did. `AVAILABLE` stays the one definition, and three writers
+what `j.active` did. Measured on production after the first reconcile
+(2026-10-10, 21:00 UTC): user 1's board recompute ran in 25.7 and 28.0 s
+against 26.0 and 26.8 s on the flag, and the preset eligible count in 1.9 s
+either way. `AVAILABLE` stays the one definition, and three writers
 store it:
 
 - `catalog.observe` refreshes the rows its observations changed, after they
