@@ -40,19 +40,30 @@ def _annualize(value: float | None, period: str) -> int | None:
     return annual
 
 
+# A stored amount with no period was annualised by an older rule and is read
+# again even when the page is unchanged, so its hash does not count.
+_UNREADABLE = "(c.comp_period IS NULL AND (c.comp_min IS NOT NULL OR c.comp_max IS NOT NULL))"
+
+
 def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
+    # Never read, or read from a page fetch that is no longer current. An
+    # answer with no recorded fetch (62,004 from before fetches were recorded)
+    # is kept. `stored_hash` lets the sweep re-stamp a re-fetch that changed
+    # nothing instead of paying for it again.
     cte, eligible = compensation_candidates.selection(
         bool(db.get_config("compensation_demand_gate_enabled"))
     )
     return db.query(
         f"""
         {cte}
-        SELECT j.id, j.url, q.input_content, q.id AS content_row_id
+        SELECT j.id, j.url, q.input_content, q.id AS content_row_id,
+               CASE WHEN {_UNREADABLE} THEN NULL ELSE c.content_hash END AS stored_hash
         FROM jobs j
         {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
-        WHERE (NOT j.comp_extracted
-               OR (j.comp_content_row_id IS NOT NULL AND j.comp_content_row_id <> q.id)
-               OR (j.comp_period IS NULL AND (j.comp_min IS NOT NULL OR j.comp_max IS NOT NULL)))
+        LEFT JOIN job_comp c ON c.url = j.url
+        WHERE (c.url IS NULL
+               OR (c.content_row_id IS NOT NULL AND c.content_row_id <> q.id)
+               OR {_UNREADABLE})
           AND {catalog.IS_AVAILABLE.format(job="j")}
           AND {eligible}
           AND {verdict_reads.verified_open("j.url")}
@@ -114,17 +125,7 @@ def _store(result: BatchResult, context: dict[str, Any], parsed: CompExtract) ->
     # report done == total even when every line failed. Count writes, not
     # parsed or collected responses; failed lines retain prior values and the
     # selection predicates govern their retry.
-    if not written:
-        return "superseded"
-    # Readers still read the copy on jobs until they move to job_comp.
-    db.execute(
-        "UPDATE jobs SET comp_min = %(min)s, comp_max = %(max)s, comp_text = %(text)s, "
-        "comp_period = %(period)s, comp_currency = %(currency)s, comp_basis = %(basis)s, "
-        "comp_extracted = TRUE, comp_content_row_id = %(row)s "
-        "WHERE id = %(job_id)s AND url = %(url)s",
-        {**values, "job_id": context["job_id"]},
-    )
-    return "written"
+    return "written" if written else "superseded"
 
 
 _STORE = (
@@ -163,4 +164,5 @@ PAY = Derivation(
     shape=COMP_TASK,
     answer=CompExtract,
     context_keys=("job_id", "content_row_id"),
+    skip_unchanged=True,
 )

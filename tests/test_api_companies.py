@@ -19,11 +19,13 @@ def _item(client, headers, key: str, query: str = "") -> dict:
 
 
 def _set_comp(job_id: int, *, extracted: bool, low=None, high=None, currency=None) -> None:
-    db.execute(
-        "UPDATE jobs SET comp_extracted = %s, comp_min = %s, comp_max = %s, comp_currency = %s "
-        "WHERE id = %s",
-        (extracted, low, high, currency, job_id),
-    )
+    url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job_id,))["url"]
+    db.execute("DELETE FROM job_comp WHERE url = %s", (url,))
+    if extracted:
+        db.execute(
+            "INSERT INTO job_comp (url, comp_min, comp_max, comp_currency) VALUES (%s, %s, %s, %s)",
+            (url, low, high, currency),
+        )
 
 
 def test_requires_admin(client, user_headers):

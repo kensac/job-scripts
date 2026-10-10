@@ -85,8 +85,8 @@ _JOB_ROW = f"""
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
     ({ATS_SQL}) AS ats,
     j.url, j.raw_url, {catalog.IS_AVAILABLE.format(job="j")} AS active, j.date_posted, j.created_at AS added_at,
-    j.extraction_status, j.comp_min, j.comp_max, j.comp_text, j.comp_currency,
-    j.comp_period, j.comp_basis,
+    j.extraction_status, pay.comp_min, pay.comp_max, pay.comp_text, pay.comp_currency,
+    pay.comp_period, pay.comp_basis,
     {verdict_reads.closed_verdict("j.url")} AS closed_verdict,
     uj.status, {applications.applied_on("uj")} AS date_applied, uj.notes, uj.size, uj.recruiter,
     uj.connection1, uj.connection2, uj.documents,
@@ -104,7 +104,7 @@ _SORTABLE = {
     "title": "lower(j.title)",
     "source": "j.source",
     "status": "uj.status",
-    "comp": "j.comp_max",
+    "comp": "pay.comp_max",
 }
 
 NOT_APPLIED = "not_applied"

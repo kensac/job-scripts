@@ -37,8 +37,9 @@ async def handle_send_digests(task_id: int, payload: dict[str, Any]) -> None:
             )
             rows = db.query(
                 f"""
-                SELECT j.company, j.title, j.locations, j.comp_text
+                SELECT j.company, j.title, j.locations, pay.comp_text
                 FROM board_visible bv JOIN jobs j ON j.id = bv.job_id
+                LEFT JOIN job_comp pay ON pay.url = j.url
                 WHERE bv.user_id = %(uid)s AND {since_clause}
                 ORDER BY bv.computed_at DESC, j.id DESC
                 """,

@@ -69,8 +69,8 @@ def test_comp_is_always_a_yearly_figure():
     """
     absurd = db.query(
         """
-        SELECT url, comp_min, comp_max, comp_text FROM jobs
-        WHERE comp_extracted AND (comp_min < 5000 OR comp_max > 5000000)
+        SELECT url, comp_min, comp_max, comp_text FROM job_comp
+        WHERE comp_min < 5000 OR comp_max > 5000000
         LIMIT 5
         """
     )
@@ -84,7 +84,7 @@ def test_comp_min_never_exceeds_comp_max():
     generated data this asserts the generator, not the extractor.
     """
     inverted = _count(
-        "SELECT count(*) FROM jobs WHERE comp_min IS NOT NULL "
+        "SELECT count(*) FROM job_comp WHERE comp_min IS NOT NULL "
         "AND comp_max IS NOT NULL AND comp_min > comp_max"
     )
     assert inverted == 0

@@ -102,6 +102,9 @@ FROM (
 ) visible_ids
 JOIN jobs j ON j.id = visible_ids.job_id
 LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
+-- The posting's pay (tasks.comp). Unique on url, so a read that names no pay
+-- column has the join removed by the planner.
+LEFT JOIN job_comp pay ON pay.url = j.url
 WHERE TRUE
 {{extra}}
 """

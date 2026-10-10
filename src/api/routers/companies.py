@@ -68,25 +68,41 @@ _MAX_LIMIT = 200
 # identity model, such as it is. mode() picks the most common spelling for
 # display so the UI shows "Stripe" rather than whichever variant sorted first.
 #
-# The comp split is three-way on purpose. comp_extracted says the extractor
+# The comp split is three-way on purpose. A job_comp row says the extractor
 # ran; an amount says it found one. A posting where it ran and found nothing
 # (3,000 of them) is the closest this schema gets to "the posting stated no
 # pay" - but it still cannot separate that from "the posting stated pay and we
 # missed it", so both live in one bucket named for what WE did.
+#
+# Pay is counted over job_comp (110,243 rows) and joined to the per-company
+# totals, rather than joining job_comp to every jobs row before grouping:
+# that join spilled its sort to disk, 4.3 s against 2.9 s for this shape and
+# 2.6 s for the old single pass over jobs (production, 2026-10-10).
 _BASE_CTES = """
-WITH base AS (
+WITH seen AS (
     SELECT lower(btrim(company)) AS company_key,
            mode() WITHIN GROUP (ORDER BY company) AS company_name,
-           count(*) AS total_postings_seen,
-           count(*) FILTER (
-               WHERE comp_extracted AND (comp_min IS NOT NULL OR comp_max IS NOT NULL)
-           ) AS comp_found,
-           count(*) FILTER (
-               WHERE comp_extracted AND comp_min IS NULL AND comp_max IS NULL
-           ) AS comp_ran_found_nothing,
-           count(*) FILTER (WHERE NOT comp_extracted) AS comp_not_attempted
+           count(*) AS total_postings_seen
     FROM jobs WHERE company <> ''
     GROUP BY lower(btrim(company))
+), paid AS (
+    SELECT lower(btrim(j.company)) AS company_key,
+           count(*) FILTER (
+               WHERE pay.comp_min IS NOT NULL OR pay.comp_max IS NOT NULL
+           ) AS comp_found,
+           count(*) FILTER (
+               WHERE pay.comp_min IS NULL AND pay.comp_max IS NULL
+           ) AS comp_ran_found_nothing,
+           count(*) AS comp_read
+    FROM job_comp pay JOIN jobs j ON j.url = pay.url
+    WHERE j.company <> ''
+    GROUP BY lower(btrim(j.company))
+), base AS (
+    SELECT seen.company_key, seen.company_name, seen.total_postings_seen,
+           COALESCE(paid.comp_found, 0) AS comp_found,
+           COALESCE(paid.comp_ran_found_nothing, 0) AS comp_ran_found_nothing,
+           seen.total_postings_seen - COALESCE(paid.comp_read, 0) AS comp_not_attempted
+    FROM seen LEFT JOIN paid ON paid.company_key = seen.company_key
 ), apps AS (
     -- SCOPED TO THE CALLING USER. Every query in this file that touches
     -- `applications` or `user_jobs` now carries a user_id, and none of them
@@ -245,13 +261,13 @@ _COUNT_SQL = (
 # folded into USD: an amount whose currency was never captured is not a dollar
 # figure, and averaging across the two would invent one.
 _CURRENCY_SQL = """
-SELECT lower(btrim(company)) AS company_key, comp_currency AS currency,
-       count(*) AS n, min(comp_min) AS min, max(comp_max) AS max
-FROM jobs
-WHERE company <> '' AND comp_extracted
-  AND (comp_min IS NOT NULL OR comp_max IS NOT NULL)
-  AND lower(btrim(company)) = ANY(%(keys)s)
-GROUP BY lower(btrim(company)), comp_currency
+SELECT lower(btrim(j.company)) AS company_key, pay.comp_currency AS currency,
+       count(*) AS n, min(pay.comp_min) AS min, max(pay.comp_max) AS max
+FROM jobs j JOIN job_comp pay ON pay.url = j.url
+WHERE j.company <> ''
+  AND (pay.comp_min IS NOT NULL OR pay.comp_max IS NOT NULL)
+  AND lower(btrim(j.company)) = ANY(%(keys)s)
+GROUP BY lower(btrim(j.company)), pay.comp_currency
 """
 
 # Keyed and filtered exactly like the count above it, because the two are
