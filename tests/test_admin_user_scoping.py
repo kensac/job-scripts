@@ -87,8 +87,9 @@ def test_mail_spend_and_queries_scope_by_user(
 
     for uid, cost in ((me, 1.5), (other, 2.5)):
         db.execute(
-            "INSERT INTO api_usage (user_id, key_source, purpose, model, prompt_tokens, "
-            "completion_tokens, total_tokens, cost_usd) VALUES (%s, 'server', 'filters', 'm', 1, 1, 2, %s)",
+            "INSERT INTO model_calls (user_id, payer, key_source, batched, purpose, model, "
+            "prompt_tokens, completion_tokens, total_tokens, cached_tokens, cost_usd) "
+            "VALUES (%s, 'user', 'server', false, 'filters', 'm', 1, 1, 2, 0, %s)",
             (uid, cost),
         )
     body = client.get("/v1/admin/spend/calls", params={"user": me}, headers=admin_headers).json()
