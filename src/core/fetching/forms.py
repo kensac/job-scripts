@@ -18,11 +18,12 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from html import unescape
-from urllib.parse import parse_qsl, urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import requests
 
 from core.fetching.ats import amazon_canonical
+from core.fetching.hosts import hostname
 
 TIMEOUT = 20
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/html"}
@@ -182,15 +183,9 @@ _READERS = {
 }
 
 
-def host_of(url: str) -> str:
-    return (urlparse(url).hostname or "").lower()
-
-
 def posting_urls(url: str) -> list[str]:
     """The urls the board may store the posting under, for the page the
-    form is on. Beside budget_host on purpose: the two are the whole of
-    what this module knows about which hosts are one Greenhouse, and a
-    second copy of that knowledge is how the first one drifted (#405). Ashby's form lives under /application and Lever's under
+    form is on. Ashby's form lives under /application and Lever's under
     /apply; a Greenhouse form embedded on an employer's site is
     boards.greenhouse.io/embed/job_app?for=<board>&token=<id>, and a
     Greenhouse posting is stored under whichever of its two hosts the
@@ -224,24 +219,8 @@ def posting_urls(url: str) -> list[str]:
     return [base, base + "/"]
 
 
-def budget_host(url: str) -> str:
-    """The host a form read actually speaks to, which is the row the host
-    budget must key on. Greenhouse's form lives on boards-api.greenhouse.io
-    while the posting lives on job-boards.greenhouse.io; keyed by the posting
-    host, the form reads would sit under their own row with no shared
-    refusal history, so a listing pull paced out to the cap would leave the
-    form reads hammering the same operator at full speed. The listing pulls
-    already key on boards-api.greenhouse.io, so this makes the two one row."""
-    host = host_of(url)
-    if host.endswith("greenhouse.io"):
-        return "boards-api.greenhouse.io"
-    if host == "myworkdayjobs.com" or host.endswith(".myworkdayjobs.com"):
-        return "myworkdayjobs.com"
-    return host
-
-
 def reader_for(url: str):
-    host = host_of(url)
+    host = hostname(url)
     return next((fn for suffix, fn in _READERS.items() if host.endswith(suffix)), None)
 
 

@@ -26,6 +26,7 @@ from api.apply.drafting import Draft, instructions, question_input, resume_text,
 from api.board import visibility
 from api.budget import load_config
 from core.fetching import forms
+from core.fetching.hosts import pace_key
 from core.shapes import APPLICATION_TASK
 from core.store import get_content
 from tasks import batch_policy
@@ -72,7 +73,7 @@ def read_form(url: str) -> list[dict[str, Any]] | None:
     if not forms.supported(url):
         store_form(url, None)
         return None
-    host = forms.budget_host(url)
+    host = pace_key(url)
     opens = hosts.take(host)
     if opens:
         raise Deferred(opens)
