@@ -286,6 +286,15 @@ def schedule_ingest_cycle() -> None:
     # never pulled, so nothing else would retire its postings. A no-op once
     # the catalog agrees (catalog.retire_switched_off).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
+    # The pay columns on jobs that job_comp replaced, emptied so their drop
+    # can prove them empty (tasks.comp_clear). Offered until a finished run
+    # cleared nothing. One at a time.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'clear_jobs_pay' "
+        "AND (status IN ('pending', 'running') "
+        "     OR (status = 'done' AND progress->>'cleared' = '0')) LIMIT 1"
+    ):
+        enqueue("clear_jobs_pay", {"cycle": cycle}, dedupe_key=f"clear-jobs-pay:{cycle}")
     # Messages whose current event or match pointer lags its log
     # (tasks.mail_pointers). Counting them is a pass over every message,
     # 0.9 s on production on 2026-10-10, so the task counts once a cycle
