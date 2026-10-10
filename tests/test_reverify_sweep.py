@@ -461,6 +461,17 @@ async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_aga
 
     await sweep()
     assert submitted == [[url]], "a verdict that recorded no question is asked again"
+    fetch = db.query_one(
+        "SELECT id FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
+    )["id"]
+    answered = db.query(
+        "SELECT page_fetch_id, model_call_id FROM ai_queries "
+        "WHERE url = %s AND config_name = 'reverify'",
+        (url,),
+    )
+    assert len(answered) == 2 and {a["page_fetch_id"] for a in answered} == {fetch}
+    [call] = {a["model_call_id"] for a in answered}
+    assert call is not None, "both axes name the one call that answered them"
     await sweep()
     assert submitted == [[url]], "the same question is not bought twice"
     reused = db.query(

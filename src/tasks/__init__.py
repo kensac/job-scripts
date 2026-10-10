@@ -11,6 +11,7 @@ without importing the code that runs it.
 
 from __future__ import annotations
 
+from tasks.answer_links import handle_link_answers
 from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
@@ -78,6 +79,7 @@ HANDLERS = {
     "classify_job_profiles": handle_classify_job_profiles,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
     "merge_olm_twins": handle_merge_olm_twins,
+    "link_answers": handle_link_answers,
 }
 
 __all__ = ["HANDLERS"]

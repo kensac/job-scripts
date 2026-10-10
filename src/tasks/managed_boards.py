@@ -11,7 +11,13 @@ from api.model_calls import Payer
 from core import providers, routing
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
-from tasks.filter_execution import ExecutionHooks, FilterSnapshot, execute_batch, execute_live
+from tasks.filter_execution import (
+    ExecutionHooks,
+    FilterSnapshot,
+    execute_batch,
+    execute_live,
+    frozen_page,
+)
 from tasks.runtime import cancelled, has_batch_work, pending_batch_ids, set_progress
 
 
@@ -132,7 +138,7 @@ async def _handle_managed_filter(
         verdict_label=f"managed-board:{board_id}",
         key_source="owner",
         payer=Payer(managed_board_id=board_id),
-        record_failure=lambda model: runs.record_parse_failures(board_id, model),
+        purpose="managed_board",
         record_usage=lambda usage, model, batched: runs.record_tokens(
             board_id, usage, model, batched=batched
         ),
@@ -159,7 +165,9 @@ async def _handle_managed_filter(
         snapshot,
         inference_jobs,
         hooks,
-        contents={job["url"]: job["content"] for job in inference_jobs if job["content"]},
+        contents={
+            job["url"]: page for job in inference_jobs if (page := frozen_page(job)) is not None
+        },
         unavailable=sum(not job["content"] for job in inference_jobs),
         purpose="managed_board",
         # No cap, exactly as tasks/filters.py submits: execute_batch defaults

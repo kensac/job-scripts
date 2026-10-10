@@ -196,6 +196,14 @@ async def test_collection_writes_the_board_verdict_the_board_run_then_reuses(
     assert [r["total_tokens"] for r in rows] == [2100, 0, 0], "one call, booked once"
     assert rows[0]["request_sha256"] == spec.context["verify_question"]
     assert decided_custom_urls([url], board["prompt_hash"], model=spec.context["model"]) == {url}
+    # Each answer points at the page it judged and the one call that paid
+    # for all three; the board's input rebuilds from that page byte for byte.
+    fetch = db.query_one("SELECT id FROM page_texts WHERE url = %s", (url,))["id"]
+    pointers = f.answer_pointers(url)
+    assert [p["page_fetch_id"] for p in pointers] == [fetch] * 3
+    [call] = {p["model_call_id"] for p in pointers}
+    assert call is not None and pointers[0]["call_tokens"] == 2100
+    assert pointers[2]["rebuilt"] == pointers[2]["copy"] == spec.input
 
 
 @pytest.mark.asyncio

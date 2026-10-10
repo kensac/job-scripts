@@ -104,6 +104,26 @@ def make_verdict(
     )
 
 
+def answer_pointers(url: str) -> list[dict[str, Any]]:
+    """Every answer for `url` in id order, with what it points at: `rebuilt`
+    is its input as core.answer_inputs rebuilds it from its fetch, beside
+    `copy`, the input_content it stored; `call_tokens` is its call's."""
+    from core import answer_inputs
+
+    return db.query(
+        f"""
+        SELECT q.check_type, q.page_fetch_id, q.model_call_id,
+               {answer_inputs.sql("q", "f.content")} AS rebuilt, q.input_content AS copy,
+               m.total_tokens AS call_tokens, m.duration_ms AS call_duration_ms
+        FROM ai_queries q
+        LEFT JOIN page_fetches f ON f.id = q.page_fetch_id
+        LEFT JOIN model_calls m ON m.id = q.model_call_id
+        WHERE q.url = %s ORDER BY q.id
+        """,
+        (url,),
+    )
+
+
 def make_fetch(
     url: str, *, content: str | None = None, status: str = "passed", method: str = "scraped"
 ) -> int:

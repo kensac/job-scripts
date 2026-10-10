@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +15,7 @@ from api.model_calls import Payer
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
-from core.store import decided_custom_urls, get_contents
+from core.store import Page, decided_custom_urls, get_contents
 from tasks.runtime import (
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
@@ -57,9 +56,11 @@ class ExecutionHooks:
 
     verdict_label: str
     key_source: str
-    # Who a batch submitted for this run is charged to.
+    # Who a call made for this run is charged to, and the ledger purpose.
     payer: Payer
-    record_failure: Callable[[str | None], AbstractContextManager[None]]
+    purpose: str
+    # Counts a collected batch item's tokens; its call is already in the
+    # ledger (the checkpoint wrote it), and a live call is booked by run_check.
     record_usage: Callable[[Mapping[str, int | None], str | None, bool], None]
     budget_exceeded: Callable[[], bool]
     cancelled: Callable[[], bool]
@@ -70,9 +71,9 @@ class ExecutionHooks:
 async def check_filter(
     cfg: ai.AIConfig,
     job: dict[str, Any],
-    content: str,
+    page: Page,
     snapshot: FilterSnapshot,
-    verdict_label: str,
+    hooks: ExecutionHooks,
 ) -> dict[str, int | None]:
     """Run one check. The caller has already excluded what is decided."""
     _, usage = await verdicts.run_check(
@@ -80,12 +81,14 @@ async def check_filter(
         url=job["url"],
         check_type="custom",
         instructions=build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous),
-        input_text=build_custom_input(job["company"], job["title"], content),
+        input_text=build_custom_input(job["company"], job["title"], page.text),
         response_model=FilterDecision,
         verdict_of=lambda parsed: (parsed.should_filter, None),
+        booking=budget.Booking(hooks.payer, hooks.key_source, hooks.purpose),
+        page_fetch_id=page.fetch_id,
         company=job["company"],
         job_title=job["title"],
-        filter_name=verdict_label,
+        filter_name=hooks.verdict_label,
         prompt_hash=snapshot.prompt_hash,
         context="filter-run",
     )
@@ -124,18 +127,18 @@ async def execute_live(
         if job["url"] in decided:
             return None
         frozen_content = "content" in job
-        content = job.get("content") if frozen_content else stored.get(job["url"])
-        if not content and not frozen_content and job["url"] not in parked:
-            content, _closure = await verdicts.refresh_content(
+        page = frozen_page(job) if frozen_content else stored.get(job["url"])
+        if not page and not frozen_content and job["url"] not in parked:
+            page, _closure = await verdicts.refresh_page(
                 job["url"],
                 company=job.get("company") or "",
                 job_title=job.get("title") or "",
                 context="filter-run",
                 scrape_sem=scrape_sem,
             )
-        if not content:
+        if not page:
             return None
-        return await check_filter(cfg, job, content, snapshot, hooks.verdict_label)
+        return await check_filter(cfg, job, page, snapshot, hooks)
 
     index = 0
     pending: dict[asyncio.Task, dict[str, Any]] = {}
@@ -148,16 +151,13 @@ async def execute_live(
             job = pending.pop(future)
             done += 1
             try:
-                with hooks.record_failure(cfg.model):
-                    usage = future.result()
+                future.result()
             except Exception as exc:
                 text = str(exc).lower()
                 limiter.record(error=True, rate_limited="429" in text or "rate limit" in text)
                 logger.exception("Filter check failed for %s", job["url"])
                 continue
             limiter.record()
-            if usage:
-                hooks.record_usage(usage, cfg.model, False)
             if done % 5 == 0:
                 hooks.progress(done, total, snapshot.name)
         if hooks.cancelled():
@@ -173,6 +173,14 @@ async def execute_live(
     hooks.complete()
 
 
+def frozen_page(job: dict[str, Any]) -> Page | None:
+    """The page a managed board run froze for a job (content_query_id is the
+    fetch), or None when it froze none."""
+    if job.get("content_query_id") is None or not job.get("content"):
+        return None
+    return Page(job["content_query_id"], job["content"])
+
+
 def result_label(unavailable: int, name: str) -> str:
     return f"{name}; {unavailable} without content, awaiting a later cycle" if unavailable else name
 
@@ -182,8 +190,8 @@ async def prepare_content(
     jobs: list[dict[str, Any]],
     *,
     cancelled: Callable[[], bool],
-    refresh_content: Callable[..., Awaitable[tuple[str | None, Any]]] = verdicts.refresh_content,
-) -> tuple[dict[str, str], int]:
+    refresh_page: Callable[..., Awaitable[tuple[Page | None, Any]]] = verdicts.refresh_page,
+) -> tuple[dict[str, Page], int]:
     contents = get_contents([job["url"] for job in jobs])
     missing = [job for job in jobs if job["url"] not in contents]
     parked = verdicts.fetch_parked_urls([job["url"] for job in missing])
@@ -195,14 +203,14 @@ async def prepare_content(
             if cancelled():
                 return
             try:
-                content, _closure = await refresh_content(
+                page, _closure = await refresh_page(
                     job["url"],
                     company=job.get("company") or "",
                     job_title=job.get("title") or "",
                     context="filter-prepare",
                 )
-                if content:
-                    contents[job["url"]] = content
+                if page:
+                    contents[job["url"]] = page
             except Exception:
                 logger.warning(
                     "filter content preparation failed for %s", job["url"], exc_info=True
@@ -221,7 +229,7 @@ async def execute_batch(
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
     *,
-    contents: dict[str, str],
+    contents: dict[str, Page],
     unavailable: int,
     purpose: str = "filter",
     max_output_tokens: int = 6000,
@@ -247,10 +255,10 @@ async def execute_batch(
         if existing:
             by_url[job["url"]] = (job, None)
             continue
-        content = contents.pop(job["url"], None)
-        if not content:
+        page = contents.pop(job["url"], None)
+        if not page:
             continue
-        input_text = build_custom_input(job["company"], job["title"], content)
+        input_text = build_custom_input(job["company"], job["title"], page.text)
         specs.append(
             structured_response_spec(
                 job["url"],
@@ -260,6 +268,7 @@ async def execute_batch(
                 context={
                     **({"prompt_cache_policy": cache_policy} if cache_policy else {}),
                     "job": job,
+                    "page_fetch_id": page.fetch_id,
                     "filter": snapshot.__dict__,
                     "reasoning_effort": cfg.params.get("reasoning_effort")
                     or cfg.params.get("effort")
@@ -362,6 +371,7 @@ def _plan(
         job_title=job["title"],
         instructions=result.request.instructions if result.request else None,
         input_text=result.request.input if result.request else None,
+        page_fetch_id=context.get("page_fetch_id"),
         filter_name=hooks.verdict_label,
         prompt_hash=stored.prompt_hash,
         context="filter-batch",

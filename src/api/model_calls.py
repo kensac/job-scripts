@@ -48,11 +48,12 @@ _INSERT = (
     "INSERT INTO model_calls (created_at, purpose, model, payer, user_id, managed_board_id, "
     "key_source, batched, task_id, provider_batch_id, custom_id, prompt_tokens, "
     "completion_tokens, total_tokens, cached_tokens, cache_write_tokens, reasoning_tokens, "
-    "cost_usd, source) VALUES "
+    "cost_usd, duration_ms, source) VALUES "
     "(COALESCE(%(created_at)s, now()), %(purpose)s, %(model)s, %(payer)s, %(user_id)s, "
     "%(managed_board_id)s, %(key_source)s, %(batched)s, %(task_id)s, %(provider_batch_id)s, "
     "%(custom_id)s, %(prompt_tokens)s, %(completion_tokens)s, %(total_tokens)s, "
-    "%(cached_tokens)s, %(cache_write_tokens)s, %(reasoning_tokens)s, %(cost_usd)s, %(source)s) "
+    "%(cached_tokens)s, %(cache_write_tokens)s, %(reasoning_tokens)s, %(cost_usd)s, "
+    "%(duration_ms)s, %(source)s) "
     "ON CONFLICT (provider_batch_id, custom_id) DO NOTHING"
 )
 
@@ -72,54 +73,69 @@ class Call:
     # copied from. A call recorded as it happens takes now() and 'call'.
     created_at: datetime.datetime | None = None
     source: str = "call"
+    # Wall time of a live call; a batch item has none of its own.
+    duration_ms: int | None = None
+
+
+def _row(call: Call) -> dict[str, Any] | None:
+    """The row a call is written as, or None when its provider reported no
+    tokens: that call was not billed and is not a row."""
+    usage = call.usage
+    if not usage.get("total_tokens"):
+        return None
+    prompt = usage.get("prompt_tokens") or 0
+    completion = usage.get("completion_tokens") or 0
+    cached = usage.get("cached_tokens") or 0
+    cache_write = usage.get("cache_write_tokens")
+    return {
+        "created_at": call.created_at,
+        "source": call.source,
+        "purpose": call.purpose,
+        "model": call.model,
+        "payer": call.payer.kind,
+        "batched": call.provider_batch_id is not None,
+        "user_id": call.payer.user_id,
+        "managed_board_id": call.payer.managed_board_id,
+        "key_source": call.key_source,
+        "task_id": call.task_id,
+        "provider_batch_id": call.provider_batch_id,
+        "custom_id": call.custom_id,
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": usage.get("total_tokens"),
+        "cached_tokens": cached,
+        "cache_write_tokens": cache_write,
+        "reasoning_tokens": usage.get("reasoning_tokens") or 0,
+        "cost_usd": pricing.estimate_cost_usd(
+            call.model,
+            prompt,
+            completion,
+            cached_tokens=cached,
+            cache_write_tokens=cache_write,
+            batched=call.provider_batch_id is not None,
+        ),
+        "duration_ms": call.duration_ms,
+    }
 
 
 def record(calls: Iterable[Call]) -> None:
-    """Write each call once; a batch item already recorded is left alone.
-
-    A call whose provider reported no tokens was not billed and is not a row.
-    """
-    rows: list[dict[str, Any]] = []
-    for call in calls:
-        usage = call.usage
-        if not usage.get("total_tokens"):
-            continue
-        prompt = usage.get("prompt_tokens") or 0
-        completion = usage.get("completion_tokens") or 0
-        cached = usage.get("cached_tokens") or 0
-        cache_write = usage.get("cache_write_tokens")
-        rows.append(
-            {
-                "created_at": call.created_at,
-                "source": call.source,
-                "purpose": call.purpose,
-                "model": call.model,
-                "payer": call.payer.kind,
-                "batched": call.provider_batch_id is not None,
-                "user_id": call.payer.user_id,
-                "managed_board_id": call.payer.managed_board_id,
-                "key_source": call.key_source,
-                "task_id": call.task_id,
-                "provider_batch_id": call.provider_batch_id,
-                "custom_id": call.custom_id,
-                "prompt_tokens": prompt,
-                "completion_tokens": completion,
-                "total_tokens": usage.get("total_tokens"),
-                "cached_tokens": cached,
-                "cache_write_tokens": cache_write,
-                "reasoning_tokens": usage.get("reasoning_tokens") or 0,
-                "cost_usd": pricing.estimate_cost_usd(
-                    call.model,
-                    prompt,
-                    completion,
-                    cached_tokens=cached,
-                    cache_write_tokens=cache_write,
-                    batched=call.provider_batch_id is not None,
-                ),
-            }
-        )
+    """Write each call once; a batch item already recorded is left alone."""
+    rows = [row for row in map(_row, calls) if row is not None]
     if rows:
         db.executemany(_INSERT, rows)
+
+
+def record_live(call: Call) -> int | None:
+    """Write one live call and return its id, which the answer it produced
+    points at (ai_queries.model_call_id). None when it was not billed."""
+    if call.provider_batch_id is not None:
+        raise ValueError("a batch item is recorded by the receipt checkpoint")
+    row = _row(call)
+    if row is None:
+        return None
+    written = db.query_one(_INSERT + " RETURNING id", row)
+    assert written is not None
+    return written["id"]
 
 
 def record_batch_items(results: Iterable[BatchResult]) -> None:

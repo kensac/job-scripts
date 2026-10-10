@@ -9,6 +9,8 @@ from api import ai, db
 from api.ai import access as ai_access
 from api.ai import verdicts
 from core import pricing
+from core.checks import JobClosedResponse
+from core.store import Page
 from tasks import uploads
 
 
@@ -30,6 +32,8 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     async def response(*args, **kwargs):
         if usable == "paid_error":
             raise ai.PaidParseError("paid invalid response", usage)
+        if usable and kind == "explain":
+            return JobClosedResponse(is_closed=False, reason="open"), usage
         parsed = (
             SimpleNamespace(
                 improved="remote roles",
@@ -64,11 +68,12 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     else:
         if kind == "explain":
 
-            async def fresh(*args, **kwargs):
-                return "current posting " * 20, None
+            async def fresh(url, **kwargs):
+                text = "current posting " * 20
+                return Page(f.make_fetch(url, content=text), text), None
 
-            monkeypatch.setattr(verdicts, "refresh_content", fresh)
-            monkeypatch.setattr(verdicts, "run_check", response)
+            # The real run_check, which books the call with its verdict.
+            monkeypatch.setattr(verdicts, "refresh_page", fresh)
             path, body, purpose = f"/v1/user/jobs/{job_id}/explain", {"check": "closed"}, "explain"
         elif kind == "suggest":
             path, body, purpose = (
@@ -98,3 +103,11 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
             "cost_usd": pricing.estimate_cost_usd(cfg.model, 1000, 100, cached_tokens=800),
         }
     ]
+    if kind == "explain":
+        # The verdict names the call it booked and the page it read, and the
+        # page it was asked about rebuilds from that fetch.
+        [answer] = [a for a in f.answer_pointers(_url) if a["check_type"] == "explain:closed"]
+        call = db.query_one("SELECT id, duration_ms FROM model_calls")
+        assert answer["model_call_id"] == call["id"] and call["duration_ms"] is not None
+        assert answer["page_fetch_id"] is not None
+        assert answer["rebuilt"] == answer["copy"]

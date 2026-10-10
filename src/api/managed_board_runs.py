@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -574,17 +573,6 @@ def record_tokens(
     if not usage.get("total_tokens"):
         return
     budget.record_managed_board_tokens(board_id, "managed_board", model, usage, batched=batched)
-
-
-@contextmanager
-def record_parse_failures(board_id: int, model: str | None):
-    from api.ai import PaidParseError
-
-    try:
-        yield
-    except PaidParseError as exc:
-        record_tokens(board_id, exc.usage, model)
-        raise
 
 
 # Who belongs on the board after this run, as (job_id, sort_at). A reuse run
