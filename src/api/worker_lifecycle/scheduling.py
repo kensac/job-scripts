@@ -11,6 +11,7 @@ from api.board import visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
 from api.resumes.backfill_schedule import schedule_next as schedule_resume_backfill
+from api.resumes.legacy_clear_schedule import schedule_next as schedule_resume_legacy_clear
 from core.fetching.hosts import pace_key
 from tasks import DERIVATIONS
 
@@ -116,6 +117,11 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         schedule_resume_backfill(cycle)
+    if db.get_config("resume_legacy_clear_enabled") and not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'clear_resume_legacy' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        schedule_resume_legacy_clear(cycle)
     # Each batch bundle's fields moved off its member rows onto batch_objects
     # (tasks.batch_objects). Offered until a run reports done; a run waiting
     # on an older image ends and the next cycle's run checks again.

@@ -7,6 +7,13 @@ from pydantic import PositiveInt
 from api.config_types import ConfigKey
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "resume_legacy_clear_enabled": ConfigKey(
+        section="Applications",
+        default=False,
+        value_type=bool,
+        help="Clear verified old resume values on Hetzner only after every old text and "
+        "PDF has a canonical pointer and all readers use the new storage.",
+    ),
     "resume_backfill_enabled": ConfigKey(
         section="Applications",
         default=False,

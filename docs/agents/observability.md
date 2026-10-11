@@ -33,6 +33,12 @@ A `done` task means one attempt ended. Check `resume_backfill_runs.failed_at`
 and `last_error`, then count old values still missing pointers to confirm
 completion.
 
+**Old resume values clear only on Hetzner after the reader rollout.** The
+persisted `resume_legacy_clear_enabled` setting starts off. Each task checks
+one canonical part against the old value. `resume_legacy_clear_runs` records
+progress and failure. A done task is one attempt; completion means no old
+values remain and no failed clearing runs need review.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

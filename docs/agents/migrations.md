@@ -168,6 +168,16 @@ must not block later values.
 Task status `done` does not prove the value moved. Check failed runs and count
 old values still missing pointers before calling the backfill complete.
 
+**Clear old resume values after all readers move.** Keep
+`resume_legacy_clear_enabled` off until every old text and PDF has a canonical
+pointer and all fleet readers use canonical storage. The clearing scheduler
+also checks that no old value lacks a pointer. Hetzner tasks compare one old
+part with its canonical part while holding the source row lock. The run keeps
+its progress and errors. A final short transaction locks the source row again,
+checks that it has not changed, checks complete canonical metadata, and clears
+only that old field. Keep both run ledgers. Count remaining old values and
+failed clearing runs before dropping the old columns through a later migration.
+
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
 of the old column in one release. After every fleet reader runs that release,
