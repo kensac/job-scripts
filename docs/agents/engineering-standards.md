@@ -80,6 +80,9 @@ size.** No row ages out, no table keeps its last N rows, no text is cut to N
 characters before it is saved, no payload is dropped after a while. The scale
 here does not call for retention, and data that is gone cannot be measured.
 
+An extracted skill keeps its raw text and canonical spelling regardless of
+length. Reject known non-skill categories by meaning, not by a character count.
+
 What the rule does not cover:
 
 - A bound on a request or a read: a request field's `max_length`, a page's
