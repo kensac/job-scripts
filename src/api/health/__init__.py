@@ -1,13 +1,8 @@
-"""Data-health detection: what is wrong right now, and the record of it.
+"""Data-health detectors, their shared vocabulary, and alert recording.
 
-This was one 1,159 line module holding five detectors, a vocabulary and a
-recorder. It is a package because the five detectors are five subjects, not
-five sections: each owns its own alert kinds and its own reason for existing,
-and `detect` already ran each in isolation so that one raising did not take
-the others down.
-
-Everything the old module exposed is re-exported here, so `from api import
-health` and `health.detect()` read exactly as they did.
+`detect` runs the source, board, queue, fleet, silent-task, and mail detectors
+separately. A failure in one detector becomes its own finding and does not
+stop the others. This package re-exports the health API used by callers.
 """
 
 from __future__ import annotations

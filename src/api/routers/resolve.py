@@ -1,26 +1,9 @@
-"""One queue for everything awaiting a human decision, and one way to answer it.
+"""The queue for human decisions and the routes that answer them.
 
-Six resolve/undo pairs existed across six URL shapes with six payloads, each
-individually well built. Together they were why the unmatched queue offered a
-single verb - "say where this belongs" - when the honest answer is often
-neither an application nor a correction.
-
-The CHOICES ARE DECLARED BY THE SERVER. A row carries what it is, the evidence
-behind it, and the verbs available on it, so the picker renders buttons from
-data and a new decision type needs no frontend change. That is the part of
-this that is architecture rather than plumbing.
-
-Every answer APPENDS. Undo is another append, the wrong answer stays visible,
-and `actor_user_id` records who decided - the same contract corrections got,
-rather than a second one.
-
-FOUR KINDS, ONE QUEUE. Unmatched mail was the only kind for as long as it was
-the only one anybody could answer. The other three were already produced and
-already unanswered: 4,674 attachments the matcher made with nobody ever asked
-whether they were right, 1,159 status proposals on offer against 0 answers,
-and 525 open action items. They were reachable through four more endpoint
-families, which is the same shape this module was written to collapse, so they
-belong here rather than beside it.
+Each row declares its kind, evidence, and available choices. The client renders
+those choices from the response. Answers and undo actions append decisions;
+`actor_user_id` records who made each one. The queue covers unmatched mail,
+match reviews, status proposals, and open action items.
 """
 
 from __future__ import annotations
