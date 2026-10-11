@@ -229,7 +229,7 @@ class _Generator:
         for symbol in self.rng.choice(classes) or "a":
             alphabet += {"A": _UPPER, "a": _LETTERS, "9": _DIGITS, " ": " ", "-": _PUNCT}[symbol]
         # choices() in one call, not choice() per character. The profile keeps
-        # production's real lengths, and ai_queries.input_content reaches 32k
+        # production's real lengths, and page_fetches.content reaches 32k
         # characters, so per-character drawing spent 62 of the build's 78
         # seconds inside random.choice alone.
         return "".join(self.rng.choices(alphabet, k=max(0, int(length))))

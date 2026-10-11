@@ -25,7 +25,7 @@ mailbox, the addresses and the OAuth tokens do not travel.
 
 Usage (reads PRODUCTION_DATABASE_URL from the environment or .env):
     python scripts/sync_testdb.py            # structure + data
-    python scripts/sync_testdb.py --fast     # skips ai_queries.input_content
+    python scripts/sync_testdb.py --fast     # skips page text
 """
 
 from __future__ import annotations
@@ -151,10 +151,10 @@ COPIED_VERBATIM = {
     "user_settings.column_layout": "the dev API renders the board from it",
 }
 
-# Page text (page_fetches.content, and the copies on answers in
-# ai_queries.input_content) is most of the database and almost no test needs it.
+# Page text (page_fetches.content) is most of the database and almost no test
+# needs it, nor the answers' raw replies.
 FAST_SKIP = {
-    "ai_queries": ["input_content", "instructions", "parsed_json"],
+    "ai_queries": ["parsed_json"],
     "page_fetches": ["content"],
 }
 

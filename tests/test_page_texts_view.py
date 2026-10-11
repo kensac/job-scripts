@@ -3,57 +3,21 @@
 from __future__ import annotations
 
 import pathlib
-import re
 
 from api import db
 from core import page_fetches, store
-from tests.factories import legacy_answer
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
-# Page text read from ai_queries in the same statement. The admin row explorer
-# shows a stored row as it is, the text the model saw included, so it reads
-# the table.
-_RAW_ROW_READERS = {"api/routers/admin/queries.py"}
-_TEXT_FROM_TABLE = re.compile(
-    r"input_content[^;]{0,400}?(?:FROM|JOIN) ai_queries"
-    r"|(?:FROM|JOIN) ai_queries[^;]{0,400}?input_content",
-    re.S,
-)
 PAGE = "Posting text. " * 40
 
 
-def test_page_text_is_fetched_text_never_an_answer_copy_or_a_filter_input():
+def test_page_text_is_the_fetches_that_brought_text_back():
     fetched = page_fetches.record("https://x/a", "passed", "scraped", PAGE)
     page_fetches.record("https://x/a", "failed", "fetch returned nothing")
-    legacy_answer("https://x/b", "passed", check_type="closed", input_content=PAGE)
-    legacy_answer("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
 
     rows = db.query("SELECT id, url FROM page_texts ORDER BY url")
     assert rows == [{"id": fetched, "url": "https://x/a"}]
-
-
-def test_the_sweeps_and_the_filters_read_the_same_text():
-    """CONTENT_LATERAL read a custom filter's wrapped input as the page when it
-    was the only text, while get_contents did not. Both now read page_texts."""
-    legacy_answer("https://x/c", "passed", check_type="custom", input_content="Acme\n" + PAGE)
-    lateral = db.query(
-        "SELECT q.input_content FROM (SELECT 'https://x/c' AS url) j "
-        + store.CONTENT_LATERAL.format(url="j.url", columns="input_content")
-    )
-    assert lateral == []
-    assert store.get_contents(["https://x/c"]) == {}
-
-
-def test_only_the_row_explorer_reads_page_text_from_the_table():
-    readers = sorted(
-        str(path.relative_to(SRC))
-        for path in SRC.rglob("*.py")
-        if _TEXT_FROM_TABLE.search(path.read_text())
-    )
-    assert set(readers) <= _RAW_ROW_READERS, (
-        f"read page text from page_texts instead: {sorted(set(readers) - _RAW_ROW_READERS)}"
-    )
 
 
 def test_the_text_lookups_are_index_only():

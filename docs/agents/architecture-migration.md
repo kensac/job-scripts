@@ -155,10 +155,10 @@ reader:
      a UNION ALL arm is flattened into the outer query only while its FROM
      is one table, and the admin ledger's skip scans and newest-first pages
      need it flattened (`tests/test_admin_jobs_read_plan.py`).
-   - The copies (`input_content`, the usage columns, `instructions`) were
-     emptied in 2026-10, only where `ledger_rows` read the same without
-     them, and no code names them. Next: the columns are dropped once
-     proven empty, and the views stop falling back to them.
+   - `ai_queries` holds no copy: `input_content`, the usage columns and
+     `instructions` were emptied in 2026-10, only where `ledger_rows` read
+     the same without them, and dropped once proven empty (a0e5b60bf58d).
+     An answer that names no fetch or no call shows none.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves. See "The ledger of paid model calls" below.
 
@@ -253,7 +253,7 @@ they came to disagree.
   id, so "this verdict's call was paid on another row" is a join, not the
   zero-token guess `joint_call_rows` makes today. A verdict no call produced
   (`reverify-unchanged`, `verify-near-copy`, ingest, manual) has none, which
-  says so. Its token and cost columns are then cleared and dropped.
+  says so. Its token and cost columns were cleared and dropped (a0e5b60bf58d).
 - `ai_batches` keeps the batch lifecycle (status, requests, completed,
   `est_tokens` for chunking). Its totals become a sum over the batch's calls.
 - `api_usage` is replaced, not pointed at: payer is a column of the call.

@@ -110,4 +110,4 @@ def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
         call = db.query_one("SELECT id, duration_ms FROM model_calls")
         assert answer["model_call_id"] == call["id"] and call["duration_ms"] is not None
         assert answer["page_fetch_id"] is not None
-        assert answer["rebuilt"] == "current posting " * 20 and answer["copy"] is None
+        assert answer["rebuilt"] == "current posting " * 20

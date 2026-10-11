@@ -482,7 +482,7 @@ async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_aga
     await sweep()
     assert submitted == [[url]], "the same question is not bought twice"
     reused = db.query(
-        "SELECT check_type, status, model, cost_usd, request_sha256 FROM ai_queries "
+        "SELECT check_type, status, model, model_call_id, request_sha256 FROM ai_queries "
         "WHERE url = %s AND config_name = 'reverify-unchanged' ORDER BY check_type",
         (url,),
     )
@@ -497,7 +497,7 @@ async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_aga
             "check_type": check,
             "status": "passed",
             "model": None,
-            "cost_usd": None,
+            "model_call_id": None,
             "request_sha256": paid["request_sha256"],
         }
         for check in ("clearance", "closed")

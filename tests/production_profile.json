@@ -145,32 +145,6 @@
      "kind": "key",
      "null_rate": 0.057636
     },
-    "cache_write_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.449688,
-     "quantiles": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      796.0,
-      1534.0,
-      133616.0
-     ]
-    },
-    "cached_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.200971,
-     "quantiles": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      1256.0,
-      1256.0,
-      134785.0
-     ]
-    },
     "check_type": {
      "kind": "categorical",
      "null_rate": 0.0,
@@ -212,19 +186,6 @@
      ],
      "null_rate": 0.000898
     },
-    "completion_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.100941,
-     "quantiles": [
-      0.0,
-      0.0,
-      14.0,
-      46.0,
-      83.0,
-      412.0,
-      5819.0
-     ]
-    },
     "config_name": {
      "kind": "categorical",
      "null_rate": 0.009733,
@@ -253,19 +214,6 @@
       "verify-near-copy": 0.001238
      }
     },
-    "cost_usd": {
-     "kind": "numeric",
-     "null_rate": 0.006609,
-     "quantiles": [
-      0.0,
-      0.0,
-      4.6e-05,
-      7.7e-05,
-      0.000109,
-      0.00023,
-      0.026898
-     ]
-    },
     "created_at": {
      "age_days": [
       0.003,
@@ -279,19 +227,6 @@
      "kind": "timestamp",
      "naive_rate": 0.0,
      "null_rate": 0.0
-    },
-    "duration_ms": {
-     "kind": "numeric",
-     "null_rate": 0.94941,
-     "quantiles": [
-      675.0,
-      1397.0,
-      2174.0,
-      3959.0,
-      6287.0,
-      9419.0,
-      224744.0
-     ]
     },
     "error": {
      "binary": false,
@@ -345,26 +280,6 @@
     "id": {
      "kind": "key",
      "null_rate": 0.0
-    },
-    "input_content": {
-     "binary": false,
-     "kind": "text",
-     "lengths": [
-      0,
-      0,
-      0,
-      2873,
-      5363,
-      8285,
-      472755
-     ],
-     "null_rate": 0.006576
-    },
-    "instructions": {
-     "binary": false,
-     "kind": "text",
-     "lengths": [],
-     "null_rate": 1.0
     },
     "instructions_id": {
      "kind": "key",
@@ -424,19 +339,6 @@
     "prompt_hash": {
      "kind": "key",
      "null_rate": 0.491526
-    },
-    "prompt_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.100941,
-     "quantiles": [
-      0.0,
-      0.0,
-      889.0,
-      1489.0,
-      1966.0,
-      2636.0,
-      134875.0
-     ]
     },
     "reason": {
      "kind": "partitioned",
@@ -539,19 +441,6 @@
       "medium": 0.043643
      }
     },
-    "reasoning_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.200971,
-     "quantiles": [
-      0.0,
-      0.0,
-      0.0,
-      25.0,
-      50.0,
-      256.0,
-      3619.0
-     ]
-    },
     "request_sha256": {
      "binary": false,
      "charclasses": [
@@ -577,19 +466,6 @@
       "passed": 0.459316,
       "rejected": 0.538363
      }
-    },
-    "total_tokens": {
-     "kind": "numeric",
-     "null_rate": 0.100941,
-     "quantiles": [
-      0.0,
-      0.0,
-      966.0,
-      1600.0,
-      2087.0,
-      2769.0,
-      137785.0
-     ]
     },
     "url": {
      "kind": "key",

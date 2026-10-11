@@ -107,62 +107,13 @@ def make_verdict(
     status: str = "passed",
     *,
     prompt_hash: str | None = None,
-    content: str | None = None,
     reason: str = "",
 ) -> None:
     """Append a verdict. Latest row per (url, check_type) wins, so calling this
-    twice is how a test expresses "the verdict changed". `content` is a copy
-    of its input as older writers stored it."""
-    legacy_answer(
-        url,
-        status,
-        reason,
-        check_type,
-        prompt_hash=prompt_hash,
-        input_content=content,
-        model="gpt-5-nano",
-    )
-
-
-# The copies older writers stored on an answer, which no writer stores now.
-_COPIES = (
-    "input_content",
-    "prompt_tokens",
-    "completion_tokens",
-    "total_tokens",
-    "cached_tokens",
-    "cache_write_tokens",
-    "reasoning_tokens",
-    "duration_ms",
-    "cost_usd",
-)
-
-
-def legacy_answer(url: str, status: str, reason: str = "", check_type: str = "", **columns) -> int:
-    """An answer as writers stored it before they pointed at its fetch and
-    call: with copies of its input and its call's usage, priced as they
-    priced it."""
-    from core import pricing
+    twice is how a test expresses "the verdict changed"."""
     from core.store import add_ai_result
 
-    copies = {k: columns.pop(k) for k in _COPIES if k in columns}
-    answer_id = add_ai_result(url, status, reason, check_type, **columns)
-    if "cost_usd" not in copies and copies.get("prompt_tokens") is not None:
-        copies["cost_usd"] = pricing.estimate_cost_usd(
-            columns.get("model"),
-            copies["prompt_tokens"],
-            copies.get("completion_tokens"),
-            cached_tokens=copies.get("cached_tokens"),
-            cache_write_tokens=copies.get("cache_write_tokens"),
-            batched=columns.get("batch_id") is not None,
-        )
-    if copies:
-        db.execute(
-            f"UPDATE ai_queries SET {', '.join(f'{k} = %({k})s' for k in copies)} "
-            "WHERE id = %(id)s",
-            {**copies, "id": answer_id},
-        )
-    return answer_id
+    add_ai_result(url, status, reason, check_type, prompt_hash=prompt_hash, model="gpt-5-nano")
 
 
 def paid_answer(
@@ -210,14 +161,14 @@ def paid_answer(
 
 def answer_pointers(url: str) -> list[dict[str, Any]]:
     """Every answer for `url` in id order, with what it points at: `rebuilt`
-    is its input as core.answer_inputs rebuilds it from its fetch, beside
-    `copy`, the input_content it stored; `call_tokens` is its call's."""
+    is its input as core.answer_inputs rebuilds it from its fetch, and
+    `call_tokens` its call's."""
     from core import answer_inputs
 
     return db.query(
         f"""
         SELECT q.check_type, q.page_fetch_id, q.model_call_id,
-               {answer_inputs.sql("q", "f.content")} AS rebuilt, q.input_content AS copy,
+               {answer_inputs.sql("q", "f.content")} AS rebuilt,
                m.total_tokens AS call_tokens, m.duration_ms AS call_duration_ms
         FROM ai_queries q
         LEFT JOIN page_fetches f ON f.id = q.page_fetch_id
