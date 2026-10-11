@@ -175,12 +175,14 @@ their implicit transaction.
 ## Batched work
 
 `core.batch` is the public batch entry point and owns the per-host wave
-concurrency setting and cached client. `core.batch_specs` owns immutable
+concurrency setting and cached client. `core.batch.specs` owns immutable
 request/result shapes, token estimates, chunk inputs and provider request
-lines. `core.batch_transport` uploads and polls provider batches;
-`core.batch_collection` reads completed output and records every provider
-error; `core.batch_progress` interprets status and counts. Keep the caller's
-batch ids and paid results through partial submission or collection failures.
+lines. `core.batch.transport` uploads and polls provider batches;
+`core.batch.collection` reads completed output and records every provider
+error; `core.batch.progress` interprets status and counts. Keep
+`core.batch_capabilities` outside the runtime package: routing and model
+selection read vendor capability without starting batch collection or storage.
+Keep the caller's batch ids and paid results through partial submission or collection failures.
 A terminal batch may be collected without waiting for unrelated unfinished
 batches. The event hook reports progress and estimates; it does not book
 model cost.

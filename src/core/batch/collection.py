@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from openai.types import Batch
 
 from core import store
-from core.batch_specs import BATCH_ENDPOINT, BatchResult
+from core.batch.specs import BATCH_ENDPOINT, BatchResult
 
 logger = logging.getLogger(__name__)
 

@@ -268,11 +268,11 @@ fresh copy:
   `ExperimentStep` declarations own request construction, comparison
   projection and deployed-result loading; `api.run_experiment` is its only
   caller. Experiments are opt-in; this is not a universal derivation registry.
-- **Structured batch transport**: `core/batch.py` is the public entry point;
-  `core/batch_specs.py` derives the response-model name and strict JSON schema
+- **Structured batch transport**: `core/batch/__init__.py` is the public entry point;
+  `core/batch/specs.py` derives the response-model name and strict JSON schema
   together through `structured_response_spec`. Transport, collection and
-  progress have separate owners in `core/batch_transport.py`,
-  `core/batch_collection.py` and `core/batch_progress.py`.
+  progress have separate owners in `core/batch/transport.py`,
+  `core/batch/collection.py` and `core/batch/progress.py`.
   Prompts, inputs, context, output limits, model choice and persistence remain
   owned by their domain or task.
 - **Listing formats**: `core/fetching/boards/formats.py`, one format object with its URL
