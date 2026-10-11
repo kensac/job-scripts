@@ -13,8 +13,8 @@ from api import db
 from api.board import visibility
 from core.fetching import forms
 from tasks import application as drafts
-from tests.test_application import GREENHOUSE, _owner_config, _user_id
-from tests.test_application import _job_for as _row_for
+from tests.application_support import GREENHOUSE, _owner_config, _user_id
+from tests.application_support import _job_for as _row_for
 
 
 def _job_for(f, uid: int, url: str) -> int:
