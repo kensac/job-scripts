@@ -24,6 +24,7 @@ from api.orm.apply import (
     ExtensionRecipeChunk,
     ExtensionRecipeUpload,
     ResumeBackfillRun,
+    ResumeLegacyClearRun,
     UserResume,
 )
 from api.orm.base import Base
@@ -120,6 +121,7 @@ __all__ = [
     "PostingUpload",
     "Report",
     "ResumeBackfillRun",
+    "ResumeLegacyClearRun",
     "SavedView",
     "Source",
     "SourceGroup",

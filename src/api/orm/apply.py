@@ -35,7 +35,7 @@ class UserResume(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(Text)
-    text: Mapped[str] = mapped_column(Text)
+    text: Mapped[str | None] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
     # The file itself, kept only so the extension can attach it to a form;
     # NULL for a resume that was pasted.
@@ -107,7 +107,7 @@ class UserResumeRevision(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     resume_id: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(Text)
-    text: Mapped[str] = mapped_column(Text)
+    text: Mapped[str | None] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
     pdf: Mapped[bytes | None] = mapped_column(BYTEA)
     pdf_upload_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -135,6 +135,28 @@ class ResumeBackfillRun(Base):
     verify_part: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     source_digest: Mapped[str] = mapped_column(Text)
     copy_digest: Mapped[str] = mapped_column(Text)
+    stage: Mapped[str] = mapped_column(Text)
+    attempted_at: Mapped[datetime.datetime | None] = mapped_column()
+    failed_at: Mapped[datetime.datetime | None] = mapped_column()
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ResumeLegacyClearRun(Base):
+    """Verification progress before one copied resume value is cleared."""
+
+    __tablename__ = "resume_legacy_clear_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    source_kind: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[int] = mapped_column(BigInteger)
+    field: Mapped[str] = mapped_column(Text)
+    source_xmin: Mapped[str] = mapped_column(Text)
+    canonical_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True))
+    total: Mapped[int] = mapped_column(BigInteger)
+    part_count: Mapped[int] = mapped_column(BigInteger)
+    next_part: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    verified_digest: Mapped[str] = mapped_column(Text)
     stage: Mapped[str] = mapped_column(Text)
     attempted_at: Mapped[datetime.datetime | None] = mapped_column()
     failed_at: Mapped[datetime.datetime | None] = mapped_column()

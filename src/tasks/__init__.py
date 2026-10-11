@@ -42,6 +42,7 @@ from tasks.mail.sync import (
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
 from tasks.resume_backfill import handle_backfill_resumes
+from tasks.resume_legacy_clear import handle_clear_resume_legacy
 from tasks.resume_uploads import handle_process_resume_upload
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
@@ -59,6 +60,7 @@ HANDLERS = {
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "process_resume_upload": lambda task_id, payload: handle_process_resume_upload(payload),
     "backfill_resumes": handle_backfill_resumes,
+    "clear_resume_legacy": handle_clear_resume_legacy,
     "classify_mail": handle_classify_mail,
     "match_mail": handle_match_mail,
     "sync_gmail": handle_sync_gmail,
