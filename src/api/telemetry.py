@@ -1,12 +1,8 @@
-"""Errors, events, logs and traces to PostHog, one project end to end.
+"""Record errors, events, logs, and traces in PostHog.
 
-The division of labour is deliberate. A traceback goes here, where it is
-grouped and searchable; a CONDITION (a source failing for a day, a purpose
-failing whole, a host blocking) stays in api/health.py, whose detectors know
-what the numbers mean. Nothing here decides anything; it records, in one
-place, so that a failure inside the service that never becomes a bad HTTP
-answer - a worker crash, a retry, a fetch or model call failing mid-pipeline
-- is visible somewhere at all.
+This module records failures, including worker and pipeline failures that do
+not produce HTTP errors. `api.health` owns condition detection and alerts;
+its detectors interpret the underlying measurements.
 
 Four signals, one client key, one host:
 

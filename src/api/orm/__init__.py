@@ -1,12 +1,8 @@
-"""Every table, grouped by what it is for.
+"""Register every table on one metadata and re-export the model names.
 
-This was one 1,268 line module. It is imported for two different
-reasons and both still work: alembic/env.py takes `Base` to compare the
-models against the migrations, and that comparison needs EVERY table
-registered on one metadata, which is why this file imports all of them
-rather than leaving it to whoever imports it first. Everything else
-takes a model by name, and those names are re-exported here, so
-`from api.orm import Job` reads the same as it always did.
+Alembic imports `Base` here to compare all models with migrations. Importing
+each domain module registers its tables before that comparison. Other callers
+can import individual models from `api.orm`.
 """
 
 from api.orm.ai import (

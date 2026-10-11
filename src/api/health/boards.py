@@ -1,4 +1,4 @@
-"""The boards: whether a feed still returns what it used to."""
+"""Detect failing pulls, empty feeds, and source admission problems."""
 
 from __future__ import annotations
 

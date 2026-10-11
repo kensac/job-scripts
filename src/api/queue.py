@@ -1,20 +1,9 @@
-"""Putting work on the queue, and the cadence the queue runs at.
+"""Task enqueueing, cancellation, payload updates, and queue reads.
 
-BELOW the handlers on purpose. tasks/runtime/ is the runtime a handler
-runs inside: claims, heartbeats, progress, batches. This is the smaller thing
-that code outside the task system needs, and needing it is not a reason to
-reach into the handlers package.
-
-Three modules were reaching. api/visibility.py asks for a board recompute,
-api/health.py measures ingest lateness in multiples of the interval, and
-api/worker.py buckets time by it. Two of them imported inside a function to
-dodge the import cycle that reaching created, which is the shape of a
-dependency pointing the wrong way.
-
-It is also the one place below the handlers that writes a task row: a payload
-merge and an admin cancel. Lifecycle writes (claim, progress, park, finish)
-belong to tasks/runtime and api/worker; tests/test_task_writes_owned.py fails
-on an UPDATE of tasks anywhere else.
+Routes, health detectors, board refresh, and workers use this module without
+importing task handlers. Claim, progress, park, and finish writes belong to
+the worker and task runtime owners. `tests/test_task_writes_owned.py` checks
+the write boundaries.
 """
 
 from __future__ import annotations
