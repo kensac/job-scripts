@@ -32,6 +32,17 @@ tests lives in `tests/board_responses.py`, but provider-shaped payloads stay
 beside the test that interprets them. A test of one provider should not need
 another provider's fixture or patch its response.
 
+## Organizing behavior tests
+
+Split a long test file by the behavior each test proves: queue claims,
+claim guarded writes, dispatch, provider batches, and verdict freshness are
+separate owners. Keep shared test helpers in a small support module imported
+only by the tests that use them. Keep fixture scope explicit when moving a
+test, especially cleanup of worker claim context. Verify that the same tests
+are collected after a split and that each assertion still exercises the
+same production path. Do not turn a module fixture into a suite-wide fixture
+just to share it.
+
 ## Fixtures and mocks
 
 **A fixture cannot falsify the assumption it was built from.** If you write
