@@ -55,9 +55,8 @@ _SHORT_PERIODS: dict[str, CompPeriod] = {
 PayPeriodParam = Literal[CompPeriod, "year", "month", "week", "day", "hour"]
 
 
-def stored_period(value: str | None) -> CompPeriod | None:
-    """The job_comp.comp_period a filter's period means, or None when it names
-    none."""
+def canonical_compensation_period(value: str | None) -> CompPeriod | None:
+    """Return the job_comp period named by a filter, or None if unknown."""
     wanted = (value or "").strip().lower()
     wanted = _SHORT_PERIODS.get(wanted, wanted)
     return next((period for period in COMP_PERIODS if period == wanted), None)

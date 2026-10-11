@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.mail import applications
 from api.problem import refuse
 from core import catalog
-from core.comp import stored_period
+from core.comp import canonical_compensation_period
 
 
 class ColumnFilter(BaseModel):
@@ -112,11 +112,11 @@ def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dic
                 units = {r.field: r.value for r in rules if r.operator == "equals"}
                 if (
                     not units.get("comp_currency")
-                    or stored_period(units.get("comp_period")) is None
+                    or canonical_compensation_period(units.get("comp_period")) is None
                 ):
                     raise ValueError("Pay comparisons require an exact currency and pay period")
             elif rule.field == "comp_period" and rule.operator in ("equals", "not_equals"):
-                value = stored_period(rule.value) or rule.value
+                value = canonical_compensation_period(rule.value) or rule.value
             elif kind == "boolean":
                 if rule.value not in ("true", "false"):
                     raise ValueError("Boolean filters accept true or false")
