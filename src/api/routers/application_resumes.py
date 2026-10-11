@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 from api import db
 from api.auth import AuthedUser, require_user
 from api.models import Ok
-from api.problem import refuse
+from api.problem import ProblemResponse, refuse
 from api.resumes.revisions import archive_resume, lock_owner
 from core.payloads.blob_parts import BlobPart, BlobPartStore
 
@@ -74,7 +74,7 @@ def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
 
 
 @router.post("/user/resumes", status_code=410)
-def legacy_create_resume(user: AuthedUser = Depends(require_user)) -> None:
+def legacy_create_resume(user: AuthedUser = Depends(require_user)) -> ProblemResponse:
     raise refuse(410, "USE_RESUME_PARTS", "send resume text or PDF in numbered parts")
 
 
