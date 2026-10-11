@@ -898,7 +898,30 @@ member's, and refuses a member named for another request.
 `PayloadRef.parse` refuses one, so no other reader can mistake a bundle for a
 single value.
 
-Every reader of `snapshot_ref` goes through `request_snapshots.resolve` or
+**A bundle's fields are stored once, on `batch_objects`; a request row holds
+the member's own.** Every row used to repeat its bundle's `bucket`, `key`,
+`sha256`, `size` and `version`: 1,613,017 rows named 6,392 objects, 378 MB of
+`snapshot_ref`'s 703 MB (2026-10-11). `batch_requests.object_id` points at
+the object row, and the row keeps `member`, `member_sha256` and
+`member_size`. A writer adds the object row (`request_snapshots.object_id`)
+and the pointer with every new request. It also leaves the bundle's fields on
+the row while `api.data_level.behind` counts a running image older than
+`data_level.LEVEL`, because that image reads them there.
+`tasks.batch_objects` (`consolidate_batch_objects`) moves the rows written
+before: it points each row, waits on the same gate, then removes the fields
+from a row only where its object row holds equal values (`@>`). A row that
+differs keeps them and is counted in the task's progress (`unpointed`,
+`holding`), and the task is not done while one does. The worker offers it
+every ingest cycle until a run reports phase `done`. Its state is in its
+payload, so a requeued run resumes at its last chunk and a new run at the
+last run's. `tests/test_batch_objects.py` holds every phase to the readers
+returning the reference the row was written with.
+
+**Every reader selects the reference as `request_snapshots.REF` from
+`request_snapshots.FROM`** (or `ROWS`, a task's requests), never
+`batch_requests.snapshot_ref` alone: REF lays the object row's fields over
+the row's, so a row reads the same before, during and after the move. Then
+it goes through `request_snapshots.resolve` or
 `request_snapshots.load`. A caller resolving many rows passes one
 `BundleCache` for that call, so each bundle is read once:
 `batch_results.snapshot_specs`, `batch_results.unconsumed`,

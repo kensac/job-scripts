@@ -21,6 +21,7 @@ from typing import Any
 import psycopg
 
 from api import (
+    data_level,
     db,
     events,
     hosts,
@@ -313,6 +314,15 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("backfill_mail_pointers", {"cycle": cycle}, dedupe_key=f"mail-pointers:{cycle}")
+    # Each batch bundle's fields moved off its member rows onto batch_objects
+    # (tasks.batch_objects). Offered until a run reports done; a run waiting
+    # on an older image ends and the next cycle's run checks again.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'consolidate_batch_objects' "
+        "AND (status IN ('pending', 'running') "
+        "     OR (status = 'done' AND payload->'state'->>'phase' = 'done')) LIMIT 1"
+    ):
+        enqueue("consolidate_batch_objects", {"cycle": cycle}, dedupe_key=f"batch-objects:{cycle}")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own
@@ -597,22 +607,25 @@ def _report_worker_status() -> None:
             """
             INSERT INTO worker_status
                 (name, started_at, current_task_id, current_task_ids, task_limit, last_seen,
-                 kinds, excluded_kinds, release, egress_group)
+                 kinds, excluded_kinds, release, egress_group, data_level, data_level_release)
             VALUES (%(name)s, %(started)s, %(tid)s, %(tids)s, %(limit)s, now(), %(kinds)s,
-                    %(excluded)s, %(release)s, %(egress)s)
+                    %(excluded)s, %(release)s, %(egress)s, %(level)s, %(release)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
                 current_task_id = EXCLUDED.current_task_id,
                 current_task_ids = EXCLUDED.current_task_ids,
                 task_limit = EXCLUDED.task_limit, last_seen = now(),
                 kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds,
-                release = EXCLUDED.release, egress_group = EXCLUDED.egress_group
+                release = EXCLUDED.release, egress_group = EXCLUDED.egress_group,
+                data_level = EXCLUDED.data_level,
+                data_level_release = EXCLUDED.data_level_release
             """,
             {
                 "name": WORKER_NAME,
                 "egress": hosts.EGRESS_GROUP,
                 "started": _PROCESS_STARTED_AT,
                 "release": telemetry.RELEASE,
+                "level": data_level.LEVEL,
                 "tid": held[0] if held else None,
                 "tids": held,
                 "limit": _task_limit,

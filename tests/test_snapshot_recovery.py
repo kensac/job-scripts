@@ -257,7 +257,7 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
 
 
 def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f, monkeypatch):
-    from api.ai import batch_results
+    from api.ai import batch_results, request_snapshots
     from core.batch import BatchResult, BatchSpec
     from core.payload_objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
@@ -267,9 +267,7 @@ def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f,
     # One call each, so each request is its own bundle.
     batch_results.snapshot_specs(task_id, [BatchSpec("consumed")])
     batch_results.snapshot_specs(task_id, [BatchSpec("required")])
-    sources = db.query(
-        "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
-    )
+    sources = db.query(request_snapshots.ROWS, (task_id,))
     results = [
         BatchResult(custom_id, text="answer", batch_id="paid")
         for custom_id in ("consumed", "required")

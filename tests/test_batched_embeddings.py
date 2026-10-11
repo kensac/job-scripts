@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db, worker
-from api.ai import batch_results
+from api.ai import batch_results, request_snapshots
 from core import batch
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.payload_objects import BundleMemberRef, PayloadRef, PayloadStore
@@ -175,7 +175,7 @@ def test_responses_snapshots_and_receipts_retain_legacy_shape(f):
     batch_results.checkpoint(
         task_id, [batch.BatchResult("url", text="answer", batch_id="responses")], []
     )
-    ref = db.query_one("SELECT snapshot_ref FROM batch_requests")["snapshot_ref"]
+    ref = db.query_one(request_snapshots.ROWS, (task_id,))["snapshot_ref"]
     snapshot = PayloadStore.from_env().get_member(BundleMemberRef.parse(ref))
     assert "endpoint" not in snapshot and "inputs" not in snapshot
     assert (
