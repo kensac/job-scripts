@@ -10,8 +10,8 @@ def seed_text_resume(user_id: int, name: str, text: str) -> int:
     with db.transaction():
         version_id, _ = store_text(user_id, [text])
         row = db.query_one(
-            "INSERT INTO user_resumes (user_id, name, text, text_version_id) "
-            "VALUES (%s, %s, '', %s) RETURNING id",
+            "INSERT INTO user_resumes (user_id, name, text_version_id) "
+            "VALUES (%s, %s, %s) RETURNING id",
             (user_id, name, version_id),
         )
     assert row is not None

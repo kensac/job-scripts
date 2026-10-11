@@ -177,6 +177,9 @@ its progress and errors. A final short transaction locks the source row again,
 checks that it has not changed, checks complete canonical metadata, and clears
 only that old field. Keep both run ledgers. Count remaining old values and
 failed clearing runs before dropping the old columns through a later migration.
+Canonical resume writers leave the old text and PDF columns NULL. When a
+resume changes, its revision copies any old inline values exactly before the
+current row is updated, so an unconverted value remains available for backfill.
 
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
