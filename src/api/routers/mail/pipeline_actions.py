@@ -95,7 +95,7 @@ def reattach_match(
         raise refuse(404, "NOT_FOUND", "match not found on this application")
     mail_match.record(
         match["message_id"],
-        mail_match.Match(
+        mail_match.MatchDecision(
             application_id, mail_match.MANUAL, "high", body.note or "reattached by the user"
         ),
         actor_user_id=user.id,

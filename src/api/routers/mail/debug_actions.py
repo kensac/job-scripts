@@ -126,6 +126,8 @@ def override_match(
     mail_match.record(
         message_id,
         actor_user_id=user.id,
-        match=mail_match.Match(body.application_id, method, confidence, f"set by admin {user.sub}"),
+        match=mail_match.MatchDecision(
+            body.application_id, method, confidence, f"set by admin {user.sub}"
+        ),
     )
     return MatchOverridden(ok=True, current=mail_match.latest(message_id))

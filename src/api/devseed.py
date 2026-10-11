@@ -266,6 +266,6 @@ def seed() -> dict[str, int]:
     for message_id in message_ids[:2]:
         mail_match.record(
             message_id,
-            mail_match.Match(application_id, mail_match.ATS_COMPANY, "high", "dev seed"),
+            mail_match.MatchDecision(application_id, mail_match.ATS_COMPANY, "high", "dev seed"),
         )
     return counts

@@ -104,11 +104,8 @@ def match_pending(
         if progress and index % progress_every == 0:
             progress(index, len(rows))
         if row["kind"] in mail_match.UNATTACHABLE_KINDS:
-            match = mail_match.Match(
-                None,
-                mail_match.NOT_AN_APPLICATION,
-                "none",
-                f"{row['kind']} describes the person, not an application",
+            match = mail_match.MatchDecision.not_an_application(
+                f"{row['kind']} describes the person, not an application"
             )
         else:
             match = mail_match.match_message(
@@ -155,11 +152,8 @@ def detach_unattachable(user_id: int) -> int:
     for row in rows:
         mail_match.record(
             row["id"],
-            mail_match.Match(
-                None,
-                mail_match.NOT_AN_APPLICATION,
-                "none",
-                f"{row['kind']} describes the person, not an application",
+            mail_match.MatchDecision.not_an_application(
+                f"{row['kind']} describes the person, not an application"
             ),
         )
     if rows:

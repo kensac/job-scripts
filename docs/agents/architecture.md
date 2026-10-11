@@ -73,6 +73,16 @@ A split must preserve the same current-event and current-match precedence,
 user scope, and event answer writes. Sender signals only suggest review and
 never filter an application. Automatic mail classification remains paused.
 
+**Match decisions keep method and attachment state together.**
+`api.mail.match_decision.MatchDecision` owns the persisted match methods and
+rejects a null application id with an attachment method, or an application id
+with a no-attachment method. A null id with `manual` remains valid: an admin
+can record that no application was found. The same value object compares
+repeat machine outcomes without rationale; `api.mail.match.record` still owns
+human precedence and the append with its pointer update. Preserve method
+strings when confirming an existing decision, including a method from older
+stored data.
+
 **Each log has one writer, and it moves the message's pointer as it
 appends.** `mail.events.append` is the only INSERT into `email_events` and
 `mail.match.record` the only one into `application_matches`

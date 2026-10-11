@@ -144,7 +144,7 @@ def assign_message(
     for index, target in enumerate(targets):
         mail_match.record(
             target,
-            mail_match.Match(
+            mail_match.MatchDecision(
                 application_id,
                 mail_match.MANUAL,
                 "high",

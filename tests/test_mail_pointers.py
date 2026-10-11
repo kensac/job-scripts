@@ -47,7 +47,7 @@ def test_each_writer_moves_its_pointer_in_the_same_statement(f):
     second = events.append(mid, "rejection", confidence="high", detail={}, model="m")
     assert _pointers(mid) == (second, None)
 
-    mail_match.record(mid, mail_match.Match(None, mail_match.UNMATCHED, "none", "nothing"))
+    mail_match.record(mid, mail_match.MatchDecision(None, mail_match.UNMATCHED, "none", "nothing"))
     assert _pointers(mid) == (second, _newest("application_matches", mid))
     assert current.stale_pointers() == 0
 
@@ -117,7 +117,7 @@ def test_the_self_sent_rule_is_named_and_nothing_else_is(f):
 def test_a_message_deletes_with_its_logs_despite_the_pointers(f):
     mid = _message(f.make_user(), 30)
     events.append(mid, "rejection", confidence="high", detail={}, model="m")
-    mail_match.record(mid, mail_match.Match(None, mail_match.UNMATCHED, "none", "nothing"))
+    mail_match.record(mid, mail_match.MatchDecision(None, mail_match.UNMATCHED, "none", "nothing"))
     db.execute("DELETE FROM email_messages WHERE id = %s", (mid,))
     assert db.query_one("SELECT 1 FROM email_events WHERE message_id = %s", (mid,)) is None
 
