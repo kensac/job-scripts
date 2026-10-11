@@ -13,9 +13,9 @@ version. After changing dependency pins, run `uv lock`, `uv sync --locked`,
 and the tests that exercise the affected runtime behavior.
 
 Keep OAuth consent state and authorization URL construction in
-`api.oauth_authorization`, provider settings and typed errors in
-`api.oauth_provider`, and grant storage, refresh, and revocation in
-`api.oauth`. The grant refresh must hold the token row lock through the
+`api.oauth.authorization`, provider settings and typed errors in
+`api.oauth.provider`, and grant storage, refresh, and revocation in the
+`api.oauth` package initializer. The grant refresh must hold the token row lock through the
 provider request and persist a rejected grant before raising. Routes and
 workers continue to import the public OAuth API from `api.oauth`.
 When moving or renaming an environment reader, keep

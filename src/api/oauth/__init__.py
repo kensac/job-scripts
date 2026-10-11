@@ -1,7 +1,6 @@
 """Per-user OAuth grant storage, refresh, and revocation.
 
-Consent state and provider configuration have separate owners. This module
-retains the existing public import path for routes and worker callers.
+Consent state and provider configuration have separate owners. This package keeps the public `api.oauth` import path for routes and workers.
 """
 
 from __future__ import annotations
@@ -13,8 +12,8 @@ import requests
 from psycopg import Connection
 
 from api import crypto, db
-from api import oauth_authorization as consent
-from api import oauth_provider as provider
+from api.oauth import authorization as consent
+from api.oauth import provider
 
 OAuthState = consent.OAuthState
 authorization_url = consent.authorization_url
