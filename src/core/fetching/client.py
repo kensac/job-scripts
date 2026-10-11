@@ -21,6 +21,7 @@ hosts.pace_key like the budget row.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -71,13 +72,18 @@ for _prefix in ("https://", "http://"):
     session.mount(_prefix, HTTPAdapter(max_retries=_RETRY))
 
 
+# A worker running several pulls at once (api.worker) calls these from
+# several threads. The floors are swapped whole, so a reader never sees the
+# table half rebuilt, and a call reserves its moment under the lock before
+# it sleeps, so two threads asking one host cannot both find it free.
 _PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
+_pace_lock = threading.Lock()
 
 
 def set_pace(floors: dict) -> None:
-    _PACE_SECONDS.clear()
-    _PACE_SECONDS.update({str(h): float(s) for h, s in (floors or {}).items() if s})
+    global _PACE_SECONDS
+    _PACE_SECONDS = {str(h): float(s) for h, s in (floors or {}).items() if s}
 
 
 def pace(url: str) -> None:
@@ -86,7 +92,9 @@ def pace(url: str) -> None:
     wait = _PACE_SECONDS.get(host)
     if not wait:
         return
-    ahead = _last_call.get(host, 0.0) + wait - time.monotonic()
+    with _pace_lock:
+        at = max(time.monotonic(), _last_call.get(host, 0.0) + wait)
+        _last_call[host] = at
+    ahead = at - time.monotonic()
     if ahead > 0:
         time.sleep(ahead)
-    _last_call[host] = time.monotonic()

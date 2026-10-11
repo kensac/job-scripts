@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 from api import metrics
 
@@ -19,8 +21,15 @@ class AdaptiveLimiter:
     completion rate keeps improving, step down when it stalls or errors appear,
     halve on rate limits. Each host converges to its own ceiling."""
 
-    def __init__(self, min_c: int = 1, max_c: int = MAX_CONCURRENCY, window: int = 8):
+    def __init__(
+        self,
+        min_c: int = 1,
+        max_c: int = MAX_CONCURRENCY,
+        window: int = 8,
+        gauge: Any = metrics.WORKER_CONCURRENCY,
+    ):
         self.limit = min(3, max_c)
+        self.gauge = gauge
         self.min_c = min_c
         self.max_c = max_c
         self.window = window
@@ -54,7 +63,38 @@ class AdaptiveLimiter:
         self._count = 0
         self._errors = 0
         self._win_start = time.monotonic()
-        metrics.WORKER_CONCURRENCY.set(self.limit)
+        if self.gauge is not None:
+            self.gauge.set(self.limit)
+
+
+def available_memory_mb(
+    cgroup: Path = Path("/sys/fs/cgroup"), proc: Path = Path("/proc")
+) -> float | None:
+    """Memory this process could still take, in MB: the smaller of the
+    container's cgroup v2 headroom and the host's MemAvailable. A container
+    with no limit is bounded by the host alone, and a limited one on a full
+    host by the host. Page cache the cgroup can reclaim (inactive_file) counts
+    as free, as MemAvailable counts it. None where neither is readable (a
+    laptop outside Linux): no reading, so nothing to back off on.
+
+    ponytail: cgroup v2 only; a v1 host reads MemAvailable alone."""
+    readings: list[float] = []
+    try:
+        for line in (proc / "meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                readings.append(int(line.split()[1]) / 1024)
+    except (OSError, ValueError):
+        pass
+    try:
+        limit = (cgroup / "memory.max").read_text().strip()
+        if limit != "max":
+            used = int((cgroup / "memory.current").read_text())
+            stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines())
+            reclaimable = int(stat.get("inactive_file", 0))
+            readings.append((int(limit) - used + reclaimable) / 2**20)
+    except (OSError, ValueError):
+        pass
+    return min(readings) if readings else None
 
 
 # In-flight jobs per worker inside a chunk (network time dominates, so calls

@@ -762,19 +762,23 @@ def test_batch_event_hook_registers_and_stores_ids():
     assert tasks_runtime.pending_batch_ids(t1) == ["batch_abc", "batch_def"]
 
 
-def test_worker_status_report_upserts():
+def test_worker_status_report_upserts(monkeypatch):
     from api import worker
 
-    worker._report_worker_status(None)
+    worker._report_worker_status()
     from api import db
 
     row = db.query_one("SELECT * FROM worker_status WHERE name = %s", (worker.WORKER_NAME,))
     assert row is not None and row["current_task_id"] is None
-    worker._report_worker_status(42)
+    assert row["current_task_ids"] == []
+    claims = {t: tasks_runtime.TaskClaim(t, worker.WORKER_NAME, 1) for t in (43, 42)}
+    monkeypatch.setattr(worker, "_in_flight", claims)
+    worker._report_worker_status()
     row = db.query_one(
-        "SELECT current_task_id FROM worker_status WHERE name = %s", (worker.WORKER_NAME,)
+        "SELECT current_task_id, current_task_ids FROM worker_status WHERE name = %s",
+        (worker.WORKER_NAME,),
     )
-    assert row["current_task_id"] == 42
+    assert row["current_task_id"] == 42 and row["current_task_ids"] == [42, 43]
 
 
 @pytest.mark.asyncio

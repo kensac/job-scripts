@@ -76,9 +76,50 @@ A handler that never yields holds its worker until it finishes. Long handlers
 should hold progress in the database so an interruption resumes rather than
 restarts.
 
-A worker runs one task at a time, and its housekeeping (reaping, scheduling,
-gauges) runs only between tasks. A long task therefore starves scheduling on
-that worker; keep tasks short and let the queue carry the volume.
+A worker runs one task at a time unless `worker_task_slots` names it, and
+its housekeeping (reaping, scheduling, gauges) runs only between the tasks it
+runs on its main loop. A long task on the main loop therefore starves
+scheduling on that worker; keep tasks short and let the queue carry the
+volume.
+
+**A worker named in `worker_task_slots` runs several tasks at once, and only
+an audited kind leaves the main loop.** The number is a ceiling, capped at
+half the connection pool because each task can hold a connection and its
+heartbeat another. Under it an `AdaptiveLimiter` sets the live limit: it
+starts at one, grows by one while a window of completions comes faster than
+the last, and halves when a task fails on the host running out of memory or
+threads (`_TRANSIENT_MARKERS`, `MemoryError`) or when free memory, the
+tighter of the cgroup's headroom and the host's `MemAvailable`, falls under
+`worker_memory_reserve_mb`. A task costs its kind's `worker_task_weights`
+slots; a kind heavier than the free room is left for another worker. Nothing
+past the first task is claimed without the reserve free, and a worker holding
+nothing always claims one, so the floor is the worker as it was. The live
+limit and every held task id are in `worker_status.task_limit` and
+`current_task_ids`; `current_task_id` stays the oldest, so "idle" reads the
+same.
+
+Kinds in `api.worker.THREADED_KINDS` run in a thread of their own on an event
+loop of their own; every other kind runs on the main loop one at a time
+beside them. A thread, because handlers call the database synchronously and
+some never await, so on a shared loop one task's statements stall the rest.
+A loop of its own is why a kind is listed only after an audit: a module
+global bound to the loop that made it (`core.batch._batch_client`) breaks on a
+second loop, and process state a handler shares with its siblings (host
+pacing in `core.fetching.client`) needs a lock. Only `ingest_source` is
+listed: it makes no model call, holds no loop-bound global, and is the
+volume. Add a kind to the list with the same audit written beside it.
+
+Every in-flight task keeps its own claim (the runtime contextvar is per
+task) and its own heartbeat thread, and is mirrored in `api.worker._in_flight`
+for the one reader outside every task's context, the SIGTERM handler, which
+requeues each held claim under its stamp and exits without waiting: a pull
+can run half an hour and a stop grace is seconds. A task that ends with an
+exception is settled by its own handler path and frees its slot; one whose
+thread dies outside that path keeps its claim with the beat stopped and goes
+to the reaper. An OOM kill of the process takes every held task to the
+reaper, which requeues each under the same rules as one. The slots, the
+claim stamps, the release and the back-off are pinned by
+`tests/test_worker_slots.py`.
 
 **A per-candidate database loop in a task handler is batched.** Workers run
 far from the database: `oci` is about 103 ms from it, the hosts beside it under

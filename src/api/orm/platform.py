@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Text,
     text,
 )
@@ -236,7 +237,17 @@ class WorkerStatus(Base):
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     started_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     last_seen: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    # The oldest task this worker holds, and every task it holds. A worker
+    # running several at once (api.worker, worker_task_slots) holds more than
+    # one; current_task_id stays the first of them, so a reader asking "is it
+    # idle" reads either column the same way.
     current_task_id: Mapped[int | None] = mapped_column(BigInteger)
+    current_task_ids: Mapped[list[int]] = mapped_column(
+        ARRAY(BigInteger), server_default=text("'{}'")
+    )
+    # The adaptive limit on how many slots it fills right now; null while it
+    # runs one task at a time.
+    task_limit: Mapped[int | None] = mapped_column(Integer)
     # What this worker will claim. Reported by the worker rather than inferred,
     # because the filters live in host environment and nothing else can see
     # them. queue_stalled reads these so a host is not called stalled by work

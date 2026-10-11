@@ -38134,6 +38134,24 @@
             ],
             "title": "Current Task Id"
           },
+          "current_task_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Current Task Ids"
+          },
+          "task_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Limit"
+          },
           "release": {
             "anyOf": [
               {
@@ -38222,6 +38240,8 @@
           "started_at",
           "last_seen",
           "current_task_id",
+          "current_task_ids",
+          "task_limit",
           "release",
           "alive",
           "task_kind",
@@ -38232,7 +38252,7 @@
           "failed_24h"
         ],
         "title": "FleetWorker",
-        "description": "One worker, as its heartbeat and its current task leave it.\n\n`alive` is the heartbeat being under 90 seconds old, resolved in SQL so\nevery reader agrees on the same clock. The task fields are null when the\nworker is idle: they come from a join on a task that is still running."
+        "description": "One worker, as its heartbeat and its current task leave it.\n\n`alive` is the heartbeat being under 90 seconds old, resolved in SQL so\nevery reader agrees on the same clock. The task fields are null when the\nworker is idle: they come from a join on a task that is still running.\nA worker running several tasks at once (worker_task_slots) names them all\nin `current_task_ids` and its adaptive limit in `task_limit`; the task\nfields describe the oldest."
       },
       "FleetWorkers": {
         "properties": {
@@ -56444,6 +56464,13 @@
             ],
             "title": "Current Task Id"
           },
+          "current_task_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Current Task Ids"
+          },
           "fresh": {
             "type": "boolean",
             "title": "Fresh"
@@ -56455,6 +56482,7 @@
           "started_at",
           "last_seen",
           "current_task_id",
+          "current_task_ids",
           "fresh"
         ],
         "title": "WorkerHeartbeat",
