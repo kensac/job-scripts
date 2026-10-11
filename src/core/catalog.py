@@ -88,7 +88,11 @@ def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
                 "INSERT INTO job_listing_events (job_id, source, listed) VALUES (%s, %s, false)",
                 [(row["id"], source) for row in dropped],
             )
-        return len(dropped)
+    # A row no observation decides stores the flag (_STORED), so it follows
+    # this write now rather than at the next reconcile. After the commit, so
+    # the refresh's snapshot sees it.
+    refresh_available(sorted(row["id"] for row in dropped))
+    return len(dropped)
 
 
 def set_near_copy_keys(keys: dict[str, str]) -> None:
@@ -368,20 +372,29 @@ AVAILABLE: LiteralString = (
         END))"""
 )
 
-# What a reader of availability uses: AVAILABLE as stored in jobs.available,
-# and jobs.active where it cannot tell (NULL) until every switched-on source
-# has been observed. The fallback goes once the shadow's projected=None cells
-# for active rows hold only explained classes
-# (docs/agents/architecture-migration.md, phase 3). Stored, because computed
-# per row it cost every reader: the AI-eligible count went from 2.0 s to
-# 6.5 s, a board recompute from 27 s to 38 s (production, 2026-10-10).
+# What a reader of availability uses: jobs.available (_STORED), and
+# jobs.active where nothing is stored yet. Stored, because computed per row it
+# cost every reader: the AI-eligible count went from 2.0 s to 6.5 s, a board
+# recompute from 27 s to 38 s (production, 2026-10-10). The fallback goes once
+# the reconcile has stored a value on every row.
 IS_AVAILABLE: LiteralString = "COALESCE({job}.available, {job}.active)"
+
+# What jobs.available stores: AVAILABLE where an observation decides, and
+# otherwise the posting's last known feed state, jobs.active. A row no pull
+# has observed since observations began keeps what its feed last said rather
+# than reading as cannot tell: a partial pull (a capped Workday or Oracle
+# search) never observes the rows past its cap and records no absence, and a
+# board not pulled yet has observed nothing. On 2026-10-11 at 04:10 UTC that
+# was 102,662 active postings, 81,644 of them on boards not yet pulled and
+# 14,693 behind a partial pull. Re-verification closes what a partial pull
+# cannot see (docs/agents/sources-and-boards.md).
+_STORED: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
 
 _RECONCILE_CHUNK = 20_000
 
 
 def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
-    """Writes AVAILABLE into jobs.available for these rows where it differs.
+    """Writes _STORED into jobs.available for these rows where it differs.
     Locks first, in url order (_LOCK_ORDER), then evaluates in a second
     statement: under READ COMMITTED that statement's snapshot is taken after
     the locks are held, so every observation committed before them is seen,
@@ -400,7 +413,7 @@ def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
     ]
     if not locked:
         return 0
-    available = AVAILABLE.format(job="jobs")
+    available = _STORED.format(job="jobs")
     return conn.execute(
         f"UPDATE jobs SET available = {available} "
         f"WHERE id = ANY(%s) AND available IS DISTINCT FROM {available}",
@@ -427,7 +440,7 @@ def reconcile_available() -> int:
     and rows a concurrent writer holds are skipped for the next run, so it
     cannot deadlock against an ingest. Safe to stop and rerun. Returns the
     rows written."""
-    available = AVAILABLE.format(job="j")
+    available = _STORED.format(job="j")
     with pool.connection() as conn:
         bounds = conn.execute("SELECT min(id) AS lo, max(id) AS hi FROM jobs").fetchone()
     if not bounds or bounds["lo"] is None:

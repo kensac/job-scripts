@@ -172,14 +172,16 @@ def test_a_sheet_import_is_available_only_while_a_switched_on_source_lists_it(f)
     assert _available(A) is True
 
 
-def test_readers_fall_back_to_jobs_active_only_where_no_source_has_observed(f):
+def test_a_row_no_observation_decides_stores_its_last_known_feed_state(f):
+    """A partial pull never observes the rows past its cap, and a board not
+    pulled yet has observed nothing: those keep what their feed last said."""
     f.make_job(url=A, active=True)
     f.make_job(url=B, active=False)
-    assert _available(A, catalog.IS_AVAILABLE) is True
-    assert _available(B, catalog.IS_AVAILABLE) is False
+    db.execute("UPDATE jobs SET available = NULL")
+    catalog.reconcile_available()
+    assert (_stored(A), _stored(B)) == (True, False)
     f.make_source("board")
     _pull("board", [_posting(B)], {B}, "unlisted")
-    db.execute("UPDATE jobs SET active = false WHERE url = %s", (B,))
     assert _available(B, catalog.IS_AVAILABLE) is True, "observed: the observation decides"
 
 
@@ -236,14 +238,14 @@ def test_the_stored_projection_follows_observations_corrections_and_switches(f):
     assert catalog.reconcile_available() == 1
     assert _stored(A) is False
     assert catalog.reconcile_available() == 0
-    # Every row agrees with the definition afterwards, NULL included.
+    # Every row agrees with what is stored afterwards, NULL included.
     f.make_job(url=B)
     catalog.reconcile_available()
-    available = catalog.AVAILABLE.format(job="j")
+    available = catalog._STORED.format(job="j")
     assert (
         db.query_one(
             f"SELECT count(*) AS n FROM jobs j WHERE j.available IS DISTINCT FROM {available}"
         )["n"]
         == 0
     )
-    assert _stored(B) is None
+    assert _stored(B) is True, "no observation decides: its feed state"
