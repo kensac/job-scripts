@@ -7,6 +7,14 @@ from pydantic import PositiveInt
 from api.config_types import ConfigKey
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "resume_backfill_enabled": ConfigKey(
+        section="Applications",
+        default=False,
+        value_type=bool,
+        help="Copy old resume text to verified parts on Hetzner after old content writers "
+        "are retired. PDF copying also requires resume_pdf_uploads_enabled and a bucket "
+        "checked for expiry rules and capacity.",
+    ),
     "resume_pdf_uploads_enabled": ConfigKey(
         section="Applications",
         default=False,

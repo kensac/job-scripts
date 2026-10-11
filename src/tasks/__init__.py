@@ -41,6 +41,7 @@ from tasks.mail.sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
+from tasks.resume_backfill import handle_backfill_resumes
 from tasks.resume_uploads import handle_process_resume_upload
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
@@ -57,6 +58,7 @@ HANDLERS = {
     "publish_extension_recipe": lambda task_id, payload: handle_publish_recipe(payload),
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "process_resume_upload": lambda task_id, payload: handle_process_resume_upload(payload),
+    "backfill_resumes": handle_backfill_resumes,
     "classify_mail": handle_classify_mail,
     "match_mail": handle_match_mail,
     "sync_gmail": handle_sync_gmail,

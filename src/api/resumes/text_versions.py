@@ -10,7 +10,9 @@ from api import db
 TEXT_PART_CHARS = 32_768
 
 
-def store_text(user_id: int, fragments: Iterable[str]) -> tuple[uuid.UUID, int]:
+def store_text(
+    user_id: int, fragments: Iterable[str], *, allow_blank: bool = False
+) -> tuple[uuid.UUID, int]:
     version_id = uuid.uuid4()
     db.execute(
         "INSERT INTO resume_text_versions (id, user_id) VALUES (%s, %s)",
@@ -42,7 +44,7 @@ def store_text(user_id: int, fragments: Iterable[str]) -> tuple[uuid.UUID, int]:
             (version_id, index, buffer),
         )
         index += 1
-    if not has_text:
+    if not has_text and not allow_blank:
         raise ValueError("that PDF has no extractable text")
     db.execute(
         "UPDATE resume_text_versions SET chars = %s, part_count = %s, ready = TRUE WHERE id = %s",
