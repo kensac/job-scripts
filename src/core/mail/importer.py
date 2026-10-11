@@ -1,22 +1,10 @@
-"""Reading mail archives into one normalised shape.
+"""Stream Gmail mbox and Outlook .olm archives into one message shape.
 
-Two formats arrive: Gmail Takeout gives an mbox, Outlook for Mac gives .olm (a
-ZIP of per-message XML). They are different enough to tempt two code paths and
-similar enough that two paths would drift - this codebase produced five
-separate cases of duplicated logic drifting apart in a single evening, so the
-formats converge here and nothing downstream learns which one a message came
-from.
+The measured Takeout mbox was 4.24 GB and each .olm was about 4.4 GB. The
+readers yield messages without indexing or loading an entire archive.
 
-Both readers STREAM. The Takeout mbox is 4.24 GB and each .olm is ~4.4 GB;
-anything that builds an index or holds the archive in memory is unusable on
-these files, which is why python's own `mailbox.mbox` is not used - it indexes
-the whole file before yielding anything.
-
-clean_text, html_to_text and parse_sent_at are public because api/mail/gmail.py
-calls them: a live mail arriving through the API and an imported one have to
-normalise identically, or the same message reads two ways depending on which
-path stored it. The other helpers here stay private.
-"""
+api/mail/gmail.py also calls clean_text, html_to_text, and parse_sent_at.
+Live and imported mail therefore use the same normalization rules."""
 
 from __future__ import annotations
 
@@ -69,10 +57,8 @@ class ImportedMessage:
     # The threading chain as the message carried it. provider_thread_id keeps
     # only the FIRST References entry, which is enough to group a reply with
     # its root and not enough to reconstruct a conversation that was forwarded,
-    # split, or re-rooted. Kept because it is free at parse time and
-    # unrecoverable afterwards - the mbox is 4.2GB and re-reading it to answer a
-    # question we could have answered on the way past is the expensive kind of
-    # cheap.
+    # split, or re-rooted. Keep it at parse time so reconstructing a thread
+    # does not require rereading the 4.24 GB archive.
     headers: dict[str, str] = field(default_factory=dict)
 
 
@@ -92,18 +78,10 @@ def _threading_headers(msg) -> dict[str, str]:
 
 
 def _strip_nul(text: str) -> str:
-    """Remove NUL bytes.
+    """Remove NUL bytes before inserting text into PostgreSQL.
 
-    Postgres text columns cannot contain 0x00 and reject the whole INSERT if
-    one appears - "PostgreSQL text fields cannot contain NUL (0x00) bytes",
-    with no indication of which message or which field. Real mailboxes do
-    contain them: mis-declared encodings, binary fragments in malformed
-    multipart bodies, and truncated attachments all produce them.
-
-    One NUL anywhere would therefore have failed the entire 38,685-message
-    import, in a 1000-row batch, hours in. Found by running the real archive
-    against a scratch database before touching production.
-    """
+    A NUL rejects the whole insert batch. A scratch import of the 38,685-message
+    archive found NULs before the production import."""
     return text.replace("\x00", "")
 
 
@@ -152,21 +130,11 @@ _MARKUP = re.compile(r"</[a-z][a-z0-9]*>", re.IGNORECASE)
 
 
 def _olm_body(body: str | None, html: str | None) -> tuple[str | None, str | None]:
-    """The readable text of an .olm message, chosen by CONTENT not by name.
+    """Choose readable .olm text by content, not the export field name.
 
-    OPFMessageCopyBody is named for text and holds raw markup on 96% of this
-    corpus - 27,221 of 28,451 messages carry tags and 20,359 leak CSS
-    declarations. The previous form was `body or html_to_text(html)`, so a
-    non-empty body short-circuited the conversion and the markup went straight
-    into body_text, which is what the classifier reads and what the reader
-    renders as prose. The model has been reading doctype declarations.
-
-    This is the same mistake as the ThreadTopic one fixed in #259 one line
-    down, found independently: that trusted OPFMessageCopyThreadTopic to be a
-    thread id when it is a normalised subject. The .olm field names describe
-    what Outlook meant, not what the export contains, so a new field from this
-    format is not safe to use on its name alone.
-    """
+    In the measured archive, 27,221 of 28,451 body fields contained tags and
+    20,359 contained CSS. Convert markup before storing body_text, while
+    retaining the original markup separately."""
     if body and not _MARKUP.search(body):
         # Genuinely plain: there is no markup to keep.
         return body, None

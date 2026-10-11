@@ -1,21 +1,9 @@
-"""The standard format every provider module fills in.
+"""Shared shapes for provider and model facts.
 
-This file holds no facts about any provider - only the shape they are all
-declared in. That separation is the point: the router reads the same fields
-from every provider, and a provider that behaves differently says so in a
-field rather than in a branch somewhere downstream.
-
-Two levels, because the facts genuinely live at two levels. A provider owns its
-endpoint, wire protocol and auth. A MODEL owns its rates, its context, what
-structured output it can do and which reasoning values it accepts - because
-those vary within a provider. xAI discounts four of its seven models for batch
-and charges the other three full price; Alibaba supports strict schemas on its
-3.7-and-later models and not on Turbo. Declaring either at provider level is
-how `_EFFORTS_OPENAI` became a union of every generation's accepted values.
-
-Nothing here is inferred. A field whose answer is unknown is None, and None
-means "nobody has looked it up", never "zero" and never "same as the other one".
-"""
+A provider declares its endpoint, wire protocol, and authentication. Each
+model declares its own rates, context, structured output, and reasoning values.
+Those values can differ within one provider. An unknown fact is None; it is
+never inferred from another model or treated as zero."""
 
 from __future__ import annotations
 

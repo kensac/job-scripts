@@ -1,24 +1,10 @@
-"""Whether a message looks like it could be about a job application.
+"""Mark mail that looks related to an application without filtering it out.
 
-THIS IS A SIGNAL, NOT A GATE. Nothing is skipped because of it.
-
-It began as a cost filter: 38,685 messages in the Takeout export, 21.7% of
-them matching, so classifying only the matches would cost ~$3 batched instead
-of ~$15. Kanishk's call was that $12 is not worth it for a one-time backfill,
-and he is right - a filtered-out email is an outcome lost for good, because
-the posting is closed and the thread is not coming back. Every other failure
-in this pipeline is recoverable by re-running something. That one is not.
-
-So the whole mailbox goes to the classifier and this stays for the three
-things it is actually good at: ordering the sweep so likely job mail is
-classified first, explaining in the admin view why a message was or was not
-expected to matter, and measuring after the fact how much a cheap filter would
-have missed - which is the only honest way to decide whether the ongoing feed
-can ever use one as a gate.
-
-The bias is still RECALL, because those measurements are only useful if the
-rules err the same way a gate would have to.
-"""
+Every message remains eligible for classification. The signal orders the
+sweep, explains likely job mail in the admin view, and supports recall
+measurement. In the measured 38,685-message Takeout archive, it matched
+21.7%. Classifying only matches would omit outcomes that cannot be recovered.
+The rules favor recall for that reason."""
 
 from __future__ import annotations
 
