@@ -75,6 +75,11 @@ entry point until its callers move.
 
 ## Always retain all data
 
+Store large uploaded files as independently verified parts. Bound the bytes
+handled by one request, read, or worker step without limiting the number of
+parts in a file. Do not assemble the whole file in an API process. Keep a
+durable receipt before marking an upload complete.
+
 **Stored data is never deleted, truncated or capped because of age, count or
 size.** No row ages out, no table keeps its last N rows, no text is cut to N
 characters before it is saved, no payload is dropped after a while. The scale
