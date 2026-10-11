@@ -141,11 +141,6 @@ SOFT_SKILLS = frozenset(
     }
 )
 
-# Longer than any real technology name; anything past it is a sentence the model
-# failed to reduce to a name, and grouping sentences produces noise, not a
-# frequency table. "Amazon Web Services (AWS)" is 26 characters.
-MAX_SKILL_CHARS = 40
-
 
 def canonical(raw: str) -> str:
     """Canonical form of one extracted skill, or "" when it is not a skill name.
@@ -159,6 +154,6 @@ def canonical(raw: str) -> str:
     # are the names, and stripping a leading dot turned ".NET Core" into
     # "net core", which then missed its own alias.
     text = _TRAILING.sub("", text).lstrip(" -/&").rstrip(" .-/&")
-    if not text or len(text) > MAX_SKILL_CHARS or text in SOFT_SKILLS:
+    if not text or text in SOFT_SKILLS:
         return ""
     return ALIASES.get(text, text)
