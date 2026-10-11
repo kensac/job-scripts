@@ -89,6 +89,9 @@ and worker read, while storing every part of the file.
 Store complete extracted resume text as immutable parts. Keep the prior resume
 revision before replacement or deletion. Read only the existing model context
 window for drafting; the full text stays available to the person in parts.
+Read resume text and PDFs through their canonical version and upload pointers.
+After exact backfill verification, remove old-column readers before dropping
+old columns. Keep archived revisions linked to their immutable parts.
 
 An extracted skill keeps its raw text and canonical spelling regardless of
 length. Reject known non-skill categories by meaning, not by a character count.

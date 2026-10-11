@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from api import db
+from api.apply.drafting import resume_text
 from core.answers import DEFAULT_STYLE
 from tests.application_support import _available_owner_key as _available_owner_key
 from tests.job_board_support import _uid
-from tests.resume_support import create_text_resume
+from tests.resume_support import create_text_resume, seed_text_resume
 
 
 class TestResumes:
@@ -50,14 +51,12 @@ class TestResumes:
         assert r.status_code == 410 and r.json()["detail"]["code"] == "USE_RESUME_PARTS"
         assert client.get("/v1/user/resumes", headers=user_headers).json()["resumes"] == []
 
-    def test_legacy_resume_remains_readable_and_rename_keeps_its_bytes(self, client, user_headers):
-        row = db.query_one(
-            "INSERT INTO user_resumes (user_id, name, text, filename, pdf) "
-            "VALUES (%s, 'old', 'Original text', 'old.pdf', %s) RETURNING id",
-            (_uid(user_headers), b"original PDF bytes"),
+    def test_rename_keeps_canonical_text_and_revision(self, client, user_headers):
+        resume_id = seed_text_resume(_uid(user_headers), "old", "Original text")
+        db.execute(
+            "UPDATE user_resumes SET text = 'stale text', pdf = %s WHERE id = %s",
+            (b"stale PDF", resume_id),
         )
-        assert row is not None
-        resume_id = row["id"]
         text_change = client.patch(
             f"/v1/user/resumes/{resume_id}",
             json={"text": "replacement"},
@@ -70,6 +69,8 @@ class TestResumes:
         )
         assert renamed.status_code == 200, renamed.text
         assert renamed.json()["name"] == "renamed"
+        assert renamed.json()["text"] == ""
+        assert renamed.json()["has_pdf"] is False
         assert (
             client.get(f"/v1/user/resumes/{resume_id}/text/parts/0", headers=user_headers).json()[
                 "text"
@@ -77,13 +78,18 @@ class TestResumes:
             == "Original text"
         )
         assert (
-            client.get(f"/v1/user/resumes/{resume_id}/pdf", headers=user_headers).content
-            == b"original PDF bytes"
+            client.get(f"/v1/user/resumes/{resume_id}/pdf", headers=user_headers).status_code == 404
         )
         assert db.query_one(
-            "SELECT text, pdf FROM user_resume_revisions WHERE resume_id = %s",
+            "SELECT text, pdf, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
             (resume_id,),
-        ) == {"text": "Original text", "pdf": b"original PDF bytes"}
+        ) == {
+            "text": "",
+            "pdf": None,
+            "text_version_id": db.query_one(
+                "SELECT text_version_id FROM user_resumes WHERE id = %s", (resume_id,)
+            )["text_version_id"],
+        }
         create_text_resume(
             client, json={"name": "taken", "text": "Other text"}, headers=user_headers
         )
@@ -105,6 +111,24 @@ class TestResumes:
             client.delete(f"/v1/user/resumes/{rid}", headers=other_user_headers).status_code == 404
         )
         assert client.delete(f"/v1/user/resumes/{rid}", headers=user_headers).status_code == 200
+
+    def test_missing_canonical_copy_does_not_read_old_columns(self, client, user_headers):
+        row = db.query_one(
+            "INSERT INTO user_resumes (user_id, name, text, filename, pdf) "
+            "VALUES (%s, 'old', 'old text', 'old.pdf', %s) RETURNING id",
+            (_uid(user_headers), b"old PDF"),
+        )
+        assert row is not None
+        resume_id = row["id"]
+        assert resume_text(_uid(user_headers), resume_id) is None
+        listed = client.get("/v1/user/resumes", headers=user_headers)
+        assert listed.status_code == 503
+        info = client.get(f"/v1/user/resumes/{resume_id}/text", headers=user_headers)
+        assert info.status_code == 503
+        part = client.get(f"/v1/user/resumes/{resume_id}/text/parts/0", headers=user_headers)
+        assert part.status_code == 503
+        pdf = client.get(f"/v1/user/resumes/{resume_id}/pdf", headers=user_headers)
+        assert pdf.status_code == 404
 
     def test_the_writing_style_is_a_setting_and_empty_clears_it(self, client, user_headers):
         r = client.put(

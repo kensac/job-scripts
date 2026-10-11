@@ -74,9 +74,9 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         else:
             await filters._process_jobs(task_id, uid, ent, cfg, flt, [job])
     else:
-        db.execute(
-            "INSERT INTO user_resumes (user_id, name, text) VALUES (%s, 'main', 'Python')", (uid,)
-        )
+        from tests.resume_support import seed_text_resume
+
+        seed_text_resume(uid, "main", "Python")
         application.ensure_answer_rows(uid, job_id, [{"key": "why", "label": "Why us?"}])
         task_id = f.make_task("application_draft", {"user_id": uid}, status="running")
         monkeypatch.setattr(application, "load_config", lambda *args: (ent, cfg))

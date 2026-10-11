@@ -5,6 +5,7 @@ import pytest
 from api import ai, budget, db
 from api.routers import application_answers as routes
 from tasks import application
+from tests.resume_support import seed_text_resume
 
 
 @pytest.mark.asyncio
@@ -13,7 +14,7 @@ async def test_parked_sweep_cannot_overwrite_newer_answer(f, monkeypatch, interv
     uid = f.make_user()
     jid = f.make_job()
     job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
-    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    seed_text_resume(uid, "main", "Python")
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     tid = f.make_task("application_sweep", {"user_id": uid}, status="running")
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
@@ -157,7 +158,7 @@ async def test_refinement_preserves_concurrent_edit_and_cached_usage(f, monkeypa
     uid = f.make_user()
     jid = f.make_job()
     job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
-    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    seed_text_resume(uid, "main", "Python")
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
     user = SimpleNamespace(id=uid)
@@ -231,7 +232,7 @@ async def test_sweep_cannot_supersede_pending_refinement(f, monkeypatch):
     uid = f.make_user()
     jid = f.make_job()
     job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
-    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    seed_text_resume(uid, "main", "Python")
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
     monkeypatch.setattr(routes, "_visible_job", lambda *args: job)
@@ -255,7 +256,7 @@ async def test_draft_uses_question_read_under_reservation(f, monkeypatch):
     uid = f.make_user()
     jid = f.make_job()
     job = db.query_one("SELECT id,url,company,title FROM jobs WHERE id=%s", (jid,))
-    db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
+    seed_text_resume(uid, "main", "Python")
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Current question"}])
     tid = f.make_task("application_draft", {"user_id": uid, "job_id": jid}, status="running")
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")

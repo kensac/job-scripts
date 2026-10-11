@@ -5,16 +5,14 @@ from __future__ import annotations
 from api import db
 from api.apply.drafting import resume_text
 from tests.job_board_support import _uid
+from tests.resume_support import seed_text_resume
 
 
 def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_user_headers):
-    first = db.query_one(
-        "INSERT INTO user_resumes (user_id, name, text, pdf, filename) "
-        "VALUES (%s, 'main', 'First complete text', %s, 'first.pdf') RETURNING id",
-        (_uid(user_headers), b"original PDF"),
-    )
-    assert first is not None
-    resume_id = first["id"]
+    resume_id = seed_text_resume(_uid(user_headers), "main", "First complete text")
+    first_version = db.query_one(
+        "SELECT text_version_id FROM user_resumes WHERE id = %s", (resume_id,)
+    )["text_version_id"]
 
     started = client.post("/v1/user/resume-text-versions", headers=user_headers)
     assert started.status_code == 201, started.text
@@ -69,13 +67,14 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
     assert actual == first_part + second_part
     assert resume_text(_uid(user_headers), resume_id) == "A" * 12_000
     prior = db.query_one(
-        "SELECT text, pdf, filename FROM user_resume_revisions WHERE resume_id = %s",
+        "SELECT text, pdf, filename, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
         (resume_id,),
     )
     assert prior == {
-        "text": "First complete text",
-        "pdf": b"original PDF",
-        "filename": "first.pdf",
+        "text": "",
+        "pdf": None,
+        "filename": None,
+        "text_version_id": first_version,
     }
 
     newer = client.post(f"/v1/user/resumes/{resume_id}/text-versions", headers=user_headers)

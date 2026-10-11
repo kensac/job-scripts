@@ -152,7 +152,7 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
         db.query_one_as(
             ResumeFile,
             "SELECT id, name, filename, "
-            "(pdf IS NOT NULL OR pdf_upload_id IS NOT NULL) AS has_pdf FROM user_resumes "
+            "(pdf_upload_id IS NOT NULL) AS has_pdf FROM user_resumes "
             "WHERE id = %s AND user_id = %s",
             (profile.default_resume_id, user.id),
         )
