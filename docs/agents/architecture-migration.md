@@ -291,15 +291,12 @@ as pointers (#953). Every page keeps the one-pass shape
 switched read ships with a test that holds the new query equal to the old
 one on the same rows for the era where both are right.
 
-**Board spend counts calls, not fetches.** `routers/analytics._SPEND_SQL`
-reads `ledger_rows`, so a page fetch is a "call" with no price. Measured
-2026-10-10, all time, joined to `jobs`: 2,800,724 "calls", 67.0 percent
-priced. Without fetches: 1,889,467 and 99.4 percent; the remaining 0.6
-percent are verdicts no call produced. On the ledger: 1,384,802 calls, 100
-percent priced, the same dollars. A fetch costs bandwidth, not a model call,
-and showing it as an unpriced call reads as a gap in pricing that does not
-exist. `priced_coverage` moving from 67 to 100 is that correction, and the
-change says so on the page in the same release.
+**Board spend counts paid model requests, not fetches.**
+`api/analytics_queries._SPEND_SQL` reads the `model_calls` ledger for
+posting checks. One batched verification answer can produce several verdicts,
+so a verdict row is not one call. A page fetch costs bandwidth but is not a
+model request. Sum recorded `cost_usd` rather than repricing historical calls,
+and report priced coverage so an unpriced request is visible.
 
 **The sequence.** Each step ships alone and leaves every page showing what
 it showed.
@@ -683,7 +680,7 @@ files listed there:
 | Reader | Meaning | Stands |
 |---|---|---|
 | `core/catalog.py`: `retire_unlisted`, `retire_switched_off`, the upsert's change test, `correct_posting`, `availability_shadow` | feed state, written and compared | stays |
-| `api/routers/analytics.py` source inventory | the owning feed's own flag, per source | stays |
+| `api/analytics_queries.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
 | `api/routers/filters.py` preset coverage gates | how many postings a preset would show | moved, once availability was stored |
@@ -699,7 +696,7 @@ the one before it is running on every worker.
    `j.available`, with NULL read as not available, and the board recompute is
    measured against its 27 s baseline. Two readers still read feed state, and
    each moves to observations: the source inventory in
-   `api/routers/analytics.py` counts each source's latest observations, and
+   `api/analytics_queries.py` counts each source's latest observations, and
    the re-listing branch in `tasks/verify.py` keys on a `reappeared`
    observation newer than the last closed check, not on `job_listing_events`.
    `posting_path` stops reading `job_listing_events` too.
