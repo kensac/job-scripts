@@ -181,6 +181,16 @@ Canonical resume writers leave the old text and PDF columns NULL. When a
 resume changes, its revision copies any old inline values exactly before the
 current row is updated, so an unconverted value remains available for backfill.
 
+**Drop old resume columns only after their values are empty.** The clearing
+task on Hetzner must compare each old text or PDF value with its complete
+canonical copy before setting that old value to NULL. Cover current resumes
+and archived revisions. The later drop migration validates that all four old
+columns are NULL, every row has a ready text version, and every referenced
+PDF upload has complete verified parts. Keep `resume_backfill_runs` as the
+record of copy and verification progress. Ship the column drop only after all
+fleet readers run the versioned storage release and no old backfill task is
+pending or running.
+
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
 of the old column in one release. After every fleet reader runs that release,
