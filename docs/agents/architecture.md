@@ -7,6 +7,26 @@ neighbouring documents carry what used to live here:
 [observability.md](observability.md) for the worker fleet and batched work,
 and [reading-production.md](reading-production.md) for reads from outside.
 
+## Assisted application boundaries
+
+The extension reads fields; the server resolves them. `api/apply/fields.py`
+defines the field read and resolved field shapes. `api/apply/profile.py` owns a
+person's application facts and values derived from them. `api/apply/rules.py`
+maps labels to facts, `api/apply/options.py` selects an offered choice, and
+`api/apply/resolver.py` applies the answer bank, profile and draft ladder in
+that order. A field with no supported value remains blank. Keep those stages
+separate so a new label rule cannot change how choices are selected or how a
+saved answer takes precedence.
+
+The extension route entry point is `api/routers/apply.py`. It owns fill tracking,
+resolution and submission, including the transaction that records the final
+fields, answer-bank edits and application link. `api/routers/apply_routes/`
+holds public extension configuration, profile and answer reads, suggestions,
+and reports by their respective responsibilities. Route models live in
+`apply_routes/models.py`, and extension telemetry is recorded through
+`apply_routes/events.py`. A route split preserves the published paths,
+request and response schemas, owner checks, and submission transaction.
+
 ## The mail pipeline
 
 Import → classify → match → derive.

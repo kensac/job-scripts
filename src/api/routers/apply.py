@@ -5,37 +5,28 @@ what to improve next. api.apply holds the resolving itself."""
 from __future__ import annotations
 
 import datetime
-import json
-import re
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from api import (
-    ai,
     apply,
-    budget,
     db,
     events,
-    telemetry,
-    user_settings,
 )
-from api.ai import access as ai_access
-from api.apply import drafting as drafts
-from api.apply import fill_answers, posting_context
-from api.apply import policy as extension_policy
-from api.apply import recipes as extension_recipes
+from api.apply import fill_answers
 from api.auth import AuthedUser, require_user
 from api.board.person_state import board_row, touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
 from api.mail import applications
-from api.models import Ok
-from api.problem import AI_REFUSALS, SIZE_REFUSALS, refuse
+from api.problem import refuse
+from api.routers.apply_routes import extension, profile, reports, suggestions
+from api.routers.apply_routes.events import record_apply_event
+from api.routers.apply_routes.models import ResolvedForm, ResumeFile, Submitted
 from core.fetching import forms
 from core.fetching.forms import posting_urls
-from core.store import get_content
 
 router = APIRouter()
 
@@ -86,356 +77,6 @@ def track_fill(fill_id: int, user: AuthedUser = Depends(require_user)) -> Tracke
     return TrackedFill(job_id=saved["job_id"], url=saved["url"])
 
 
-class RememberedAnswer(BaseModel):
-    """One answer the bank kept from a submitted form."""
-
-    id: int
-    label: str
-    kind: str
-    value: str
-    times_used: int
-    last_used_at: datetime.datetime | None
-    updated_at: datetime.datetime | None
-
-
-class AnswerList(BaseModel):
-    answers: list[RememberedAnswer]
-
-
-class Fill(BaseModel):
-    """One pass of the extension over one form. `job_id` is null when the url
-    matched no posting on the board, which is normal rather than an error."""
-
-    id: int
-    job_id: int | None
-    url: str
-    host: str | None
-    created_at: datetime.datetime
-    submitted_at: datetime.datetime | None
-    company: str | None
-    title: str | None
-    fields: int
-
-
-class FillList(BaseModel):
-    fills: list[Fill]
-
-
-class ProblemReport(BaseModel):
-    """One row of the problem-report list, declared rather than implied.
-
-    The row shape used to reach the frontend as an untyped dict, so the types
-    on the other side were written by hand from reading this query. They
-    drifted: a capture field typed as a string was an object, and the page
-    crashed on 2026-09-10 when a report with fields was opened. A declared
-    shape puts that in openapi.json, which is where the frontend's types come
-    from.
-    """
-
-    id: int
-    url: str
-    host: str | None
-    note: str
-    created_at: datetime.datetime
-    title: str | None
-    fields: int
-
-
-class ReportList(BaseModel):
-    reports: list[ProblemReport]
-
-
-class ProblemReportDetail(BaseModel):
-    """One report with the capture itself, which is the part triage reads.
-    The list above carries a title and a field count out of the same column
-    rather than the whole page."""
-
-    id: int
-    url: str
-    host: str | None
-    note: str
-    page: dict[str, Any]
-    created_at: datetime.datetime
-
-
-class ReportCreated(BaseModel):
-    """The extension shows the number, so the person can quote it."""
-
-    id: int
-    created_at: datetime.datetime
-
-
-class MatchedPosting(BaseModel):
-    """The posting the url matched, when the board holds one."""
-
-    id: int
-    company: str | None
-    title: str | None
-    status: str | None = None
-    date_applied: datetime.date | None = None
-    submitted_at: datetime.datetime | None = None
-
-
-class ContextDraft(BaseModel):
-    """A draft already written for this posting. Only drafts that exist are
-    listed, so `draft` is never null here."""
-
-    key: str
-    question: str
-    draft: str
-
-
-class ApplyContext(BaseModel):
-    """The three sources a fill draws from, before anything is filled.
-
-    `profile` is a map rather than the profile shape: only the facts that are
-    set are listed, because a blank fact fills nothing and listing it would
-    say the profile has something it does not.
-    """
-
-    job: MatchedPosting | None
-    profile: dict[str, Any]
-    answers: list[RememberedAnswer]
-    drafts: list[ContextDraft]
-
-
-class ResumeFile(BaseModel):
-    """The resume a fill would attach. `has_pdf` false means there is text to
-    draft from and no file to upload."""
-
-    id: int
-    name: str
-    filename: str | None
-    has_pdf: bool
-
-
-class ResolvedForm(BaseModel):
-    """What goes in each field, and what the extension needs to put it there.
-
-    `profile` is the whole profile as a map, minus the default resume and the
-    notes: a config-driven reader fills a repeated group one row at a time and
-    a selector that names another fact reads the scalar from it, so the keys
-    are read at runtime rather than known here.
-    """
-
-    fill_id: int
-    job_id: int | None
-    fields: list[apply.ResolvedField]
-    resume: ResumeFile | None
-    profile: dict[str, Any]
-
-
-class Submitted(BaseModel):
-    """The ledger row after the person clicked submit.
-
-    An entry stays a map on purpose. It is the field as read, plus the final
-    value and whether it changed, plus whatever the model's pass left on it -
-    so naming the keys here would silently drop the ones it did not name.
-    """
-
-    ok: bool = True
-    job_id: int | None
-    fields: list[dict[str, Any]]
-
-
-class Suggested(BaseModel):
-    """The model's pass over what the ladder left blank. `answers` is keyed by
-    field key and holds only what came back usable; `skipped` is what the
-    admin list keeps from the model, which is not the same as unanswered."""
-
-    answers: dict[str, str]
-    skipped: list[str]
-    model: str | None
-
-
-class LabelCount(BaseModel):
-    label: str
-    count: int
-
-
-class ApplyReport(BaseModel):
-    """How the ladder is doing on this person's submitted forms. `by_rung`
-    is keyed by the rung that filled the field, with "blank" for the ones
-    nothing filled."""
-
-    forms_submitted: int
-    fields: int
-    filled_unchanged: int
-    by_rung: dict[str, int]
-    most_often_blank: list[LabelCount]
-    most_often_corrected: list[LabelCount]
-
-
-@router.get("/extension/config", response_model=extension_policy.ExtensionConfig)
-def extension_config(
-    response: Response,
-    adapter: extension_policy.AdapterId,
-    schema_version: int = Query(ge=1),
-):
-    # Disablements must remain readable when the person's session expires.
-    # This public response contains no profile, answers or credentials. The
-    # extension alone owns the bounded cache and pins a revision per fill.
-    response.headers["Cache-Control"] = "no-store"
-    if schema_version != 1:
-        raise refuse(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
-    try:
-        policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
-    except ValueError as exc:
-        raise refuse(
-            503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
-        ) from exc
-    return extension_policy.resolve(policy, adapter)
-
-
-@router.get("/extension/recipe", response_model=extension_recipes.RecipeConfig)
-def extension_recipe(
-    response: Response,
-    adapter: extension_policy.AdapterId,
-    schema_version: int = Query(ge=1),
-):
-    """The published table for a config-driven reader, or 404 when only the
-    bundled copy exists. Same public terms as /extension/config: no profile,
-    answers or credentials; the extension pins a revision per fill and keeps
-    the bundled table as its fallback (api.apply.recipes)."""
-    response.headers["Cache-Control"] = "no-store"
-    if schema_version != 1:
-        raise refuse(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
-    try:
-        policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
-    except ValueError as exc:
-        raise refuse(
-            503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
-        ) from exc
-    config = extension_recipes.config_for(adapter, policy.max_age_seconds)
-    if config is None:
-        raise refuse(
-            404, "NO_RECIPE", "no published recipe for this adapter; the bundled table applies"
-        )
-    return config
-
-
-@router.get("/user/profile")
-def get_profile(user: AuthedUser = Depends(require_user)) -> apply.Profile:
-    return apply.load_profile(user.id)
-
-
-class ProfilePut(apply.Profile):
-    """Replace the whole profile; omitted fields return to their defaults."""
-
-    # Stored profiles stay tolerant of older keys. Writes cannot silently drop
-    # misspelled fields while replacing the person's previously saved facts.
-    model_config = ConfigDict(extra="forbid")
-
-
-@router.put("/user/profile")
-def put_profile(body: ProfilePut, user: AuthedUser = Depends(require_user)) -> apply.Profile:
-    """The whole profile, replaced. A resume id that is not the person's is
-    dropped rather than refused, so a deleted resume does not wedge the
-    profile."""
-    if body.default_resume_id is not None and not db.query_one(
-        "SELECT 1 FROM user_resumes WHERE id = %s AND user_id = %s",
-        (body.default_resume_id, user.id),
-    ):
-        body.default_resume_id = None
-    user_settings.save_profile(user.id, body.model_dump())
-    return body
-
-
-@router.get("/user/apply/context")
-def apply_context(
-    url: str = Query(max_length=2000), user: AuthedUser = Depends(require_user)
-) -> ApplyContext:
-    """What this person already has for the page in front of them, before
-    anything is filled: the profile facts that are set, the answer bank, and
-    the drafts for the posting when the url matches one.
-
-    A read. It opens no fill and writes nothing, which is what lets the
-    panel show its three sources the moment it appears rather than naming
-    them and making the person open the site to see what is in them.
-
-    One call rather than three: the panel wants all of it at once, and the
-    job match is the only way to know whether there are drafts at all.
-    """
-    job = db.query_one_as(
-        MatchedPosting,
-        f"SELECT j.id, j.company, j.title, uj.status, {applications.applied_on('uj')} AS date_applied, "
-        "(SELECT MAX(f.submitted_at) FROM application_fills f "
-        " WHERE f.user_id = %s AND f.job_id = j.id) AS submitted_at "
-        "FROM jobs j LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %s "
-        "WHERE j.url = ANY(%s) "
-        "AND j.id NOT IN (SELECT job_id FROM posting_uploads WHERE uploaded_by <> %s) LIMIT 1",
-        (user.id, user.id, posting_urls(url), user.id),
-    )
-    # Only the facts that are set. A blank fact fills nothing, so listing it
-    # would be a row that says the profile has something it does not.
-    facts = {
-        key: value
-        for key, value in apply.load_profile(user.id)
-        .model_dump(exclude={"default_resume_id", "notes"})
-        .items()
-        if value not in ("", None, [], {})
-    }
-    return ApplyContext(
-        job=job,
-        profile=facts,
-        answers=db.query_as(
-            RememberedAnswer,
-            f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
-            "ORDER BY times_used DESC, updated_at DESC LIMIT 200",
-            (user.id,),
-        ),
-        drafts=db.query_as(
-            ContextDraft,
-            "SELECT key, question, draft FROM application_answers "
-            "WHERE user_id = %s AND job_id = %s AND draft IS NOT NULL ORDER BY id",
-            (user.id, job.id),
-        )
-        if job
-        else [],
-    )
-
-
-class SavedAnswerPut(BaseModel):
-    value: str = Field(min_length=1, max_length=4000)
-
-
-@router.get("/user/answers")
-def list_answers(user: AuthedUser = Depends(require_user)) -> AnswerList:
-    return AnswerList(
-        answers=db.query_as(
-            RememberedAnswer,
-            f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
-            "ORDER BY times_used DESC, updated_at DESC",
-            (user.id,),
-        )
-    )
-
-
-@router.put("/user/answers/{answer_id}")
-def put_answer(
-    answer_id: int, body: SavedAnswerPut, user: AuthedUser = Depends(require_user)
-) -> RememberedAnswer:
-    row = db.query_one_as(
-        RememberedAnswer,
-        f"UPDATE application_answer_bank SET value = %s, updated_at = now() "
-        f"WHERE id = %s AND user_id = %s RETURNING {_BANK_COLS}",
-        (body.value.strip(), answer_id, user.id),
-    )
-    if not row:
-        raise refuse(404, "NOT_FOUND", "unknown answer")
-    return row
-
-
-@router.delete("/user/answers/{answer_id}")
-def delete_answer(answer_id: int, user: AuthedUser = Depends(require_user)) -> Ok:
-    if not db.query_one(
-        "DELETE FROM application_answer_bank WHERE id = %s AND user_id = %s RETURNING id",
-        (answer_id, user.id),
-    ):
-        raise refuse(404, "NOT_FOUND", "unknown answer")
-    return Ok()
-
-
 class ResolveBody(BaseModel):
     url: str = Field(min_length=1, max_length=2000)
     fields: list[apply.Field_] = Field(max_length=300)
@@ -447,23 +88,6 @@ class ResolveBody(BaseModel):
     # answered), and they belong on the same ledger row.
     fill_id: int | None = None
     resume_open: bool = False
-
-
-def _seen(event: str, user: AuthedUser, **props: Any) -> None:
-    """One event per thing the extension did, keyed to the person.
-
-    distinct_id is the IdP subject, which is what the API already uses for
-    exceptions (app.py) and what the frontend identifies with: auth.js mints a
-    fresh token.sub at every sign-in, so it surfaces the stable idp_sub to
-    PostHog instead. Anything else here would put the extension's funnel on a
-    different person from the same person's web session.
-
-    Properties carry counts and the ATS host, never a field label, a question
-    or an answer. What someone was asked and what they replied is the content
-    of their application; the shape of it is what tells us whether a reader
-    works.
-    """
-    telemetry.capture(event, distinct_id=user.sub, properties=props)
 
 
 @router.post("/user/apply/resolve")
@@ -534,7 +158,7 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
         if profile.default_resume_id
         else None
     )
-    _seen(
+    record_apply_event(
         "apply_form_resolved",
         user,
         host=urlsplit(body.url).netloc,
@@ -635,7 +259,7 @@ def fill_submitted(
         )
     if job_id is not None:
         events.publish_board_row(user.id, job_id, board_row(user.id, job_id))
-    _seen(
+    record_apply_event(
         "apply_form_submitted",
         user,
         matched_job=fill["job_id"] is not None,
@@ -643,187 +267,6 @@ def fill_submitted(
         changed=sum(1 for f in fields if f["changed"]),
     )
     return Submitted(job_id=fill["job_id"], fields=fields)
-
-
-class SuggestField(BaseModel):
-    key: str = Field(min_length=1, max_length=300)
-    label: str = Field(min_length=1, max_length=4000)
-    kind: str = Field(default="text", max_length=20)
-    options: apply.ApplicationOptions = Field(default_factory=list)
-    # The profile's answer when the options did not recognisably hold it.
-    hint: str | None = Field(default=None, max_length=200)
-
-
-class SuggestBody(BaseModel):
-    fields: list[SuggestField] = Field(min_length=1, max_length=100)
-    job_id: int | None = None
-    # The fill this belongs to; the model's answers go on its ledger row.
-    fill_id: int | None = None
-    review_only: bool = False
-    revision: int | None = Field(default=None, ge=0)
-
-
-class SuggestedAnswer(BaseModel):
-    key: str
-    answer: str
-
-
-class Suggestions(BaseModel):
-    answers: list[SuggestedAnswer]
-
-
-DEFAULT_SUGGEST = (
-    "You fill the fields of a job application form that the person's profile "
-    "did not fill by rule. Answer every field from the profile and resume; do "
-    "not invent facts. For a field with options, the answer is exactly one "
-    "of the options as written; when a hint is given, it is the person's own "
-    "answer and you choose the option that means it. A text field takes a "
-    "short phrase, a number field a number, and a long field a short paragraph "
-    "in the person's own voice drawn from the resume. The resume and profile are "
-    "the person's whole record: a question about their own history with this "
-    "employer or its people (worked here before, applied before, referred by or "
-    "related to an employee, a current or former contractor) is answered No when "
-    "neither shows it. A fact only they could know (a postal code, a date) is "
-    "left as an empty string rather than guessed."
-)
-
-
-def never_filled(fields: list[SuggestField]) -> list[str]:
-    """The keys of the fields the admin list keeps from the model."""
-    raw = db.get_config("application_ai_never_fills") or ""
-    words = [w.strip().lower() for w in re.split(r"[\n,]", raw) if w.strip()]
-    if not words:
-        return []
-    return [
-        f.key
-        for f in fields
-        if any(re.search(rf"\b{re.escape(w)}\b", f"{f.label} {f.key}".lower()) for w in words)
-    ]
-
-
-@router.post("/user/apply/suggest", responses=AI_REFUSALS)
-async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -> Suggested:
-    """Everything the ladder left blank, in one live call on the person's
-    own model settings. The extension fills the answers; the person still
-    sees them in the form before submitting, and an answer left in place
-    goes into the bank on submit."""
-    token = None
-    saved = {}
-    if body.review_only and (
-        body.fill_id is None or body.revision is None or len(body.fields) != 1
-    ):
-        raise refuse(
-            422, "FILL_REQUIRED", "Answer review requires one field, its revision and its fill."
-        )
-    # Touchable, the rule resolve_form matches a fill's posting by: the
-    # posting text goes into the prompt, and another person's private upload
-    # is not this person's to read.
-    if body.job_id and not touchable_job_ids(user.id, [body.job_id]):
-        raise refuse(404, "NOT_FOUND", "unknown job")
-    if body.fill_id is not None:
-        token, saved = fill_answers.reserve(
-            user.id,
-            body.fill_id,
-            [f.key for f in body.fields],
-            body.job_id,
-            expected_revision=body.revision if body.review_only else None,
-        )
-    skipped = never_filled(body.fields)
-    fields = [f for f in body.fields if f.key not in skipped]
-    if not fields:
-        _finish_suggestions(user.id, body, token, {}, {}, skipped)
-        _seen("apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None)
-        return Suggested(answers={}, skipped=skipped, model=None)
-    profile = apply.load_profile(user.id)
-    resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
-    cfg = ai_access.require_config(user)
-    job = (
-        db.query_one("SELECT company, title, url FROM jobs WHERE id = %s", (body.job_id,))
-        if body.job_id
-        else None
-    )
-    parts = []
-    if job:
-        parts.append(f"Job: {job['title']} at {job['company']}")
-    if any(f.kind in {"text", "long"} and not f.options for f in fields):
-        posting = get_content(job["url"]) if job else None
-        if not posting and body.fill_id is not None:
-            posting = await posting_context.external_posting(user.id, body.fill_id)
-        parts.append(f"Posting:\n{(posting or '')[:6000] or '(no posting text captured)'}")
-    parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
-    if body.review_only:
-        parts.append(
-            "Revise the requested answers using the person's saved feedback. "
-            "Keep claims grounded in their profile and resume.\n"
-            + json.dumps(
-                {
-                    key: {
-                        "previous_answer": f.get("review_value", f.get("value")),
-                        "feedback": f.get("feedback", ""),
-                    }
-                    for key, f in saved.items()
-                }
-            )
-        )
-    if profile.notes:
-        parts.append("The person's standing answers, in their own words:\n" + profile.notes)
-    parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id", "notes"}))
-    if resume:
-        parts.append("Resume:\n" + resume)
-    rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
-    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id))
-    with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
-        parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
-    budget.record_tokens(
-        user.id,
-        cfg.key_source,
-        drafts.PURPOSE,
-        cfg.model,
-        usage,
-    )
-    if parsed is None:
-        raise refuse(502, "NO_ANSWER", "the model returned no usable answer; try again")
-    by_key = {f.key: f for f in fields}
-    answers = {}
-    raw = {}
-    for a in parsed.answers:
-        field = by_key.get(a.key)
-        text = a.answer.strip()
-        if not field or not text:
-            continue
-        raw[a.key] = text
-        if field.options:
-            text = apply.pick_option(text, field.options) or ""
-        if text:
-            answers[a.key] = text
-    _finish_suggestions(user.id, body, token, answers, raw, skipped)
-    _seen(
-        "apply_ai_suggested",
-        user,
-        asked=len(fields),
-        answered=len(answers),
-        skipped=len(skipped),
-        model=cfg.model,
-    )
-    return Suggested(answers=answers, skipped=skipped, model=cfg.model)
-
-
-def _finish_suggestions(
-    user_id: int, body: SuggestBody, token: str | None, answers: dict, raw: dict, skipped: list[str]
-) -> None:
-    if body.fill_id is None or token is None:
-        return
-    if not fill_answers.complete(
-        user_id,
-        body.fill_id,
-        token,
-        [f.key for f in body.fields],
-        answers,
-        raw,
-        skipped,
-        review_only=body.review_only,
-    ):
-        raise refuse(409, "ANSWER_CHANGED", "A newer edit or submission superseded this answer.")
 
 
 class FillAnswerEdit(BaseModel):
@@ -850,127 +293,13 @@ def edit_fill_answer(
     fill_id: int, body: FillAnswerEdit, user: AuthedUser = Depends(require_user)
 ) -> FillAnswerState:
     fill_answers.edit(user.id, fill_id, body.key, body.revision, body.value, body.feedback)
-    _seen("apply_answer_edited", user, has_feedback=bool(body.feedback))
+    record_apply_event("apply_answer_edited", user, has_feedback=bool(body.feedback))
     return FillAnswerState(**fill_answers.read(user.id, fill_id))
 
 
-class PageReport(BaseModel):
-    url: str = Field(min_length=1, max_length=2000)
-    note: str = Field(default="", max_length=4000)
-    page: dict[str, Any]
+router.include_router(extension.router)
+router.include_router(profile.router)
+router.include_router(suggestions.router)
+router.include_router(reports.router)
 
-
-MAX_REPORT_BYTES = 2_000_000
-
-
-@router.post("/user/apply/reports", status_code=201, responses=SIZE_REFUSALS)
-def create_report(body: PageReport, user: AuthedUser = Depends(require_user)) -> ReportCreated:
-    """The extension's report button: whatever it saw, kept whole for
-    triage. Capped so one page cannot fill the table by itself."""
-    if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
-        raise refuse(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
-    report = db.query_one_as(
-        ReportCreated,
-        "INSERT INTO application_reports (user_id, url, host, note, page) "
-        "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
-        (user.id, body.url, urlsplit(body.url).netloc, body.note.strip(), db.jsonb(body.page)),
-    )
-    assert report is not None  # an insert with RETURNING always yields its row
-    # The one event that says a reader did not work on a real page. The note is
-    # a person's own words about their own application, so only whether there
-    # was one ships; the host is what says where to look.
-    _seen(
-        "apply_page_reported",
-        user,
-        host=urlsplit(body.url).netloc,
-        has_note=bool(body.note.strip()),
-    )
-    return report
-
-
-@router.get("/user/apply/reports")
-def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> ReportList:
-    return ReportList(
-        reports=db.query_as(
-            ProblemReport,
-            "SELECT id, url, host, note, created_at, page->>'title' AS title, "
-            "jsonb_array_length(COALESCE(page->'fields', '[]'::jsonb)) AS fields "
-            "FROM application_reports WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
-            (user.id, max(1, min(limit, 500))),
-        )
-    )
-
-
-@router.get("/user/apply/reports/{report_id}")
-def get_report(report_id: int, user: AuthedUser = Depends(require_user)) -> ProblemReportDetail:
-    row = db.query_one_as(
-        ProblemReportDetail,
-        "SELECT id, url, host, note, page, created_at FROM application_reports "
-        "WHERE id = %s AND user_id = %s",
-        (report_id, user.id),
-    )
-    if not row:
-        raise refuse(404, "NOT_FOUND", "unknown report")
-    return row
-
-
-@router.get("/user/apply/fills")
-def list_fills(limit: int = 50, user: AuthedUser = Depends(require_user)) -> FillList:
-    return FillList(
-        fills=db.query_as(
-            Fill,
-            "SELECT f.id, f.job_id, f.url, f.host, f.created_at, f.submitted_at, "
-            "j.company, j.title, jsonb_array_length(f.fields) AS fields "
-            "FROM application_fills f LEFT JOIN jobs j ON j.id = f.job_id "
-            "WHERE f.user_id = %s ORDER BY f.created_at DESC LIMIT %s",
-            (user.id, max(1, min(limit, 500))),
-        )
-    )
-
-
-@router.get("/user/apply/report")
-def report(user: AuthedUser = Depends(require_user)) -> ApplyReport:
-    """How the ladder is doing on this person's submitted forms: fields by
-    rung, how many the person changed, and the labels most often left
-    blank or corrected. The blank list is the backlog: each label on it
-    is a rule to add or a fact the profile is missing."""
-    rows = db.query(
-        """
-        SELECT f.host, e.value->>'label' AS label, e.value->>'kind' AS kind,
-               COALESCE(e.value->>'rung', '') AS rung,
-               COALESCE((e.value->>'changed')::boolean, false) AS changed
-        FROM application_fills f, jsonb_array_elements(f.fields) e
-        WHERE f.user_id = %s AND f.submitted_at IS NOT NULL
-        """,
-        (user.id,),
-    )
-    by_rung: dict[str, int] = {}
-    blank: dict[str, int] = {}
-    corrected: dict[str, int] = {}
-    unchanged = 0
-    for r in rows:
-        by_rung[r["rung"] or "blank"] = by_rung.get(r["rung"] or "blank", 0) + 1
-        norm = apply.normalize(r["label"] or "")
-        if not r["rung"]:
-            blank[norm] = blank.get(norm, 0) + 1
-        elif r["changed"]:
-            corrected[norm] = corrected.get(norm, 0) + 1
-        else:
-            unchanged += 1
-
-    def top(counts: dict[str, int]) -> list[LabelCount]:
-        ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:25]
-        return [LabelCount(label=k, count=v) for k, v in ranked]
-
-    submitted = db.query_one(
-        "SELECT count(*) AS n FROM application_fills WHERE user_id = %s AND submitted_at IS NOT NULL",
-        (user.id,),
-    )
-    return ApplyReport(
-        forms_submitted=(submitted or {}).get("n", 0),
-        fields=len(rows),
-        filled_unchanged=unchanged,
-        by_rung=by_rung,
-        most_often_blank=top(blank),
-        most_often_corrected=top(corrected),
-    )
+SuggestField = suggestions.SuggestField
