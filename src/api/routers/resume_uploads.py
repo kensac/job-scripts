@@ -48,6 +48,8 @@ def _upload(upload_id: uuid.UUID, user_id: int, *, lock: bool = False) -> dict |
 def start_upload(
     body: ResumeUploadStart, user: AuthedUser = Depends(require_user)
 ) -> ResumeUploadState:
+    if not db.get_config("resume_pdf_uploads_enabled"):
+        raise refuse(503, "PDF_UPLOADS_PAUSED", "PDF uploads are paused")
     upload_id = uuid.uuid4()
     row = db.query_one(
         f"INSERT INTO resume_uploads (id, user_id, name, filename, size) "
@@ -151,6 +153,8 @@ async def put_part(
 def complete_upload(
     upload_id: uuid.UUID, user: AuthedUser = Depends(require_user)
 ) -> ResumeUploadState:
+    if not db.get_config("resume_pdf_uploads_enabled"):
+        raise refuse(503, "PDF_UPLOADS_PAUSED", "PDF uploads are paused")
     with db.transaction():
         row = _upload(upload_id, user.id, lock=True)
         if row is None:

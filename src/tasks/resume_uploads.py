@@ -57,6 +57,11 @@ def _extract(upload_id: uuid.UUID, user_id: int, size: int, part_count: int) -> 
 
 def _save_resume(upload_id: uuid.UUID, row: dict[str, Any], version_id: uuid.UUID) -> None:
     with db.transaction():
+        setting = db.query_one(
+            "SELECT value FROM app_config WHERE key = 'resume_pdf_uploads_enabled' FOR SHARE"
+        )
+        if setting is None or setting["value"] is not True:
+            raise RuntimeError("PDF uploads are paused")
         lock_owner(row["user_id"])
         locked = db.query_one(
             "SELECT status FROM resume_uploads WHERE id = %s FOR UPDATE", (upload_id,)
@@ -104,6 +109,8 @@ async def handle_process_resume_upload(payload: dict[str, Any]) -> None:
         (upload_id,),
     )
     try:
+        if not db.get_config("resume_pdf_uploads_enabled"):
+            raise RuntimeError("PDF uploads are paused")
         version_id = _extract(upload_id, row["user_id"], row["size"], row["next_part"])
         _save_resume(upload_id, row, version_id)
     except Exception as exc:

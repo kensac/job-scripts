@@ -15,6 +15,14 @@ from core.payloads.blob_parts import PART_BYTES, BlobPartStore
 from tasks import resume_uploads
 
 
+@pytest.fixture(autouse=True)
+def enable_verified_pdf_storage():
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('resume_pdf_uploads_enabled', 'true') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
+
+
 class FakeClient:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -30,6 +38,14 @@ class FakeClient:
 async def test_large_transfer_retries_and_streams_download(
     client, user_headers, other_user_headers, monkeypatch
 ) -> None:
+    db.execute("UPDATE app_config SET value = 'false' WHERE key = 'resume_pdf_uploads_enabled'")
+    paused = client.post(
+        "/v1/user/resume-uploads",
+        json={"name": "master", "filename": "master.pdf", "size": 1},
+        headers=user_headers,
+    )
+    assert paused.status_code == 503
+    db.execute("UPDATE app_config SET value = 'true' WHERE key = 'resume_pdf_uploads_enabled'")
     objects = FakeClient()
     store = BlobPartStore(objects, "test")
     monkeypatch.setattr(BlobPartStore, "from_env", classmethod(lambda cls: store))
@@ -74,6 +90,14 @@ async def test_large_transfer_retries_and_streams_download(
             changed = client.put(f"{path}/parts/{index}", content=b"changed", headers=user_headers)
             assert changed.status_code == 409
     assert client.post(f"{path}/complete", headers=user_headers).json()["status"] == "processing"
+    assert client.post(f"{path}/complete", headers=user_headers).json()["status"] == "processing"
+    db.execute("UPDATE app_config SET value = 'false' WHERE key = 'resume_pdf_uploads_enabled'")
+    with pytest.raises(RuntimeError, match="PDF uploads are paused"):
+        await resume_uploads.handle_process_resume_upload({"upload_id": str(upload_id)})
+    assert db.query_one(
+        "SELECT count(*) AS n FROM user_resumes WHERE pdf_upload_id = %s", (upload_id,)
+    ) == {"n": 0}
+    db.execute("UPDATE app_config SET value = 'true' WHERE key = 'resume_pdf_uploads_enabled'")
     assert client.post(f"{path}/complete", headers=user_headers).json()["status"] == "processing"
     await resume_uploads.handle_process_resume_upload({"upload_id": str(upload_id)})
     state = client.get(path, headers=user_headers).json()

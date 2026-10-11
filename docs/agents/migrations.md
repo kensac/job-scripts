@@ -135,7 +135,9 @@ set NOT NULL and drop the CHECK in a short transaction.
 complete text in `resume_text_parts`; new PDF writes store verified object
 parts. Older `user_resumes` rows and archived revisions keep their old text
 and PDF bytes readable during the fleet rollout. Deploy the additive backend
-first, then the frontend that sends parts. After that frontend is live,
+first with PDF uploads paused. Verify the live bucket has no expiry rule and
+enough capacity, then turn on `resume_pdf_uploads_enabled` in admin config.
+Deploy the frontend that sends parts. After that frontend is live,
 retire the legacy JSON/base64 resume write routes in a follow-up release;
 their request shape cannot process unlimited input in bounded memory. After
 every writer uses the new path, backfill each old text value in a small

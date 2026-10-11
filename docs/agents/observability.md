@@ -889,6 +889,12 @@ Account changes must not cascade away current resumes, uploads, text versions,
 parts, or revisions. Verify bucket lifecycle rules before using object parts
 as the sole PDF copy.
 
+**PDF resume uploads start paused.** The persisted
+`resume_pdf_uploads_enabled` setting stays off until the live bucket is checked
+for expiry rules and available capacity. The admin config page exposes its
+switch. The API and worker check it before completing an upload. Text resume
+parts and existing PDF downloads remain available while uploads are paused.
+
 **A new receipt's vectors are written to object storage before the receipt
 exists, and the receipt holds only `embedding_vectors_ref`.** There is no
 inline shape: 0 of 1,619 receipts held inline vectors on 2026-10-10, and the

@@ -7,6 +7,13 @@ from pydantic import PositiveInt
 from api.config_types import ConfigKey
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    "resume_pdf_uploads_enabled": ConfigKey(
+        section="Applications",
+        default=False,
+        value_type=bool,
+        help="Accept new PDF resume uploads only after the object bucket has been checked "
+        "for lifecycle expiry and enough capacity. Existing resumes remain readable while off.",
+    ),
     # The hourly application sweep, per person: how many unread forms it
     # reads (one request each to the ATS, under the host budget; 1,307
     # readable postings were on the board on 2026-09-06, so the first pass

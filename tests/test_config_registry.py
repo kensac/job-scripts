@@ -21,6 +21,8 @@ def test_every_key_is_served_with_its_type_help_and_choices(client, admin_header
         assert spec["section"].strip(), key
         assert spec["kind"] in {"value", "text", "groups", "hosts", "columns"}, key
     assert body["keys"]["fetch_engine"]["choices"] == ["chromium", "static_first"]
+    assert body["config"]["resume_pdf_uploads_enabled"] is False
+    assert body["keys"]["resume_pdf_uploads_enabled"]["type"] == "bool"
     assert body["keys"]["batch_straggler_hours"] == {
         "type": "int",
         "kind": "value",
