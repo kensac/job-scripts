@@ -226,3 +226,34 @@ def test_changed_source_cannot_clear_old_text(user_headers) -> None:
         "SELECT failed_at IS NOT NULL AS failed FROM resume_legacy_clear_runs WHERE id = %s",
         (run_id,),
     ) == {"failed": True}
+
+
+def test_unavailable_pdf_copy_keeps_old_bytes(user_headers, monkeypatch) -> None:
+    user_id = _uid(user_headers)
+    old_pdf = b"%PDF-stored"
+    objects = MemoryObjects()
+    store = BlobPartStore(objects, "test")
+    monkeypatch.setattr(BlobPartStore, "from_env", classmethod(lambda cls: store))
+    _, upload_id = _canonical(user_id, "", old_pdf, store)
+    row = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text, pdf, pdf_upload_id) "
+        "VALUES (%s, 'current', NULL, %s, %s) RETURNING id",
+        (user_id, old_pdf, upload_id),
+    )
+    assert row is not None
+    objects.objects.clear()
+    _enable()
+    legacy_clear_schedule.schedule_next("pdf")
+    task = db.query_one(
+        "SELECT payload FROM tasks WHERE kind = 'clear_resume_legacy' ORDER BY id LIMIT 1"
+    )
+    assert task is not None
+    run_id = uuid.UUID(task["payload"]["run_id"])
+    resume_legacy_clear.process_run(run_id)
+    assert db.query_one("SELECT pdf FROM user_resumes WHERE id = %s", (row["id"],)) == {
+        "pdf": old_pdf
+    }
+    assert db.query_one(
+        "SELECT failed_at IS NOT NULL AS failed FROM resume_legacy_clear_runs WHERE id = %s",
+        (run_id,),
+    ) == {"failed": True}
