@@ -8,6 +8,9 @@ Keep OAuth consent state and authorization URL construction in
 `api.oauth`. The grant refresh must hold the token row lock through the
 provider request and persist a rejected grant before raising. Routes and
 workers continue to import the public OAuth API from `api.oauth`.
+When moving or renaming an environment reader, keep
+`tests/test_env_example.py` able to discover its reads so `.env.example`
+stays checked in both directions.
 
 Production-grade only. No patches, no hotfixes. If a design turns out wrong,
 rearchitect it rather than working around it.
