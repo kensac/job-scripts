@@ -12,7 +12,7 @@ from api import db
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
-from api.routers.source_admin_catalog import _check_pattern_length
+from api.routers.source_management.catalog import _check_pattern_length
 from core import catalog
 
 router = APIRouter()

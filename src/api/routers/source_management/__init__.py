@@ -1,0 +1,1 @@
+"""Administrative source catalog routes."""
