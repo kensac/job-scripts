@@ -119,6 +119,26 @@ class UserResumeRevision(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class ResumeBackfillRun(Base):
+    """Durable part and verification progress for one old resume value."""
+
+    __tablename__ = "resume_backfill_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    source_kind: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[int] = mapped_column(BigInteger)
+    field: Mapped[str] = mapped_column(Text)
+    source_xmin: Mapped[str] = mapped_column(Text)
+    total: Mapped[int] = mapped_column(BigInteger)
+    part_count: Mapped[int] = mapped_column(BigInteger)
+    next_part: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    verify_part: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    source_digest: Mapped[str] = mapped_column(Text)
+    copy_digest: Mapped[str] = mapped_column(Text)
+    stage: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class ApplicationForm(Base):
     """The questions a posting's application form asks, read once per url
     from the ATS (core.fetching.forms). questions is NULL when the host cannot be

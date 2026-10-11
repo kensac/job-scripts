@@ -21,6 +21,13 @@ the current resume. A failure leaves the PDF and any partial text version
 stored; the upload status shows the error. Retrying completion starts a new
 text version. Replacing a resume saves its prior text and PDF in revisions.
 
+**Old resume copies run only on Hetzner.** `backfill_resumes` is claimable only
+when `JOBTRACKER_HOST_NAME=hetzner` and its handler checks the same value.
+The persisted `resume_backfill_enabled` setting starts off. Once enabled, each
+task copies or verifies one old text or PDF part. `resume_backfill_runs` keeps
+the part checkpoint and rolling digests, so a worker restart continues from
+stored progress. The source stays stored until a later guarded column drop.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

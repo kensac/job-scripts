@@ -153,6 +153,17 @@ host runs that release, a later merged migration checks that no old value is
 the sole copy and drops the old text and PDF columns. Do not clear old values
 before that guarded migration.
 
+`resume_backfill_enabled` is the persisted start gate. Leave it off until old
+writers are retired and the fleet is on the backfill release. The scheduler
+then queues one part at a time. Claiming permits `backfill_resumes` only when
+`JOBTRACKER_HOST_NAME=hetzner`; the handler checks that name again. A durable
+`resume_backfill_runs` row checkpoints each part and a second pass compares
+source and copy digests. Finalization takes a short source-row lock before it
+sets the pointer. The old value stays in place.
+`resume_pdf_uploads_enabled` also gates PDF copies. Leave it off until the live
+bucket's expiry and capacity have been checked. Failed tasks leave the source
+unchanged; the next scheduling cycle resumes a run still lacking a pointer.
+
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
 of the old column in one release. After every fleet reader runs that release,
