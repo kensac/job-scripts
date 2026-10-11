@@ -1,9 +1,4 @@
-"""The catalog's posting type, and the date floor ingest reads.
-
-Every board fetcher in core/boards.py returns this, so it is what ingest, the
-catalog and the checks all agree on. It lived in the sheet-era pipeline until
-that module was retired; nothing about it was sheet-specific.
-"""
+"""The posting type returned by board fetchers and the ingest date floor."""
 
 from __future__ import annotations
 

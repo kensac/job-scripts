@@ -1,7 +1,7 @@
 """Drafts for the free-response questions on an application form.
 
 Autofill stops at the paragraph box. The questions are public on four ATSs
-(core/forms.py) and a person pastes the rest; the answer is written from a
+(core/fetching/forms.py) and a person pastes the rest; the answer is written from a
 resume they keep here, in a style they describe in their own words, about the
 posting the board already holds. Drafts are batched like every other
 scheduled AI step; the back-and-forth on one draft is a live call because a

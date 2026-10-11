@@ -1,8 +1,6 @@
-"""The fallback listing fetcher: a board that is not one of the known formats.
+"""Fallback listing fetchers for URLs without a known board format.
 
-core/boards.py routes a listings URL to a per-format fetcher and falls back to
-fetch_job_postings here, which reads a plain JSON feed and carries the airtable
-and jobright shapes with it.
+core/fetching/boards/ routes a URL here for JSON feeds, Airtable, and Jobright.
 """
 
 from __future__ import annotations

@@ -88,7 +88,7 @@ def join_posting_sections(*parts: str | None) -> str:
 
 # The text of one posting from the JSON its board's API returns. One function
 # per format, shared by the resolver (which fetches a posting by URL) and the
-# listing fetcher in core/boards.py (which gets the same JSON for every
+# listing fetchers in core/fetching/boards/ (which get the same JSON for every
 # posting in one call), so the text a listing stores is exactly the text a
 # resolver would have fetched for it, and the per-posting fetch is not needed.
 
