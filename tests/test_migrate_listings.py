@@ -8,9 +8,9 @@ import dataclasses
 import pytest
 
 from api import db
-from core import listing_payloads
-from core.listing_payloads import COLUMNS, migrate, resolve
-from core.payload_objects import PayloadStore
+from core.payloads import listings
+from core.payloads.listings import COLUMNS, migrate, resolve
+from core.payloads.objects import PayloadStore
 from tests.factories import ObjectClient
 from tests.test_listings import LISTED, LONG_RAW, LONG_TEXT, _ingest
 
@@ -136,7 +136,7 @@ def test_a_row_locked_by_a_pull_is_skipped_rather_than_waited_for(inline):
 
     with psycopg.connect(DATABASE_URL) as holder:
         holder.execute("SELECT 1 FROM listings WHERE url = %s FOR UPDATE", (TEXTED[2].url,))
-        result = listing_payloads.migrate("externalize", after="", limit=10, chunk_size=10)
+        result = listings.migrate("externalize", after="", limit=10, chunk_size=10)
         holder.rollback()
 
     assert result["counts"] == {"externalized": 2, "changed": 1}

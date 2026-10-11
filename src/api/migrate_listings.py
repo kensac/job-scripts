@@ -27,8 +27,8 @@ def main() -> int:
     )
     from psycopg import Error
 
-    from core.listing_payloads import migrate
-    from core.payload_objects import PayloadUnavailable
+    from core.payloads.listings import migrate
+    from core.payloads.objects import PayloadUnavailable
     from core.pool import pool
 
     try:

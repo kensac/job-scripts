@@ -11,7 +11,7 @@ from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
 from api.task_jobs import run_jobs
-from core.payload_objects import MAX_CONNECTIONS, PayloadStore
+from core.payloads.objects import MAX_CONNECTIONS, PayloadStore
 from core.screening import screen
 from core.store import decided_custom_urls, get_contents
 from tasks import batch_policy

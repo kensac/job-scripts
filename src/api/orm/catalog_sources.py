@@ -151,7 +151,7 @@ class Listing(Base):
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     raw: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     # A value held by reference lives in a verified bundle object
-    # (core.listing_payloads); the inline column then holds its default.
+    # (core.payloads.listings); the inline column then holds its default.
     description_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
     description_object: Mapped[bytes | None] = mapped_column(LargeBinary)
     description_object_size: Mapped[int | None] = mapped_column(Integer)

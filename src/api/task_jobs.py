@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
+from core.payloads.objects import PayloadRef, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 

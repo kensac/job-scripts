@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, LiteralString
 
 from psycopg.types.json import Jsonb
 
-from core import listing_payloads
+from core.payloads import listings
 from core.pool import in_transaction, pool
 
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
 
 # Whether the value an incoming row {e} carries for a field equals what the
-# stored row {l} holds, in either shape (core.listing_payloads). A digest is
+# stored row {l} holds, in either shape (core.payloads.listings). A digest is
 # trusted only where it is written with its reference, so an inline value is
 # compared as itself: no writer of an inline value keeps a digest beside it.
 _KEPT: dict[str, LiteralString] = {
@@ -129,7 +129,7 @@ def record_listings(
     every posting enters the catalog. Read by the admin source screens
     (pattern preview, screened postings), never by visibility or the checks;
     those read neither the text nor the raw record, and anything that does
-    reads them through core.listing_payloads.resolve.
+    reads them through core.payloads.listings.resolve.
 
     A row is rewritten only when what it would hold differs, or when its
     last_seen_at is older than refresh_hours. Rewriting every listed row on
@@ -145,13 +145,13 @@ def record_listings(
     retained. A reader that means "listed now" says so with LISTED_NOW.
 
     The text and the raw record are written by reference to verified bundle
-    objects uploaded before the upsert (listing_payloads.reference_columns).
+    objects uploaded before the upsert (listings.reference_columns).
     Returns how many values it had to write inline because object storage
     was unavailable."""
     listed_postings = [posting for posting in postings if posting.url]
     if in_transaction():
         raise RuntimeError("Listings upload their payloads and cannot record inside a transaction")
-    payloads, inline_payloads = listing_payloads.reference_columns(
+    payloads, inline_payloads = listings.reference_columns(
         [(posting.url, posting.description or "", posting.raw or {}) for posting in listed_postings]
     )
     pattern_id = title_pattern_id(pattern)

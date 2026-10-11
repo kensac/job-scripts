@@ -10,7 +10,7 @@ from typing import Any
 from api import data_level, db, model_calls, queue
 from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
-from core.payload_objects import (
+from core.payloads.objects import (
     MAX_CONNECTIONS,
     BundleCache,
     PayloadRef,

@@ -13,7 +13,7 @@ import pytest
 from api import data_level, db, worker
 from api.ai import batch_results, request_snapshots
 from core.batch import BatchResult, BatchSpec
-from core.payload_objects import PayloadStore
+from core.payloads.objects import PayloadStore
 from tasks import batch_objects
 from tasks.batch_objects import advance
 from tests.factories import ObjectClient

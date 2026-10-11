@@ -347,6 +347,10 @@ reads it.
 
 ## A listing's text and raw record can be held by reference
 
+`core.payloads.objects` owns verified object storage and bundle rules.
+`core.payloads.listings` owns listing fields stored inline or by reference.
+Keep listing readers and writers on that module so both shapes resolve to the same value.
+
 `description` and `raw` were 1.3 GB of TOAST on about 650k rows (about 595 MB
 and 630 MB compressed, from a 5% sample, 2026-10-03), and the only thing that
 read them was the upsert's own change check. Each field can instead be a
@@ -358,8 +362,8 @@ and `<field>_object_size` its length. The three are set together or not at all
 default, `''` or `'{}'`, which is not the value. An empty description is never
 referenced: `''` with no reference is "the board never carried the text".
 
-**Every reader of `description` or `raw` selects `listing_payloads.COLUMNS`
-and goes through `listing_payloads.resolve`.** Selecting the inline columns
+**Every reader of `description` or `raw` selects `core.payloads.listings.COLUMNS`
+and goes through `core.payloads.listings.resolve`.** Selecting the inline columns
 alone reads `''` and `'{}'` for every referenced row. A reference that cannot
 be read, or reads a value whose digest differs, raises `PayloadUnavailable`;
 it is never a listing without text. On 2026-10-03 nothing outside the upsert
@@ -373,7 +377,7 @@ digest, so no older writer can leave a digest that disagrees with the value
 beside it.
 
 **A pull writes references, uploaded before its upsert.**
-`listing_payloads.reference_columns` reads the reference columns of the rows
+`core.payloads.listings.reference_columns` reads the reference columns of the rows
 the pull lists (never their text), reuses a stored reference wherever an
 incoming value's digest matches one, and uploads every other value with
 `PayloadStore.put_bundle`, outside any transaction: one bundle per pull, split
