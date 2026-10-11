@@ -90,6 +90,7 @@ from core.fetching.boards import common as board_common
 )
 def test_kind_is_read_off_the_url(url, expected):
     assert boards.kind(url) == expected
+    assert boards.format_for_url(url).name == expected
 
 
 def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
@@ -112,6 +113,76 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
+
+
+def test_each_format_owns_its_fetcher_and_source_rules():
+    formats = {board_format.name: board_format for board_format in boards.FORMATS}
+    assert len(formats) == len(boards.FORMATS)
+    assert set(formats) == {
+        "amazon",
+        "apple",
+        "ashby",
+        "avature",
+        "bytedance",
+        "eightfold",
+        "goldman",
+        "greenhouse",
+        "ibm",
+        "icims",
+        "jibe",
+        "lever",
+        "markdown",
+        "oracle",
+        "smartrecruiters",
+        "successfactors",
+        "taleo",
+        "workable",
+        "workday",
+    }
+    assert {name for name, board_format in formats.items() if board_format.needs_company} == {
+        "amazon",
+        "apple",
+        "ashby",
+        "avature",
+        "bytedance",
+        "eightfold",
+        "goldman",
+        "ibm",
+        "icims",
+        "lever",
+        "oracle",
+        "successfactors",
+        "taleo",
+        "workable",
+        "workday",
+    }
+    assert {name for name, board_format in formats.items() if board_format.authoritative} == {
+        "amazon",
+        "apple",
+        "ashby",
+        "avature",
+        "bytedance",
+        "eightfold",
+        "goldman",
+        "greenhouse",
+        "ibm",
+        "icims",
+        "jibe",
+        "lever",
+        "oracle",
+        "smartrecruiters",
+        "successfactors",
+        "taleo",
+        "workable",
+        "workday",
+    }
+    assert all(board_format.fetcher is not None for board_format in formats.values())
+    assert boards.format_for_url("https://airtable.com/appX/shrY").fetcher is None
+
+
+def test_company_requirement_cannot_be_non_authoritative():
+    with pytest.raises(ValueError, match="company board"):
+        boards.BoardFormat("invalid", lambda address: True, None, needs_company=True)
 
 
 def test_unknown_urls_fall_through_to_the_sheet_era_fetcher(monkeypatch):

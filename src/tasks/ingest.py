@@ -136,7 +136,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     # than an empty board) records no absence. jobs.active is frozen and not
     # written (docs/agents/architecture-migration.md, the jobs.active
     # contract).
-    authoritative = boards.kind(source["listings_url"]) in boards.AUTHORITATIVE
+    authoritative = boards.format_for_url(source["listings_url"]).authoritative
     observed = catalog.observe(
         source["name"],
         task_id,

@@ -6,18 +6,22 @@ these, see [observability.md](observability.md).
 
 ## A source is a row, never a code path
 
-The format is read off its listings URL by `core/fetching/boards/__init__.py`. A new board in a
+The format is read off its listings URL by `core/fetching/boards/formats.py`. A new board in a
 known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
-**Keep board selection separate from board fetching.**
-`core/fetching/boards/__init__.py` identifies the format from the listings URL, declares
-whether a source needs a company name and whether its complete pull can retire
-absent postings, and dispatches to the fetcher. Keep each provider's requests,
-pagination, completeness proof and posting parser together in its domain
-module named `boards/<provider>.py`. A format's pagination, completeness
-proof, parser, and measured reasons for its rules stay together. Shared request
-pacing and posting construction live in `boards/common.py`; date interpretation
+**Keep board format identity and its rules together.**
+`core/fetching/boards/formats.py` owns each `BoardFormat`: its listings URL
+matcher, fetcher, whether the source must name its company, and whether a
+complete pull can mark absent postings unlisted. Resolve the format once with
+`boards.format_for_url` when a caller needs a rule; do not keep a second
+provider-name list at a call site. `core/fetching/boards/__init__.py` keeps
+the public `kind` and `fetch_listings` entry points and derives the public
+`NEEDS_COMPANY` and `AUTHORITATIVE` sets from those objects. The order of
+format matchers matters when a provider serves from an employer's own domain.
+Keep each provider's requests, pagination, completeness proof and posting
+parser together in its `boards/<provider>.py` module. Shared request pacing
+and posting construction live in `boards/common.py`; date interpretation
 lives in `boards/dates.py`. Markdown tables have their own parser in
 `boards/markdown.py`. Its public result is still a `JobPosting`, and a pull
 that cannot prove completeness raises `PartialPull` with every posting it did
