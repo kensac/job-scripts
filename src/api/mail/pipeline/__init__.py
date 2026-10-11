@@ -4,7 +4,7 @@ The import surface remains stable while event stages, board proposals, action
 items, and sender evidence each have one owner.
 """
 
-from api.mail.pipeline_actions import (
+from api.mail.pipeline.actions import (
     _EVENT_TO_ACTION,
     _RESOLVING_EVENTS,
     ACTION_QUESTION,
@@ -18,7 +18,7 @@ from api.mail.pipeline_actions import (
     latest_answers,
     settles_on,
 )
-from api.mail.pipeline_events import (
+from api.mail.pipeline.events import (
     _EVENT_TO_STAGE,
     STAGE_ORDER,
     TERMINAL,
@@ -31,7 +31,7 @@ from api.mail.pipeline_events import (
     stage_for,
     state_of,
 )
-from api.mail.pipeline_proposals import (
+from api.mail.pipeline.proposals import (
     ACCEPTED,
     DISMISSED,
     NOT_ON_BOARD,
@@ -43,7 +43,7 @@ from api.mail.pipeline_proposals import (
     answer_proposal,
     proposals_for,
 )
-from api.mail.pipeline_senders import (
+from api.mail.pipeline.senders import (
     INTERMEDIARY_COMPANY_NAMES,
     SenderSignal,
     intermediary_domains,

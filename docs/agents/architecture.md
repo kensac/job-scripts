@@ -64,7 +64,7 @@ Import → classify → match → derive.
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
-**Keep each mail derivation with its owner.** `api.mail.pipeline_events` reads
+**Keep each mail derivation with its owner.** `api.mail.pipeline.events` reads
 current events and matches and derives stage; `pipeline_proposals` derives board
 status suggestions and records a person's answer; `pipeline_actions` derives
 asks and reads the append-only answer log; `pipeline_senders` reads sender
