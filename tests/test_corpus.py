@@ -237,9 +237,9 @@ def test_a_board_query_over_real_volume_never_returns_another_users_rows():
         # merits - it is in the catalog. What must not happen is it becoming
         # visible BECAUSE they touched it.
         for job_id in leaked:
-            row = db.query_one("SELECT active, source FROM jobs WHERE id = %s", (job_id,))
-            assert row is not None and row["active"], (
-                f"job {job_id} is visible to user {uid} but is inactive; the only "
+            row = db.query_one("SELECT available, source FROM jobs WHERE id = %s", (job_id,))
+            assert row is not None and row["available"], (
+                f"job {job_id} is visible to user {uid} but is not available; the only "
                 "thing putting it there is another user's board row"
             )
 
