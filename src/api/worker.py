@@ -43,6 +43,7 @@ from tasks.runtime import (
     AwaitingBatch,
     Deferred,
     TaskClaim,
+    available_memory_mb,
     fail_unavailable_payload,
     finish,
     maybe_finalize_parent,
@@ -50,7 +51,6 @@ from tasks.runtime import (
     repark_if_unfinished,
     set_current_claim,
 )
-from tasks.runtime.limits import available_memory_mb
 
 logger = logging.getLogger(__name__)
 
