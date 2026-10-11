@@ -21,7 +21,7 @@ def objects(monkeypatch):
 
 
 def rows(task_id):
-    return db.query("SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,))
+    return db.query(request_snapshots.ROWS, (task_id,))
 
 
 SPECS = [

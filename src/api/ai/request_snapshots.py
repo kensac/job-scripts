@@ -8,13 +8,60 @@ from __future__ import annotations
 
 from typing import Any
 
+from api import db
 from core.batch import BatchSpec
 from core.payload_objects import BundleCache, BundleMemberRef, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
+# The bundle's fields of a member reference, held once on batch_objects. A
+# member row keeps the rest (member, member_sha256, member_size). OBJECT is
+# them as JSON from the batch_objects row aliased o.
+OBJECT_FIELDS = ("bucket", "key", "sha256", "size", "version")
+OBJECT = (
+    "jsonb_build_object('bucket', o.bucket, 'key', o.key, 'sha256', o.sha256, "
+    "'size', o.size, 'version', o.version)"
+)
+
+# Every reader selects snapshot_ref as REF from FROM. A row holds the bundle's
+# fields itself until tasks.batch_objects removes them, and only where
+# batch_objects holds the same values, so the composed reference is the one
+# the row was written with before, during and after that task.
+FROM = "batch_requests q LEFT JOIN batch_objects o ON o.id = q.object_id"
+REF = f"q.snapshot_ref || CASE WHEN o.id IS NULL THEN '{{}}'::jsonb ELSE {OBJECT} END"
+# A task's requests, each with its whole reference.
+ROWS = (
+    f"SELECT q.task_id, q.custom_id, {REF} AS snapshot_ref FROM {FROM} "
+    "WHERE q.task_id=%s ORDER BY q.custom_id"
+)
+
+
+def object_id(ref: dict[str, Any]) -> int:
+    """The batch_objects row describing this reference's bundle, added if new.
+    The select is its own statement so it sees a row a concurrent writer
+    inserted while this insert waited on (bucket, key)."""
+    values = {f: ref[f] for f in OBJECT_FIELDS}
+    db.execute(
+        "INSERT INTO batch_objects (bucket, key, sha256, size, version) "
+        "VALUES (%(bucket)s, %(key)s, %(sha256)s, %(size)s, %(version)s) "
+        "ON CONFLICT (bucket, key) DO NOTHING",
+        values,
+    )
+    row = db.query_one(
+        "SELECT id FROM batch_objects WHERE bucket = %(bucket)s AND key = %(key)s "
+        "AND sha256 = %(sha256)s AND size = %(size)s AND version = %(version)s",
+        values,
+    )
+    if row is None:
+        raise RuntimeError("batch_objects holds this key with other fields")
+    return int(row["id"])
+
+
+def member_fields(ref: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in ref.items() if k not in OBJECT_FIELDS}
+
 
 def load(row: dict[str, Any], store: PayloadStore, cache: BundleCache | None = None) -> Any:
-    """The verified bundle member behind a row's snapshot_ref."""
+    """The verified bundle member behind a row's snapshot_ref, selected as REF."""
     ref = BundleMemberRef.parse(row["snapshot_ref"])
     if ref.member != row["custom_id"]:
         raise PayloadUnavailable("Bundle member belongs to another request")

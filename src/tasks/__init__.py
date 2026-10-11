@@ -12,6 +12,7 @@ without importing the code that runs it.
 from __future__ import annotations
 
 from tasks.application import handle_application_draft, handle_application_sweep
+from tasks.batch_objects import handle_consolidate_batch_objects
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
 from tasks.comp import PAY
@@ -76,6 +77,7 @@ HANDLERS = {
     "run_managed_board": handle_run_managed_board,
     "run_managed_board_batch": handle_run_managed_board_batch,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
+    "consolidate_batch_objects": handle_consolidate_batch_objects,
     **{d.kind: d.handle for d in DERIVATIONS},
 }
 

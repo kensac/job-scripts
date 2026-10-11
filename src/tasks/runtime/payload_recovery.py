@@ -33,9 +33,9 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
         parent = db.query_one("SELECT * FROM tasks WHERE id=%s", (parent_id,))
         if not parent or not _recoverable_parent(parent):
             return "conflict"
-    requests = db.query(
-        "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id", (task_id,)
-    )
+    # Composed, so a row tasks.batch_objects compacts between this read and
+    # the locked one compares equal: compaction never changes a reference.
+    requests = db.query(request_snapshots.ROWS, (task_id,))
     receipts = db.query(
         "SELECT * FROM batch_result_receipts WHERE task_id=%s ORDER BY provider_batch_id,custom_id",
         (task_id,),
@@ -67,10 +67,7 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
             return "conflict"
         if db.query_one("SELECT * FROM tasks WHERE id=%s FOR UPDATE", (task_id,)) != source:
             return "conflict"
-        current_requests = db.query(
-            "SELECT * FROM batch_requests WHERE task_id=%s ORDER BY custom_id FOR UPDATE",
-            (task_id,),
-        )
+        current_requests = db.query(request_snapshots.ROWS + " FOR UPDATE OF q", (task_id,))
         current_receipts = db.query(
             "SELECT * FROM batch_result_receipts WHERE task_id=%s "
             "ORDER BY provider_batch_id,custom_id FOR UPDATE",

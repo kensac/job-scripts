@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
-from api import db, model_calls, queue
+from api import data_level, db, model_calls, queue
 from api.ai import request_snapshots
 from core.batch import BatchResult, BatchSpec
 from core.payload_objects import (
@@ -60,30 +60,42 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
             for uploaded in executor.map(store.put_bundle, map(dict, groups)):
                 refs.update({name: dataclasses.asdict(ref) for name, ref in uploaded.items()})
     rows = []
+    written: set[str] = set()
     with db.transaction():
+        objects = {
+            ref["key"]: request_snapshots.object_id(ref)
+            for ref in {ref["key"]: ref for ref in refs.values()}.values()
+        }
+        # The bundle's fields stay on the row too while any running image
+        # still reads them there (api.data_level); tasks.batch_objects
+        # removes them once none does.
+        compact = data_level.behind(data_level.LEVEL) == 0
         for spec in specs:
             ref = refs.get(spec.custom_id)
-            if ref is None:
-                row = db.query_one(
-                    "SELECT custom_id,snapshot_ref FROM batch_requests "
-                    "WHERE task_id=%s AND custom_id=%s",
-                    (task_id, spec.custom_id),
-                )
-            else:
-                row = db.query_one(
-                    "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref) VALUES (%s,%s,%s) "
-                    "ON CONFLICT (task_id,custom_id) DO UPDATE SET snapshot_ref=batch_requests.snapshot_ref "
-                    "RETURNING custom_id,snapshot_ref",
-                    (task_id, spec.custom_id, db.jsonb(ref)),
-                )
+            if ref is not None and spec.custom_id not in written:
+                stored = request_snapshots.member_fields(ref) if compact else ref
+                if db.query_one(
+                    "INSERT INTO batch_requests (task_id, custom_id, snapshot_ref, object_id) "
+                    "VALUES (%s,%s,%s,%s) ON CONFLICT (task_id,custom_id) DO NOTHING "
+                    "RETURNING custom_id",
+                    (task_id, spec.custom_id, db.jsonb(stored), objects[ref["key"]]),
+                ):
+                    written.add(spec.custom_id)
+            if spec.custom_id in written:
+                rows.append({"custom_id": spec.custom_id})
+                continue
+            row = db.query_one(
+                f"SELECT q.custom_id, {request_snapshots.REF} AS snapshot_ref "
+                f"FROM {request_snapshots.FROM} WHERE q.task_id=%s AND q.custom_id=%s",
+                (task_id, spec.custom_id),
+            )
             if row is None:
                 raise RuntimeError("request snapshot was not recorded")
             rows.append(row)
     frozen = []
     cache: BundleCache = {}
     for row in rows:
-        written = refs.get(row["custom_id"])
-        if written is not None and row["snapshot_ref"] == written:
+        if row["custom_id"] in written:
             # This call wrote the row from a value already read back from storage.
             spec = request_snapshots.spec(row["custom_id"], fresh[row["custom_id"]])
         else:
@@ -174,7 +186,8 @@ def unconsumed(task_id: int) -> list[BatchResult]:
             **response_payload(row["response"]),
         )
         for row in db.query(
-            "SELECT r.*, q.snapshot_ref FROM batch_result_receipts r LEFT JOIN batch_requests q "
+            f"SELECT r.*, {request_snapshots.REF} AS snapshot_ref FROM batch_result_receipts r "
+            f"LEFT JOIN ({request_snapshots.FROM}) "
             "ON q.task_id=r.task_id AND q.custom_id=r.custom_id "
             "WHERE r.task_id=%s AND r.consumed_at IS NULL ORDER BY r.provider_batch_id,r.custom_id",
             (task_id,),

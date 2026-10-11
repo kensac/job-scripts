@@ -260,6 +260,11 @@ class WorkerStatus(Base):
     # missed a roll is a query, not a sweep of seven containers. gcp-vps sat
     # two rolls behind for an hour on 2026-09-04 and nothing said so.
     release: Mapped[str | None] = mapped_column(Text)
+    # api.data_level.LEVEL of the image, and the release that wrote it. An
+    # older image rewrites `release` but not these, so a worker counts as at
+    # the level only while the two releases agree (api.data_level.fleet_at).
+    data_level: Mapped[int | None] = mapped_column(Integer)
+    data_level_release: Mapped[str | None] = mapped_column(Text)
 
 
 class HealthAlert(Base):

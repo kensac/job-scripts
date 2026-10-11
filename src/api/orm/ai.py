@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Numeric,
     Text,
     UniqueConstraint,
@@ -177,6 +178,24 @@ class AiBatch(Base):
     payer_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
+class BatchObject(Base):
+    """One stored bundle of requests, described once. Every member row used
+    to repeat these five fields: 1,613,017 rows named 6,392 objects on
+    2026-10-11, and the copies were 378 MB of snapshot_ref's 703 MB. Keyed
+    by (bucket, key); the key names the SHA-256 of the content, so the size
+    and version follow from it. Never updated or deleted."""
+
+    __tablename__ = "batch_objects"
+    __table_args__ = (UniqueConstraint("bucket", "key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    bucket: Mapped[str] = mapped_column(Text)
+    key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(BigInteger)
+    version: Mapped[int] = mapped_column(Integer)
+
+
 class BatchRequest(Base):
     __tablename__ = "batch_requests"
 
@@ -184,9 +203,16 @@ class BatchRequest(Base):
         BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
     custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    # A version 3 bundle member reference, the only stored shape
-    # (observability.md, request snapshot storage).
+    # The member's own fields of a version 3 bundle member reference
+    # (member, member_sha256, member_size). A row the fleet wrote before
+    # batch_objects still also holds the bundle's fields until
+    # tasks.batch_objects moves them out; request_snapshots.REF composes the
+    # whole reference either way (observability.md, request snapshot storage).
     snapshot_ref: Mapped[dict] = mapped_column(JSONB)
+    # NULL only on a row written before batch_objects and not yet backfilled.
+    object_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("batch_objects.id", name="fk_batch_requests_object")
+    )
 
 
 class BatchResultReceipt(Base):

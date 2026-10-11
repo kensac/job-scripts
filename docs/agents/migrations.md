@@ -136,6 +136,19 @@ container start behind the schema lock, so a long one stalls every deploy.
 Register it as a task instead, and make it idempotent by predicate so a
 partial run resumes rather than restarting.
 
+**A data step that an older image cannot read waits for the fleet, in the
+same release.** `worker_status.release` is a commit and cannot be ordered, so
+each image also reports `api.data_level.LEVEL`. Raise it in the release whose
+task removes or reshapes what older images read, and have the task proceed
+only while `data_level.behind(LEVEL)` is zero: no worker seen in five minutes
+runs an older image. An older image rewrites `release` but never
+`data_level_release`, so a host rolled back counts as behind on its next
+beat. Readers in that release must read both shapes, and writers keep
+writing the old one while anything is behind. `tasks.batch_objects` is the
+worked example; with it, an expand and contract that would take three
+releases takes one, and no later migration is needed when the column keeps
+its remaining values.
+
 ## Every table is a model
 
 No table is created outside alembic. `ai_queries` was the last one, created
