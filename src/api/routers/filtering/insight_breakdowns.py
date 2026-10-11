@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import collections
 import datetime
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel
@@ -250,76 +251,85 @@ def _example_selection() -> ExamplesSelection:
     )
 
 
-def _new_reason_bucket() -> dict[str, Any]:
-    return {
-        "decisions": 0,
-        "distinct_jobs": set(),
-        "phrasings": collections.Counter(),
-        "evidence_missing_decisions": 0,
-        "evidence_missing_jobs": set(),
-    }
+@dataclass(slots=True)
+class ReasonBreakdownAccumulator:
+    """Count decisions in one reason group while retaining distinct URLs."""
+
+    decisions: int = 0
+    _jobs: set[str] = field(default_factory=set)
+    _phrasings: collections.Counter[str] = field(default_factory=collections.Counter)
+    _evidence_missing_decisions: int = 0
+    _evidence_missing_jobs: set[str] = field(default_factory=set)
+
+    def record(self, reason: str, url: str, *, evidence_missing: bool) -> None:
+        self.decisions += 1
+        self._jobs.add(url)
+        self._phrasings[reason] += 1
+        if evidence_missing:
+            self._evidence_missing_decisions += 1
+            self._evidence_missing_jobs.add(url)
+
+    def to_breakdown(self, examples: int) -> Breakdown:
+        return Breakdown(
+            decisions=self.decisions,
+            distinct_jobs=len(self._jobs),
+            distinct_phrasings=len(self._phrasings),
+            evidence_missing_decisions=self._evidence_missing_decisions,
+            evidence_missing_distinct_jobs=len(self._evidence_missing_jobs),
+            # Counts rank the examples, then text breaks ties reproducibly.
+            # This is a sample of distinct phrasings, not a representative
+            # frequency ranking when most phrasings occur once.
+            examples=[
+                text
+                for text, _ in sorted(self._phrasings.items(), key=lambda kv: (-kv[1], kv[0]))[
+                    :examples
+                ]
+            ],
+        )
+
+
+@dataclass(slots=True)
+class PromptEvidenceAccumulator:
+    """Count missing-evidence decisions once, even across overlapping groups."""
+
+    decisions: int = 0
+    _jobs: set[str] = field(default_factory=set)
+
+    def record(self, url: str) -> None:
+        self.decisions += 1
+        self._jobs.add(url)
+
+    @property
+    def distinct_job_count(self) -> int:
+        return len(self._jobs)
 
 
 def _group_rejections_by_prompt(
     hashes: list[str], rejections: list[dict[str, Any]]
-) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, dict[str, Any]]]:
+) -> tuple[dict[str, dict[str, ReasonBreakdownAccumulator]], dict[str, PromptEvidenceAccumulator]]:
     """One classification pass, shared by the admin and user views.
 
     A reason can land in several groups, so the per-hash evidence-missing
     totals ride along here rather than being summed from the groups
     afterwards: a reason in three groups is still one decision.
     """
-    grouped: dict[str, dict[str, dict[str, Any]]] = {
-        h: collections.defaultdict(_new_reason_bucket) for h in hashes
+    grouped: dict[str, dict[str, ReasonBreakdownAccumulator]] = {
+        h: collections.defaultdict(ReasonBreakdownAccumulator) for h in hashes
     }
-    per_hash: dict[str, dict[str, Any]] = {h: {"decisions": 0, "jobs": set()} for h in hashes}
+    per_hash = {h: PromptEvidenceAccumulator() for h in hashes}
     for row in rejections:
         buckets = grouped[row["prompt_hash"]]
         reason, url = row["reason"], row["url"]
         missing = is_evidence_missing(reason)
         if missing:
-            totals_for_hash = per_hash[row["prompt_hash"]]
-            totals_for_hash["decisions"] += 1
-            totals_for_hash["jobs"].add(url)
+            per_hash[row["prompt_hash"]].record(url)
         keys = classify(reason) or (UNGROUPED_REASON_KEY,)
         for key in keys:
-            b = buckets[key]
-            b["decisions"] += 1
-            b["distinct_jobs"].add(url)
-            b["phrasings"][reason] += 1
-            if missing:
-                b["evidence_missing_decisions"] += 1
-                b["evidence_missing_jobs"].add(url)
+            buckets[key].record(reason, url, evidence_missing=missing)
     return grouped, per_hash
 
 
-def _finish(bucket: dict[str, Any], examples: int) -> Breakdown:
-    return Breakdown(
-        decisions=bucket["decisions"],
-        distinct_jobs=len(bucket["distinct_jobs"]),
-        distinct_phrasings=len(bucket["phrasings"]),
-        evidence_missing_decisions=bucket["evidence_missing_decisions"],
-        evidence_missing_distinct_jobs=len(bucket["evidence_missing_jobs"]),
-        # Most frequent phrasings rather than arbitrary ones: an example is
-        # standing in for a group, so it should be typical of it.
-        # Ordered by count then text, which makes the choice reproducible
-        # rather than dependent on the order rows arrived in. It does NOT make
-        # it representative: the model writes a near-unique sentence almost
-        # every time - 30 of 14,050 distinct phrasings in production repeat at
-        # all - so nearly every count here is 1 and "most frequent" is not a
-        # meaningful ranking. Treat these as a sample of `distinct_phrasings`,
-        # which is why that number ships beside them, and use the phrasings
-        # listing when the distribution itself is the question.
-        examples=[
-            text
-            for text, _ in sorted(bucket["phrasings"].items(), key=lambda kv: (-kv[1], kv[0]))[
-                :examples
-            ]
-        ],
-    )
-
-
-def _prompt_totals(row: dict[str, Any], missing: dict[str, Any]) -> PromptTotals:
+def _prompt_totals(row: dict[str, Any], missing: PromptEvidenceAccumulator) -> PromptTotals:
     return PromptTotals(
         evaluated=row["evaluated"],
         passed=row["passed"],
@@ -327,18 +337,18 @@ def _prompt_totals(row: dict[str, Any], missing: dict[str, Any]) -> PromptTotals
         rejected_with_reason=row["rejected_with_reason"],
         distinct_jobs_evaluated=row["distinct_jobs_evaluated"],
         distinct_jobs_rejected=row["distinct_jobs_rejected"],
-        evidence_missing_decisions=missing["decisions"],
-        evidence_missing_distinct_jobs=len(missing["jobs"]),
+        evidence_missing_decisions=missing.decisions,
+        evidence_missing_distinct_jobs=missing.distinct_job_count,
     )
 
 
 def _named_group_breakdowns(
-    buckets: dict[str, dict[str, Any]], examples: int
+    buckets: dict[str, ReasonBreakdownAccumulator], examples: int
 ) -> list[GroupBreakdown]:
     return sorted(
         (
             GroupBreakdown(
-                **_finish(buckets[g.key], examples).model_dump(),
+                **buckets[g.key].to_breakdown(examples).model_dump(),
                 key=g.key,
                 label=GROUP_LABELS[g.key],
             )

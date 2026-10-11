@@ -135,6 +135,12 @@ default; moving it means the caller passes the value down.
 
 ## Measuring
 
+Filter insight reason groups may overlap. Keep each group's decision count,
+distinct job URLs, and phrasing count in `ReasonBreakdownAccumulator`. Keep
+prompt-level missing-evidence decisions in `PromptEvidenceAccumulator`, counted
+once per rejected verdict before assigning its reason to groups. Never derive
+prompt totals by summing group totals.
+
 Price an optimisation before defending it. Count the population before
 describing a mechanism as costly.
 
