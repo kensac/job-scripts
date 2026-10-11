@@ -27,6 +27,8 @@ The persisted `resume_backfill_enabled` setting starts off. Once enabled, each
 task copies or verifies one old text or PDF part. `resume_backfill_runs` keeps
 the part checkpoint and rolling digests, so a worker restart continues from
 stored progress. The source stays stored until a later guarded column drop.
+An expected copy failure is stored on the run. The task finishes so later
+values can start; the scheduler retries the failed value after fresh ones.
 
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.

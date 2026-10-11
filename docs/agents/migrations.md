@@ -161,8 +161,10 @@ then queues one part at a time. Claiming permits `backfill_resumes` only when
 source and copy digests. Finalization takes a short source-row lock before it
 sets the pointer. The old value stays in place.
 `resume_pdf_uploads_enabled` also gates PDF copies. Leave it off until the live
-bucket's expiry and capacity have been checked. Failed tasks leave the source
-unchanged; the next scheduling cycle resumes a run still lacking a pointer.
+bucket's expiry and capacity have been checked. A failed copy leaves the
+source unchanged and records its error on the run. Scheduling tries values
+without a previous attempt first, then retries older attempts. A bad value
+must not block later values.
 
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads

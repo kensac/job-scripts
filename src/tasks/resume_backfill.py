@@ -9,12 +9,10 @@ import uuid
 from typing import Any
 
 from api import db, queue
+from api.resumes.backfill_schedule import POINTERS, TABLES, source
 from api.resumes.text_versions import TEXT_PART_CHARS
 from core.payloads.blob_parts import PART_BYTES, BlobPart, BlobPartStore
-
-TABLES = {"current": "user_resumes", "revision": "user_resume_revisions"}
-POINTERS = {"text": "text_version_id", "pdf": "pdf_upload_id"}
-SEED = "00" * 32
+from core.payloads.objects import PayloadUnavailable
 
 
 def fold(previous: str, index: int, value: bytes) -> str:
@@ -23,86 +21,12 @@ def fold(previous: str, index: int, value: bytes) -> str:
     ).hexdigest()
 
 
-def source(kind: str, row_id: int, field: str, *, lock: bool = False) -> dict[str, Any] | None:
-    table, pointer = TABLES[kind], POINTERS[field]
-    length = "length" if field == "text" else "octet_length"
-    return db.query_one(
-        f"SELECT user_id, name, filename, xmin::text AS source_xmin, "
-        f"{length}({field}) AS total, {pointer} AS pointer "
-        f"FROM {table} WHERE id = %s" + (" FOR UPDATE" if lock else ""),
-        (row_id,),
-    )
-
-
-def next_value() -> tuple[str, int, str] | None:
-    for field, pointer in POINTERS.items():
-        if field == "pdf" and not db.get_config("resume_pdf_uploads_enabled"):
-            continue
-        for kind, table in TABLES.items():
-            row = db.query_one(
-                f"SELECT id FROM {table} WHERE {field} IS NOT NULL "
-                f"AND {pointer} IS NULL ORDER BY id LIMIT 1"
-            )
-            if row is not None:
-                return kind, row["id"], field
-    return None
-
-
-def part_count(total: int, field: str) -> int:
-    size = TEXT_PART_CHARS if field == "text" else PART_BYTES
-    return (total + size - 1) // size
-
-
 def queue_step(run_id: uuid.UUID, stage: str, index: int) -> None:
     queue.enqueue(
         "backfill_resumes",
         {"run_id": str(run_id)},
         dedupe_key=f"resume-backfill:{run_id}:{stage}:{index}",
     )
-
-
-def schedule_next(cycle: str) -> None:
-    candidate = next_value()
-    if candidate is None:
-        return
-    kind, row_id, field = candidate
-    with db.transaction():
-        old = source(kind, row_id, field)
-        if old is None or old["pointer"] is not None or old["total"] is None:
-            return
-        total = old["total"]
-        xmin = old["source_xmin"]
-        run_id = uuid.uuid5(
-            uuid.NAMESPACE_URL, f"job-scripts/resume-backfill/v1/{kind}/{row_id}/{field}/{xmin}"
-        )
-        if field == "text":
-            db.execute(
-                "INSERT INTO resume_text_versions (id, user_id) VALUES (%s, %s) "
-                "ON CONFLICT (id) DO NOTHING",
-                (run_id, old["user_id"]),
-            )
-        else:
-            db.execute(
-                "INSERT INTO resume_uploads (id, user_id, name, filename, size) "
-                "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING",
-                (run_id, old["user_id"], old["name"], old["filename"] or "resume.pdf", total),
-            )
-        db.execute(
-            "INSERT INTO resume_backfill_runs "
-            "(id, source_kind, source_id, field, source_xmin, total, part_count, "
-            "source_digest, copy_digest, stage) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'copy') "
-            "ON CONFLICT (id) DO NOTHING",
-            (run_id, kind, row_id, field, xmin, total, part_count(total, field), SEED, SEED),
-        )
-        run = db.query_one("SELECT stage FROM resume_backfill_runs WHERE id = %s", (run_id,))
-        assert run is not None
-        if run["stage"] != "done":
-            queue.enqueue(
-                "backfill_resumes",
-                {"run_id": str(run_id)},
-                dedupe_key=f"resume-backfill-resume:{run_id}:{cycle}",
-            )
 
 
 def run_row(run_id: uuid.UUID, *, lock: bool = False) -> dict[str, Any]:
@@ -165,7 +89,8 @@ def copy_text(run_id: uuid.UUID, run: dict[str, Any]) -> None:
         following = index + 1
         stage = "verify" if following == run["part_count"] else "copy"
         db.execute(
-            "UPDATE resume_backfill_runs SET next_part = %s, stage = %s WHERE id = %s",
+            "UPDATE resume_backfill_runs SET next_part = %s, stage = %s, "
+            "failed_at = NULL, last_error = NULL WHERE id = %s",
             (following, stage, run_id),
         )
         queue_step(run_id, stage, 0 if stage == "verify" else following)
@@ -203,7 +128,8 @@ def copy_pdf(run_id: uuid.UUID, run: dict[str, Any]) -> None:
             (following, part.size, run_id),
         )
         db.execute(
-            "UPDATE resume_backfill_runs SET next_part = %s, stage = %s WHERE id = %s",
+            "UPDATE resume_backfill_runs SET next_part = %s, stage = %s, "
+            "failed_at = NULL, last_error = NULL WHERE id = %s",
             (following, stage, run_id),
         )
         queue_step(run_id, stage, 0 if stage == "verify" else following)
@@ -250,7 +176,7 @@ def verify_part(run_id: uuid.UUID, run: dict[str, Any]) -> None:
         stage = "finalize" if following == current["part_count"] else "verify"
         db.execute(
             "UPDATE resume_backfill_runs SET verify_part = %s, source_digest = %s, "
-            "copy_digest = %s, stage = %s WHERE id = %s",
+            "copy_digest = %s, stage = %s, failed_at = NULL, last_error = NULL WHERE id = %s",
             (following, source_digest, copy_digest, stage, run_id),
         )
         queue_step(run_id, stage, 0 if stage == "finalize" else following)
@@ -293,7 +219,11 @@ def finalize(run_id: uuid.UUID) -> None:
             db.execute("UPDATE resume_uploads SET status = 'ready' WHERE id = %s", (run_id,))
         table, pointer = TABLES[run["source_kind"]], POINTERS[run["field"]]
         db.execute(f"UPDATE {table} SET {pointer} = %s WHERE id = %s", (run_id, run["source_id"]))
-        db.execute("UPDATE resume_backfill_runs SET stage = 'done' WHERE id = %s", (run_id,))
+        db.execute(
+            "UPDATE resume_backfill_runs SET stage = 'done', failed_at = NULL, "
+            "last_error = NULL WHERE id = %s",
+            (run_id,),
+        )
 
 
 def advance(run_id: uuid.UUID) -> None:
@@ -332,9 +262,20 @@ def advance(run_id: uuid.UUID) -> None:
         raise RuntimeError("invalid resume backfill stage")
 
 
+def process_run(run_id: uuid.UUID) -> None:
+    try:
+        advance(run_id)
+    except (PayloadUnavailable, RuntimeError, ValueError) as exc:
+        # Keep the old value and checkpoint. The next cycle can try another row.
+        db.execute(
+            "UPDATE resume_backfill_runs SET failed_at = now(), last_error = %s WHERE id = %s",
+            (str(exc), run_id),
+        )
+
+
 async def handle_backfill_resumes(task_id: int, payload: dict[str, Any]) -> None:
     if os.environ.get("JOBTRACKER_HOST_NAME") != "hetzner":
         raise RuntimeError("resume backfill must run on Hetzner")
     if not db.get_config("resume_backfill_enabled"):
         return
-    await asyncio.to_thread(advance, uuid.UUID(payload["run_id"]))
+    await asyncio.to_thread(process_run, uuid.UUID(payload["run_id"]))

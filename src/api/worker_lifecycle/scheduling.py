@@ -10,9 +10,9 @@ from api import db, managed_boards, queue, telemetry
 from api.board import visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
+from api.resumes.backfill_schedule import schedule_next as schedule_resume_backfill
 from core.fetching.hosts import pace_key
 from tasks import DERIVATIONS
-from tasks.resume_backfill import schedule_next as schedule_resume_backfill
 
 logger = logging.getLogger(__name__)
 

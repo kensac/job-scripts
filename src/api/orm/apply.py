@@ -136,6 +136,9 @@ class ResumeBackfillRun(Base):
     source_digest: Mapped[str] = mapped_column(Text)
     copy_digest: Mapped[str] = mapped_column(Text)
     stage: Mapped[str] = mapped_column(Text)
+    attempted_at: Mapped[datetime.datetime | None] = mapped_column()
+    failed_at: Mapped[datetime.datetime | None] = mapped_column()
+    last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 

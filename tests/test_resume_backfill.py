@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 from api import db
+from api.resumes import backfill_schedule
 from api.worker_lifecycle import claims
 from core.payloads.blob_parts import PART_BYTES, BlobPart, BlobPartStore
 from core.payloads.objects import PayloadUnavailable
@@ -37,7 +38,7 @@ def _enable() -> None:
 
 
 def _drive_one_value() -> uuid.UUID:
-    resume_backfill.schedule_next(str(uuid.uuid4()))
+    backfill_schedule.schedule_next(str(uuid.uuid4()))
     first_run_id = None
     while True:
         task = db.query_one(
@@ -78,7 +79,7 @@ def test_text_and_pdf_parts_checkpoint_and_keep_old_values(user_headers, monkeyp
     monkeypatch.setattr(BlobPartStore, "from_env", classmethod(lambda cls: store))
     _enable()
 
-    resume_backfill.schedule_next("first")
+    backfill_schedule.schedule_next("first")
     started = db.query_one(
         "SELECT id, payload FROM tasks WHERE kind = 'backfill_resumes' ORDER BY id LIMIT 1"
     )
@@ -161,7 +162,7 @@ def test_failed_pdf_part_keeps_old_bytes(user_headers, monkeypatch) -> None:
     monkeypatch.setattr(BlobPartStore, "from_env", classmethod(lambda cls: store))
     monkeypatch.setattr(store, "read", lambda part: b"different bytes")
     _enable()
-    resume_backfill.schedule_next("text")
+    backfill_schedule.schedule_next("text")
     while True:
         task = db.query_one(
             "SELECT id, payload FROM tasks WHERE kind = 'backfill_resumes' "
@@ -173,7 +174,7 @@ def test_failed_pdf_part_keeps_old_bytes(user_headers, monkeypatch) -> None:
         resume_backfill.advance(run_id)
         if resume_backfill.run_row(run_id)["stage"] == "done":
             break
-    resume_backfill.schedule_next("pdf")
+    backfill_schedule.schedule_next("pdf")
     task = db.query_one(
         "SELECT payload FROM tasks WHERE kind = 'backfill_resumes' "
         "AND status = 'pending' ORDER BY id LIMIT 1"
@@ -187,3 +188,71 @@ def test_failed_pdf_part_keeps_old_bytes(user_headers, monkeypatch) -> None:
     assert db.query_one("SELECT next_part FROM resume_backfill_runs WHERE id = %s", (pdf_run,)) == {
         "next_part": 0
     }
+
+
+def test_source_change_refuses_old_checkpoint(user_headers) -> None:
+    user_id = _uid(user_headers)
+    original = "A" * (resume_backfill.TEXT_PART_CHARS + 1)
+    row = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text) VALUES (%s, 'main', %s) RETURNING id",
+        (user_id, original),
+    )
+    assert row is not None
+    _enable()
+    backfill_schedule.schedule_next("first")
+    task = db.query_one(
+        "SELECT payload FROM tasks WHERE kind = 'backfill_resumes' ORDER BY id LIMIT 1"
+    )
+    assert task is not None
+    run_id = uuid.UUID(task["payload"]["run_id"])
+    resume_backfill.advance(run_id)
+    db.execute("UPDATE user_resumes SET name = 'renamed' WHERE id = %s", (row["id"],))
+    with pytest.raises(RuntimeError, match="source changed"):
+        resume_backfill.advance(run_id)
+    assert db.query_one(
+        "SELECT text, text_version_id FROM user_resumes WHERE id = %s", (row["id"],)
+    ) == {"text": original, "text_version_id": None}
+
+
+def test_failed_row_does_not_block_later_row(user_headers, monkeypatch) -> None:
+    user_id = _uid(user_headers)
+    first = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text) "
+        "VALUES (%s, 'first', 'first text') RETURNING id",
+        (user_id,),
+    )
+    second = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text) "
+        "VALUES (%s, 'second', 'second text') RETURNING id",
+        (user_id,),
+    )
+    assert first is not None and second is not None
+    _enable()
+    backfill_schedule.schedule_next("first")
+    task = db.query_one(
+        "SELECT id, payload FROM tasks WHERE kind = 'backfill_resumes' ORDER BY id LIMIT 1"
+    )
+    assert task is not None
+    first_run = uuid.UUID(task["payload"]["run_id"])
+    original = resume_backfill.source_part
+
+    def fail_first(run: dict[str, object], index: int) -> str | bytes:
+        if run["source_id"] == first["id"]:
+            raise PayloadUnavailable("source part cannot be read")
+        return original(run, index)
+
+    monkeypatch.setattr(resume_backfill, "source_part", fail_first)
+    resume_backfill.process_run(first_run)
+    db.execute("UPDATE tasks SET status = 'done' WHERE id = %s", (task["id"],))
+    assert db.query_one(
+        "SELECT failed_at IS NOT NULL AS failed FROM resume_backfill_runs WHERE id = %s",
+        (first_run,),
+    ) == {"failed": True}
+    backfill_schedule.schedule_next("second")
+    next_task = db.query_one(
+        "SELECT payload FROM tasks WHERE kind = 'backfill_resumes' AND status = 'pending' "
+        "ORDER BY id LIMIT 1"
+    )
+    assert next_task is not None
+    second_run = uuid.UUID(next_task["payload"]["run_id"])
+    assert resume_backfill.run_row(second_run)["source_id"] == second["id"]
