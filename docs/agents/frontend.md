@@ -107,19 +107,21 @@ never in `prefs`. A count of a person's views is the length of
 `GET /user/views` with no `page`.
 
 **A config-driven reader's table can be published, and the bundled copy is
-the fallback.** `GET /v1/extension/recipe?schema_version=1&adapter=<id>`
-serves the newest enabled publish for an adapter as a zlib-compressed,
-base64-encoded canonical table with its sha256 as `revision` and `digest`, or
-404 `NO_RECIPE` when only the bundled table exists. The extension pins a
-revision per fill, keeps an unexpired copy through an outage, and runs from
-the bundled table when nothing is published. Publish with
-`tools/publish_recipes.py` (every `extension/adapters/recipes/*.json`, or one adapter) or
-`PUT /v1/admin/extension/recipes/{adapter}`; `POST .../rollback` re-enables the
-publish before; `GET /v1/admin/extension/recipes` is the history. The encoding
-keeps selector tables out of casual view and out of a public diff and stops
-nobody who reads the decoder. This channel is for a developer-mode or
-self-hosted install: the Chrome Web Store's MV3 policy treats a
-behaviour-driving config as remote logic (Kanishk chose remote, 2026-09-09).
+the fallback.** Admin recipe uploads store 64 KiB byte chunks. Every chunk
+except the last must be exactly 64 KiB; the last must be nonempty. Completion
+queues one validation task per chunk and publishes only a complete recipe.
+The revision chains the SHA-256 of each chunk with its index and length.
+`GET /v1/extension/recipe?schema_version=2&adapter=<id>` serves the current
+revision, digest algorithm and chunk count. Fetch each chunk with that
+revision and `chunk_index`; verify the named digest before parsing or
+caching them. The extension pins a revision per fill and keeps an unexpired
+verified copy through an outage. `POST /v1/admin/extension/recipes/{adapter}/rollback`
+re-enables the previous publish. Older JSONB revisions keep their raw-byte
+digest; the manifest names that algorithm. The version 1 single-response
+read stays only while older clients use it. Remove it
+after the fleet and extension have moved to version 2. This channel is for a
+developer-mode or self-hosted install: the Chrome Web Store's MV3 policy
+treats a behaviour-driving config as remote logic.
 
 **Keep the recipe reader split by domain behavior.** `recipe.js` owns
 adapter selection, form flow and the public reader contract.

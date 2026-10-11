@@ -21,6 +21,8 @@ from api.orm.apply import (
     ApplicationForm,
     ApplicationReport,
     ExtensionRecipe,
+    ExtensionRecipeChunk,
+    ExtensionRecipeUpload,
     UserResume,
 )
 from api.orm.base import Base
@@ -95,6 +97,8 @@ __all__ = [
     "EmailMessage",
     "EventAnswer",
     "ExtensionRecipe",
+    "ExtensionRecipeChunk",
+    "ExtensionRecipeUpload",
     "FilterPreset",
     "GmailScanCursor",
     "GroupBudget",

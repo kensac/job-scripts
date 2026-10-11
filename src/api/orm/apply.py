@@ -181,15 +181,61 @@ class ExtensionRecipe(Base):
     __tablename__ = "extension_recipes"
     __table_args__ = (
         UniqueConstraint("adapter", "revision", name="uq_extension_recipes_adapter_revision"),
+        UniqueConstraint("upload_id", name="uq_extension_recipes_upload_id"),
         Index("idx_extension_recipes_adapter_enabled", "adapter", "enabled"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     adapter: Mapped[str] = mapped_column(Text)
     revision: Mapped[str] = mapped_column(Text)
-    body: Mapped[Any] = mapped_column(JSONB)
+    body: Mapped[Any | None] = mapped_column(JSONB)
+    upload_id: Mapped[Any | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("extension_recipe_uploads.id", name="fk_extension_recipes_upload_id"),
+    )
     published_by: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=_now
     )
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+
+
+class ExtensionRecipeUpload(Base):
+    """An immutable upload and the state of its validation."""
+
+    __tablename__ = "extension_recipe_uploads"
+
+    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    adapter: Mapped[str] = mapped_column(Text)
+    chunk_count: Mapped[int] = mapped_column(BigInteger)
+    published_by: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    revision: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    next_chunk: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    validation_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ExtensionRecipeChunk(Base):
+    """One bounded part of a recipe upload."""
+
+    __tablename__ = "extension_recipe_chunks"
+
+    upload_id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("extension_recipe_uploads.id"), primary_key=True
+    )
+    chunk_index: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    body: Mapped[bytes] = mapped_column(BYTEA)
+
+
+class ExtensionRecipeFrame(Base):
+    """One persisted JSON container in an upload validator."""
+
+    __tablename__ = "extension_recipe_frames"
+
+    upload_id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("extension_recipe_uploads.id"), primary_key=True
+    )
+    depth: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    body: Mapped[dict[str, Any]] = mapped_column(JSONB)

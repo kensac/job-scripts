@@ -6,6 +6,13 @@ because the signals only make sense beside them.
 
 ## The worker fleet
 
+`publish_extension_recipe` validates one stored recipe chunk per task. Each
+successful task saves the JSON parser state and ordered chunk digest, then
+queues the next chunk in the same transaction. A retry for an already saved
+chunk does nothing. The last task publishes the revision only if the whole
+recipe is valid. Invalid uploads remain stored and never become current. The
+completion route can retry a failed task from the last saved chunk.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

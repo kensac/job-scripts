@@ -6501,6 +6501,39 @@
               "minimum": 1,
               "title": "Schema Version"
             }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          },
+          {
+            "name": "chunk_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chunk Index"
+            }
           }
         ],
         "responses": {
@@ -6509,7 +6542,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RecipeConfig"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RecipeConfig"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeChunkManifest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RecipeChunk"
+                    }
+                  ],
+                  "title": "Response Extension Recipe V1 Extension Recipe Get"
                 }
               }
             }
@@ -21431,11 +21475,10 @@
         }
       }
     },
-    "/v1/admin/extension/recipes": {
-      "get": {
-        "summary": "List Extension Recipes",
-        "description": "Every publish, newest first per adapter; the enabled row is what the\nextension fetches (api.apply.recipes).",
-        "operationId": "list_extension_recipes_v1_admin_extension_recipes_get",
+    "/v1/admin/extension/recipe-uploads": {
+      "post": {
+        "summary": "Start Recipe Upload",
+        "operationId": "start_recipe_upload_v1_admin_extension_recipe_uploads_post",
         "parameters": [
           {
             "name": "x-service-token",
@@ -21488,13 +21531,23 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeUploadStart"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RecipeHistory"
+                  "$ref": "#/components/schemas/RecipeUploadReceipt"
                 }
               }
             }
@@ -21562,18 +21615,19 @@
         }
       }
     },
-    "/v1/admin/extension/recipes/{adapter}": {
-      "put": {
-        "summary": "Publish Extension Recipe",
-        "operationId": "publish_extension_recipe_v1_admin_extension_recipes__adapter__put",
+    "/v1/admin/extension/recipe-uploads/{upload_id}": {
+      "get": {
+        "summary": "Get Recipe Upload",
+        "operationId": "get_recipe_upload_v1_admin_extension_recipe_uploads__upload_id__get",
         "parameters": [
           {
-            "name": "adapter",
+            "name": "upload_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Adapter"
+              "format": "uuid",
+              "title": "Upload Id"
             }
           },
           {
@@ -21627,23 +21681,433 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RecipePut"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RecipePublished"
+                  "$ref": "#/components/schemas/RecipeUploadReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipe-uploads/{upload_id}/chunks/{chunk_index}": {
+      "put": {
+        "summary": "Put Recipe Chunk",
+        "operationId": "put_recipe_chunk_v1_admin_extension_recipe_uploads__upload_id__chunks__chunk_index__put",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Upload Id"
+            }
+          },
+          {
+            "name": "chunk_index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Chunk Index"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeUploadReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipe-uploads/{upload_id}/complete": {
+      "post": {
+        "summary": "Complete Recipe Upload",
+        "operationId": "complete_recipe_upload_v1_admin_extension_recipe_uploads__upload_id__complete_post",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Upload Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeUploadReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/extension/recipes": {
+      "get": {
+        "summary": "List Extension Recipes",
+        "description": "Every publish, newest first per adapter; the enabled row is what the\nextension fetches (api.apply.recipes).",
+        "operationId": "list_extension_recipes_v1_admin_extension_recipes_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeHistory"
                 }
               }
             }
@@ -48692,6 +49156,82 @@
         "title": "RecheckOptions",
         "description": "`defaults` is keyed by check option, not by check type: a re-check may\nbe asked for by filter id or prompt hash, and the person's last choice is\nremembered against what they asked for."
       },
+      "RecipeChunk": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version",
+            "default": 2
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "payload": {
+            "type": "string",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adapter",
+          "revision",
+          "index",
+          "payload"
+        ],
+        "title": "RecipeChunk"
+      },
+      "RecipeChunkManifest": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version",
+            "default": 2
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "title": "Max Age Seconds"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding",
+            "default": "identity-chunks"
+          },
+          "digest_algorithm": {
+            "type": "string",
+            "title": "Digest Algorithm"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "adapter",
+          "revision",
+          "max_age_seconds",
+          "digest_algorithm",
+          "chunk_count"
+        ],
+        "title": "RecipeChunkManifest"
+      },
       "RecipeConfig": {
         "properties": {
           "schema_version": {
@@ -48719,12 +49259,12 @@
           "payload": {
             "type": "string",
             "title": "Payload",
-            "description": "the canonical table, zlib-compressed and base64-encoded"
+            "description": "the recipe bytes, zlib-compressed and base64-encoded"
           },
           "digest": {
             "type": "string",
             "title": "Digest",
-            "description": "sha256 of the canonical table; equals revision"
+            "description": "sha256 of the served recipe bytes; equals revision"
           }
         },
         "type": "object",
@@ -48773,18 +49313,6 @@
         "title": "RecipePublished",
         "description": "The revision now serving that adapter. A revision is derived from the\nbody, so publishing the same recipe twice returns the same one."
       },
-      "RecipePut": {
-        "properties": {
-          "recipe": {
-            "$ref": "#/components/schemas/JsonValue"
-          }
-        },
-        "type": "object",
-        "required": [
-          "recipe"
-        ],
-        "title": "RecipePut"
-      },
       "RecipeRevision": {
         "properties": {
           "adapter": {
@@ -48831,6 +49359,84 @@
         ],
         "title": "RecipeRevision",
         "description": "One publish. The recipe body itself is not here: this is the history\nlist, and a body is tens of kilobytes that only the editor opens.\n`bytes` is its size, which is what the list has a use for."
+      },
+      "RecipeUploadReceipt": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "received_chunks": {
+            "type": "integer",
+            "title": "Received Chunks"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "title": "Chunk Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "error",
+          "received_chunks",
+          "chunk_count"
+        ],
+        "title": "RecipeUploadReceipt"
+      },
+      "RecipeUploadStart": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "chunk_count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Chunk Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "adapter",
+          "chunk_count"
+        ],
+        "title": "RecipeUploadStart"
       },
       "Reclassification": {
         "properties": {

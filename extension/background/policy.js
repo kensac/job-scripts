@@ -64,12 +64,56 @@ async function sha256(bytes) {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function chunkChainDigest(parts) {
+  let previous = new Uint8Array(32);
+  const domain = new TextEncoder().encode("recipe-chunk-v2\0");
+  for (let index = 0; index < parts.length; index++) {
+    const chunkDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", parts[index]));
+    const header = new Uint8Array(domain.length + 32 + 8 + 8 + 32);
+    header.set(domain);
+    header.set(previous, domain.length);
+    const view = new DataView(header.buffer);
+    view.setBigUint64(domain.length + 32, BigInt(index));
+    view.setBigUint64(domain.length + 40, BigInt(parts[index].length));
+    header.set(chunkDigest, domain.length + 48);
+    previous = new Uint8Array(await crypto.subtle.digest("SHA-256", header));
+  }
+  return Array.from(previous, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // The recipe response is validated by DECODING it: the payload inflates,
 // its digest matches the revision the server named, and the table inside
 // is the engine's shape for this adapter. Anything else is no recipe, and
 // the bundled table applies. Returns the decoded table beside the identity.
 async function validateRecipe(raw, adapter) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  if (raw.schema_version === 2) {
+    if (sortedKeys(raw) !== "adapter,chunk_count,chunks,digest_algorithm,encoding,max_age_seconds,revision,schema_version") return null;
+    if (raw.encoding !== "identity-chunks" || !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
+    if (raw.digest_algorithm !== "raw-sha256" && raw.digest_algorithm !== "chunk-chain-sha256") return null;
+    if (!Array.isArray(raw.chunks) || raw.chunks.length !== raw.chunk_count) return null;
+    if (typeof raw.revision !== "string" || !HEX64.test(raw.revision)) return null;
+    if (typeof raw.adapter !== "string" || !ADAPTER_ID.test(raw.adapter) || raw.adapter !== adapter) return null;
+    if (!Number.isInteger(raw.max_age_seconds) || raw.max_age_seconds < 0 || raw.max_age_seconds > 86400) return null;
+    let bytes;
+    let parts;
+    try {
+      parts = raw.chunks.map((value) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0)));
+      bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+      let offset = 0;
+      for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+    } catch (_) { return null; }
+    const digest = raw.digest_algorithm === "raw-sha256" ? await sha256(bytes) : await chunkChainDigest(parts);
+    if (digest !== raw.revision) return null;
+    let recipe;
+    try { recipe = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { return null; }
+    if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)) return null;
+    if (typeof recipe.name !== "string" || recipe.name.toLowerCase() !== raw.adapter) return null;
+    if (!Array.isArray(recipe.matches) || !recipe.matches.length || !recipe.matches.every((m) => typeof m === "string" && m.startsWith("https://"))) return null;
+    if (!Array.isArray(recipe.fields)) return null;
+    return { schema_version: 2, revision: raw.revision, adapter: raw.adapter,
+      max_age_seconds: raw.max_age_seconds, recipe };
+  }
   if (sortedKeys(raw) !== "adapter,digest,encoding,max_age_seconds,payload,revision,schema_version") return null;
   if (raw.schema_version !== POLICY_SCHEMA || raw.encoding !== "deflate+base64") return null;
   if (typeof raw.revision !== "string" || !HEX64.test(raw.revision) || raw.digest !== raw.revision) return null;
@@ -121,13 +165,15 @@ export class PolicyStore {
     return "policy";
   }
 
+  get schema() { return POLICY_SCHEMA; }
+
   // Sync or async; a subclass decodes.
   validate(raw, adapter) {
     return validatePolicy(raw, adapter);
   }
 
   key(adapter) {
-    return `${this.prefix}:${POLICY_SCHEMA}:${adapter}`;
+    return `${this.prefix}:${this.schema}:${adapter}`;
   }
 
   // {ok: true, config, cached} or {ok: false, unavailable: true, reason}.
@@ -152,7 +198,7 @@ export class PolicyStore {
     let raw = null;
     let reason = "UNAVAILABLE";
     try {
-      const url = `${this.base}?schema_version=${POLICY_SCHEMA}&adapter=${encodeURIComponent(adapter)}`;
+      const url = `${this.base}?schema_version=${this.schema}&adapter=${encodeURIComponent(adapter)}`;
       const res = await this.fetch(url, { credentials: "omit", cache: "no-store" });
       if (res.status === 200) {
         raw = await res.json();
@@ -196,7 +242,30 @@ export class RecipeStore extends PolicyStore {
     return "recipe";
   }
 
-  validate(raw, adapter) {
+  get schema() { return 2; }
+
+  async validate(raw, adapter) {
+    if (raw && raw.schema_version === 2 && !Object.hasOwn(raw, "chunks")) {
+      if (sortedKeys(raw) !== "adapter,chunk_count,digest_algorithm,encoding,max_age_seconds,revision,schema_version" ||
+          raw.adapter !== adapter || !ADAPTER_ID.test(adapter) ||
+          typeof raw.revision !== "string" || !HEX64.test(raw.revision) ||
+          raw.encoding !== "identity-chunks" ||
+          (raw.digest_algorithm !== "raw-sha256" && raw.digest_algorithm !== "chunk-chain-sha256") ||
+          !Number.isInteger(raw.max_age_seconds) || raw.max_age_seconds < 0 || raw.max_age_seconds > 86400 ||
+          !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
+      const chunks = [];
+      for (let index = 0; index < raw.chunk_count; index++) {
+        const url = `${this.base}?schema_version=2&adapter=${encodeURIComponent(adapter)}&revision=${encodeURIComponent(raw.revision)}&chunk_index=${index}`;
+        const response = await this.fetch(url, { credentials: "omit", cache: "no-store" });
+        if (response.status !== 200) return null;
+        const part = await response.json();
+        if (!part || sortedKeys(part) !== "adapter,index,payload,revision,schema_version" ||
+            part.adapter !== adapter || part.revision !== raw.revision || part.index !== index ||
+            part.schema_version !== 2 || typeof part.payload !== "string") return null;
+        chunks.push(part.payload);
+      }
+      raw.chunks = chunks;
+    }
     return validateRecipe(raw, adapter);
   }
 }
