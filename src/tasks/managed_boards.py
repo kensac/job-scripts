@@ -11,7 +11,7 @@ from api.model_calls import Payer
 from core import providers, routing
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
-from tasks.filter_execution import (
+from tasks.filtering.execution import (
     ExecutionHooks,
     FilterSnapshot,
     execute_batch,
@@ -159,7 +159,7 @@ async def _handle_managed_filter(
         },
         unavailable=sum(not job["content"] for job in inference_jobs),
         purpose="managed_board",
-        # No cap, exactly as tasks/filters.py submits: execute_batch defaults
+        # No cap, exactly as tasks/filtering/personal_runs.py submits: execute_batch defaults
         # to 6000, and a boolean verdict has never needed more than 1,050.
         complete_without_submission=True,
     )

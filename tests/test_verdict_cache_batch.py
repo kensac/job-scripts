@@ -19,8 +19,8 @@ from core.filters import compute_filter_hash
 from core.pool import connection
 from core.query_instructions import InstructionUnavailable
 from core.store import add_ai_result
-from tasks import filter_execution
 from tasks import managed_boards as managed_task
+from tasks.filtering import execution as filter_execution
 from tests.factories import board_config
 
 

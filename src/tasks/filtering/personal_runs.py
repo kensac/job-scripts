@@ -21,7 +21,7 @@ from tasks.board import (
     materialize_passing,
     submission_exclusions,
 )
-from tasks.filter_execution import (
+from tasks.filtering.execution import (
     ExecutionHooks,
     FilterSnapshot,
     execute_batch,

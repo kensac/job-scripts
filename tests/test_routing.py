@@ -257,7 +257,7 @@ class TestCustomVerdictCostCliff:
         a coupling that no longer holds."""
         import inspect
 
-        from tasks import filter_execution
+        from tasks.filtering import execution as filter_execution
 
         source = inspect.getsource(filter_execution)
         assert (
@@ -298,7 +298,7 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # Listed so a THIRD cannot appear quietly - which is exactly how the four
     # copies this deletes accumulated.
     #
-    # filters.py runs a model the USER configured per filter, not a TaskShape.
+    # personal_runs.py uses each user filter's configured model, not a TaskShape.
     # There is no declaration for run_batched to take, and routing it would
     # change which jobs land on the board.
     #

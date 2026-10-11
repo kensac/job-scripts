@@ -5,7 +5,8 @@ import pytest
 from api import db
 from core import batch, pricing
 from core.batch import BatchResult, BatchSpec
-from tasks import application, filters, runtime
+from tasks import application, runtime
+from tasks.filtering import personal_runs as filters
 from tasks.runtime import batching
 from tests.factories import filter_config
 

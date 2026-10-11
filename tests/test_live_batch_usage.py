@@ -4,7 +4,8 @@ import pytest
 
 from api import ai, budget, db
 from core import pricing
-from tasks import application, filters
+from tasks import application
+from tasks.filtering import personal_runs as filters
 from tests.factories import filter_config
 
 MODEL = "gpt-5-mini"

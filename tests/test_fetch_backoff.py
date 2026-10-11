@@ -183,7 +183,7 @@ async def test_the_content_backfill_reads_the_latest_closed_answer(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_filter_preparation_does_not_fetch_a_given_up_posting(f):
-    from tasks import filter_execution
+    from tasks.filtering import execution as filter_execution
 
     _given_up("https://b.test/prep-dead")
     fetched = []
@@ -205,7 +205,7 @@ async def test_filter_preparation_does_not_fetch_a_given_up_posting(f):
 
 @pytest.mark.asyncio
 async def test_a_live_filter_run_does_not_fetch_a_given_up_posting(f, monkeypatch):
-    from tasks import filter_execution
+    from tasks.filtering import execution as filter_execution
 
     _given_up("https://b.test/live-dead")
     fetched = []

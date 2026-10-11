@@ -14,7 +14,7 @@ from api.model_calls import Payer
 from core import pricing
 from core.checks import JobClosedResponse
 from core.store import Page
-from tasks import filter_execution
+from tasks.filtering import execution as filter_execution
 
 USAGE = {"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
 

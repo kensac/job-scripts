@@ -206,7 +206,7 @@ another's list is a measured change of its own.
 so a screen applied after selection meets the same posting on every run: the
 filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
 filter batch chunks in the 7 days before read pages only to skip them again.
-Each screen applies where candidates are chosen: `tasks.filters._run_filters`
+Each screen applies where candidates are chosen: `tasks.filtering.personal_runs._run_filters`
 per filter, `managed_boards.admission._plan` per board run (the run payload records
 `title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.

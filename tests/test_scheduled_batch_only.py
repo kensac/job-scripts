@@ -5,7 +5,7 @@ import pytest
 from api import ai, db
 from core.filters import build_custom_input
 from core.store import Page
-from tasks import filters
+from tasks.filtering import personal_runs as filters
 from tests.factories import filter_config
 
 

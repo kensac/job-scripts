@@ -23,7 +23,7 @@ from tasks.derivations.locations import LOCATIONS
 from tasks.derivations.requirements import REQUIREMENTS
 from tasks.derivations.sweep import Derivation
 from tasks.digests import handle_send_digests
-from tasks.filters import (
+from tasks.filtering.personal_runs import (
     handle_run_all_filters,
     handle_run_filter,
     handle_run_filter_batch_chunk,
