@@ -754,9 +754,11 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default={},
         value_type=dict[str, PositiveInt],
         kind="hosts",
-        help="Worker name to the most task slots it fills at once. A worker not listed, or "
-        "listed at 1, runs one task at a time. Under the ceiling the worker grows while its "
-        "throughput improves and memory is free, and halves on memory pressure.",
+        help="Worker name to the most task slots it fills at once. A worker whose host sets "
+        "JOBTRACKER_TASK_SLOTS takes the smaller of the two, so an entry here can lower a host "
+        "but not raise it. A worker with neither, or at 1, runs one task at a time. Under the "
+        "ceiling the worker grows while its throughput improves and memory is free, and halves "
+        "on memory pressure.",
     ),
     # What one task of a kind costs in slots. The kinds seeded at 2 can hold
     # SCRAPE_CONCURRENCY browsers at once (its default is 2; tasks.runtime.limits),
