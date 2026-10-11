@@ -64,6 +64,15 @@ Import → classify → match → derive.
 Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
+**Keep each mail derivation with its owner.** `api.mail.pipeline_events` reads
+current events and matches and derives stage; `pipeline_proposals` derives board
+status suggestions and records a person's answer; `pipeline_actions` derives
+asks and reads the append-only answer log; `pipeline_senders` reads sender
+evidence. `api.mail.pipeline` is the stable import surface for their callers.
+A split must preserve the same current-event and current-match precedence,
+user scope, and event answer writes. Sender signals only suggest review and
+never filter an application. Automatic mail classification remains paused.
+
 **Each log has one writer, and it moves the message's pointer as it
 appends.** `mail.events.append` is the only INSERT into `email_events` and
 `mail.match.record` the only one into `application_matches`
