@@ -1,7 +1,7 @@
 """track verified resume upload parts
 
 Revision ID: 2fb526da869f
-Revises: b8a3948d50a9
+Revises: d6749ac1f507
 Create Date: 2026-10-11 16:13:51.306684
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '2fb526da869f'
-down_revision: Union[str, None] = 'b8a3948d50a9'
+down_revision: Union[str, None] = 'd6749ac1f507'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
