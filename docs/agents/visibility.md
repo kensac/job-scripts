@@ -450,3 +450,14 @@ A null weekly budget means uncapped, and null allowed models means the whole
 catalog; keep those as explicit response values. Resolve a person's effective
 budget on the server before returning their detail, and scope their activity
 to that user's id.
+
+## Application route ownership
+
+`api.routers.application` assembles the resume library before the application
+form routes. `application_resumes` owns a person's stored resume text, uploaded
+PDF and resume list. `application_answers` owns one visible job's form state,
+questions, draft admission, edits and refinement. Every job-specific route
+checks that the person can see the job before reading or changing its answers;
+resume reads and writes remain scoped to that person's id. Keep the form's
+unanswered questions visible alongside stored answers, and keep a concurrent
+refinement from overwriting a newer edit.
