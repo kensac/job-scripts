@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import uuid
 from urllib.parse import urlsplit
 
@@ -10,15 +11,13 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from api import db
+from api.apply.report_storage import REPORT_CHUNK_BYTES
 from api.auth import AuthedUser, require_user
 from api.problem import SIZE_REFUSALS, refuse
 from api.routers.apply_routes.events import record_apply_event
 from api.routers.apply_routes.models import ReportCreated
 
 router = APIRouter()
-
-# A request fits in memory. A report may contain any number of requests.
-REPORT_CHUNK_BYTES = 64 * 1024
 
 
 class ReportUploadStart(BaseModel):
@@ -40,6 +39,46 @@ class ReportUploadReceipt(BaseModel):
 class ReportChunk(BaseModel):
     index: int
     data: str
+
+
+def store_single_request_report(user: AuthedUser, url: str, note: str, page: dict) -> ReportCreated:
+    """Write an older extension's one-request report in the chunk format."""
+    data = json.dumps(page, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    chunks = [data[i : i + REPORT_CHUNK_BYTES] for i in range(0, len(data), REPORT_CHUNK_BYTES)]
+    upload_id = uuid.uuid4()
+    host = urlsplit(url).netloc
+    with db.transaction():
+        report = db.query_one_as(
+            ReportCreated,
+            "INSERT INTO application_reports (user_id, url, host, note, page) "
+            "VALUES (%s, %s, %s, %s, NULL) RETURNING id, created_at",
+            (user.id, url, host, note),
+        )
+        assert report is not None
+        title = page.get("title")
+        fields = page.get("fields")
+        db.execute(
+            "INSERT INTO application_report_uploads "
+            "(id, user_id, url, host, note, title, field_count, chunk_count, report_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                upload_id,
+                user.id,
+                url,
+                host,
+                note,
+                str(title)[:2000] if title is not None else None,
+                len(fields) if isinstance(fields, list) else 0,
+                len(chunks),
+                report.id,
+            ),
+        )
+        db.executemany(
+            "INSERT INTO application_report_chunks (upload_id, chunk_index, body) VALUES (%s, %s, %s)",
+            [(upload_id, index, chunk) for index, chunk in enumerate(chunks)],
+        )
+    record_apply_event("apply_page_reported", user, host=host, has_note=bool(note.strip()))
+    return report
 
 
 def _owned_upload(upload_id: uuid.UUID, user_id: int, *, lock: bool = False) -> dict:

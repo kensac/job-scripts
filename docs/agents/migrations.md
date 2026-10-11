@@ -131,6 +131,16 @@ set NOT NULL and drop the CHECK in a short transaction.
 
 ## Long-running work
 
+**Move application report pages one row at a time.** The report upload release
+writes all new pages as chunks, including requests from older extensions. Run
+`scripts/backfill_application_reports.py --apply` only after that release is
+live. Each transaction locks one old report, writes its chunks, checks that
+they decode to the same JSON value, and then clears `application_reports.page`.
+Check that zero non-null pages remain before the later reader release stops
+using the column. Drop the column only in a later migration after every fleet
+reader has moved off it. Keep the chunk rows because they are the complete
+page's durable copy.
+
 Do not put a large data operation inside a migration. Migrations run at every
 container start behind the schema lock, so a long one stalls every deploy.
 Register it as a task instead, and make it idempotent by predicate so a

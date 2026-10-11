@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -12,7 +11,6 @@ from pydantic import BaseModel, Field
 from api import apply, db
 from api.auth import AuthedUser, require_user
 from api.problem import SIZE_REFUSALS, refuse
-from api.routers.apply_routes.events import record_apply_event
 from api.routers.apply_routes.models import (
     ApplyReport,
     Fill,
@@ -23,6 +21,7 @@ from api.routers.apply_routes.models import (
     ReportCreated,
     ReportList,
 )
+from api.routers.apply_routes.report_uploads import store_single_request_report
 
 router = APIRouter()
 
@@ -39,25 +38,9 @@ MAX_REPORT_BYTES = 2_000_000
 @router.post("/user/apply/reports", status_code=201, responses=SIZE_REFUSALS)
 def create_report(body: PageReport, user: AuthedUser = Depends(require_user)) -> ReportCreated:
     """Accept reports from older extensions that send one JSON request."""
-    if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
+    if len(json.dumps(body.page).encode("utf-8")) > MAX_REPORT_BYTES:
         raise refuse(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
-    report = db.query_one_as(
-        ReportCreated,
-        "INSERT INTO application_reports (user_id, url, host, note, page) "
-        "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
-        (user.id, body.url, urlsplit(body.url).netloc, body.note.strip(), db.jsonb(body.page)),
-    )
-    assert report is not None  # an insert with RETURNING always yields its row
-    # The one event that says a reader did not work on a real page. The note is
-    # a person's own words about their own application, so only whether there
-    # was one ships; the host is what says where to look.
-    record_apply_event(
-        "apply_page_reported",
-        user,
-        host=urlsplit(body.url).netloc,
-        has_note=bool(body.note.strip()),
-    )
-    return report
+    return store_single_request_report(user, body.url, body.note.strip(), body.page)
 
 
 @router.get("/user/apply/reports")
