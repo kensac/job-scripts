@@ -4,7 +4,7 @@ the report about it says so."""
 
 from __future__ import annotations
 
-from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 
 
 def test_closing_a_reported_posting_removes_it_from_the_board(client, user_headers, admin_headers):

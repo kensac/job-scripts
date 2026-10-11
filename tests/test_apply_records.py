@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from api import db
-from tests.test_api_jobs import _insert_job, _uid
+from tests.job_board_support import _insert_job, _uid
 
 
 def test_a_report_keeps_the_page_whole_for_triage(client, user_headers, other_user_headers):

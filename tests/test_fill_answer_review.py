@@ -1,5 +1,5 @@
 from api import db
-from tests.test_api_jobs import _uid
+from tests.job_board_support import _uid
 
 
 def _fill(client, headers):

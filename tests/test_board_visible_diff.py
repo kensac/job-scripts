@@ -15,7 +15,7 @@ import threading
 from api import db
 from api.board import populations, visibility
 from api.db import pool
-from tests.test_api_jobs import _insert_job, _pass_closed, _subscribe
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
 
 def _old_recompute(conn, user_id: int, ids: list[int]) -> None:

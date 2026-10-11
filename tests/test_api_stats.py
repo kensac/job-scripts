@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from api import db
 from api.board import visibility
-from tests.test_api_jobs import _insert_job, _pass_closed, _subscribe, _uid
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
 
 
 def _counts(client, headers) -> dict[str, int]:
