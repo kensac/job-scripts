@@ -71,7 +71,7 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
         (resume_id,),
     )
     assert prior == {
-        "text": "",
+        "text": None,
         "pdf": None,
         "filename": None,
         "text_version_id": first_version,
