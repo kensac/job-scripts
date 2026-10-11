@@ -14,6 +14,8 @@ from api import db
         ({"remote": "true"}, [2]),
         ({"min_comp": "140000", "comp_currency": "USD", "comp_period": "year"}, [1]),
         ({"min_comp": "140000", "comp_currency": "CAD", "comp_period": "year"}, [2]),
+        ({"min_comp": "140000", "comp_currency": "USD", "comp_period": "yearly"}, [1]),
+        ({"min_comp": "140000", "comp_currency": "USD", "comp_period": "hourly"}, []),
         ({"location": "missing"}, []),
     ],
 )
@@ -117,7 +119,7 @@ def _job(
     assert job is not None
     db.execute(
         "INSERT INTO job_comp (url, comp_min, comp_max, comp_currency, comp_period, comp_basis, "
-        "comp_text) VALUES (%s, 100000, %s, 'USD', 'year', 'base', '$100k-$150k')",
+        "comp_text) VALUES (%s, 100000, %s, 'USD', 'yearly', 'base', '$100k-$150k')",
         (url, comp_max),
     )
     db.execute(
