@@ -51,6 +51,9 @@ These are instructions, not history. Follow them.
 ## Repository map
 
 - `src/api/`: FastAPI application. Routers, the worker loop, matching, pipeline.
+  Filter route implementations live in `src/api/routers/filtering/`; the
+  `filters.py` and `filter_insights.py` modules register their routers. Keep
+  related route handlers, request shapes, and domain queries together there.
 - `src/tasks/`: the handlers the worker runs, and the runtime they run inside.
 - `src/core/`: provider datasheets, pricing, routing, task shapes, storage
   primitives.

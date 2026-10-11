@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from api import db
 from api.auth import AuthedUser, require_user
 from api.problem import refuse
-from api.routers.filter_crud import (
+from api.routers.filtering.saved_filters import (
     _FILTER_COLS,
     Filter,
     SavedFilter,

@@ -13,7 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.models import FilterCreate, FilterPatch, Ok
 from api.problem import refuse
-from api.routers import filter_run_routes as runs
+from api.routers.filtering import run_controls as runs
 from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
