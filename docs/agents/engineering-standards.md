@@ -245,6 +245,16 @@ it, and correct it when you find it stale.
 
 The ORM models in `src/api/orm/` are the schema. A schema change is a model change followed by `make migration m="..."`, which autogenerates the migration against the throwaway database; the generated file is then read and, where the change moves data (a copy, a backfill, a seed of both halves of a rename), the data step is added to it by hand. Nobody writes a schema migration from scratch: the two copies drifted every time someone did, and CI's autogenerate drift check exists to catch exactly that. Non-additive changes (drops, renames) still go through the expand-then-contract shape and the before-merge conversation with homelab; generation does not change what is safe to roll, only who writes it.
 
+**Keep catalog ORM models grouped by the data they represent.**
+`api.orm.catalog_postings` owns the posting, upload and page-fetch facts;
+`api.orm.catalog_derivations` owns extracted answers and classified places;
+`api.orm.catalog_sources` owns source settings, listing evidence and source
+observations. `api.orm.catalog` re-exports their models for existing imports,
+while `api.orm.__init__` imports the groups to register every table on one
+`Base.metadata` for Alembic. A model move preserves its mapped table, columns,
+constraints and indexes exactly. Compare the full metadata before and after,
+then run `migrations-check`; moving a class alone needs no migration.
+
 ## Dependencies
 
 Dependencies are declared in `pyproject.toml` and resolved into `uv.lock`; both
