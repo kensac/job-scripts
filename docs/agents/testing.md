@@ -43,6 +43,19 @@ are collected after a split and that each assertion still exercises the
 same production path. Do not turn a module fixture into a suite-wide fixture
 just to share it.
 
+## Generated corpus ownership
+
+Keep measured column distributions in `tests/production_profile.json`; refresh
+that file through the production measurement command, never by hand. Keep
+undeclared joins and scaling constants in `tests/corpus_generator/config.py`,
+schema inspection and table order in `schema.py`, profiled row sampling in
+`rows.py`, and only the cross-column relationships needed for coherent rows in
+`relationships.py`. `tests/corpus.py` owns the guarded build, public API, and
+corpus reuse stamp. Its fingerprint must cover the profile and every generator
+source file, including any new module, so a changed generator cannot reuse a
+stale corpus. Test the fingerprint with a change to each input, and keep corpus
+assertions independent of the relationships the generator supplies.
+
 ## Fixtures and mocks
 
 **A fixture cannot falsify the assumption it was built from.** If you write
