@@ -17,12 +17,11 @@ from api.routers.filtering.insight_breakdowns import (
     MyRejectionReasons,
     OwnedFilter,
     PromptTotals,
+    ReasonBreakdownAccumulator,
     _evidence_criterion,
     _example_selection,
-    _finish,
     _group_rejections_by_prompt,
     _named_group_breakdowns,
-    _new_reason_bucket,
     _prompt_totals,
 )
 
@@ -128,9 +127,9 @@ def my_rejection_reasons(
                 sufficient=row["rejected"] >= min_decisions,
                 totals=_prompt_totals(row, missing),
                 groups=_named_group_breakdowns(buckets, examples),
-                ungrouped=_finish(
-                    buckets.get(UNGROUPED_REASON_KEY) or _new_reason_bucket(), examples
-                ),
+                ungrouped=buckets.get(
+                    UNGROUPED_REASON_KEY, ReasonBreakdownAccumulator()
+                ).to_breakdown(examples),
             )
         )
     # A filter that decided nothing in the window is still the caller's, and
@@ -156,7 +155,7 @@ def my_rejection_reasons(
                         evidence_missing_distinct_jobs=0,
                     ),
                     groups=[],
-                    ungrouped=_finish(_new_reason_bucket(), examples),
+                    ungrouped=ReasonBreakdownAccumulator().to_breakdown(examples),
                 )
             )
     out.sort(key=lambda r: r.totals.rejected, reverse=True)

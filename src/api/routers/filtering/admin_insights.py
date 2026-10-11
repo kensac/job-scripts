@@ -21,15 +21,14 @@ from api.routers.filtering.insight_breakdowns import (
     PhrasingPage,
     PromptOwner,
     PromptVersion,
+    ReasonBreakdownAccumulator,
     ReasonGroup,
     RejectionReasons,
     Taxonomy,
     _evidence_criterion,
     _example_selection,
-    _finish,
     _group_rejections_by_prompt,
     _named_group_breakdowns,
-    _new_reason_bucket,
     _prompt_totals,
 )
 from core import reason_taxonomy
@@ -273,9 +272,9 @@ def rejection_reasons(
                 sufficient=row["rejected"] >= min_decisions,
                 totals=_prompt_totals(row, missing),
                 groups=_named_group_breakdowns(buckets, examples),
-                ungrouped=_finish(
-                    buckets.get(UNGROUPED_REASON_KEY) or _new_reason_bucket(), examples
-                ),
+                ungrouped=buckets.get(
+                    UNGROUPED_REASON_KEY, ReasonBreakdownAccumulator()
+                ).to_breakdown(examples),
             )
         )
 
