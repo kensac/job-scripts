@@ -82,3 +82,12 @@ A company key remains a normalized extracted name, not an employer identity.
 When changing a query or projection, check the route response against the
 application and catalog test cases, including missing evidence and small
 samples.
+
+## Source analytics ownership
+
+Source analytics SQL belongs in `api/analytics_queries.py`, including each
+query's denominator and missing-value conditions. Query row and response
+shapes belong in `api/analytics_models.py`. `api/analytics_assembly.py` joins
+the source-keyed aggregates and applies sample floors; the route only sets
+access and request bounds. Keep the numerator, denominator, null meaning,
+and caveats together when changing a metric.
