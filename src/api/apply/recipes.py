@@ -138,7 +138,7 @@ def publish(adapter: str, body: Any, published_by: str | None) -> str:
 
 def current(adapter: str) -> dict[str, Any] | None:
     return db.query_one(
-        "SELECT adapter, revision, body, upload_id, published_by, published_at FROM extension_recipes "
+        "SELECT adapter, revision, upload_id, published_by, published_at FROM extension_recipes "
         "WHERE adapter = %s AND enabled ORDER BY published_at DESC LIMIT 1",
         (adapter,),
     )
@@ -168,9 +168,8 @@ def rollback(adapter: str) -> str | None:
 def history() -> list[dict[str, Any]]:
     return db.query(
         "SELECT r.adapter, r.revision, r.enabled, r.published_by, r.published_at, "
-        "coalesce(length(r.body::text), "
         "(SELECT sum(octet_length(c.body)) FROM extension_recipe_chunks c "
-        "WHERE c.upload_id = r.upload_id)) AS bytes FROM extension_recipes r "
+        "WHERE c.upload_id = r.upload_id) AS bytes FROM extension_recipes r "
         "ORDER BY r.adapter, r.published_at DESC"
     )
 
@@ -179,21 +178,18 @@ def config_for(adapter: str, max_age_seconds: int) -> RecipeConfig | None:
     row = current(adapter)
     if not row:
         return None
-    if row["body"] is not None:
-        raw = canonical(row["body"])
-    else:
-        size = db.query_one(
-            "SELECT coalesce(sum(octet_length(body)), 0) AS bytes "
-            "FROM extension_recipe_chunks WHERE upload_id = %s",
-            (row["upload_id"],),
-        )
-        if size is None or size["bytes"] > LEGACY_RESPONSE_BYTES:
-            return None
-        parts = db.query(
-            "SELECT body FROM extension_recipe_chunks WHERE upload_id = %s ORDER BY chunk_index",
-            (row["upload_id"],),
-        )
-        raw = b"".join(bytes(part["body"]) for part in parts)
+    size = db.query_one(
+        "SELECT coalesce(sum(octet_length(body)), 0) AS bytes "
+        "FROM extension_recipe_chunks WHERE upload_id = %s",
+        (row["upload_id"],),
+    )
+    if size is None or size["bytes"] > LEGACY_RESPONSE_BYTES:
+        return None
+    parts = db.query(
+        "SELECT body FROM extension_recipe_chunks WHERE upload_id = %s ORDER BY chunk_index",
+        (row["upload_id"],),
+    )
+    raw = b"".join(bytes(part["body"]) for part in parts)
     return RecipeConfig(
         adapter=adapter,
         revision=revision_of(raw),
@@ -205,49 +201,34 @@ def config_for(adapter: str, max_age_seconds: int) -> RecipeConfig | None:
 
 def chunk_manifest(adapter: str, max_age_seconds: int) -> RecipeChunkManifest | None:
     row = db.query_one(
-        "SELECT r.revision, r.body, u.chunk_count FROM extension_recipes r "
-        "LEFT JOIN extension_recipe_uploads u ON u.id = r.upload_id "
+        "SELECT r.revision, u.chunk_count FROM extension_recipes r "
+        "JOIN extension_recipe_uploads u ON u.id = r.upload_id "
         "WHERE r.adapter = %s AND r.enabled ORDER BY r.published_at DESC LIMIT 1",
         (adapter,),
     )
     if row is None:
         return None
-    chunk_count = row["chunk_count"]
-    if chunk_count is None:
-        if row["body"] is None:
-            return None
-        # Old publishes were bounded by the version 1 request limit.
-        byte_count = len(canonical(row["body"]))
-        chunk_count = (byte_count + CHUNK_BYTES - 1) // CHUNK_BYTES
     return RecipeChunkManifest(
         adapter=adapter,
         revision=row["revision"],
         max_age_seconds=max_age_seconds,
-        chunk_count=chunk_count,
-        digest_algorithm="raw-sha256" if row["body"] is not None else "chunk-chain-sha256",
+        chunk_count=row["chunk_count"],
+        digest_algorithm="chunk-chain-sha256",
     )
 
 
 def chunk_for(adapter: str, revision: str, index: int) -> RecipeChunk | None:
     row = db.query_one(
-        "SELECT r.body AS legacy_body, c.body AS chunk_body "
+        "SELECT c.body "
         "FROM extension_recipes r "
-        "LEFT JOIN extension_recipe_chunks c ON c.upload_id = r.upload_id "
+        "JOIN extension_recipe_chunks c ON c.upload_id = r.upload_id "
         "AND c.chunk_index = %s "
         "WHERE r.adapter = %s AND r.revision = %s",
         (index, adapter, revision),
     )
     if row is None:
         return None
-    if row["chunk_body"] is not None:
-        body = bytes(row["chunk_body"])
-    elif row["legacy_body"] is not None:
-        raw = canonical(row["legacy_body"])
-        body = raw[index * CHUNK_BYTES : (index + 1) * CHUNK_BYTES]
-        if not body:
-            return None
-    else:
-        return None
+    body = bytes(row["body"])
     return RecipeChunk(
         adapter=adapter,
         revision=revision,

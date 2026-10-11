@@ -213,23 +213,17 @@ def test_incomplete_or_invalid_recipe_never_becomes_current(client, admin_header
     assert db.query_one("SELECT count(*) AS n FROM extension_recipes")["n"] == 0
 
 
-def test_version_two_reads_an_older_jsonb_revision_after_rollback(client, admin_headers):
+def test_version_two_reads_a_chunk_revision_after_rollback(client, admin_headers):
     older = recipe(matches=["https://older.example/*"])
     raw = extension_recipes.canonical(older)
-    revision = extension_recipes.revision_of(raw)
-    db.execute(
-        "INSERT INTO extension_recipes "
-        "(adapter, revision, body, enabled, published_at) "
-        "VALUES ('workday', %s, %s, FALSE, now() - interval '1 hour')",
-        (revision, db.jsonb(older)),
-    )
+    revision = extension_recipes.publish("workday", older, "test")
     extension_recipes.publish("workday", recipe(), "test")
     rolled_back = client.post(f"{ADMIN}/workday/rollback", headers=admin_headers)
     assert rolled_back.status_code == 200
     assert rolled_back.json()["revision"] == revision
     manifest = client.get("/v1/extension/recipe?schema_version=2&adapter=workday").json()
     assert manifest["revision"] == revision
-    assert manifest["digest_algorithm"] == "raw-sha256"
+    assert manifest["digest_algorithm"] == "chunk-chain-sha256"
     chunks = [
         client.get(
             "/v1/extension/recipe?schema_version=2&adapter=workday"
@@ -238,3 +232,6 @@ def test_version_two_reads_an_older_jsonb_revision_after_rollback(client, admin_
         for index in range(manifest["chunk_count"])
     ]
     assert b"".join(base64.b64decode(chunk) for chunk in chunks) == raw
+    legacy = client.get(PATH).json()
+    assert decode(legacy) == older
+    assert legacy["revision"] == extension_recipes.revision_of(raw)
