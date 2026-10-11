@@ -41,12 +41,12 @@ orders, so it gets its own transaction. 36 ingests failed on deadlocks in the
 row and fails on the deadlock.
 
 **`core.catalog` is the public API for every write to `jobs`.** Its named
-owners are `catalog_jobs` for ingest, corrections and uploads, and
-`catalog_observations` for stored availability. `catalog_listings` owns the
-retained evidence in `listings`. Keep multi-row locks in URL code-point order
+owners are `core.catalog.jobs` for ingest, corrections and uploads, and
+`core.catalog.observations` for stored availability.
+`core.catalog.listings` owns retained evidence in `listings`. Keep multi-row locks in URL code-point order
 across these modules and preserve each operation's transaction boundary.
 `jobs.active` is frozen and written by nothing; availability is
-`jobs.available`, stored by `catalog_observations`.
+`jobs.available`, stored by `core.catalog.observations`.
 `tests/test_catalog_one_writer.py` fails on an `INSERT`, `UPDATE`, `DELETE` or
 `MERGE` of `jobs` anywhere else under `src`; its allow-list holds only
 dev-only seed writes and fails once a listed file stops writing. The two

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal
 
 from psycopg import errors, sql
 
-from core.catalog_observations import (
+from core.catalog.observations import (
     _BATCH,
     _LOCK_ORDER,
     IS_AVAILABLE,

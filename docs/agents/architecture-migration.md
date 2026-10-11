@@ -679,7 +679,7 @@ files listed there:
 
 | Reader | Meaning | Stands |
 |---|---|---|
-| `core/catalog.py`: `retire_unlisted`, `retire_switched_off`, the upsert's change test, `correct_posting`, `availability_shadow` | feed state, written and compared | stays |
+| `core/catalog/jobs.py` and `core/catalog/observations.py` (historical catalog writers) | feed state, written and compared | historical; `jobs.active` is now frozen |
 | `api/analytics_queries.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
