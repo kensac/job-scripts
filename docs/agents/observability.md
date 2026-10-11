@@ -30,6 +30,16 @@ cycle scheduling belongs to `api.worker_scheduling`. `api.worker` owns the
 process loop, held claims, slots and signal release. Claim-aware writes and progress updates
 belong to `tasks.runtime.lifecycle`.
 
+**The admin fleet view has three owners.**
+`api.routers.admin.fleet_tasks` lists and cancels tasks; the summary uses
+the full filter selection while cursor pagination narrows only rows.
+`api.routers.admin.fleet_workers` reads worker heartbeats, running work and
+throughput without claiming tasks. `api.routers.admin.fleet_batches` lists
+provider batches and prices each verdict in a batch drill-down.
+`api.routers.admin.fleet` registers those routes in their existing order.
+Keep cancellation in `api.queue` and keep worker claim and reaping writes
+with their owners above.
+
 **A task row is written only by its owners.** `api.worker_claims` claims
 and reaps; `api.worker_execution` settles transient and deferred runs and
 beats; `api.worker` releases claims on exit. `tasks.runtime` writes progress
