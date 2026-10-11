@@ -64,6 +64,7 @@ from tasks.runtime.limits import (
     MAX_CONCURRENCY,
     SCRAPE_CONCURRENCY,
     AdaptiveLimiter,
+    available_memory_mb,
 )
 
 __all__ = [
@@ -75,6 +76,7 @@ __all__ = [
     "BatchProvenance",
     "Deferred",
     "TaskClaim",
+    "available_memory_mb",
     "batch_event_hook",
     "cancelled",
     "checkpoint",

@@ -744,6 +744,56 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=Annotated[int, Field(ge=2)],
         help="Minutes without a heartbeat before the reaper requeues a running task.",
     ),
+    # The switch for running several tasks on one worker (api.worker). Empty by
+    # default: a worker not named runs one task at a time, the loop it ran
+    # before this key existed, so a deploy changes nothing until a worker is
+    # named here. The number is a ceiling; under it the worker's adaptive
+    # limit finds its own level from throughput and free memory.
+    "worker_task_slots": ConfigKey(
+        section="Fleet",
+        default={},
+        value_type=dict[str, PositiveInt],
+        kind="hosts",
+        help="Worker name to the most task slots it fills at once. A worker not listed, or "
+        "listed at 1, runs one task at a time. Under the ceiling the worker grows while its "
+        "throughput improves and memory is free, and halves on memory pressure.",
+    ),
+    # What one task of a kind costs in slots. The kinds seeded at 2 can hold
+    # SCRAPE_CONCURRENCY browsers at once (its default is 2; tasks.runtime.limits),
+    # where an ingest holds at most one. A kind not listed costs one slot.
+    "worker_task_weights": ConfigKey(
+        section="Fleet",
+        default={
+            kind: 2
+            for kind in (
+                "fetch_missing_content",
+                "reverify_open",
+                "reverify_chunk",
+                "run_filter",
+                "run_filter_chunk",
+                "run_filter_batch_chunk",
+                "run_managed_board",
+                "run_managed_board_batch",
+            )
+        },
+        value_type=dict[str, PositiveInt],
+        kind="hosts",
+        help="Task kind to the slots one task of it takes on a worker running several at once. "
+        "A kind not listed takes one slot.",
+    ),
+    # One headless browser on a posting page is the largest thing a task
+    # starts: 413 to 490 MB physical footprint across its processes, measured
+    # on two career pages on 2026-10-11 (macOS; Linux shares more and lands
+    # lower). A worker with less free than this does not claim a second task,
+    # and one already running several halves its limit.
+    "worker_memory_reserve_mb": ConfigKey(
+        section="Fleet",
+        default=512,
+        value_type=PositiveInt,
+        help="Free memory, in MB, a worker running several tasks keeps in hand. It claims "
+        "another task only with more than this free, and halves its limit when free memory "
+        "falls under it.",
+    ),
 }
 
 

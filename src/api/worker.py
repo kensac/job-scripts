@@ -15,6 +15,7 @@ import signal
 import socket
 import threading
 import time
+from queue import SimpleQueue
 from typing import Any
 
 import psycopg
@@ -31,15 +32,18 @@ from api import (
 from api.board import visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
+from core import pool
 from core.env import env_list
 from core.fetching.hosts import pace_key
 from core.payload_objects import PayloadUnavailable
 from tasks import DERIVATIONS, HANDLERS
 from tasks.runtime import (
     CHUNK_KINDS,
+    AdaptiveLimiter,
     AwaitingBatch,
     Deferred,
     TaskClaim,
+    available_memory_mb,
     fail_unavailable_payload,
     finish,
     maybe_finalize_parent,
@@ -145,13 +149,17 @@ CLAIM_ORDER = """
     id"""
 
 
-def _claim_task() -> dict[str, Any] | None:
+def _claim_task(too_heavy: list[str] | None = None) -> dict[str, Any] | None:
     """Only kinds this image has a handler for. A roll goes host by host, and
     a host still on the old image sees the new kind a rolled host enqueued:
     on 2026-09-05 gcp-vps claimed the first classify_locations task and
     failed it terminally as an unknown kind, in the seconds before its own
-    deploy. A kind this worker cannot run waits for one that can."""
-    kinds_clause = _kinds_clause(WORKER_KINDS, EXCLUDE_KINDS)
+    deploy. A kind this worker cannot run waits for one that can.
+
+    `too_heavy` names kinds that need more slots than a worker running several
+    tasks has free; they wait for a worker, or a moment, with the room."""
+    exclude = EXCLUDE_KINDS + (too_heavy or [])
+    kinds_clause = _kinds_clause(WORKER_KINDS, exclude)
     return db.query_one(
         f"""
         UPDATE tasks SET status = 'running', started_at = now(),
@@ -173,7 +181,7 @@ def _claim_task() -> dict[str, Any] | None:
         {
             "known": list(HANDLERS),
             "kinds": WORKER_KINDS,
-            "exclude": EXCLUDE_KINDS,
+            "exclude": exclude,
             "worker": WORKER_NAME,
             "egress": hosts.EGRESS_GROUP,
         },
@@ -465,10 +473,19 @@ def schedule_ingest_cycle() -> None:
     enqueue("fetch_missing_content", {"cycle": cycle}, dedupe_key=f"content:{cycle}")
 
 
-# The claim held by the task currently running on this worker. The handler
-# path reads it from the runtime contextvar, but a signal handler runs outside
-# that context, so the loop mirrors it here.
-_current_claim: TaskClaim | None = None
+# Every claim this process holds, by task id. A handler reads its own claim
+# from the runtime contextvar, which is per task: each task runs in its own
+# asyncio task, and a threaded one on its own loop in its own thread. A signal
+# handler runs outside every one of those contexts, so the loop mirrors the
+# claims here. Written under the lock by the thread that runs the task; the
+# signal handler only copies it, because a signal can land while the lock is
+# held on the very thread that would wait for it.
+_in_flight: dict[int, TaskClaim] = {}
+_in_flight_lock = threading.Lock()
+
+# The adaptive limit of a worker running several tasks, for worker_status;
+# None while it runs one at a time.
+_task_limit: int | None = None
 
 
 # Kept as a named constant so the test that pins this statement asserts against
@@ -483,25 +500,29 @@ _REQUEUE_ON_EXIT_SQL = (
 
 
 def _graceful_exit(signum: int, frame: Any) -> None:
-    """Deploys must not leave the in-flight task in 'running' limbo until the
-    reaper times out: requeue it immediately (chunks resume from cached
-    verdicts) without burning an attempt, then exit.
+    """Deploys must not leave in-flight tasks in 'running' limbo until the
+    reaper times out: requeue every one immediately (chunks resume from cached
+    verdicts) without burning an attempt, then exit. Not waited on: a pull can
+    run half an hour and a deploy's stop grace is seconds, so a task left to
+    finish is a task killed mid-write.
 
-    Guarded by the claim: a deploy is exactly when a worker is most likely to
-    have already lost its task to the reaper, and requeueing then would hand
+    Guarded by each claim: a deploy is exactly when a worker is most likely to
+    have already lost a task to the reaper, and requeueing then would hand
     back a run another worker is midway through - while crediting it an attempt
-    it never spent.
+    it never spent. One failed requeue leaves that task to the reaper and does
+    not stop the others.
     """
-    if _current_claim is not None:
+    _release_all()
+    os._exit(0)
+
+
+def _release_all() -> None:
+    for claim in _in_flight.copy().values():
         try:
-            db.execute(
-                _REQUEUE_ON_EXIT_SQL,
-                (_current_claim.task_id, _current_claim.worker, _current_claim.attempts),
-            )
-            logger.info(f"SIGTERM: requeued task {_current_claim.task_id}, exiting")
+            db.execute(_REQUEUE_ON_EXIT_SQL, (claim.task_id, claim.worker, claim.attempts))
+            logger.info(f"SIGTERM: requeued task {claim.task_id}")
         except Exception:  # noqa: S110 - nothing may block exit, not even logging
             pass
-    os._exit(0)
 
 
 # Infrastructure went away underneath a healthy task. Matched by TYPE, because
@@ -551,6 +572,12 @@ def _task_props(task: dict[str, Any], exc: BaseException) -> dict[str, Any]:
     }
 
 
+def _exhausted(exc: BaseException) -> bool:
+    """The host ran short, not the task: what a worker running several tasks
+    backs off on."""
+    return isinstance(exc, MemoryError) or any(m in str(exc).lower() for m in _TRANSIENT_MARKERS)
+
+
 def _is_transient(exc: Exception) -> bool:
     if isinstance(exc, _TRANSIENT_EXCEPTIONS):
         return True
@@ -576,18 +603,23 @@ HEARTBEAT_SECONDS = 60
 _PROCESS_STARTED_AT = datetime.datetime.now(datetime.UTC)
 
 
-def _report_worker_status(current_task_id: int | None) -> None:
+def _report_worker_status() -> None:
+    """Every task this worker holds, oldest first. current_task_id is the
+    first of them, so a reader that asks only "idle or not" is unchanged."""
+    held = sorted(_in_flight.copy())
     try:
         db.execute(
             """
             INSERT INTO worker_status
-                (name, started_at, current_task_id, last_seen, kinds, excluded_kinds, release,
-                 egress_group)
-            VALUES (%(name)s, %(started)s, %(tid)s, now(), %(kinds)s, %(excluded)s, %(release)s,
-                    %(egress)s)
+                (name, started_at, current_task_id, current_task_ids, task_limit, last_seen,
+                 kinds, excluded_kinds, release, egress_group)
+            VALUES (%(name)s, %(started)s, %(tid)s, %(tids)s, %(limit)s, now(), %(kinds)s,
+                    %(excluded)s, %(release)s, %(egress)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
-                current_task_id = %(tid)s, last_seen = now(),
+                current_task_id = EXCLUDED.current_task_id,
+                current_task_ids = EXCLUDED.current_task_ids,
+                task_limit = EXCLUDED.task_limit, last_seen = now(),
                 kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds,
                 release = EXCLUDED.release, egress_group = EXCLUDED.egress_group
             """,
@@ -596,7 +628,9 @@ def _report_worker_status(current_task_id: int | None) -> None:
                 "egress": hosts.EGRESS_GROUP,
                 "started": _PROCESS_STARTED_AT,
                 "release": telemetry.RELEASE,
-                "tid": current_task_id,
+                "tid": held[0] if held else None,
+                "tids": held,
+                "limit": _task_limit,
                 # Reported rather than inferred: the filters live in this host's
                 # environment, so nothing else can know what this worker refuses.
                 "kinds": WORKER_KINDS,
@@ -608,22 +642,40 @@ def _report_worker_status(current_task_id: int | None) -> None:
 
 
 async def run_once() -> bool:
-    global _current_claim
     task = _claim_task()
     if not task:
-        _report_worker_status(None)
+        _report_worker_status()
         return False
+    await run_task(task)
+    return True
+
+
+async def run_task(task: dict[str, Any]) -> bool:
+    """Runs one claimed task to its end. True when it ended on the host running
+    out of memory or threads, which a worker running several tasks backs off
+    on; every other ending is the task's own."""
     claim = TaskClaim(task["id"], task["worker"], task["attempts"])
-    _current_claim = claim
+    with _in_flight_lock:
+        _in_flight[claim.task_id] = claim
     set_current_claim(claim)
-    _report_worker_status(task["id"])
+    try:
+        return await _run_held(task, claim)
+    finally:
+        set_current_claim(None)
+        with _in_flight_lock:
+            _in_flight.pop(claim.task_id, None)
+
+
+async def _run_held(task: dict[str, Any], claim: TaskClaim) -> bool:
+    _report_worker_status()
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
     logger.info(f"Task {task['id']} ({task['kind']}) starting")
     if not handler:
         finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
-        return True
+        return False
     task_start = time.monotonic()
+    exhausted = False
 
     stop_beating = threading.Event()
 
@@ -655,7 +707,7 @@ async def run_once() -> bool:
                 # it now would vouch for the run that replaced ours.
                 logger.warning(f"Task {claim.task_id}: claim lost, stopping heartbeat")
                 return
-            _report_worker_status(task["id"])
+            _report_worker_status()
 
     hb = threading.Thread(target=_liveness, name="liveness", daemon=True)
     hb.start()
@@ -698,6 +750,7 @@ async def run_once() -> bool:
         logger.exception("Task %s requires payload restoration before retry", task["id"])
         telemetry.capture_exception(exc, properties={**_task_props(task, exc), **span_ids})
     except Exception as exc:
+        exhausted = _exhausted(exc)
         if _is_transient(exc) and task["retries_spent"] < int(db.get_config("task_max_attempts")):
             # Host ran out of memory/threads, not a broken task: put it back so
             # a healthier worker (or this one, later) takes it. Failing
@@ -733,15 +786,117 @@ async def run_once() -> bool:
         # next loop iteration has already moved on from.
         stop_beating.set()
         hb.join(timeout=5)
-        set_current_claim(None)
-        _current_claim = None
     metrics.TASK_DURATION.labels(task["kind"]).observe(time.monotonic() - task_start)
     if task["kind"] in CHUNK_KINDS:
         try:
             maybe_finalize_parent(task["payload"]["parent_id"])
         except Exception:
             logger.exception("parent finalize failed")
-    return True
+    return exhausted
+
+
+# Kinds that run in a thread of their own, on an event loop of their own,
+# beside other tasks when worker_task_slots gives this worker more than one.
+# Every other kind runs on the main loop, one at a time, as it always has,
+# while the threaded ones carry on beside it.
+#
+# A thread, not a coroutine on the shared loop: handlers call the database
+# synchronously, so on a shared loop every statement of one task stalls all
+# the others (on oci, 103 ms a round trip, an ingest averaged 38 s and was
+# mostly that), and match_mail and a mail backfill never await at all. A loop
+# of its own is also why a kind must be audited before it is listed: a module
+# global bound to the loop that made it (core.batch._batch_client, an
+# AsyncOpenAI client) breaks when a second loop uses it.
+#
+# ingest_source, audited 2026-10-11: no model call and no loop-bound global
+# (its fetches are requests and selenium in to_thread, its writes go through
+# the thread-safe pool and keep catalog's lock order); host pacing is shared
+# process state and is locked (core.fetching.client.pace); hosts.take is one
+# UPDATE, so two pulls of one host on one worker get one slot. It is also
+# the volume: 8,388 of the 24 hours' tasks to 2026-10-11 01:45 UTC, 3,441
+# pending, p50 1 s and p90 17 s but 219 runs over 5 minutes holding the
+# worker for 41,000 s between them, most of it waiting on boards.
+THREADED_KINDS = frozenset({"ingest_source"})
+
+
+class _Slots:
+    """Several tasks at once on one worker, under an AIMD limit
+    (tasks.runtime.AdaptiveLimiter): it grows by one while a window of
+    completions comes faster than the last, and halves when a task fails on
+    the host running out of memory or threads, or when free memory falls under
+    worker_memory_reserve_mb. A task's weight (worker_task_weights) is the
+    slots it takes. Nothing is claimed beyond the limit, nothing but the first
+    task is claimed without the reserve free, and a worker holding nothing
+    always claims one, so the floor is the worker as it was.
+
+    Only the main thread touches this; a task's thread reports its end on
+    the queue."""
+
+    def __init__(self) -> None:
+        self.limiter = AdaptiveLimiter(max_c=1, gauge=None)
+        self.weights: dict[str, int] = {}
+        self.reserve_mb = 0
+        self.held: dict[int, int] = {}
+        self.ended: SimpleQueue[tuple[int, bool]] = SimpleQueue()
+        self.wake = threading.Event()
+
+    def configure(self, ceiling: int, weights: dict[str, int], reserve_mb: int) -> None:
+        self.limiter.max_c = ceiling
+        self.limiter.limit = min(self.limiter.limit, ceiling)
+        self.weights = weights
+        self.reserve_mb = reserve_mb
+
+    def step(self, runner: asyncio.Runner) -> None:
+        """One pass: settle what ended, then claim one task if there is room,
+        else wait for a task to end or a poll to pass."""
+        global _task_limit
+        while not self.ended.empty():
+            task_id, exhausted = self.ended.get()
+            self.held.pop(task_id, None)
+            self.limiter.record(rate_limited=exhausted)
+        free = available_memory_mb()
+        short = free is not None and free < self.reserve_mb
+        if short and self.held:
+            self.limiter.record(rate_limited=True)
+        _task_limit = self.limiter.limit
+        room = self.limiter.limit - sum(self.held.values())
+        task = None
+        if not self.held:
+            task = _claim_task()
+        elif room > 0 and not short:
+            task = _claim_task([k for k, w in self.weights.items() if w > room])
+        if task is None:
+            _report_worker_status()
+            self.wake.wait(POLL_SECONDS)
+            self.wake.clear()
+            return
+        if task["kind"] not in THREADED_KINDS:
+            self.limiter.record(rate_limited=runner.run(run_task(task)))
+            return
+        self.held[task["id"]] = self.weights.get(task["kind"], 1)
+        threading.Thread(
+            target=self._run, args=(task,), name=f"task-{task['id']}", daemon=True
+        ).start()
+
+    def _run(self, task: dict[str, Any]) -> None:
+        exhausted = False
+        try:
+            exhausted = asyncio.run(run_task(task))
+        except BaseException:
+            # run_task settles every Exception itself; what reaches here is
+            # the loop itself failing. The claim stays running with its beat
+            # stopped, so the reaper requeues it.
+            logger.exception(f"Task {task['id']} thread ended abnormally")
+        finally:
+            self.ended.put((task["id"], exhausted))
+            self.wake.set()
+
+
+def _task_ceiling() -> int:
+    """This worker's worker_task_slots, bounded by its connection pool: each
+    running task can hold a connection and its heartbeat another."""
+    slots = db.get_config("worker_task_slots") or {}
+    return max(1, min(int(slots.get(WORKER_NAME.lower(), 1)), pool.MAX_SIZE // 2))
 
 
 def _seed_gauges() -> None:
@@ -753,6 +908,7 @@ def _seed_gauges() -> None:
 
 
 def main() -> None:
+    global _task_limit
     logging.basicConfig(level=logging.INFO)
     signal.signal(signal.SIGTERM, _graceful_exit)
     signal.signal(signal.SIGINT, _graceful_exit)
@@ -787,6 +943,8 @@ def main() -> None:
     # live as long as the worker, not be closed after each run_once call.
     with asyncio.Runner() as runner:
         last_housekeeping = 0.0
+        ceiling = 1
+        slots: _Slots | None = None
         while True:
             if time.monotonic() - last_housekeeping > 60:
                 last_housekeeping = time.monotonic()
@@ -798,9 +956,25 @@ def main() -> None:
                         schedule_ingest_cycle()
                 except Exception:
                     logger.exception("housekeeping failed")
-            worked = runner.run(run_once())
-            if not worked:
-                time.sleep(POLL_SECONDS)
+                try:
+                    ceiling = _task_ceiling()
+                    if slots is not None or ceiling > 1:
+                        slots = slots or _Slots()
+                        slots.configure(
+                            ceiling,
+                            db.get_config("worker_task_weights") or {},
+                            int(db.get_config("worker_memory_reserve_mb")),
+                        )
+                except Exception:
+                    logger.exception("reading task slots failed")
+            # One at a time, the loop as it was, unless worker_task_slots names
+            # this worker; switched back, it drains what it holds first.
+            if slots is None or (ceiling <= 1 and not slots.held):
+                slots, _task_limit = None, None
+                if not runner.run(run_once()):
+                    time.sleep(POLL_SECONDS)
+            else:
+                slots.step(runner)
 
 
 # The container entrypoint is `python -m api.worker`. Without this the module

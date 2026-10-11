@@ -23,7 +23,7 @@ def _worker_row():
 def _beats_are_a_thread() -> bool:
     import inspect
 
-    source = inspect.getsource(worker.run_once)
+    source = inspect.getsource(worker._run_held)
     return "threading.Thread" in source and "asyncio.create_task(_liveness" not in source
 
 
@@ -42,9 +42,9 @@ class TestTheBeatDoesNotDependOnTheHandler:
         beats: list[int] = []
         real_report = worker._report_worker_status
 
-        def counting_report(task_id):
-            beats.append(task_id or 0)
-            real_report(task_id)
+        def counting_report():
+            beats.append(1)
+            real_report()
 
         monkeypatch.setattr(worker, "_report_worker_status", counting_report)
         monkeypatch.setattr(worker, "HEARTBEAT_SECONDS", 0.05)

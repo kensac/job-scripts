@@ -108,9 +108,11 @@ comment explaining the number goes beside the seed, not beside a literal
 somewhere else. Values that are facts about a system (a provider's page size,
 a word-boundary regex) stay in code; values that are a person's judgment
 about how this deployment should behave do not. A value that differs per
-host (`JOBTRACKER_MAX_CONCURRENCY`, `JOBTRACKER_SCRAPE_CONCURRENCY`, the
-worker poll) stays in that host's environment, because `app_config` holds one
-value for the whole fleet. `core` cannot read `app_config`, because core does
+host and that an administrator turns (how many tasks a worker runs at once)
+is a map keyed by worker name, as `worker_task_slots` is, so one worker can be
+switched without a deploy. A per-host value nobody turns from the admin page
+(`JOBTRACKER_MAX_CONCURRENCY`, `JOBTRACKER_SCRAPE_CONCURRENCY`, the worker
+poll) stays in that host's environment. `core` cannot read `app_config`, because core does
 not import api, so `core.batch.BATCH_WAVE_CONCURRENCY` is still an environment
 default; moving it means the caller passes the value down.
 

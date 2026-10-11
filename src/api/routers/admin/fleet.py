@@ -271,12 +271,17 @@ class FleetWorker(BaseModel):
     `alive` is the heartbeat being under 90 seconds old, resolved in SQL so
     every reader agrees on the same clock. The task fields are null when the
     worker is idle: they come from a join on a task that is still running.
+    A worker running several tasks at once (worker_task_slots) names them all
+    in `current_task_ids` and its adaptive limit in `task_limit`; the task
+    fields describe the oldest.
     """
 
     name: str
     started_at: datetime.datetime
     last_seen: datetime.datetime
     current_task_id: int | None
+    current_task_ids: list[int]
+    task_limit: int | None
     release: str | None
     alive: bool
     task_kind: str | None
@@ -298,7 +303,8 @@ def list_workers(user: AuthedUser = Depends(require_admin)) -> FleetWorkers:
     rows = db.query_as(
         FleetWorker,
         """
-        SELECT w.name, w.started_at, w.last_seen, w.current_task_id, w.release,
+        SELECT w.name, w.started_at, w.last_seen, w.current_task_id, w.current_task_ids,
+               w.task_limit, w.release,
                now() - w.last_seen < interval '90 seconds' AS alive,
                t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
                t.started_at AS task_started_at,
@@ -360,6 +366,7 @@ class WorkerHeartbeat(BaseModel):
     started_at: datetime.datetime
     last_seen: datetime.datetime
     current_task_id: int | None
+    current_task_ids: list[int]
     fresh: bool
 
 
@@ -413,7 +420,7 @@ def queue_summary(hours: int = 6, user: AuthedUser = Depends(require_admin)) -> 
         workers=db.query_as(
             WorkerHeartbeat,
             """
-            SELECT name, started_at, last_seen, current_task_id,
+            SELECT name, started_at, last_seen, current_task_id, current_task_ids,
                    last_seen > now() - %(fresh)s::interval AS fresh
             FROM worker_status ORDER BY name
             """,
