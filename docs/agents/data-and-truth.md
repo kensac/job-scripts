@@ -70,3 +70,15 @@ it means a wrong answer remains inspectable.
 Record who made a correction as an identifier, not a role. Whether that person
 was the owner or an administrator is derived by comparing against the row's
 owner, so there is no second copy of that distinction to drift.
+
+## Company name analytics ownership
+
+`api.companies.queries` owns the SQL and its measured grouping rules.
+`api.companies.models` declares both database rows and the published response
+shape. `api.companies.projection` owns sample floors and null blocks; the
+`api.routers.companies` route applies filters, sorting, pagination and user
+scope. Keep a number's qualification next to the response field it qualifies.
+A company key remains a normalized extracted name, not an employer identity.
+When changing a query or projection, check the route response against the
+application and catalog test cases, including missing evidence and small
+samples.
