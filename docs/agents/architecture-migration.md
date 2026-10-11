@@ -492,8 +492,8 @@ Kanishk chose the three product meanings the storage cutover needed
   `api.board.populations.per_user_counts` and `person_state.PERSON_STATE`:
   `GET /user/stats` totals carry `visible` and `acted_on`, and
   `GET /admin/users` rows and source analytics `board_yield` carry
-  `acted_on`, `working_set` and `visible` beside the old `tracked` and
-  `board_rows`.
+  `acted_on`, `working_set` and `visible`. The old `tracked` and
+  `board_rows` were removed once the frontend stopped declaring them.
 
 Phase 2b ran on 2026-10-10, one step a PR, each read checked on production
 after the split backfill before it merged:

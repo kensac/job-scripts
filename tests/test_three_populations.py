@@ -40,7 +40,7 @@ def test_person_stats_name_visible_and_acted_on_beside_the_old_counts(client, us
 
     assert totals["visible"] == 2, "picked (on the board) and applied (acted on), not hidden"
     assert totals["acted_on"] == 2, "applied and hidden; machine rows are not person state"
-    assert totals["tracked"] == 4, "the old overloaded count is kept until the frontend moves"
+    assert "tracked" not in totals
 
 
 def test_admin_surfaces_name_all_three(client, admin_headers, user_headers, f):
@@ -50,7 +50,7 @@ def test_admin_surfaces_name_all_three(client, admin_headers, user_headers, f):
     users = client.get("/v1/admin/users", headers=admin_headers).json()["users"]
     person = next(u for u in users if u["id"] == uid)
     assert (person["acted_on"], person["working_set"], person["visible"]) == (2, 1, 2)
-    assert person["board_rows"] == 4
+    assert "board_rows" not in person
 
     row = client.get("/v1/analytics/sources/pop-src", headers=admin_headers).json()["row"]
     board = row["board_yield"]

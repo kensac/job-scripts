@@ -158,6 +158,36 @@ async def progress_none():
     return {"b": BatchProgress(status="in_progress", total=1)}
 
 
+@pytest.mark.asyncio
+async def test_past_the_window_a_task_resumes_only_to_collect_something(monkeypatch, set_config):
+    """Task 8540662 was resumed 752 times on one batch still
+    in_progress past the window: each resume collected nothing and parked
+    again. Past the window, a finished batch still resumes even when
+    batch_straggler_hours is longer than the window."""
+
+    async def progress(ids):
+        return {
+            "a": BatchProgress(status="completed", total=1, completed=1),
+            "b": BatchProgress(status="in_progress", total=1),
+        }
+
+    monkeypatch.setattr("core.batch.batch_progress", progress)
+    poll = make_task("poll_batches", {}, status="running")
+    _ai_batch("a", "completed", 30)
+    _ai_batch("b", "in_progress", 30)
+    stuck = make_task("run_filter", {"batch_ids": ["b"]}, status="awaiting_batch")
+    await tasks_batches.handle_poll_batches(poll, {})
+    assert _status(stuck) == "awaiting_batch"
+    label = db.query_one("SELECT progress->>%s AS l FROM tasks WHERE id = %s", ("label", poll))["l"]
+    assert "1 past the completion window with nothing finished" in label
+
+    set_config("batch_straggler_hours", 48)
+    mixed = make_task("run_filter", {"batch_ids": ["a", "b"]}, status="awaiting_batch")
+    await tasks_batches.handle_poll_batches(poll, {})
+    assert _status(mixed) == "pending"
+    assert _status(stuck) == "awaiting_batch"
+
+
 def test_straggler_hours_is_admin_config(client, admin_headers):
     r = client.put(
         "/v1/admin/config/batch_straggler_hours", json={"value": 6}, headers=admin_headers

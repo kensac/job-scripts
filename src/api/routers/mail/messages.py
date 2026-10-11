@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db
+from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.mail import applications
 from api.mail import match as mail_match
@@ -163,7 +164,7 @@ def user_mail(
         # Comma-separated for the same reason as stage: "replies" is rejection
         # AND offer AND interview_invite AND assessment_invite, and a lens the
         # client assembles from four requests is not the same set.
-        kinds = [k.strip() for k in kind.split(",") if k.strip()]
+        kinds = params_.csv(kind)
         where.append("ce.kind = ANY(%(kinds)s)")
         params["kinds"] = kinds
     if q:

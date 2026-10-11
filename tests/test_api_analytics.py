@@ -202,7 +202,7 @@ def test_board_yield_counts_applications_per_source(client, admin_headers, f):
     applications.from_board(user_id, applied, datetime.date(2026, 9, 1), set_date=True)
 
     row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "yielding")
-    assert row["board_yield"]["board_rows"] == 2
+    assert "board_rows" not in row["board_yield"]
     assert row["board_yield"]["with_status"] == 1
     assert row["board_yield"]["applied"] == 1
     assert row["board_yield"]["users"] == 1

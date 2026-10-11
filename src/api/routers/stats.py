@@ -60,13 +60,10 @@ class Totals(BaseModel):
     they hid) and `acted_on` the postings they acted on (person state). Those
     are the two populations this page names (phase 2b).
 
-    `tracked`, `applied` and `hidden` are the old user_jobs counts, kept until
-    the frontend reads the new ones: `tracked` counts every user_jobs row,
-    including machine rows for postings that have since left the board."""
+    `applied` and `hidden` are the older user_jobs counts."""
 
     visible: int
     acted_on: int
-    tracked: int
     applied: int
     hidden: int
 
@@ -124,8 +121,7 @@ def stats(user: AuthedUser = Depends(require_user)) -> Stats:
         f"""
         SELECT counts.visible, counts.acted_on, legacy.*
         FROM (SELECT {populations.per_user_counts("%(uid)s")}) counts,
-             (SELECT COUNT(*) AS tracked,
-                     COUNT(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
+             (SELECT COUNT(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
                      COUNT(*) FILTER (WHERE uj.hidden) AS hidden
               FROM user_jobs uj WHERE uj.user_id = %(uid)s) legacy
         """,

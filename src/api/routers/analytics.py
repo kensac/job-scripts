@@ -208,8 +208,8 @@ GROUP BY j.source
 
 # The three labelled populations per source (phase 2b), as (user, posting)
 # pairs: acted on (person state), picked by filters (working set), and on a
-# computed board (board_visible). board_rows above is the old overloaded
-# count, kept until the frontend reads these.
+# computed board (board_visible). board_rows above is counted only as
+# apply_rate's denominator.
 _POPULATIONS_SQL = f"""
 SELECT j.source AS source,
        count(*) FILTER (WHERE p.population = 'acted_on') AS acted_on,
@@ -467,7 +467,6 @@ class BoardOverlap(BaseModel):
 class BoardYield(BaseModel):
     """What the board's postings became once a person saw them."""
 
-    board_rows: int
     with_status: int
     applied: int
     users: int
@@ -673,7 +672,6 @@ def _source_row(
             exclusive=keyed - shared,
         ),
         board_yield=BoardYield(
-            board_rows=board_rows,
             with_status=board.with_status if board else 0,
             applied=applied,
             users=board.users if board else 0,
