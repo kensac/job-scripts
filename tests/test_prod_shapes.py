@@ -1,23 +1,10 @@
-"""Data-shape checks over a catalog, split by what each one actually needs.
+"""Check measured catalog shapes and live-writer invariants.
 
-These exist because unit tests assert what we believe the data looks like,
-which is exactly the assumption that has been wrong most often here: the
-ats_text_collapse detector was blind for its whole life because real rows had
-a `reason` value no fixture ever produced, and the comp column was unsortable
-because real postings advertise weekly pay that no test ever wrote.
-
-`corpus` runs on every pull request, against the generated corpus in
-tests/corpus.py, whose shapes are measured out of production.
-
-`integration` needs a synced copy of real production and is skipped without
-one. Every such test says in its own docstring why the corpus cannot falsify
-it - almost always because its subject is what a LIVE WRITER did, and the
-corpus has no writers. Building the corpus to satisfy those assertions would
-turn each of them into a tautology, which docs/agents/testing.md names as the
-first way a test stops being able to fail.
-
-    make test                        # everything; integration skips
-    make testdb-sync && make integration   # the real-data half
+The generated corpus covers production value shapes in pull request tests.
+Integration tests require a synced copy when their subject is data produced
+by a live writer. Generating rows to satisfy those assertions would make the
+tests unable to fail. Examples include an unexpected ATS reason and weekly
+pay values that earlier fixtures omitted.
 """
 
 from __future__ import annotations
@@ -175,25 +162,12 @@ def test_visibility_predicate_runs_against_real_volume():
 
 @pytest.mark.integration
 def test_no_stored_filter_hash_would_move_under_the_current_template():
-    """The unit suite pins one hash for one prompt; this checks every filter
-    a real user actually has.
+    """Compare stored filter hashes with current instructions.
 
-    prompt_hash is STORED on user_filters and only recomputed when a filter is
-    patched, so a change to build_custom_instructions does not fork the verdict
-    log when it ships - it arms a fork that fires later, on an edit as
-    innocuous as a rename or an enable toggle, orphaning that filter's history
-    and triggering a paid re-run. Nothing errors and nothing looks wrong until
-    weeks afterwards, which is why the check has to be against real rows.
-
-    A failure here means someone moved model guidance into the instruction
-    text. Put it in the response schema instead: the schema is not part of the
-    hash.
-
-
-    Real data only, and this is the clearest case in the file: the subject is hashes
-    STORED by older code. The corpus computes them with today's
-    build_custom_instructions, so it agrees with today's build_custom_instructions by
-    construction and could never fail.
+    Filter edits recompute prompt_hash. If the template changes, a later edit can
+    orphan prior verdicts and trigger a paid run. The generated corpus computes
+    hashes with current code, so only stored real rows can expose that drift.
+    Model guidance belongs in the response schema, outside the prompt hash.
     """
     from core.filters import build_custom_instructions, compute_prompt_hash
 

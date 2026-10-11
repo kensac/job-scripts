@@ -1,19 +1,9 @@
-"""Checks on the corpus itself, and the two things only a corpus can test.
+"""Check corpus relationships, rare values and cross-user isolation.
 
-Split in two halves.
-
-The first half is the corpus's own falsifiability. A generated corpus fails in
-one characteristic way: it looks full and joins to nothing, so every assertion
-over it is true of zero rows and the suite goes green having checked nothing.
-`docs/agents/testing.md` calls that conditional vacuity and it is the single
-thing that would make this whole arrangement worse than the copy it replaces.
-These assert that the tables are populated, that the undeclared joins actually
-join, and that the rare measured values survived generation.
-
-The second half is what the copy could never do, at any refresh rate:
-production has ONE user, so every cross-user assertion over a copy is
-vacuously true. These need several users holding overlapping jobs, which is a
-thing a generator can produce and a copy of production cannot.
+Generated tables can be populated yet fail to join, leaving board assertions
+over zero rows. These tests require useful joins and measured rare values.
+The corpus also creates overlapping jobs for multiple users, which the
+single-user production copy cannot test.
 """
 
 from __future__ import annotations
@@ -266,18 +256,11 @@ def _corpus_headers(index: int) -> dict:
 
 
 def test_the_board_route_renders_each_users_own_state_and_no_one_elses(client):
-    """The isolation check through the real route, over a full catalog, against
-    a second account that actually has rows.
+    """Check route isolation for two accounts with overlapping catalog rows.
 
-    Route-level gating here was fully correct while four object-level holes sat
-    open behind it, and no test could see them: production has one user, so a
-    copy of it renders the same page whether or not the predicate mentions
-    whose data it is.
-
-    The comparison is unconditional on purpose. The first spelling guarded it
-    with "if this user has a row for this job", and that version passed with
-    the route's `AND uj.user_id = %(uid)s` deleted outright - which is exactly
-    the conditional vacuity docs/agents/testing.md lists.
+    A single-user copy cannot expose a missing ownership predicate. Compare
+    results unconditionally: an earlier conditional check passed even with
+    `AND uj.user_id = %(uid)s` removed from the route.
     """
     with_state = 0
     for index in (0, 1):

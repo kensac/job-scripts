@@ -1,20 +1,10 @@
-"""A resumed classify task must collect the batch it already paid for.
+"""A resumed classify task collects its already submitted batch.
 
-handle_classify_mail re-runs from the top when poll_batches un-parks it. It
-selected nothing, because its own claims were in its own payload and the
-in-flight guard did not exclude itself, and then returned before reaching
-run_batched - so the finished batch was never downloaded and _finish dropped
-its ids as provably spent.
-
-Survivable during the backfill, because there was always other mail to select
-and the batch got collected as a side effect. With the backfill done, "nothing
-else to classify" is the normal state, so this became the normal path: two
-batches reached 'completed' at the provider with 0 tokens recorded, and 2,646
-messages sat unclassified behind claims nobody would ever collect.
-
-The existing coverage misses it by construction: test_mail_classify_selection.py builds a
-SECOND task id to test the cross-task case, so it can never exercise a task
-excluding itself.
+The handler restarts after a batch poll. Its own claims once made selection
+empty, so it returned before collection and then dropped the batch IDs. In
+the observed failure, two completed batches recorded zero tokens and 2,646
+messages remained unclassified. Cross-task selection tests use a second task
+ID, so this test covers the task excluding itself.
 """
 
 from __future__ import annotations

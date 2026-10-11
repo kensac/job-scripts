@@ -92,17 +92,12 @@ def _assert_disposable(url: str) -> str:
 
 
 def _worker_database(dsn: str, worker: str) -> str:
-    """One database per xdist worker, created here on demand.
+    """Create a disposable database for each xdist worker.
 
-    The advisory lock below is what keeps two runs from truncating each
-    other's rows, and under `-n` it would simply refuse every worker after
-    the first. So each worker gets its own database rather than the lock
-    being loosened: the property it protects is the one parallelism needs
-    most. Migrating an empty database costs about 1.3 s, which is less than
-    the resets a single worker saves in its first few tests.
-
-    The name is derived, not chosen, so it still satisfies the disposable
-    rule that anything destructive checks: jobtracker_test -> jobtracker_gw0_test.
+    The advisory lock prevents concurrent runs from truncating each other's
+    rows. Separate databases preserve that rule under parallel execution.
+    An empty migration was measured at about 1.3 seconds. Derived names such
+    as jobtracker_gw0_test satisfy the disposable database guard.
     """
     from core.disposable_db import require_disposable_name
 

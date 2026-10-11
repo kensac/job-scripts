@@ -1,17 +1,9 @@
-"""A managed board run must not cap the model's output.
+"""Managed board calls must allow enough output for a full verdict.
 
-Every truncated custom verdict landed on exactly 120 completion tokens with
-zero variance: p50, p95 and max all 120 across 1,852 failures, against a p95
-of 313 and a max of 1,050 for verdicts that succeeded. The cap was the whole
-of the failure.
-
-The same prompt, model and hash run through the user-filter path, which sets
-no cap, failed 0 times in 2,075. Through the managed-board path it failed
-1,725 times in 11,629.
-
-A truncated verdict is recorded as `failed`, and a board with fail_closed
-drops it silently, so this does not surface as an error. It surfaces as a
-board that is quietly missing a seventh of its postings.
+An audit found 1,852 truncated verdicts, all at exactly 120 completion
+tokens. Successful verdicts had p95 313 and maximum 1,050. The uncapped
+user-filter path had 0 failures in 2,075 calls; the managed-board path had
+1,725 in 11,629. A fail-closed board silently omits failed verdicts.
 """
 
 from __future__ import annotations

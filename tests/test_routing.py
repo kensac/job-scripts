@@ -231,18 +231,12 @@ class TestKeyAvailability:
 
 class TestCustomVerdictCostCliff:
     def test_a_model_change_hides_every_decided_custom_verdict(self, f):
-        """The real cost of a model switch, and it is not a forked log.
+        """Keep decided custom verdicts scoped to their model.
 
-        Model appears in no resolution key, so the board is unaffected. But
-        the filter evaluator skips a check by calling decided_custom_urls WITH
-        the model, so the first cycle answered by a different model sees no
-        cached verdicts and re-runs the whole candidate set at full price.
-        The estimate recorded when this test was added on 2026-09-02 was $1.32
-        for its enabled filter, or $6.19 if all ten configured filters ran.
-
-        Pinned here so that widening a call site to two models cannot be done
-        without meeting this first. It fails if the model scoping is removed,
-        which would be the other way to make the cliff disappear.
+        A model switch leaves board resolution keys unchanged but makes the
+        filter evaluator rerun candidates for the new model. The 2026-09-02
+        estimate was $1.32 for one enabled filter or $6.19 for all ten. This
+        test detects removal of the model condition from cached verdict reads.
         """
         _, url = f.make_ready_job(content="a long job description " * 20)
         add_ai_result(

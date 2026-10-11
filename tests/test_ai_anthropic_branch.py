@@ -1,15 +1,9 @@
-"""The Anthropic branch of the model call runs, through the real library.
+"""Exercise the Anthropic path through the installed client library.
 
-The 2026-09-08 measurement found zero Anthropic calls among 241k ai_queries
-rows, even though the provider branch was configured then. A library change
-on a rarely used path can first surface when someone selects that provider.
-This test runs api.ai's
-Anthropic branch through the installed anthropic client against a recorded
-Messages API response served by an httpx mock transport: a renamed request
-parameter, a moved response attribute or a changed default in the library
-fails here, where a hand-rolled stub standing in for the client would keep
-passing. (It already did once: anthropic 1.4.0 takes its transport from
-httpx2, not httpx, which the first run of this test found.)
+A 2026-09-08 audit found zero Anthropic calls among 241,000 ai_queries rows.
+The test sends a recorded Messages API response through an httpx mock
+transport. It detects client request or response changes that a stub of the
+library would miss.
 """
 
 from __future__ import annotations

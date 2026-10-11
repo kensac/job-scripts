@@ -1,15 +1,8 @@
-"""The worker actually runs when the container starts it.
+"""Execute the worker through its container entrypoint.
 
-This exists because it did not. #142 split worker.py into the tasks/ package
-and dropped `if __name__ == "__main__": main()`. The entrypoint is
-`python -m api.worker`, so the module imported, defined main(), reached EOF and
-exited 0 - a clean exit, which every healthcheck, restart policy and metric
-reads as success. The whole worker fleet did nothing for hours while looking
-healthy.
-
-Nothing in the rest of the suite can catch this: every other test imports
-`main` as a symbol, which succeeds whether or not anything calls it. The only
-way to know is to execute the module the way the container does.
+Issue #142 removed the module's main call. `python -m api.worker` then exited
+successfully without running the worker. Import-based tests could not detect
+that failure, so this test executes the module as the container does.
 """
 
 from __future__ import annotations

@@ -1,31 +1,13 @@
-"""Build a test corpus shaped like production, holding none of its data.
+"""Build synthetic rows from measured production shapes.
 
-`docs/agents/testing.md` prefers a copy of production over fabricated rows,
-and it is right about why: a fixture cannot falsify the assumption it was
-built from. This keeps that property and drops the two costs the copy cannot
-shed - it cannot run on a pull request, because reaching it needs a production
-credential, and it cannot contain a second user, because production has one.
+`tests/production_profile.json` supplies value distributions, null rates,
+string lengths and timestamp ranges. Schema foreign keys and LINKS in
+corpus_generator/config.py supply relationships. The corpus contains no
+production rows and supports multiple users in pull request tests.
 
-The trick is that the rows are fabricated but their SHAPES are not. Every
-value here comes out of `tests/production_profile.json`, which
-`scripts/measure_profile.py` measures off production: which values a column
-actually holds and how often, how often it is null, how long its strings run,
-how far back its timestamps go. Nothing in this file encodes what anyone
-BELIEVES the data looks like, and `measure_profile.py --check` fails on a
-schedule when production grows a shape this generator cannot produce.
-
-Three kinds of knowledge, kept apart on purpose:
-
-  shape       measured, lives in the profile, never written by hand
-  structure   the schema's own foreign keys, read at build time, plus LINKS
-              in corpus_generator/config.py for undeclared joins
-  invariants  NOT reproduced here. A corpus built to satisfy an assertion
-              makes that assertion a tautology. Where a test's whole subject
-              is an invariant only the live writer maintains, the test stays
-              on real data and says so.
-
-Build it with `build()`; the conftest fixture does that for anything marked
-`corpus`.
+Do not encode writer invariants into generated rows. Tests of those
+invariants need a synced production copy; otherwise the fixture would make
+their assertions true by construction. The `corpus` marker invokes build().
 """
 
 from __future__ import annotations
@@ -136,17 +118,11 @@ def build(*, target_jobs: int = TARGET_JOBS) -> dict[str, int]:
 
 
 def _refuse_to_destroy_anything_that_matters() -> None:
-    """Two ways build() could delete something it should not.
+    """Reject a non-disposable database or a synced production copy.
 
-    The database NAME, because `make corpus` calls build() outside pytest and
-    therefore outside conftest's own name gate. A mistyped DATABASE_URL there
-    would TRUNCATE whatever it reached, with nothing in between.
-
-    And a SYNCED COPY, because a full `pytest tests` pointed at one would have
-    the corpus fixture quietly truncate the very rows the integration tests
-    exist to read - then those tests would skip, having found no production
-    data, and the run would be green. conftest already carries a note that
-    this fixture silently did exactly that once.
+    `make corpus` runs outside conftest's database-name guard. Building over a
+    synced copy would erase integration evidence and could make tests skip.
+    Check both conditions before truncation.
     """
     name = require_disposable_dsn(os.environ["DATABASE_URL"])
     if holds_real_data():
