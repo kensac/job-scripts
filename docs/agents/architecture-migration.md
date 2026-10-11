@@ -435,6 +435,12 @@ answer tables. Verdicts do not fit that helper, which updates one row per url
 while `ai_queries` is append-only, but the pattern is there to extend the day
 a measurement asks for it.
 
+**Derived posting contracts live in `core.derivations`.** Compensation periods and
+conversion, embedding dimensions, job-profile and requirement vocabularies,
+and skill normalization are shared by their worker, API, and ORM readers.
+Keep each contract in its named module there. A migration freezes its own
+schema values and does not import a live contract.
+
 **A derived fact is one registration.** `tasks.DERIVATIONS` lists every
 answer a model derives from data we already hold (pay, requirements, job
 profiles, embeddings, locations), each a `tasks.derivations.sweep.Derivation` naming its

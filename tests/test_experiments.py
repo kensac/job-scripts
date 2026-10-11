@@ -14,7 +14,7 @@ import pytest
 from api import experiments as exp
 from core import answers
 from core.answers import VERIFY_INPUT_CHARS
-from core.comp import COMP_INPUT_CHARS
+from core.derivations.compensation import COMP_INPUT_CHARS
 from tasks import verify as task_verify
 from tasks.derivations import compensation as task_comp
 from tasks.verification import new_postings

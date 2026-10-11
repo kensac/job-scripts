@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
-from core.embeddings import EMBEDDING_DIMENSIONS
+from core.derivations.embeddings import EMBEDDING_DIMENSIONS
 
 
 class JobRequirements(Base):
@@ -67,7 +67,7 @@ class JobComp(Base):
     none. Keyed by url with no foreign key, like the other derived tables: a
     cache of paid work outlives the job row.
 
-    Amounts are yearly (core.comp.PERIOD_TO_YEARLY); `comp_period`,
+    Amounts are yearly (core.derivations.compensation.PERIOD_TO_YEARLY); `comp_period`,
     `comp_currency` and `comp_basis` say what was advertised, so the figure can
     be re-derived and audited.
     """

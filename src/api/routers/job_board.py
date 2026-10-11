@@ -14,7 +14,7 @@ from api.board import visibility
 from api.mail import applications
 from api.reports import ReportKind, report_kinds
 from core import catalog, verdict_reads
-from core.comp import CompBasis, CompPeriod
+from core.derivations.compensation import CompBasis, CompPeriod
 
 router = APIRouter()
 

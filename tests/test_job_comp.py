@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from core.comp import COMP_INPUT_CHARS
+from core.derivations.compensation import COMP_INPUT_CHARS
 from tasks.derivations import compensation as comp
 
 # Multibyte text past the cut, so a hash of bytes or of the whole page would

@@ -6,7 +6,7 @@ from typing import Any
 
 from api import db
 from core import verdict_reads
-from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
+from core.derivations.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 _ELIGIBLE = f"""

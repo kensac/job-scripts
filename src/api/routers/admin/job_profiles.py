@@ -12,7 +12,7 @@ from api import db, events
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
-from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
+from core.derivations.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 
 router = APIRouter()
 

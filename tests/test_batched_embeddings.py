@@ -7,7 +7,7 @@ import pytest
 from api import db, worker
 from api.ai import batch_results, request_snapshots
 from core import batch
-from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.payloads.objects import BundleMemberRef, PayloadRef, PayloadStore
 from tasks import runtime
 from tasks.derivations import embeddings

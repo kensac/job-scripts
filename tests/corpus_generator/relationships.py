@@ -110,7 +110,7 @@ def _specialise(table: str, rows: list[dict[str, Any]], gen: _Generator) -> None
         for i, row in enumerate(rows):
             row["status"] = row.get("status") or statuses[i % len(statuses)]
     elif table == "job_embeddings":
-        from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+        from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 
         for row in rows:
             # pgvector will not take anything else, and the profile cannot

@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
-from core import skills as skills_lib
 from core import verdict_reads
 from core.batch import BatchResult, BatchSpec, structured_response_spec
-from core.requirements import (
+from core.derivations import skills as skills_lib
+from core.derivations.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
     EMPLOYMENT_TYPES,
