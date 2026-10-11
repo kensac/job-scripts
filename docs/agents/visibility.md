@@ -274,6 +274,15 @@ filters and board, gated like every per-job route. Both job drawers render it;
 a new rule that reads, skips, judges or shows a posting adds its stage here, or
 the drawer goes back to having no answer for it.
 
+`posting_path_common` owns the response shapes and verdict provenance shared
+by every consumer. `posting_path_catalog` owns catalog admission, stored text
+and verification stages. `posting_path_gates` owns current criteria, volume,
+title and verdict decisions. `posting_path_consumers` assembles managed board,
+filter and personal board paths from those stages; `posting_path` selects the
+posting and the consumer set. The verdict cache resets for each path request,
+and the personal path includes only the caller's filters and board. Keep
+recorded membership distinct from stages evaluated under today's rules.
+
 ## Location criteria match places, not words
 
 Every distinct location string a board writes is one row of `locations`,
