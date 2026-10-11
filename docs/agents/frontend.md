@@ -116,8 +116,9 @@ revision, digest algorithm and chunk count. Fetch each chunk with that
 revision and `chunk_index`; verify the named digest before parsing or
 caching them. The extension pins a revision per fill and keeps an unexpired
 verified copy through an outage. `POST /v1/admin/extension/recipes/{adapter}/rollback`
-re-enables the previous publish. Older JSONB revisions keep their raw-byte
-digest; the manifest names that algorithm. The version 1 single-response
+re-enables the previous publish. Published recipes are read from stored
+chunks only. Keep raw-byte digest validation in the extension for old cached
+manifests until their cache window has passed. The version 1 single-response
 read stays only while older clients use it. Remove it
 after the fleet and extension have moved to version 2. This channel is for a
 developer-mode or self-hosted install: the Chrome Web Store's MV3 policy
