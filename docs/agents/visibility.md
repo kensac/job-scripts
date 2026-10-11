@@ -401,8 +401,9 @@ plain non-negative integers and drops the rest. `tests/test_comma_lists.py`
 fails on a module that splits its own; one admin lookup's copy had drifted to
 accept negative ids.
 
-**A view is a name that returns a page to a state.** `saved_views` holds, per
-user and per page, the filters, the sort order across columns, the columns and
+**A saved view is a name that returns a page to a state.**
+`api.routers.saved_views` owns `/user/views`, backed by `saved_views`. Each
+row holds, per user and per page, the filters, the sort order across columns, the columns and
 the search a person wants back; several per page, one default, ordered. The
 state is the page's canonical request shape, the same names the API echoes in
 `filters`, `sorts` and `sortable`, never a build's private wording, so a view

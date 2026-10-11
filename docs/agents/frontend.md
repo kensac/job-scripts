@@ -165,7 +165,7 @@ other people's filter names or global policy editing.
 
 The implementations are `SettingsPut` and `FilterPatch` in `api/models.py`,
 `put_settings` in `api/routers/users.py`, and the request models and writers in
-`api/routers/views.py` and `api/routers/apply.py`. Filter and view updates share
+`api/routers/saved_views.py` and `api/routers/apply.py`. Filter and view updates share
 `api.updates.NonNullUpdate`; preserve its distinction between omission and null.
 
 ## Actions

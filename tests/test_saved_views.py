@@ -182,7 +182,7 @@ def test_concurrent_default_selection_serializes_on_owner(client, user_headers, 
     from concurrent.futures import ThreadPoolExecutor
 
     from api.auth import AuthedUser
-    from api.routers.views import ViewCreate, ViewPatch, create_view, patch_view
+    from api.routers.saved_views import ViewCreate, ViewPatch, create_view, patch_view
 
     first = _create(client, user_headers, "First")
     second = _create(client, user_headers, "Second")
