@@ -136,7 +136,7 @@ class ApplicationReport(Base):
     url: Mapped[str] = mapped_column(Text)
     host: Mapped[str] = mapped_column(Text)
     note: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    # Older reports carry one JSON value. New reports keep their page in chunks.
+    # Removed after every fleet reader has stopped using this column.
     page: Mapped[Any | None] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 

@@ -131,15 +131,11 @@ set NOT NULL and drop the CHECK in a short transaction.
 
 ## Long-running work
 
-**Move application report pages one row at a time.** The report upload release
-writes all new pages as chunks, including requests from older extensions. Run
-`scripts/backfill_application_reports.py --apply` only after that release is
-live. Each transaction locks one old report, writes its chunks, checks that
-they decode to the same JSON value, and then clears `application_reports.page`.
-Check that zero non-null pages remain before the later reader release stops
-using the column. Drop the column only in a later migration after every fleet
-reader has moved off it. Keep the chunk rows because they are the complete
-page's durable copy.
+**Retire an old data column in two releases.** First verify that every old
+value has moved and that current writers use the new storage. Remove all reads
+of the old column in one release. After every fleet reader runs that release,
+drop the column through a migration that proves the column empty. Keep the
+application report chunks because they are each page's durable copy.
 
 Do not put a large data operation inside a migration. Migrations run at every
 container start behind the schema lock, so a long one stalls every deploy.

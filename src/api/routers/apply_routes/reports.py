@@ -49,8 +49,7 @@ def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> R
         reports=db.query_as(
             ProblemReport,
             "SELECT r.id, r.url, r.host, r.note, r.created_at, "
-            "COALESCE(r.page->>'title', u.title) AS title, "
-            "COALESCE(jsonb_array_length(r.page->'fields'), u.field_count, 0) AS fields "
+            "u.title AS title, u.field_count AS fields "
             "FROM application_reports r LEFT JOIN application_report_uploads u ON u.report_id = r.id "
             "WHERE r.user_id = %s ORDER BY r.created_at DESC LIMIT %s",
             (user.id, max(1, min(limit, 500))),
@@ -62,7 +61,7 @@ def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> R
 def get_report(report_id: int, user: AuthedUser = Depends(require_user)) -> ProblemReportDetail:
     row = db.query_one_as(
         ProblemReportDetail,
-        "SELECT r.id, r.url, r.host, r.note, r.page, r.created_at, u.chunk_count "
+        "SELECT r.id, r.url, r.host, r.note, NULL::jsonb AS page, r.created_at, u.chunk_count "
         "FROM application_reports r LEFT JOIN application_report_uploads u ON u.report_id = r.id "
         "WHERE r.id = %s AND r.user_id = %s",
         (report_id, user.id),
