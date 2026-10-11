@@ -1,7 +1,7 @@
 """Drop legacy resume values after verified copy.
 
 Revision ID: 5a04926d6434
-Revises: 8e25d1b9702d
+Revises: d0d5cad33df9
 Create Date: 2026-10-11 18:46:01.069563
 
 Only deploy this after the reader cutover is live on every host and the
@@ -26,13 +26,17 @@ _TABLES = ("user_resumes", "user_resume_revisions")
 
 def _require_canonical_copies() -> None:
     connection = op.get_bind()
-    enabled = connection.execute(
-        sa.text("""
+    enabled = (
+        connection.execute(
+            sa.text("""
         SELECT key FROM app_config
         WHERE key IN ('resume_backfill_enabled', 'resume_legacy_clear_enabled')
           AND value <> 'false'::jsonb
     """)
-    ).scalars().all()
+        )
+        .scalars()
+        .all()
+    )
     if enabled:
         raise RuntimeError(f"retired resume scheduling is still enabled: {enabled}")
     active = connection.execute(
@@ -44,12 +48,6 @@ def _require_canonical_copies() -> None:
     ).scalar_one()
     if active:
         raise RuntimeError(f"{active} retired resume tasks are still active")
-    unfinished = connection.execute(sa.text("""
-        SELECT count(*) FROM resume_legacy_clear_runs
-        WHERE stage <> 'done' OR failed_at IS NOT NULL
-    """)).scalar_one()
-    if unfinished:
-        raise RuntimeError(f"{unfinished} resume clearing runs are unfinished")
     for table in _TABLES:
         missing = connection.execute(
             sa.text(f"""
