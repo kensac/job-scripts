@@ -1,795 +1,88 @@
+"""Select posting detail resolvers and expose their stable contract."""
+
 from __future__ import annotations
 
-import datetime
-import enum
-import html
-import json
 import logging
 import re
-from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import Any, ClassVar, TypeGuard
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import urlparse
 
-import ftfy
-import requests
-from bs4 import BeautifulSoup
-
-from core.fetching.client import session as _session
+from core.fetching.ats_apple import Apple
+from core.fetching.ats_ashby import Ashby
+from core.fetching.ats_common import (
+    UNSUPPORTED,
+    AtsResolver,
+    AtsResult,
+    Status,
+    _session,
+    ashby_text,
+    clean_html,
+    goldman_place,
+    goldman_text,
+    greenhouse_text,
+    lever_text,
+    oracle_text,
+    source_posting_url,
+    workable_text,
+)
+from core.fetching.ats_common import (
+    join_posting_sections as join,
+)
+from core.fetching.ats_common import (
+    parse_posted_date as _iso_date,
+)
+from core.fetching.ats_eightfold import EIGHTFOLD, Eightfold
+from core.fetching.ats_goldman import Goldman
+from core.fetching.ats_greenhouse import Greenhouse
+from core.fetching.ats_ibm import Ibm
+from core.fetching.ats_icims import ICims
+from core.fetching.ats_lever import Lever
+from core.fetching.ats_oracle import Oracle
+from core.fetching.ats_smartrecruiters import SmartRecruiters
+from core.fetching.ats_workable import Workable
+from core.fetching.ats_workday import Workday
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
 
+__all__ = [
+    "EIGHTFOLD",
+    "RESOLVERS",
+    "UNSUPPORTED",
+    "Apple",
+    "Ashby",
+    "AtsResolver",
+    "AtsResult",
+    "Eightfold",
+    "Goldman",
+    "Greenhouse",
+    "ICims",
+    "Ibm",
+    "Lever",
+    "Oracle",
+    "SmartRecruiters",
+    "Status",
+    "Workable",
+    "Workday",
+    "_iso_date",
+    "_session",
+    "amazon_canonical",
+    "ashby_text",
+    "canonicalize",
+    "clean_html",
+    "eightfold_listing_prefixes",
+    "goldman_place",
+    "goldman_text",
+    "greenhouse_text",
+    "is_ats_email_domain",
+    "join",
+    "lever_text",
+    "oracle_text",
+    "resolve",
+    "resolve_listed",
+    "source_posting_url",
+    "workable_text",
+]
+
 logger = logging.getLogger(__name__)
-
-
-class Status(enum.Enum):
-    OK = "ok"
-    GONE = "gone"
-    UNSUPPORTED = "unsupported"
-    ERROR = "error"
-
-
-@dataclass(frozen=True)
-class AtsResult:
-    status: Status
-    text: str | None = None
-    source: str | None = None
-    # The day the board says the posting went up, when the API states one.
-    # Workday's list endpoint says only "Posted 30+ Days Ago" past its window,
-    # but the posting's own JSON carries the start date, so 1,154 undated rows
-    # on 2026-09-04 could be dated from the fetch they were about to get.
-    posted: datetime.date | None = None
-
-    @property
-    def ok(self) -> bool:
-        return self.status is Status.OK
-
-
-UNSUPPORTED = AtsResult(Status.UNSUPPORTED)
-
-
-def source_posting_url(url: str, listings_url: str | None) -> str:
-    """An embedded posting's catalog source supplies its board identity.
-
-    A hostname guess cannot prove a closure: a wrong board and a removed
-    posting both return 404. Only use the configured Greenhouse API source.
-    Keep the original URL as the storage key and browser fallback.
-    """
-    posting = urlparse(url)
-    job_id = (parse_qs(posting.query).get("gh_jid") or [None])[0]
-    listing = urlparse(listings_url or "")
-    board = re.fullmatch(r"/v1/boards/([A-Za-z0-9_-]+)/jobs/?", listing.path)
-    if (
-        job_id
-        and job_id.isascii()
-        and job_id.isdecimal()
-        and listing.hostname == "boards-api.greenhouse.io"
-        and board
-    ):
-        return f"https://boards.greenhouse.io/{board.group(1)}/jobs/{job_id}"
-    return url
-
-
-def clean_html(raw: str) -> str:
-    text = BeautifulSoup(html.unescape(raw or ""), "html.parser").get_text("\n")
-    return ftfy.fix_text(re.sub(r"\n{3,}", "\n\n", text)).strip()
-
-
-def _iso_date(text: str | None) -> datetime.date | None:
-    try:
-        return datetime.date.fromisoformat((text or "")[:10])
-    except ValueError:
-        return None
-
-
-def join(*parts: str | None) -> str:
-    return "\n\n".join(p.strip() for p in parts if p and p.strip()).strip()
-
-
-# The text of one posting from the JSON its board's API returns. One function
-# per format, shared by the resolver (which fetches a posting by URL) and the
-# listing fetcher in core/boards.py (which gets the same JSON for every
-# posting in one call), so the text a listing stores is exactly the text a
-# resolver would have fetched for it, and the per-posting fetch is not needed.
-
-
-def greenhouse_text(data: dict) -> str:
-    return join(
-        data.get("title"),
-        (data.get("location") or {}).get("name"),
-        clean_html(data.get("content", "")),
-    )
-
-
-def lever_text(data: dict) -> str:
-    lists = [join(s.get("text"), clean_html(s.get("content", ""))) for s in data.get("lists", [])]
-    return join(
-        data.get("text"),
-        (data.get("categories") or {}).get("location"),
-        clean_html(data.get("description", "")),
-        *lists,
-        clean_html(data.get("additional", "")),
-    )
-
-
-def ashby_text(job: dict) -> str:
-    comp = (job.get("compensation") or {}).get("compensationTierSummary")
-    return join(
-        job.get("title"),
-        job.get("location"),
-        comp,
-        clean_html(job.get("descriptionHtml", "")),
-    )
-
-
-def goldman_text(role: dict) -> str:
-    """One role as Goldman's roleSearch returns it. The posting page shows the
-    same description beside its overview (title, place, corporate title, pay)
-    and a block of firm-wide benefits, which is left out."""
-    comp = role.get("compensation") or {}
-    pay = ""
-    if comp.get("minSalary") and comp.get("maxSalary"):
-        pay = f"{comp.get('currency') or ''} {comp['minSalary']:,.0f} - {comp['maxSalary']:,.0f}"
-    return join(
-        role.get("jobTitle"),
-        "; ".join(goldman_place(loc) for loc in role.get("locations") or []),
-        role.get("corporateTitle"),
-        pay,
-        clean_html(role.get("descriptionHtml") or ""),
-    )
-
-
-def goldman_place(loc: dict) -> str:
-    return ", ".join(str(loc[k]) for k in ("city", "state", "country") if loc.get(k))
-
-
-def oracle_text(item: dict) -> str:
-    """One requisition as Oracle Recruiting's detail call returns it. The
-    listing call carries the same keys minus the description, so a listing
-    row would read short; the resolver fetches the detail instead."""
-    return join(
-        item.get("Title"),
-        item.get("PrimaryLocation"),
-        clean_html(item.get("ExternalDescriptionStr") or ""),
-        clean_html(item.get("ExternalResponsibilitiesStr") or ""),
-        clean_html(item.get("ExternalQualificationsStr") or ""),
-    )
-
-
-def workable_text(data: dict) -> str:
-    loc = data.get("location") or {}
-    return join(
-        data.get("title"),
-        ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k)),
-        clean_html(data.get("description") or ""),
-        clean_html(data.get("requirements") or ""),
-        clean_html(data.get("benefits") or ""),
-    )
-
-
-class AtsResolver(ABC):
-    name: ClassVar[str]
-    markers: ClassVar[tuple[str, ...]]
-
-    def matches(self, url: str) -> bool:
-        return any(m in url for m in self.markers)
-
-    @abstractmethod
-    def fetch(self, url: str) -> AtsResult: ...
-
-    def canonical(self, url: str) -> str | None:
-        """Collapse URL variants of one posting onto a single clickable URL."""
-        return None
-
-    def get(self, url: str, **kwargs: Any) -> requests.Response | None:
-        return self._send(_session.get, url, **kwargs)
-
-    def post(self, url: str, **kwargs: Any) -> requests.Response | None:
-        return self._send(_session.post, url, **kwargs)
-
-    def _send(
-        self, send: Callable[..., requests.Response], url: str, **kwargs: Any
-    ) -> requests.Response | None:
-        """The answer, or None when there was none to read: a resolver
-        reads None as ERROR, never as the posting's closure."""
-        try:
-            return send(url, **kwargs)
-        except requests.RequestException as exc:
-            logger.debug(f"[{self.name}] request failed {url}: {exc}")
-            return None
-
-    def result(self, text: str | None) -> AtsResult:
-        if text:
-            return AtsResult(Status.OK, text, self.name)
-        return AtsResult(Status.ERROR, source=self.name)
-
-    def from_response(self, resp: requests.Response | None) -> AtsResult | None:
-        if resp is None:
-            return AtsResult(Status.ERROR, source=self.name)
-        if resp.status_code in (404, 410):
-            return AtsResult(Status.GONE, source=self.name)
-        if resp.status_code != 200:
-            return AtsResult(Status.ERROR, source=self.name)
-        return None
-
-
-class Greenhouse(AtsResolver):
-    name = "greenhouse"
-    markers = ("greenhouse.io", "gh_jid=")
-
-    def canonical(self, url: str) -> str | None:
-        parsed = urlparse(url)
-        match = re.search(r"greenhouse\.io/([^/?]+)/jobs/(\d+)", url)
-        if match:
-            return f"https://{parsed.netloc.lower()}/{match.group(1)}/jobs/{match.group(2)}"
-        job_id = (parse_qs(parsed.query).get("gh_jid") or [None])[0]
-        if job_id:
-            return f"https://{parsed.netloc.lower()}{parsed.path.rstrip('/')}?gh_jid={job_id}"
-        return None
-
-    def fetch(self, url: str) -> AtsResult:
-        parsed = urlparse(url)
-        board = job_id = None
-        match = re.search(r"greenhouse\.io/([^/?]+)/jobs/(\d+)", url)
-        if match:
-            board, job_id = match.group(1), match.group(2)
-        else:
-            job_id = (parse_qs(parsed.query).get("gh_jid") or [None])[0]
-        if not job_id:
-            return UNSUPPORTED
-
-        host = parsed.netloc.replace("www.", "").split(".")[0]
-        candidates = [c for c in dict.fromkeys([board, host, host.replace("-", "")]) if c]
-
-        last: AtsResult = AtsResult(Status.ERROR, source=self.name)
-        for cand in candidates:
-            resp = self.get(
-                f"https://boards-api.greenhouse.io/v1/boards/{cand}/jobs/{job_id}?content=true"
-            )
-            early = self.from_response(resp)
-            if early is not None:
-                if cand == board:
-                    # An explicit board identity owns the answer. Trying a
-                    # hostname guess afterwards discarded authoritative 404s.
-                    return early
-                # A 404 only proves the posting is gone when the board token
-                # came explicitly from a greenhouse.io URL. For host-derived
-                # guesses (embedded boards on custom domains) a 404 usually
-                # means the guess was wrong, not that the job is dead.
-                if early.status is Status.GONE and cand != board:
-                    last = AtsResult(Status.ERROR, source=self.name)
-                else:
-                    last = early
-                continue
-            assert resp is not None
-            return self.result(greenhouse_text(resp.json()))
-        return last
-
-
-class Lever(AtsResolver):
-    name = "lever"
-    markers = ("lever.co",)
-
-    def canonical(self, url: str) -> str | None:
-        match = re.search(r"(jobs(?:\.eu)?\.lever\.co)/([^/?]+)/([0-9a-f-]{36})", url)
-        return (
-            f"https://{match.group(1).lower()}/{match.group(2)}/{match.group(3)}" if match else None
-        )
-
-    def fetch(self, url: str) -> AtsResult:
-        match = re.search(r"lever\.co/([^/]+)/([0-9a-f-]{36})", url)
-        if not match:
-            return UNSUPPORTED
-        api_host = "api.eu.lever.co" if ".eu.lever.co" in url else "api.lever.co"
-        resp = self.get(f"https://{api_host}/v0/postings/{match.group(1)}/{match.group(2)}")
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        return self.result(lever_text(resp.json()))
-
-
-class Ashby(AtsResolver):
-    name = "ashby"
-    markers = ("ashbyhq.com",)
-
-    def canonical(self, url: str) -> str | None:
-        match = re.search(r"ashbyhq\.com/([^/?]+)/([0-9a-f-]{36})", url)
-        return f"https://jobs.ashbyhq.com/{match.group(1)}/{match.group(2)}" if match else None
-
-    def fetch(self, url: str) -> AtsResult:
-        match = re.search(r"ashbyhq\.com/([^/]+)/([0-9a-f-]{36})", url)
-        if not match:
-            return UNSUPPORTED
-        org, job_id = unquote(match.group(1)), match.group(2)
-        resp = self.get(
-            f"https://api.ashbyhq.com/posting-api/job-board/{org}?includeCompensation=true"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        for job in resp.json().get("jobs", []):
-            if job.get("id") == job_id or job_id in str(job.get("jobUrl", "")):
-                return self.result(ashby_text(job))
-        return AtsResult(Status.GONE, source=self.name)
-
-
-class SmartRecruiters(AtsResolver):
-    name = "smartrecruiters"
-    markers = ("smartrecruiters.com",)
-
-    _SECTIONS = ("companyDescription", "jobDescription", "qualifications", "additionalInformation")
-
-    def canonical(self, url: str) -> str | None:
-        match = re.search(r"smartrecruiters\.com/([^/?]+)/(\d+)", url)
-        return (
-            f"https://jobs.smartrecruiters.com/{match.group(1)}/{match.group(2)}" if match else None
-        )
-
-    def fetch(self, url: str) -> AtsResult:
-        match = re.search(r"smartrecruiters\.com/([^/]+)/(\d+)", url)
-        if not match:
-            return UNSUPPORTED
-        resp = self.get(
-            f"https://api.smartrecruiters.com/v1/companies/{match.group(1)}/postings/{match.group(2)}"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        data = resp.json()
-        # A removed public ad can retain its complete description at HTTP 200.
-        # Missing fields are not closure evidence, and truthy strings are not
-        # booleans. INTERNAL means unavailable to this public-board audience.
-        if data.get("active") is False or data.get("visibility") == "INTERNAL":
-            return AtsResult(Status.GONE, source=self.name)
-        loc = data.get("location") or {}
-        sections = (data.get("jobAd") or {}).get("sections") or {}
-        body = [clean_html((sections.get(k) or {}).get("text", "")) for k in self._SECTIONS]
-        return self.result(
-            join(
-                data.get("name"),
-                " ".join(str(loc.get(k, "")) for k in ("city", "region", "country")),
-                *body,
-            )
-        )
-
-
-class Workday(AtsResolver):
-    name = "workday"
-    markers = ("myworkdayjobs.com",)
-
-    def canonical(self, url: str) -> str | None:
-        parsed = urlparse(url)
-        path = re.sub(r"^/[a-z]{2}-[a-z]{2}/", "/", parsed.path, flags=re.IGNORECASE)
-        match = re.match(r"^/([^/]+)/job/(.+?)/?$", path)
-        return (
-            f"https://{parsed.netloc.lower()}/{match.group(1)}/job/{match.group(2)}"
-            if match
-            else None
-        )
-
-    def fetch(self, url: str) -> AtsResult:
-        parsed = urlparse(url)
-        tenant = parsed.netloc.split(".")[0]
-        path = re.sub(r"^/[a-z]{2}-[a-z]{2}/", "/", parsed.path, flags=re.IGNORECASE)
-        match = re.match(r"^/([^/]+)/job/(.+)$", path)
-        if not match:
-            return UNSUPPORTED
-        resp = self.get(
-            f"https://{parsed.netloc}/wday/cxs/{tenant}/{match.group(1)}/job/{match.group(2)}"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        info = resp.json().get("jobPostingInfo") or {}
-        result = self.result(
-            join(
-                info.get("title"),
-                info.get("location"),
-                info.get("startDate"),
-                clean_html(info.get("jobDescription", "")),
-            )
-        )
-        return replace(result, posted=_iso_date(info.get("startDate")))
-
-
-class Oracle(AtsResolver):
-    """Oracle Recruiting (Fusion HCM) candidate experience: the posting page is
-    rendered by script, but the same tenant serves the requisition as JSON."""
-
-    name = "oracle"
-    markers = ("oraclecloud.com",)
-    # Requisition ids are usually numeric; some tenants prefix them (W737248).
-    _JOB = re.compile(r"/sites/([^/]+)/job/([A-Za-z0-9_-]+)")
-
-    def canonical(self, url: str) -> str | None:
-        parsed = urlparse(url)
-        match = self._JOB.search(parsed.path)
-        return (
-            f"https://{parsed.netloc.lower()}/hcmUI/CandidateExperience/en/sites/"
-            f"{match.group(1)}/job/{match.group(2)}"
-            if match
-            else None
-        )
-
-    def fetch(self, url: str) -> AtsResult:
-        parsed = urlparse(url)
-        match = self._JOB.search(parsed.path)
-        if not match:
-            return UNSUPPORTED
-        site, job_id = match.groups()
-        resp = self.get(
-            f"https://{parsed.netloc}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails"
-            f"?onlyData=true&expand=all&finder=ById;siteNumber={site},Id=%22{job_id}%22"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        items = resp.json().get("items") or []
-        # A requisition that is no longer posted comes back as an empty list,
-        # not a 404.
-        if not items:
-            return AtsResult(Status.GONE, source=self.name)
-        return replace(
-            self.result(oracle_text(items[0])),
-            posted=_iso_date(items[0].get("ExternalPostedStartDate") or items[0].get("PostedDate")),
-        )
-
-
-class Workable(AtsResolver):
-    name = "workable"
-    markers = ("workable.com",)
-    _JOB = re.compile(r"workable\.com/([^/]+)/j/([A-Za-z0-9]+)")
-
-    def canonical(self, url: str) -> str | None:
-        match = self._JOB.search(url)
-        return (
-            f"https://apply.workable.com/{match.group(1)}/j/{match.group(2).upper()}/"
-            if match
-            else None
-        )
-
-    def fetch(self, url: str) -> AtsResult:
-        match = self._JOB.search(url)
-        if not match:
-            return UNSUPPORTED
-        resp = self.get(
-            f"https://apply.workable.com/api/v2/accounts/{match.group(1)}/jobs/{match.group(2)}"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        data = resp.json()
-        return replace(self.result(workable_text(data)), posted=_iso_date(data.get("published")))
-
-
-class ICims(AtsResolver):
-    """An iCIMS portal posting, read from the frame its public page embeds.
-
-    The public URL serves the portal's chrome with the posting inside an
-    iframe, which neither the static fetch nor the browser's body text reads:
-    GDMS answered 7,417 characters of site navigation and none of the posting,
-    Joby 472 (2026-10-05). The frame itself, the same URL with in_iframe=1,
-    carries the posting as schema.org JobPosting JSON-LD. A posting that is
-    not public answers 410: 40 of 40 ids missing from two tenants' sitemaps
-    did, and 6 of 6 listed ids answered 200 with the JSON-LD.
-    """
-
-    name = "icims"
-    markers = ("icims.com",)
-    _JOB = re.compile(r"/jobs/(\d+)(?:/[^/]*)?/job")
-    _LD = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
-
-    def canonical(self, url: str) -> str | None:
-        parsed = urlparse(url)
-        match = self._JOB.search(parsed.path)
-        return f"https://{parsed.netloc.lower()}/jobs/{match.group(1)}/job" if match else None
-
-    def fetch(self, url: str) -> AtsResult:
-        parsed = urlparse(url)
-        host = parsed.netloc.lower()
-        match = self._JOB.search(parsed.path)
-        if not host.endswith(".icims.com") or not match:
-            return UNSUPPORTED
-        resp = self.get(f"https://{host}/jobs/{match.group(1)}/job?in_iframe=1")
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        posting = next(
-            (d for d in map(_json_or_none, self._LD.findall(resp.text)) if _is_job_posting(d)),
-            None,
-        )
-        if posting is None:
-            return self.result(None)
-        places = posting.get("jobLocation") or []
-        places = places if isinstance(places, list) else [places]
-        result = self.result(
-            join(
-                posting.get("title"),
-                "; ".join(_ld_place(p) for p in places if _ld_place(p)),
-                clean_html(posting.get("description") or ""),
-            )
-        )
-        return replace(result, posted=_iso_date(posting.get("datePosted")))
-
-
-class Apple(AtsResolver):
-    """A jobs.apple.com posting, read from the careers site's own details API.
-
-    The posting page builds its text from JSON embedded in the page, so the
-    static fetch extracts the site's navigation alone (3,278 characters, none
-    of the posting, on 2026-10-05) and that clears static_fetch_min_chars.
-    jobDetails takes the id the page URL carries.
-
-    A requisition that is no longer posted answers 404: 68 of 68 requisitions
-    from an aggregator's history that the board no longer listed did, and 66
-    of 66 it still listed answered 200. A 200 is not proof the posting is
-    listed: one requisition missing from the board answered 200 with its
-    full text, so the board pull, not this, closes that one. An unknown
-    location suffix answers the requisition itself, not a 404.
-    """
-
-    name = "apple"
-    # The slash keeps the marker out of the mail domains, which inherit
-    # resolver markers: whether jobs.apple.com sends application mail has
-    # not been measured.
-    markers = ("jobs.apple.com/",)
-    # A pipeline row's id is "PIPE-<n>" in the search API, and its page and
-    # jobDetails both take <n>; both also accept the prefixed form.
-    _JOB = re.compile(
-        r"jobs\.apple\.com/[a-z]{2}-[a-z]{2}/details/(?:PIPE-)?([0-9][0-9-]*)(/[^/?#]+)?"
-    )
-    _SECTIONS = (
-        ("jobSummary", None),
-        ("description", "Description"),
-        ("responsibilities", "Responsibilities"),
-        ("minimumQualifications", "Minimum Qualifications"),
-        ("preferredQualifications", "Preferred Qualifications"),
-    )
-
-    def canonical(self, url: str) -> str | None:
-        # The listing fetcher writes /en-us/details/{id}/{slug}; any locale,
-        # query or trailing page (/locationPicker) of the same posting is it.
-        match = self._JOB.search(url)
-        if not match:
-            return None
-        return f"https://jobs.apple.com/en-us/details/{match.group(1)}{match.group(2) or ''}"
-
-    def fetch(self, url: str) -> AtsResult:
-        match = self._JOB.search(url)
-        if not match:
-            return UNSUPPORTED
-        job_id = match.group(1)
-        resp = self.get(f"https://jobs.apple.com/api/v1/jobDetails/{job_id}")
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        data = resp.json().get("res") or {}
-        # For an unknown location suffix jobNumber is the bare requisition and
-        # selectedLocation is one of its other places, so name them all.
-        place = data.get("selectedLocation") if data.get("jobNumber") == job_id else None
-        places = [place] if place else data.get("locations") or []
-        result = self.result(
-            join(
-                data.get("postingTitle"),
-                "; ".join(
-                    ", ".join(dict.fromkeys(x for x in (p.get("name"), p.get("countryName")) if x))
-                    for p in places
-                ),
-                *(
-                    join(label, data.get(key)) if data.get(key) else None
-                    for key, label in self._SECTIONS
-                ),
-            )
-        )
-        # A managed pipeline role's date is the time of the request, here as
-        # in the search API.
-        if data.get("managedPipelineRole"):
-            return result
-        return replace(result, posted=_iso_date(data.get("postDateInGMT")))
-
-
-class Goldman(AtsResolver):
-    """A higher.gs.com role, read from the careers site's own GraphQL `role`.
-
-    The text is goldman_text over the same fields the listing fetcher reads,
-    so a re-check sees the text the listing stored. The page itself is
-    server-rendered and the static tier reads it too (7 of 7 listed roles on
-    2026-10-05), with the site's navigation and a firm-wide benefits block
-    around the description.
-
-    A role the board no longer lists has no closure signal: 44 of 44 such
-    roles from an aggregator's history answered INTERNAL_ERROR, "An exception
-    occurred when making a request to an external service", exactly as a
-    made-up id and an upstream failure do, and their pages read "Oops,
-    something went wrong". So any error is ERROR and never GONE, the page
-    tiers get their turn, and the board's authoritative pull closes the role.
-    """
-
-    name = "goldman"
-    # The path keeps the marker out of the mail domains, which inherit
-    # resolver markers: whether higher.gs.com sends application mail has not
-    # been measured.
-    markers = ("higher.gs.com/roles/",)
-    _ROLE = re.compile(r"higher\.gs\.com/roles/(\d+)")
-    _QUERY = """query Role($id: String!) {
-  role(externalSourceId: $id) {
-    jobTitle corporateTitle status externalJobStatus lastPostedDate
-    locations { city state country }
-    compensation { minSalary maxSalary currency }
-    descriptionHtml
-  }
-}"""
-
-    def fetch(self, url: str) -> AtsResult:
-        match = self._ROLE.search(url)
-        if not match:
-            return UNSUPPORTED
-        resp = self.post(
-            "https://api-higher.gs.com/gateway/api/v1/graphql",
-            json={"query": self._QUERY, "variables": {"id": match.group(1)}},
-        )
-        # Not from_response: the gateway answers a missing role 200 with
-        # INTERNAL_ERROR (a made-up id, 2026-10-10) and a wrong path 401, so a
-        # status here is about the endpoint, never the role, and a 404 read as
-        # GONE would close every Goldman posting the day the path moved.
-        if resp is None or resp.status_code != 200:
-            return AtsResult(Status.ERROR, source=self.name)
-        role = (resp.json().get("data") or {}).get("role") or {}
-        # Every role listed on 2026-10-05 read POSTED. The schema also has
-        # UNPOSTED, EXPIRED and SCHEDULED, none of them seen, so their text is
-        # not offered as a live posting's.
-        if role.get("externalJobStatus") not in (None, "POSTED") or not role.get("descriptionHtml"):
-            return AtsResult(Status.ERROR, source=self.name)
-        return replace(
-            self.result(goldman_text(role)), posted=_iso_date(role.get("lastPostedDate"))
-        )
-
-
-class Ibm(AtsResolver):
-    """A careers.ibm.com posting's closure, read off the Avature host's redirect.
-
-    No unauthenticated endpoint returns the full text. The careers search
-    index carries a 256-character snippet and a body without the headings,
-    education or years of experience; every careers.ibm.com page and feed
-    answers a plain or Chrome-fingerprinted request with an AWS WAF challenge
-    (202), so the static tier never gets the page; the browser does (7 of 7
-    listed postings on 2026-10-05, about 91% of the index body's 8-word runs
-    on the page). So an open posting is UNSUPPORTED here and its text comes
-    from the browser.
-
-    ibmglobal.avature.net/en_US/careers/JobDetail?jobId={id} answers without
-    a challenge: 301 to careers.ibm.com's JobDetail for an open posting, and
-    301 to /careers/Error for one IBM has closed. Measured 2026-10-05: 19 of
-    19 ids an aggregator held and the board no longer listed went to Error,
-    so did 1 of 10 the search index still listed, and in a browser every one
-    of the 9 opened (that one among them) ended on IBM's page "this job is
-    closed"; the other 9 listed went to JobDetail. A made-up id goes to Error
-    too.
-    """
-
-    name = "ibm"
-    # The paths keep the markers out of the mail domains; ibmglobal.avature.net
-    # is what aggregators link (SimplifyJobs, 19 of 19).
-    markers = ("careers.ibm.com/", "ibmglobal.avature.net/")
-    _JOB = re.compile(r"(?:careers\.ibm\.com|ibmglobal\.avature\.net)/.*[?&]jobId=(\d+)")
-
-    def fetch(self, url: str) -> AtsResult:
-        match = self._JOB.search(url)
-        if not match:
-            return UNSUPPORTED
-        resp = self.get(
-            f"https://ibmglobal.avature.net/en_US/careers/JobDetail?jobId={match.group(1)}",
-            allow_redirects=False,
-        )
-        if resp is None:
-            return AtsResult(Status.ERROR, source=self.name)
-        location = urlparse(resp.headers.get("location") or "").path
-        if resp.status_code in (301, 302) and location.endswith("/careers/Error"):
-            return AtsResult(Status.GONE, source=self.name)
-        return UNSUPPORTED
-
-
-class Eightfold(AtsResolver):
-    """An Eightfold posting, read from its tenant's detail endpoint.
-
-    The posting page is a shell. On 2026-10-05 the static tier returned
-    139,000 to 163,000 characters for eight Lockheed and Northrop postings,
-    the title and the site's theme JSON, and not one 50-character run of the
-    description; the gate passed all eight. A removed posting's page is the
-    same shell. The detail endpoint carries the text and answers 404 for a
-    posting it no longer has.
-
-    A tenant posts on its own domain (jobs.northropgrumman.com), so a posting
-    URL alone does not say it is Eightfold's, and a guessed endpoint on a host
-    that is not would answer 404 and read as a closure. So this never matches
-    a URL by itself: it answers only beside the listings URL of a source on
-    the same host (resolve's listings_url), and its markers stay empty, which
-    also keeps it out of the mail domains.
-    """
-
-    name = "eightfold"
-    markers = ()
-    _JOB = re.compile(r"^/careers/job/(\d+)/?$")
-
-    def matches(self, url: str) -> bool:
-        return False
-
-    def fetch(self, url: str) -> AtsResult:
-        return UNSUPPORTED
-
-    def fetch_listed(self, url: str, listings_url: str) -> AtsResult | None:
-        """The posting's text, or None when listings_url is not an Eightfold
-        listing on the posting's own host."""
-        posting, listing = urlparse(url), urlparse(listings_url)
-        match = self._JOB.match(posting.path)
-        generation = listing.path.rstrip("/")
-        if (
-            not match
-            or posting.netloc.lower() != listing.netloc.lower()
-            or generation not in (EIGHTFOLD_PCSX, EIGHTFOLD_V2)
-        ):
-            return None
-        job_id = match.group(1)
-        origin = f"https://{listing.netloc}"
-        pcsx = generation == EIGHTFOLD_PCSX
-        resp = self.get(
-            f"{origin}/api/pcsx/position_details?position_id={job_id}"
-            if pcsx
-            else f"{origin}{EIGHTFOLD_V2}/{job_id}"
-        )
-        early = self.from_response(resp)
-        if early is not None:
-            return early
-        assert resp is not None
-        body = resp.json()
-        data = (body.get("data") or {}) if pcsx else body
-        text = data.get("jobDescription") if pcsx else data.get("job_description")
-        result = self.result(
-            join(
-                data.get("name"),
-                "; ".join(data.get("locations") or []),
-                clean_html(text or ""),
-            )
-            if text
-            else None
-        )
-        ts = data.get("postedTs") if pcsx else data.get("t_create")
-        posted = datetime.datetime.fromtimestamp(int(ts), datetime.UTC).date() if ts else None
-        return replace(result, posted=posted)
-
-
-EIGHTFOLD = Eightfold()
-
-
-def _json_or_none(text: str) -> object:
-    try:
-        return json.loads(text)
-    except ValueError:
-        return None
-
-
-def _is_job_posting(data: object) -> TypeGuard[dict]:
-    return isinstance(data, dict) and data.get("@type") == "JobPosting"
-
-
-def _ld_place(place: object) -> str:
-    address = place.get("address") if isinstance(place, dict) else None
-    if not isinstance(address, dict):
-        return ""
-    # iCIMS writes UNAVAILABLE where a tenant left a part empty (AMD Hsinchu
-    # has no region, Peraton's remote postings no city).
-    keys = ("addressLocality", "addressRegion", "addressCountry")
-    parts = (str(address.get(k) or "").strip() for k in keys)
-    return ", ".join(p for p in parts if p and p != "UNAVAILABLE")
-
 
 RESOLVERS: list[AtsResolver] = [
     Greenhouse(),
