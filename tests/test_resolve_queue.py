@@ -214,23 +214,11 @@ def test_the_candidate_picker_serves_the_same_declared_choices(client, me):
 
 
 def test_the_picker_and_the_queue_agree_on_eligibility(client, me):
-    """One builder, so the two surfaces cannot drift. If they were built
-    separately the first conditional verb would make one of them wrong with
-    nothing saying which.
+    """Compare eligibility across picker and queue responses.
 
-    Everything except `target_source`, which is a per-surface fact and the one
-    thing that SHOULD differ: a client reads `payload[choice.target_source]`,
-    and the two responses hold their applications under different keys. This
-    compared the whole dict and so asserted more than its own name - agreeing
-    on the field that must not agree would mean one surface was pointing at a
-    list the other one owns.
-
-    A field a verb does not have is null on the picker and absent on the queue,
-    because the queue's route excludes nulls and the picker's cannot: the rest
-    of that payload has real nulls it has always sent. The two say the same
-    thing - no `reason` is that the verb is available, no `affects` is one
-    message - so the comparison drops them on both sides rather than asserting
-    which spelling each surface happens to use.
+    `target_source` differs by surface because each response stores applications
+    under its own key. The queue omits some null fields while the picker retains
+    them. Normalize those fields before comparing the shared eligibility rules.
     """
     headers, uid = me
     db.execute(

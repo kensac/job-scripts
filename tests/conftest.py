@@ -111,23 +111,11 @@ _PGVECTOR_HELP = (
 
 
 def _provision() -> None:
-    """Migrate, and translate the one failure that has a non-obvious cause.
+    """Migrate the test database and explain a missing pgvector extension.
 
-    The scratch server is built from whatever local install `pg_config` points
-    at, which for most machines is a homebrew Postgres with no vector
-    extension in its sharedir. `CREATE EXTENSION vector` then fails several
-    frames deep at import time, naming neither pgvector nor the way out.
-
-    The cause is matched on the CHAIN, not on the top-level type. Alembic runs
-    through SQLAlchemy, so psycopg's UndefinedFile arrives wrapped in
-    sqlalchemy.exc.OperationalError - the first version of this guard caught
-    the psycopg class directly and therefore never fired once. Matching the
-    extension name in the message text is cruder and works regardless of how
-    many layers wrap it.
-
-    Deliberately reactive rather than a pre-flight check: a guard that refused
-    to start whenever pgvector was absent would break every session's suite
-    immediately, for a dependency no migration had needed yet.
+    Alembic and SQLAlchemy wrap the database error. Search its cause chain
+    for the extension name rather than catching only psycopg's exception.
+    Check after migration fails, since some schemas may not need pgvector.
     """
     try:
         db.init_schema()
@@ -170,17 +158,11 @@ def pytest_configure(config) -> None:
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items) -> None:
-    """Run the corpus tests last, as one group.
+    """Run corpus tests together after tests that reset the database.
 
-    The corpus is generated data that an unmarked test's reset empties, so it
-    is rebuilt the next time a corpus test runs. Interleaved, that cost four
-    builds of about six seconds each in a serial run. Ordered, one build
-    serves all of them, and it happens after every test that would have
-    emptied it.
-
-    tryfirst so the CI shard split (tests/ci_suite.py, trylast) partitions the
-    ordered list; its assignment hashes node ids and does not depend on order,
-    but a shard should still run the corpus at its end.
+    Interleaving once caused four corpus builds of about six seconds each.
+    This hook runs before CI shard assignment so each shard keeps its corpus
+    tests at the end.
     """
     corpus = [item for item in items if item.get_closest_marker("corpus")]
     if not corpus:
@@ -229,22 +211,11 @@ def _in_memory_object_storage(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_browser(monkeypatch):
-    """The browser tier must never actually launch in a test.
+    """Fail if a test unexpectedly launches the browser tier.
 
-    Nothing stopped it deliberately. core/scrape.py returned early unless
-    OPENAI_API_KEY was set, which is nonsense as a condition on fetching a web
-    page and was inherited from the sheet-era module, and the key is unset here
-    and in CI. So whatever protection existed came from an accident.
-
-    Measured before adding this, by counting calls through a whole suite run:
-    no test reaches the browser tier at all, 0 calls in 1353 tests. That makes
-    this a latch rather than a rescue - removing the OPENAI_API_KEY early
-    return changed nothing here, and this keeps it changed-nothing as tests are
-    added.
-
-    Raising rather than returning None: a test meaning to exercise this tier
-    stubs it, and one arriving here by accident should say so rather than
-    quietly read no content and assert on the emptiness.
+    A measured suite run had zero browser calls across 1,353 tests. Tests
+    that need this tier replace the stub explicitly. Raising identifies an
+    accidental call instead of returning empty content.
     """
     import core.fetching.scrape
 
@@ -256,19 +227,11 @@ def _no_browser(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clean_db(request):
-    """Give each test the database its marker asks for.
+    """Prepare the database population selected by each test marker.
 
-    Three populations, and the difference between them is what gets truncated:
-
-    unmarked  a truncated database it fills itself. 632 tests, unchanged.
-    corpus    the generated corpus from tests/corpus.py, built from a
-              measurement of production. Not truncated, or there would be
-              nothing to read; rebuilt lazily when an unmarked test has
-              emptied it.
-    integration  a synced copy of REAL production. Skipped unless the database
-              actually holds one, so a full `pytest tests` on CI - which has
-              no production credential and must not have one - skips them
-              rather than failing or, worse, passing against empty tables.
+    Unmarked tests start empty. Corpus tests share generated data and rebuild
+    it after an unmarked reset. Integration tests require a synced production
+    copy and skip when none is present. A prior count found 632 unmarked tests.
     """
     if request.node.get_closest_marker("integration"):
         if not _SYNCED_AT:
@@ -386,17 +349,11 @@ def f():
 
 @pytest.fixture
 def runs_permitted():
-    """Let this test start a filter run by hand.
+    """Permit a non-admin test user to start a filter run.
 
-    Starting one is admin-only (`filter_run_groups`, seeded empty), because a
-    run re-judges every posting in the catalog and three filter edits on one
-    account cost 10.27 dollars in a day on 2026-09-08.
-
-    A test whose subject is what a run DOES - that a second one is refused,
-    that one person's run does not block another's, which reason a missing key
-    reports - is not a test of who may press the button, and asking it to use
-    an admin would change the thing it is actually about. So it opens the
-    policy instead, which is a config row exactly so it can be opened.
+    The default policy is admin-only because runs rejudge the catalog. Three
+    filter edits cost $10.27 on 2026-09-08. Tests of run behavior temporarily
+    open the app_config policy so permission does not mask their subject.
     """
     db.execute(
         "INSERT INTO app_config (key, value) VALUES ('filter_run_groups', %s) "

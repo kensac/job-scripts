@@ -38,18 +38,11 @@ def test_committed_openapi_matches_the_routes():
 
 
 def test_every_schema_has_a_name_a_generator_can_use():
-    """Two routers may not name two different models the same thing.
+    """Require distinct schema names across routers.
 
-    FastAPI does not refuse it. It disambiguates, by prefixing the module
-    path, so `Source` becomes `api__routers__source_admin__Source` and the
-    type a generator emits for the frontend is unusable. The point of
-    declaring shapes is that `openapi.json` can be pointed at a generator, so
-    a name that survives that round trip is part of the contract, not a
-    detail.
-
-    Renaming one of the two is the fix, and the better name is usually the
-    more specific one: a catalog row and a person's subscription are both
-    "a source" only until you have to hold both.
+    FastAPI prefixes module paths when two models share a name. That produces
+    names such as `api__routers__source_admin__Source` in generated clients.
+    Distinct names keep the OpenAPI contract usable by the frontend.
     """
     from api.app import app
 
@@ -64,22 +57,11 @@ def test_every_schema_has_a_name_a_generator_can_use():
 
 
 def test_no_response_model_declares_a_decimal():
-    """A `Decimal` field is served as a JSON string, and nothing says so.
+    """Keep response money fields as JSON numbers.
 
-    psycopg returns `numeric` columns as `Decimal`, and for the years these
-    routes returned bare dicts FastAPI's encoder turned each one into a
-    number. The frontend's hand-written types say `number` and the board
-    renders the money fields as numbers.
-
-    Declaring the field as `Decimal` changes that silently: pydantic
-    serialises a Decimal to `"100.5"`, a string, and the generated schema says
-    `type: string`, so the wire moves and the schema agrees with neither the
-    old behaviour nor the client. Found by generating a TypeScript client from
-    `openapi.json` and reading what came out.
-
-    Use `float`. It is what was already on the wire, and these are display
-    values, not ledger arithmetic: the ledger's own totals are computed in
-    Postgres.
+    Bare dict routes encoded database Decimal values as numbers. A declared
+    Decimal model serializes them as strings and changes the client contract.
+    Use float for display fields; ledger totals are computed in Postgres.
     """
     import decimal
     import typing

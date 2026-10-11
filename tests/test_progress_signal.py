@@ -1,23 +1,13 @@
-"""progress_at: the only column that can say the WORK advanced.
+"""Track work progress separately from worker heartbeat.
 
-A heartbeat is a thread beating on a timer. It proves the process is alive and
-says nothing about whether the handler is moving, which is why a match_mail
-task could sit 60 minutes at {"done": 0, "total": 1} with a 20-second-old
-heartbeat and never be reaped.
+A heartbeat shows process activity, not handler progress. One match_mail task
+stayed at zero progress for 60 minutes despite a recent heartbeat.
 
-This is instrumentation, not a control. Nothing reaps or alerts on it yet,
-deliberately: no bound anyone has proposed survives contact with the data.
-A duration bound is contaminated by the pathology it detects - three wedged
-match_mail runs completed on 2026-09-03 and raised that kind's all-time
-maximum from 5.2 minutes to 179.7, so a max-based threshold gets blinder every
-time a wedge survives. And duration cannot work across kinds at all, because
-ingest_source's runtime tracks payload size: two of them ran concurrently at
-158 and 4.6 items/min under one kind name.
-
-Progress staleness is payload-independent and cannot be contaminated. What it
-needs is a bound, and the bound has to come from measuring how long real
-handlers legitimately go between updates - which needs this column to exist
-first. That is what this ships.
+`progress_at` is instrumentation; no reaper or alert uses it yet. On
+2026-09-03, three stalled match_mail runs raised the observed maximum from
+5.2 to 179.7 minutes. Runtime also varies with payload size: two concurrent
+ingest_source runs processed 158 and 4.6 items per minute. A progress alert
+needs a bound measured from legitimate gaps between updates.
 """
 
 from __future__ import annotations

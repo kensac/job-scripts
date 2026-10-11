@@ -1,19 +1,9 @@
-"""A Workday posting's location, from whichever field actually says.
+"""Read Workday location data when locationsText is absent or unusable.
 
-`locationsText` is the intended field. Measured against live tenants on
-2026-09-12, three of them do not use it as intended: Accenture and Thomson
-Reuters omit it entirely, BlackRock sends a count ("2 Locations").
-
-Both failures defeat a location filter, in opposite directions, which is why
-neither was noticed:
-
-  - A count never matches the `locations` vocabulary, so with
-    `included_locations` set the posting is silently EXCLUDED. 1,002 postings
-    in the catalog carry one.
-  - An empty list is deliberately KEPT by the same predicate ("a posting with
-    no location at all stays, having nothing to judge"), so it bypasses the
-    filter. 162 carry none, and that is how an Accenture posting in Jakarta
-    reached a United States board.
+On 2026-09-12, Accenture and Thomson Reuters omitted that field, while
+BlackRock supplied a count. The audited catalog held 1,002 count-valued
+locations that could be excluded by location filters and 162 empty locations
+that could pass through them. One Jakarta posting reached a US board.
 """
 
 from __future__ import annotations

@@ -251,18 +251,12 @@ def test_sort_keys_the_frontend_depends_on_still_exist():
 
 
 def test_verdicts_take_their_timestamp_from_the_database():
-    """`ai_queries.created_at` must come from Postgres, not from Python.
+    """Use the database clock for ai_queries.created_at.
 
-    verify.py compares it against `ai_batches.submitted_at`, which Postgres
-    writes with now(). That inequality is the whole of the rule that a parked
-    reverify may not overturn a closure newer than its evidence - and three
-    worker hosts mean three clocks against one database. A host running
-    slightly fast makes its verdicts look newer than batches submitted after
-    them, and a reverify that should record is discarded as stale, silently.
-
-    Asserting on the insert column list rather than on behaviour because the
-    two clocks agree closely enough in a test that a behavioural check would
-    pass either way - which is exactly why this shipped.
+    Verification compares this timestamp with database-written batch times.
+    Worker clock skew could otherwise reject a valid reverify as stale. The
+    test checks the insert columns because local clocks are too close for a
+    reliable behavior assertion.
     """
     from core.store import _INSERT_COLUMNS
 

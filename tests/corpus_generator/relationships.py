@@ -129,24 +129,13 @@ def _specialise(table: str, rows: list[dict[str, Any]], gen: _Generator) -> None
 
 
 def _pair_verdicts_into_sweeps(rows: list[dict[str, Any]], gen: _Generator) -> None:
-    """Give some jobs a COMPLETE set of verdicts instead of a random handful.
+    """Pair verdicts into complete posting sweeps.
 
-    The pipeline does not evaluate one filter against one posting. It sweeps: a
-    candidate job gets a closed verdict, a clearance verdict, and one custom
-    verdict per enabled filter. Board membership needs all of them at once, so
-    a corpus that draws (url, check_type, prompt_hash) independently produces
-    2000 jobs each holding two unrelated verdicts and not one job that any
-    board can contain.
-
-    Measured, and worth writing down: with independent draws, materialisation
-    inserted ZERO rows. Every board test still passed, over a user_jobs table
-    the generator had filled by itself, which is exactly the vacuity this
-    whole design has to avoid.
-
-    This changes only the PAIRING. Row counts, the check_type mix and the
-    status distribution are all still whatever the profile says; what is put
-    back is the pipeline's own structure, which a per-column distribution
-    cannot express.
+    Board membership needs closed, clearance and enabled custom verdicts
+    together. Independent draws once produced zero materialized board rows,
+    although board tests still passed. Pairing restores the pipeline's
+    relationship while retaining measured row counts, check types and status
+    distributions.
     """
     urls = gen.pools.get(("jobs", "url")) or []
     hashes = [

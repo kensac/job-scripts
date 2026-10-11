@@ -1,15 +1,9 @@
-"""A DB restart is infrastructure moving, not a task failing.
+"""Classify transient database disconnects by exception type.
 
-homelab restarted Postgres twice to swap in pgvector. Both in-flight parked
-tasks came back "terminating connection due to administrator command", each
-severance was booked as a real attempt, and two restarts exhausted the cap.
-The tasks permanently failed - which stripped their batch_ids, while the
-OpenAI batches they named went on to COMPLETE. Paid results with nothing left
-to consume them.
-
-The classifier matched substrings and that phrase was not among them. These
-tests pin the classification by TYPE, so the next transient database error
-does not need someone to have predicted its wording.
+Two Postgres restarts once exhausted the attempt limit for parked tasks.
+Those failures removed batch IDs while the provider batches still completed.
+Matching one error phrase missed the disconnect. These tests cover its type
+so paid results remain available after a database restart.
 """
 
 from __future__ import annotations
