@@ -349,9 +349,7 @@ def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
                 measured_on=datetime.date(2026, 9, 2),
             ),
         ),
-        # The comment that used to live above BACKFILL_MODEL, promoted to data
-        # so it reaches a person overriding this from a screen. A code comment
-        # cannot warn the one reader who most needs the warning.
+        # Show this evidence in the model picker, where an override is made.
         notes=(
             "gpt-5-nano is excluded on evidence rather than price: measured on "
             "extraction-shaped work it fabricates, inventing 12 clearances "

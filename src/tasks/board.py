@@ -1,15 +1,8 @@
-"""Board membership: which jobs are on a user's board, and why.
+"""Maintain the jobs selected by a person's filters.
 
-Every name here is public, because every one of them was already imported by
-another module while spelled private. candidates_for is not called `candidates`
-because tasks/filters.py binds a local of that name around the call, where the
-short name would shadow the function rather than read as it.
-
-The predicate itself is not spelled here. api/visibility.py owns it: FULL is
-the one spelling, and handle_recompute_board below runs it through
-visibility.recompute. What this module does spell is the write path around it,
-materialize_passing and candidates_for, which share criteria.SQL and the
-structural gates with FULL and must stay consistent with it.
+``api.board.visibility`` owns what the person can see. This module writes the
+working set and selects candidates using the same structural rules. Public
+function names stay distinct from local names in their callers.
 """
 
 from __future__ import annotations
@@ -25,22 +18,14 @@ from core import catalog, verdict_reads
 logger = logging.getLogger(__name__)
 
 
-# The working set is what the filters picked for a person: user_job_working_set,
-# written here and pruned by demote_closed. It carries scope (core/store.py's
-# ON_A_BOARD makes the posting worth paying to check, and handle_reverify_open
-# draws its candidates from it). It does not decide what the person sees:
-# visibility.FULL admits a picked posting through its structural branch.
-#
-# user_jobs holds only what a person did (phase 2b). Machine rows were written
-# there too until 2026-10-10; they were working-set membership, copied into
-# the working set and then removed from user_jobs.
+# The working set records filter picks. It keeps those jobs in scope for
+# verification; visibility decides whether the person can see them.
+# user_jobs stores actions a person took, not filter picks.
 def materialize_passing(user_id: int) -> int:
-    """Every job currently passing ALL of the user's enabled filters (and the
-    structural gates) joins the person's working set. Returns how many joined.
+    """Add jobs passing all enabled filters and structural gates to the working set.
 
-    This does NOT decide what the person sees and writes nothing a person
-    owns. It used to insert an empty user_jobs row, a mirror of the step that
-    wrote a Google Sheet, where the row WAS the board."""
+    Return the number added. Visibility and person-owned rows are unchanged.
+    """
     params = board_eligibility.settings_params(user_id)
     filter_status = verdict_reads.latest_status("j.url", "custom", prompt_hash="e.prompt_hash")
     result = db.query_one(
@@ -91,10 +76,8 @@ def candidates_for(user_id: int) -> list[dict[str, Any]]:
     )
 
 
-# The URLs a filter chunk holds, in either payload shape (api.task_jobs): the
-# legacy inline `jobs` list, or `urls`, kept inline beside the referenced list
-# because these readers run in SQL and cannot follow a reference. A payload
-# holds one or the other, so this is exactly the URL sequence of its jobs.
+# Filter chunks have two active payload shapes: inline jobs, or a referenced
+# list with inline URLs. SQL readers use whichever URLs the payload holds.
 CHUNK_URLS = (
     "CROSS JOIN LATERAL (SELECT j->>'url' AS url FROM jsonb_array_elements({t}.payload->'jobs') j "
     "UNION ALL SELECT jsonb_array_elements_text({t}.payload->'urls')) AS chunk_url"
@@ -140,14 +123,11 @@ def submission_exclusions(
 
 
 def in_flight_urls(user_id: int) -> set:
-    """URLs a live filter chunk of an earlier run still holds for this user.
+    """URLs held by this person's live filter chunks.
 
-    A run that splits while those chunks wait at the provider must not
-    submit them again. A batch yields nothing until it is terminal, so a
-    chunk parked on a straggler holds every url in it undecided for hours,
-    and the verdict cache cannot see them; re-selecting would pay twice for the
-    same verdicts. Excluding them is what lets a new run start while an old
-    one is still parked: it judges only what arrived since.
+    Exclude them from new runs until those chunks finish. A parked provider
+    batch has no verdicts yet, so the verdict cache cannot prevent duplicate
+    submissions on its own.
     """
     rows = db.query(
         f"SELECT DISTINCT chunk_url.url FROM tasks t {CHUNK_URLS.format(t='t')} "

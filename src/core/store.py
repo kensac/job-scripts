@@ -121,19 +121,8 @@ def ai_result_row(
         # No view reads a fetch stored here; it would be lost.
         raise ValueError("a page fetch is written by core.page_fetches.record")
     row = {
-        # created_at is DELIBERATELY ABSENT: the column defaults to Postgres
-        # now(), and letting the database supply it is what keeps every
-        # timestamp in this system on ONE clock.
-        #
-        # It used to be written from Python here, which made
-        # `ai_queries.created_at > ai_batches.submitted_at` a comparison
-        # between the app host's clock and the database's. That inequality is
-        # the whole of #162's rule - a parked reverify may not overturn a
-        # closure newer than its evidence - and three worker hosts mean three
-        # clocks against one database. A host running slightly fast makes its
-        # verdicts look newer than batches submitted after them, and a
-        # reverify that should record is discarded as stale. Silently:
-        # recorded == 0 is a normal-looking outcome.
+        # Use the database clock for created_at. Comparing an app-host time
+        # with a batch's database time can discard a valid reverify as stale.
         "config_name": config_name or os.environ.get("CONFIG_NAME"),
         "url": url,
         "check_type": check_type,
@@ -305,23 +294,9 @@ PERSON_SOURCE = """
 #
 # Evaluated on every sweep rather than stamped onto rows, so subscribing to a
 # source makes its jobs eligible on the next cycle and needs no backfill.
-# THE WORKING SET, which is not the same question as what a person sees.
-#
-# A board row means the sweeps carry this posting. It does NOT mean anybody
-# can see it: visibility.FULL admits an untouched row only through its
-# structural branch, which does not reference user_jobs at all. The two
-# meanings share one table and reading the wrong one is how a board question
-# gets answered wrongly (2026-09-10).
-#
-# So this branch is scope, deliberately. A posting somebody tracks keeps being
-# checked even after nobody subscribes to the source that found it, which is
-# the point: it is their job now, not the board's.
-#
-# Scope is the working set (postings a person's filters picked) plus person
-# state (postings a person acted on). A legacy all-default user_jobs row is
-# working-set membership (phase 2b), and the split backfill copies every one
-# into user_job_working_set, so the user_jobs arm carries only what a person
-# did once those rows are converted.
+# A posting stays in verification scope when a filter picked it or a person
+# acted on it. This is scope, not visibility; api.board.visibility owns what
+# a person can see. Tracked jobs remain in scope after unsubscribing.
 ON_A_BOARD = (
     "(EXISTS (SELECT 1 FROM user_job_working_set ws WHERE ws.job_id = {job}.id)"
     " OR EXISTS (SELECT 1 FROM user_jobs uj WHERE uj.job_id = {job}.id))"

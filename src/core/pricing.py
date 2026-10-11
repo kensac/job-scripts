@@ -1,17 +1,8 @@
-"""Pricing, computed from the provider descriptors.
+"""Price model calls from the provider datasheets in ``core.providers``.
 
-The rates themselves live in core/providers/, one datasheet per provider, each
-number beside its source and the date someone read it. This module is only the
-arithmetic - and the two renderings of it, Python for the write path and SQL
-for bulk work, held together by a parity test.
-
-It used to own a `{model: (rate_in, rate_out)}` table plus two global
-multipliers, one halving batched calls and one charging cached input at a
-tenth. That was a faithful model of one vendor's price list rather than of
-pricing: the batch discount is not universal (one vendor discounts four of its
-seven models and charges the rest full price), and the cached rate is a third
-published rate ranging from 10% to 20% to 25% of input, not a fixed fraction
-of it.
+Each datasheet owns its sourced rates. This module applies those rates in
+Python and SQL; a parity test keeps the two calculations aligned. Batch and
+cached-input rates come from each provider and model, not global discounts.
 """
 
 from __future__ import annotations

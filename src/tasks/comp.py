@@ -21,11 +21,9 @@ from tasks.derive import Derivation, Row
 
 
 def _annualize(value: float | None, period: str) -> int | None:
-    """Yearly equivalent of an advertised amount, or None when there isn't one.
+    """Return a yearly amount for recurring pay with a known period.
 
-    None is the right answer more often than a number: an unrecognised period,
-    or a one-off payment, has no annual equivalent, and a wrong sortable value
-    is worse than a missing one because it silently reorders the column.
+    An unknown or one-time period has no reliable yearly value.
     """
     if value is None:
         return None
@@ -40,8 +38,8 @@ def _annualize(value: float | None, period: str) -> int | None:
     return annual
 
 
-# A stored amount with no period was annualised by an older rule and is read
-# again even when the page is unchanged, so its hash does not count.
+# A stored amount without a period may have a wrong yearly value. Read it
+# again even when the page is unchanged; its old content hash cannot exempt it.
 _UNREADABLE = "(c.comp_period IS NULL AND (c.comp_min IS NOT NULL OR c.comp_max IS NOT NULL))"
 
 
