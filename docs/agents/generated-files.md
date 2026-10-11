@@ -11,8 +11,9 @@ CI runs the schema export and compares. If the committed file is stale, CI
 
 What that means for you:
 
-- **Regenerate it yourself whenever you change routes**, request models or
-  response models, and commit it with the change. `make schema` does it. A PR
+- **Regenerate it yourself whenever you change routes**, request models,
+  response models, or framework versions that generate their schemas, and
+  commit it with the change. `make schema` does it. A PR
   that changes an endpoint and not this file is incomplete, even though CI will
   paper over it.
 - **After CI has run, your branch may be ahead of your local copy.** Pull before

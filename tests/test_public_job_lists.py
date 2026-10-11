@@ -70,6 +70,16 @@ def test_public_compensation_filter_requires_units(client):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("amount", ["invalid", "-1", "100000001"])
+def test_public_compensation_filter_rejects_invalid_amount(client, amount):
+    _published_board()
+    response = client.get(
+        "/v1/public/job-lists/engineering",
+        params={"min_comp": amount, "comp_currency": "USD", "comp_period": "year"},
+    )
+    assert response.status_code == 422
+
+
 def _published_board() -> int:
     user = db.query_one(
         "INSERT INTO users (sub, email) VALUES ('public-board-owner', 'owner@example.com') "
