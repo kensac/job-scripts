@@ -1,22 +1,15 @@
-"""Board membership: computed by a task, read as a lookup.
+"""Compute board membership in a task and read it from `board_visible`.
 
-Which postings are on a person's board is a question whose answer changes
-when a preference changes or a verdict lands, not on every read. It used to
-be answered on every read, by FULL below, which runs the closed and clearance
-verdicts, the filter passes and the location and date criteria over every
-posting on the person's boards: 2 to 7 seconds a sort on Kanishk's board,
-twice when the total rode along. Now a worker runs FULL once per person and
-stores the ids in `board_visible`; the board reads FAST, which is a lookup.
+`FULL` checks verdicts, filters, location, and date across subscribed postings.
+It previously ran on each read, taking 2 to 7 seconds per sort on Kanishk's
+board and running again for the total. A worker now runs it per person and
+stores the visible job ids. `FAST` reads those ids.
 
-Freshness is minutes, not a day: a preference write asks for a recompute at
-once (request_refresh), and the scheduler asks for every person every
-`board_refresh_minutes` so new verdicts arrive on their own. A posting the
-person uploaded or acted on (a status, a note, a date applied) is visible
-without waiting; it is theirs whatever the computation says.
+Preference writes request an immediate refresh. The scheduler refreshes every
+person at `board_refresh_minutes` intervals. Uploads and postings a person
+acted on remain visible without waiting for that refresh.
 
-FULL is the one spelling of the predicate; the task and nothing else runs
-it. FAST is the one spelling of the read; every per-object route and the
-requirements slice go through it.
+Only the task runs `FULL`. Per-object routes and requirements reads use `FAST`.
 """
 
 from __future__ import annotations

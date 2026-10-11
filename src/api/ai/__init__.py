@@ -53,20 +53,13 @@ def owner_models(unlimited: bool) -> list:
 
 
 def _declared_efforts(provider: str, model: str | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """The (accepts, rejects) a model declares, or the provider's union.
+    """Return a model's declared reasoning efforts, or the provider's union.
 
-    A model this registry does not know is NOT validated - both tuples come
-    back empty and the call goes through. That is deliberate. A wrong rejection
-    blocks a model that works and surfaces as a mystery outage; a wrong
-    acceptance comes back as the provider's own error naming what it supports.
-    Being stricter than the vendor only makes us slower than the vendor, and a
-    table that blocks a model shipped yesterday is exactly that.
+    Unknown models bypass local validation. Rejecting a supported model would
+    block working requests; the provider can reject an unsupported effort.
 
-    When the caller does not know which model the params are for, the union
-    across the provider's declared models is the permissive answer - but it is
-    now DERIVED from the per-model declarations rather than hand-maintained
-    beside them, which is what let the two OpenAI generations' incompatible
-    sets sit in one tuple.
+    Without a model name, derive the accepted efforts from the provider's
+    model declarations. Keep one source of truth for incompatible models.
     """
     declared = providers.model(model)
     if declared is not None:
@@ -253,30 +246,15 @@ async def _parse_json_object[T: BaseModel](
     declared: Model,
     timeout: float,
 ) -> tuple[T | None, dict[str, int | None]]:
-    """The path for a provider that returns JSON but will not enforce a schema.
+    """Parse JSON from models that do not enforce a response schema.
 
-    Reached by DECLARED MODE, never by provider name. A provider is on this
-    path because its datasheet says json_object, so the next one that says so
-    needs no branch here - which is the difference between a router and a pile
-    of if-statements.
+    The model's declared output mode selects this path. Include the literal
+    word "json" when required; DeepSeek otherwise rejects the request.
+    Apply its declared reasoning default: leaving effort unset costs 79 more
+    input tokens per request than "low".
 
-    Three things this path has to do that the strict-schema path gets for free:
-
-    The literal word. DeepSeek refuses the request outright without it -
-    "Prompt must contain the word 'json' in some form to use 'response_format'
-    of type 'json_object'" - so the instructions are amended rather than the
-    caller being asked to remember, since forgetting is a 400 at call time.
-
-    The reasoning default. Its declared default is applied when the caller has
-    not chosen, because on DeepSeek an UNSET effort is not neutral: it costs 79
-    extra input tokens per request against 'low'. Leaving it out would pay that
-    scaffold by omission.
-
-    The validation. The provider guarantees only that the bytes parse as JSON,
-    not that they match the model asked for, so the shape is checked here. And
-    a truncated response is refused rather than parsed: the JSON would fail to
-    load with an error pointing at column 4,000 of a string instead of at the
-    token budget that actually caused it.
+    Validate the parsed object against the requested model. Reject truncated
+    responses as token-budget failures before parsing their incomplete JSON.
     """
     spec = declared.structured_output
     if spec.requires_literal_json_in_prompt and "json" not in instructions.lower():

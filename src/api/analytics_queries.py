@@ -88,35 +88,22 @@ FROM per_job GROUP BY source
 # "first verdict per posting" query is how the two readings would drift.
 _FIRST_CLOSED_SQL = signals.first_closed_sql()
 
-# What a board's postings cost to check: the paid calls that asked a check
-# about one of its postings, from the call ledger (model_calls). cost_usd is
-# summed, never recomputed: it is written at call time against the price in
-# force then, so re-deriving it on read would restate history every time the
-# price table changes.
+# Count paid checks for a board's postings from `model_calls`. Sum the
+# recorded cost_usd so later price changes cannot rewrite historical cost.
+# One request counts once even when it writes closed, clearance, and custom
+# verdicts. Page fetches are not model calls. Counting every ai_queries row
+# reported 2,800,724 calls at 67.0% priced on 2026-10-10; counting paid
+# requests reported 1,384,802 at 100% priced with the same total dollars.
 #
-# A call, not a row. One verify answer writes a closed, a clearance and
-# sometimes a board's custom verdict; it was one request and is counted once.
-# A page fetch is not a model call and is not counted: read over every row
-# ai_queries ever held, a board's "calls" included its fetches as unpriced,
-# 2,800,724 calls at 67.0 percent priced on 2026-10-10, against 1,384,802
-# paid calls at 100 percent with the same dollars.
+# Batch custom_id identifies the posting URL. A live call backfilled from a
+# verdict gets its URL through that verdict's primary key. Separate query
+# arms avoid hashing all ai_queries: 6.2 s on production 2026-10-10, against
+# 11.0 s for the combined join and 5.4 s for the former full-row read.
+# Recent live calls with no URL are excluded (about ten weekly on that date).
+# `priced` distinguishes a free call from one missing a price record.
 #
-# A batch item's custom_id is the posting's url for the check purposes; a live
-# call backfilled from its verdict reaches the url through that verdict, by
-# primary key: two arms rather than one join with a COALESCE, because the
-# single join hashed all of ai_queries (11.0 s on production on 2026-10-10,
-# against 6.2 s for the two arms and 5.4 s for the old read of every row). A
-# live call recorded since the ledger began names no url and is not counted
-# here (about ten a week on 2026-10-10).
-#
-# `priced` separates "this cost nothing" from "we do not know what this
-# cost": a model missing from the price table is counted, never summed as zero.
-#
-# ALL TIME, deliberately, and said out loud in the response. /admin/spend
-# defaults to 30 days and this takes no window at all, so a reader comparing
-# the two was comparing a lifetime against a month with nothing on either page
-# saying so (found by personal-portfolio-e3). All-time is the right window
-# HERE: whether a board has earned its keep is a question about its whole life.
+# This response covers all time. /admin/spend defaults to 30 days; a board's
+# lifetime cost needs an explicit all-time window for a valid comparison.
 _SPEND_SQL = """
 WITH calls AS (
     SELECT m.model, m.requests, m.cost_usd, m.total_tokens, m.custom_id AS url
