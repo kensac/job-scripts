@@ -102,6 +102,23 @@ def text_part(resume_id: int, index: int, user: AuthedUser = Depends(require_use
     return TextPart(**part)
 
 
+@router.get("/user/resume-text-versions/{version_id}/parts/{index}")
+def pinned_text_part(
+    version_id: uuid.UUID, index: int, user: AuthedUser = Depends(require_user)
+) -> TextPart:
+    if index < 0:
+        raise refuse(404, "NOT_FOUND", "unknown text part")
+    part = db.query_one(
+        "SELECT p.text FROM resume_text_parts p JOIN resume_text_versions v "
+        "ON v.id = p.version_id WHERE p.version_id = %s AND p.part_index = %s "
+        "AND v.user_id = %s AND v.ready",
+        (version_id, index, user.id),
+    )
+    if part is None:
+        raise refuse(404, "NOT_FOUND", "unknown text part")
+    return TextPart(**part)
+
+
 @router.post("/user/resumes/{resume_id}/text-versions", status_code=201)
 def start_text_version(
     resume_id: int, user: AuthedUser = Depends(require_user)

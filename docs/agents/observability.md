@@ -883,6 +883,12 @@ version. The vectors themselves are an object. Receipt identity, outcome and
 acknowledgement timestamps remain in Postgres. No object lifecycle expiration
 or garbage collection may remove referenced objects.
 
+**Resume PDF parts remain available while any resume or revision references
+them.** Do not expire or delete `uploads/v1/` objects or their receipts.
+Account changes must not cascade away resume uploads, text versions, parts,
+or revisions. Verify bucket lifecycle rules before using object parts as the
+sole PDF copy.
+
 **A new receipt's vectors are written to object storage before the receipt
 exists, and the receipt holds only `embedding_vectors_ref`.** There is no
 inline shape: 0 of 1,619 receipts held inline vectors on 2026-10-10, and the

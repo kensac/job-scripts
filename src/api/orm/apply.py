@@ -55,7 +55,7 @@ class ResumeUpload(Base):
     __tablename__ = "resume_uploads"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(Text)
     filename: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(BigInteger)
@@ -71,7 +71,7 @@ class ResumeUploadPart(Base):
     __tablename__ = "resume_upload_parts"
 
     upload_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id", ondelete="CASCADE"), primary_key=True
+        PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id"), primary_key=True
     )
     part_index: Mapped[int] = mapped_column(Integer, primary_key=True)
     sha256: Mapped[str] = mapped_column(Text)
@@ -83,7 +83,7 @@ class ResumeTextVersion(Base):
     __tablename__ = "resume_text_versions"
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     chars: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     part_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     ready: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
@@ -104,7 +104,7 @@ class UserResumeRevision(Base):
     __tablename__ = "user_resume_revisions"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     resume_id: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)

@@ -65,16 +65,9 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
     )
     info = client.get(f"/v1/user/resumes/{resume_id}/text", headers=user_headers).json()
     assert info["chars"] == 80_001 and info["part_count"] == 2
-    assert (
-        client.get(
-            f"/v1/user/resumes/{resume_id}/text/parts/0", headers=other_user_headers
-        ).status_code
-        == 404
-    )
+    assert client.get(f"{path}/parts/0", headers=other_user_headers).status_code == 404
     actual = "".join(
-        client.get(f"/v1/user/resumes/{resume_id}/text/parts/{index}", headers=user_headers).json()[
-            "text"
-        ]
+        client.get(f"{path}/parts/{index}", headers=user_headers).json()["text"]
         for index in range(2)
     )
     assert actual == first_part + second_part
@@ -108,6 +101,7 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
         (resume_id,),
     )
     assert archived is not None and str(archived["text_version_id"]) == version_id
+    assert client.get(f"{path}/parts/0", headers=user_headers).json()["text"] == first_part
     assert db.query_one(
         "SELECT count(*) AS n FROM resume_text_parts WHERE version_id = %s", (version_id,)
     ) == {"n": 2}
