@@ -274,7 +274,9 @@ def add_upload(url: str, raw_url: str, user_id: int) -> dict:
         # DO NOTHING waits for a concurrent insert of the same url to commit,
         # so the SELECT below and the upload read see its row.
         inserted = conn.execute(
-            "INSERT INTO jobs (url, raw_url, source) VALUES (%s, %s, 'upload') "
+            # Available from the start (_STORED): no source lists a person's
+            # own posting, and readers read jobs.available alone.
+            "INSERT INTO jobs (url, raw_url, source, available) VALUES (%s, %s, 'upload', true) "
             "ON CONFLICT (url) DO NOTHING RETURNING id",
             (url, raw_url),
         ).fetchone()
@@ -372,12 +374,13 @@ AVAILABLE: LiteralString = (
         END))"""
 )
 
-# What a reader of availability uses: jobs.available (_STORED), and
-# jobs.active where nothing is stored yet. Stored, because computed per row it
-# cost every reader: the AI-eligible count went from 2.0 s to 6.5 s, a board
-# recompute from 27 s to 38 s (production, 2026-10-10). The fallback goes once
-# the reconcile has stored a value on every row.
-IS_AVAILABLE: LiteralString = "COALESCE({job}.available, {job}.active)"
+# What a reader of availability uses: jobs.available (_STORED) alone. A new
+# row is stored as it is inserted (upsert_postings, add_upload) and every
+# other row by the reconcile, so a NULL is a row nothing has stored yet and
+# reads as not available. Stored, because computed per row it cost every
+# reader: the AI-eligible count went from 2.0 s to 6.5 s, a board recompute
+# from 27 s to 38 s (production, 2026-10-10).
+IS_AVAILABLE: LiteralString = "COALESCE({job}.available, false)"
 
 # What jobs.available stores: AVAILABLE where an observation decides, and
 # otherwise the posting's last known feed state, jobs.active. A row no pull
@@ -608,9 +611,10 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                 # row even when its WHERE refuses the update.
                 cur.executemany(
                     """
-                INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
+                INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active,
+                                  available, date_posted)
                 SELECT v.url, v.raw_url, v.company, v.title, v.locations, v.terms, v.source,
-                       v.active, v.date_posted
+                       v.active, v.active, v.date_posted
                 FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[], %s::text[],
                               %s::text, %s::boolean, %s::timestamptz))
                     AS v (url, raw_url, company, title, locations, terms, source, active,

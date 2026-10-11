@@ -176,9 +176,9 @@ async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, tak
     _, imported_url = f.make_ready_job(source="upload")
     # sheet_import is a switched-off source (catalog.AVAILABLE): not available,
     # so nothing spends on it.
-    _, sheet_url = f.make_ready_job(source="sheet_import")
-    # What the hourly reconcile stores (catalog.reconcile_available).
-    catalog.reconcile_available()
+    sheet_id, sheet_url = f.make_ready_job(source="sheet_import")
+    # What a refresh stores for it (catalog.AVAILABLE).
+    catalog.refresh_available([sheet_id])
 
     task_id = f.make_task("reverify_open", {}, status="running")
     await tasks_verify.handle_reverify_open(task_id, {"full": True})

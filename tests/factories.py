@@ -68,12 +68,16 @@ def make_job(
     url = url or f"https://jobs.test/{_next('j')}"
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, source, company, title, active)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active
+        INSERT INTO jobs (url, raw_url, source, company, title, active, available)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (url) DO UPDATE SET active = EXCLUDED.active,
+                                        available = EXCLUDED.available
         RETURNING id
         """,
-        (url, url, source, company, title, active),
+        # Stored availability (catalog.IS_AVAILABLE) as a source listing it
+        # leaves it. A test about how it is derived writes observations and
+        # runs catalog.reconcile_available.
+        (url, url, source, company, title, active, active),
     )
     assert row is not None
     if comp_min is not None or comp_max is not None:

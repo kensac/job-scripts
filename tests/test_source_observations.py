@@ -185,6 +185,16 @@ def test_a_row_no_observation_decides_stores_its_last_known_feed_state(f):
     assert _available(B, catalog.IS_AVAILABLE) is True, "observed: the observation decides"
 
 
+def test_readers_read_a_null_as_not_available_whatever_the_feed_flag_says(f):
+    """IS_AVAILABLE reads the stored column alone: no fallback to jobs.active.
+    NULL is a row nothing has stored yet, which the reconcile fills."""
+    f.make_job(url=A, active=True)
+    db.execute("UPDATE jobs SET available = NULL")
+    assert _available(A, catalog.IS_AVAILABLE) is False
+    catalog.reconcile_available()
+    assert _available(A, catalog.IS_AVAILABLE) is True
+
+
 def test_an_administrators_correction_holds_until_a_source_says_something_new(f):
     f.make_source("board")
     _pull("board", [_posting(A)], {A}, "unlisted")
