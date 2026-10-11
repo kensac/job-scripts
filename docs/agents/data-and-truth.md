@@ -94,11 +94,12 @@ and caveats together when changing a metric.
 
 ## Filter insight ownership
 
-`api.routers.filter_insights_domain` owns prompt-version response models, reason
-grouping and sample thresholds. `filter_insights_admin` owns the cross-user
-taxonomy, phrasing and rejection views; `filter_insights_user` owns the
-caller's view. `filter_insights` exports both routers. Keep `prompt_hash` as the
-unit of aggregation: a filter name can span prompt edits, and an old hash may
+`api.routers.filtering.insight_breakdowns` owns prompt-version response
+models, reason grouping, and sample thresholds.
+`api.routers.filtering.admin_insights` owns cross-user taxonomy, phrasing,
+and rejection views. `api.routers.filtering.person_insights` owns the
+caller's view. `api.routers.filter_insights` registers both routers.
+Keep `prompt_hash` as the unit of aggregation: a filter name can span prompt edits, and an old hash may
 have no current owner. The owner state must say unknown when current filter
 rows cannot establish one. Group totals may overlap, so count each decision
 once per prompt before projecting groups. The owner's names come from their

@@ -101,35 +101,19 @@ def choices_for_message(
     thread_size: int,
     target_source: str,
 ) -> list[dict[str, Any]]:
-    """The verbs available on one message, decided HERE rather than by the
-    caller.
+    """Return the actions available for a message.
 
-    Shared with the candidate picker, which is the surface a person actually
-    makes this decision on. A modal that builds the verb list itself has to
-    decide eligibility client-side, and eligibility decided client-side is
-    exactly what a server-declared contract exists to prevent - the first time
-    a verb becomes conditional, one of the two lists is wrong and nothing says
-    which.
+    Both the review queue and candidate picker use this policy. The server
+    decides eligibility so their action lists cannot drift.
 
-    Takes the index, the thread size and the name of its own target list rather
-    than fetching or assuming them. Required, not defaulted: a default is how
-    "I did not have this" hides inside shared code as if it were "there is
-    nothing", and all three are already in hand at every call site.
+    Callers provide the application index, thread size, and `target_source`.
+    Neither surface may imply an absent value means an empty value. The queue
+    names its target list `candidates`; the picker names it `applications`.
 
-    `target_source` IS A PER-SURFACE FACT and that is why the caller states it.
-    Two surfaces share these verbs and they hold their applications under
-    different keys - the queue row calls the list `candidates`, the picker
-    calls it `applications`. A constant here would name whichever one was
-    written first and be wrong on the other, which is the same hardcoded fact
-    the field exists to remove, moved one module along.
-
-    ELIGIBILITY IS "AN APPLICATION EXISTS AT THIS COMPANY", not "the list in
-    front of you is non-empty". On the queue those coincide, because the row's
-    candidates and this index are the same set read under the same key. On the
-    picker they do not: its list is search-filtered, and typing a query that
-    matches nothing does not stop the application existing. So the caller that
-    wants the stronger claim - eligible exactly when its own list is non-empty
-    - is the queue, and it holds there by construction rather than by promise.
+    An application at this company determines eligibility. The picker's
+    visible list is search-filtered, so an empty search result does not remove
+    an existing application. The queue's candidate list and index are the
+    same set, so its list also expresses eligibility.
     """
     key = mail_match.norm_company(company)
     if key and apps_by_company.get(key):

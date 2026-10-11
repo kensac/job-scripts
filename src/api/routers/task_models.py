@@ -1,29 +1,16 @@
-"""Configuring which model runs which task, and saying what that costs.
+"""Configure task models and show the cost and effect of each choice.
 
-The router already decides this from a task's declared needs and the models
-its call site sanctioned. This lets the owner of the system overrule that
-choice from a screen - and, more importantly, refuses to let him do it blind.
+The router chooses from each task's needs and sanctioned models. An owner can
+override that choice after seeing its evidence, price, and effect on existing
+work.
 
-Three things this deliberately puts in front of a person before they commit:
+Model evidence matters. `mail_classify` excludes `gpt-5-nano` after it invented
+12 clearances across 55 postings. Each task shape exposes this reason. It also
+declares a token profile; dated model rates price a proposed switch.
 
-WHAT THE CALL SITE KNEW. Model choice here is an evidence judgment, not a
-preference. mail_classify excludes gpt-5-nano because it was measured
-fabricating - 12 invented clearances across 55 postings. That reasoning lived
-in a code comment, which is invisible to exactly the person about to overrule
-it, so it is now a field on the shape and it is on this screen.
-
-WHAT IT COSTS. Every shape declares its own token profile, and every model has
-dated rates, so a switch can be priced honestly before it happens rather than
-discovered in next month's spend.
-
-WHAT HAPPENS TO WORK ALREADY DONE. Not the same answer for every task, so it is
-declared per task rather than assumed: these sweeps skip finished rows without
-regard to which model did them, so a switch MIXES two models' answers in one
-catalog and re-pays for nothing.
-
-Capability stays hard and sanction stays soft: a model that cannot do the work
-is not offered at all, because that failure would arrive mid-batch after the
-money was spent.
+A sweep skips completed rows regardless of model. Switching models therefore
+mixes answers in one catalog without repeating completed work. Model capability
+is required; sanctioned status is advice.
 """
 
 from __future__ import annotations

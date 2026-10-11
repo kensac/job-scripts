@@ -311,44 +311,26 @@ def match_message(
 
 
 def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None = None) -> None:
-    """Append a match. `actor_user_id` is the HUMAN who decided it, if any.
+    """Append a match and record the person who decided it, if any.
 
-    NULL means the matcher wrote it. Whether that human was the message's owner
-    or an administrator correcting someone else's data is derived by comparing
-    this against the owner, rather than recorded twice.
+    A null `actor_user_id` identifies the matcher. Compare a human actor with
+    the message owner to distinguish owner and administrator corrections.
 
-    THE MATCHER NEVER OVERTURNS A PERSON. Not a preference - it happened. The
-    single human decision ever recorded in production (match 14911, message
-    126111 assigned to application 2507 at 19:16) was superseded an hour later
-    by row 14912, `unmatched`, "no candidate matched", written by the matcher.
-    `match_pending` selects on `cm.application_id IS NULL` and so could not
-    have selected that message after 19:16; it selected it before, and wrote
-    the verdict it had computed against a world that had since changed. A
-    selection predicate cannot close that window because the window is between
-    the selection and the write. The check has to be at the write.
+    The matcher cannot overturn a human decision. In production, match 14911
+    assigned message 126111 to application 2507 at 19:16. One hour later,
+    match 14912 replaced it with `unmatched`. The sweep had selected the
+    message before the human write. Selection cannot close that race; the
+    write must check the latest match.
 
-    This does not freeze the answer, which is the rule it would otherwise
-    break: a human verdict stays reconsiderable BY A HUMAN, from the queue that
-    exists to reconsider it, where every candidate is shown rather than the one
-    the matcher would have picked. What it stops is a rejection being undone by
-    the sweep that follows it, which would make rejecting a match pointless.
+    A person can still reconsider a human decision from the review queue.
+    The matcher skips an identical verdict to avoid appending the same state
+    on every sweep. At 6,124 unmatched messages and an hourly cycle, that
+    would add roughly 147,000 redundant rows per day. The first unmatched
+    verdict stays because it records the decision.
 
-    A verdict from the MATCHER that repeats the one already standing is not
-    appended. "We looked and found nothing" is a real state and the first one
-    is worth recording - that is what lets a later re-run be measured against
-    it. The second identical one says the same thing with a newer timestamp.
-    Without this, re-deciding already-decided messages appends a fresh
-    `unmatched` row per message per sweep: at 6,124 unmatched and an hourly
-    cycle that is roughly 147,000 rows a day of a log repeating itself, burying
-    the transitions the log exists to show.
-
-    A HUMAN's verdict is always appended, even when it matches. That someone
-    looked and affirmed the answer is a different fact from the matcher
-    producing it again, and it is the fact `actor_user_id` exists to carry.
-
-    Rationale is excluded from the comparison deliberately: it is prose from
-    whichever tier answered, and two `unmatched` verdicts differing only in
-    wording are one decision.
+    A human decision always appends, even when it agrees with the current
+    match. Its actor is new evidence. Compare decision fields only; different
+    rationale prose does not make a different decision.
     """
     if actor_user_id is None:
         current = latest(message_id)

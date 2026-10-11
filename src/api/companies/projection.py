@@ -38,29 +38,20 @@ def _quantile(value: float | None, n: int, min_sample: int) -> float | None:
 
 
 def _response_block(row: _ResponseRow | None, min_sample: int) -> CompanyResponses | None:
-    """Does this company reply, and how long does it take?
+    """Report replies and tracker-based time to an outcome.
 
-    RATES ARE ALMOST ALWAYS NULL HERE, and that is the honest answer rather than
-    a defect. Of 1,283 companies with an application, 449 have two, 87 have
-    five and TWO have thirty. At any floor that makes a proportion mean
-    something, nearly every company is below it - so the numerator and
-    denominator carry the information and the caller renders "2 of 7". A
-    company with three applications and one reply does not have a 33% response
-    rate; it has one reply.
+    Response rates are often null. Of 1,283 companies with an application,
+    449 have two, 87 have five, and only two have thirty. Keep the numerator
+    and denominator visible when the sample is below the rate floor.
 
-    TIMING IS TRACKER-ONLY, and this is not a caveat about precision - the
-    mail-derived number is not a measurement at all. For all 1,783 mail-derived
-    applications, `applied_at` IS the first matched message's `sent_at`,
-    exactly, with no exceptions. So "days from applying to the first outcome"
-    computed over them measures the gap between the first mail and the first
-    DECIDING mail, which is zero whenever a rejection arrives with no
-    acknowledgement before it - a median of 0.0 days across 956 applications.
-    Publishing that mixed with real dates is how an average becomes 33 days
-    when the measurable median is 8.
+    Mail-derived `applied_at` equals the first matched message's `sent_at` in
+    all 1,783 measured applications. It cannot measure time since applying.
+    Across 956 such applications, the first outcome has a median gap of 0.0
+    days from that first message. Mixing those dates with tracker dates made
+    the average 33 days, while the measurable median was 8 days.
 
-    Median and p90 rather than a mean, because the tail is long: over the 200
-    tracker applications with a clean duration the mean is 30.5 days and the
-    median 7.9. The mean is describing the tail, not the wait.
+    Report median and p90 because the tracker sample has a long tail. Among
+    200 clean tracker durations, the mean is 30.5 days and the median is 7.9.
     """
     if row is None:
         return None
