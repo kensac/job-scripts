@@ -50,10 +50,9 @@ class TestSkillCanonicalisation:
     def test_drops_non_skills(self, raw):
         assert skills.canonical(raw) == ""
 
-    def test_drops_sentences_rather_than_bucketing_them(self):
-        sentence = "a demonstrated ability to work across many teams and time zones"
-        assert len(sentence) > skills.MAX_SKILL_CHARS
-        assert skills.canonical(sentence) == ""
+    def test_keeps_long_extracted_skill(self):
+        skill = "International Business Machines Cloud Pak for Data"
+        assert skills.canonical(skill) == skill.lower()
 
     def test_lead_in_and_bare_name_land_together(self):
         assert skills.canonical("Experience with Kubernetes") == skills.canonical("Kubernetes")
