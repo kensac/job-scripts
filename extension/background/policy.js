@@ -64,6 +64,23 @@ async function sha256(bytes) {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function chunkChainDigest(parts) {
+  let previous = new Uint8Array(32);
+  const domain = new TextEncoder().encode("recipe-chunk-v2\0");
+  for (let index = 0; index < parts.length; index++) {
+    const chunkDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", parts[index]));
+    const header = new Uint8Array(domain.length + 32 + 8 + 8 + 32);
+    header.set(domain);
+    header.set(previous, domain.length);
+    const view = new DataView(header.buffer);
+    view.setBigUint64(domain.length + 32, BigInt(index));
+    view.setBigUint64(domain.length + 40, BigInt(parts[index].length));
+    header.set(chunkDigest, domain.length + 48);
+    previous = new Uint8Array(await crypto.subtle.digest("SHA-256", header));
+  }
+  return Array.from(previous, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // The recipe response is validated by DECODING it: the payload inflates,
 // its digest matches the revision the server named, and the table inside
 // is the engine's shape for this adapter. Anything else is no recipe, and
@@ -71,20 +88,23 @@ async function sha256(bytes) {
 async function validateRecipe(raw, adapter) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   if (raw.schema_version === 2) {
-    if (sortedKeys(raw) !== "adapter,chunk_count,chunks,encoding,max_age_seconds,revision,schema_version") return null;
+    if (sortedKeys(raw) !== "adapter,chunk_count,chunks,digest_algorithm,encoding,max_age_seconds,revision,schema_version") return null;
     if (raw.encoding !== "identity-chunks" || !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
+    if (raw.digest_algorithm !== "raw-sha256" && raw.digest_algorithm !== "chunk-chain-sha256") return null;
     if (!Array.isArray(raw.chunks) || raw.chunks.length !== raw.chunk_count) return null;
     if (typeof raw.revision !== "string" || !HEX64.test(raw.revision)) return null;
     if (typeof raw.adapter !== "string" || !ADAPTER_ID.test(raw.adapter) || raw.adapter !== adapter) return null;
     if (!Number.isInteger(raw.max_age_seconds) || raw.max_age_seconds < 0 || raw.max_age_seconds > 86400) return null;
     let bytes;
+    let parts;
     try {
-      const parts = raw.chunks.map((value) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0)));
+      parts = raw.chunks.map((value) => Uint8Array.from(atob(value), (c) => c.charCodeAt(0)));
       bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
       let offset = 0;
       for (const part of parts) { bytes.set(part, offset); offset += part.length; }
     } catch (_) { return null; }
-    if ((await sha256(bytes)) !== raw.revision) return null;
+    const digest = raw.digest_algorithm === "raw-sha256" ? await sha256(bytes) : await chunkChainDigest(parts);
+    if (digest !== raw.revision) return null;
     let recipe;
     try { recipe = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { return null; }
     if (!recipe || typeof recipe !== "object" || Array.isArray(recipe)) return null;
@@ -226,10 +246,11 @@ export class RecipeStore extends PolicyStore {
 
   async validate(raw, adapter) {
     if (raw && raw.schema_version === 2 && !Object.hasOwn(raw, "chunks")) {
-      if (sortedKeys(raw) !== "adapter,chunk_count,encoding,max_age_seconds,revision,schema_version" ||
+      if (sortedKeys(raw) !== "adapter,chunk_count,digest_algorithm,encoding,max_age_seconds,revision,schema_version" ||
           raw.adapter !== adapter || !ADAPTER_ID.test(adapter) ||
           typeof raw.revision !== "string" || !HEX64.test(raw.revision) ||
           raw.encoding !== "identity-chunks" ||
+          (raw.digest_algorithm !== "raw-sha256" && raw.digest_algorithm !== "chunk-chain-sha256") ||
           !Number.isInteger(raw.max_age_seconds) || raw.max_age_seconds < 0 || raw.max_age_seconds > 86400 ||
           !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
       const chunks = [];

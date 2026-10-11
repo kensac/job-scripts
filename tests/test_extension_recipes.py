@@ -4,7 +4,6 @@ as the extension's fallback."""
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import uuid
 import zlib
@@ -44,7 +43,12 @@ def test_a_published_table_is_served_encoded_and_decodes_to_itself(client, user_
     assert response.status_code == 200
     body = response.json()
     assert body["schema_version"] == 1 and body["adapter"] == "workday"
-    assert body["revision"] == revision == body["digest"] and len(revision) == 64
+    assert (
+        body["revision"]
+        == body["digest"]
+        == extension_recipes.revision_of(extension_recipes.canonical(recipe()))
+    )
+    assert len(revision) == 64
     assert body["max_age_seconds"] == 300
     assert response.headers["cache-control"] == "no-store"
     assert decode(body) == recipe()
@@ -57,12 +61,16 @@ def test_publishing_keeps_history_and_rolls_back(client, admin_headers, user_hea
         "workday", recipe(matches=["https://*.myworkdaysite.com/*"]), "test"
     )
     assert second != first
-    assert client.get(PATH, headers=user_headers).json()["revision"] == second
+    second_raw = extension_recipes.revision_of(
+        extension_recipes.canonical(recipe(matches=["https://*.myworkdaysite.com/*"]))
+    )
+    assert client.get(PATH, headers=user_headers).json()["revision"] == second_raw
     rows = client.get(ADMIN, headers=admin_headers).json()["recipes"]
     assert [r["enabled"] for r in rows if r["adapter"] == "workday"] == [True, False]
     back = client.post(f"{ADMIN}/workday/rollback", headers=admin_headers)
     assert back.status_code == 200 and back.json()["revision"] == first
-    assert client.get(PATH, headers=user_headers).json()["revision"] == first
+    first_raw = extension_recipes.revision_of(extension_recipes.canonical(recipe()))
+    assert client.get(PATH, headers=user_headers).json()["revision"] == first_raw
     assert client.post(f"{ADMIN}/workday/rollback", headers=admin_headers).status_code == 404
     # The same table again is the same revision, not a new row.
     assert extension_recipes.publish("workday", recipe(), "test") == first
@@ -118,7 +126,22 @@ def test_large_recipe_upload_is_chunked_and_published(client, admin_headers, use
         ).status_code
         == 200
     )
-    process(upload_id)
+    process(upload_id, 0)
+    process(upload_id, 0)
+    assert (
+        db.query_one("SELECT next_chunk FROM extension_recipe_uploads WHERE id = %s", (upload_id,))[
+            "next_chunk"
+        ]
+        == 1
+    )
+    next_task = db.query_one(
+        "SELECT payload FROM tasks WHERE kind = 'publish_extension_recipe' "
+        "AND payload->>'upload_id' = %s AND payload->>'chunk_index' = '1' LIMIT 1",
+        (str(upload_id),),
+    )
+    assert next_task is not None
+    for index in range(1, len(pieces)):
+        process(upload_id, index)
     receipt = client.get(
         f"/v1/admin/extension/recipe-uploads/{upload_id}", headers=admin_headers
     ).json()
@@ -127,7 +150,13 @@ def test_large_recipe_upload_is_chunked_and_published(client, admin_headers, use
     manifest = client.get(
         "/v1/extension/recipe?schema_version=2&adapter=workday", headers=user_headers
     ).json()
-    assert manifest["revision"] == hashlib.sha256(raw).hexdigest()
+    from api.apply.recipe_uploads import advance_digest
+
+    digest = bytes(32)
+    for index, piece in enumerate(pieces):
+        digest = advance_digest(digest, index, piece)
+    assert manifest["revision"] == digest.hex()
+    assert manifest["digest_algorithm"] == "chunk-chain-sha256"
     recovered = bytearray()
     for index in range(manifest["chunk_count"]):
         part = client.get(
@@ -169,7 +198,8 @@ def test_incomplete_or_invalid_recipe_never_becomes_current(client, admin_header
         == 200
     )
     assert client.post(f"{base}/complete", headers=admin_headers).status_code == 200
-    process(upload_id)
+    process(upload_id, 0)
+    process(upload_id, 1)
     receipt = client.get(base, headers=admin_headers).json()
     assert receipt["status"] == "rejected"
     assert receipt["received_chunks"] == 2
@@ -192,6 +222,7 @@ def test_version_two_reads_an_older_jsonb_revision_after_rollback(client, admin_
     assert rolled_back.json()["revision"] == revision
     manifest = client.get("/v1/extension/recipe?schema_version=2&adapter=workday").json()
     assert manifest["revision"] == revision
+    assert manifest["digest_algorithm"] == "raw-sha256"
     chunks = [
         client.get(
             "/v1/extension/recipe?schema_version=2&adapter=workday"

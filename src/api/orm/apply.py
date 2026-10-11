@@ -212,6 +212,8 @@ class ExtensionRecipeUpload(Base):
     status: Mapped[str] = mapped_column(Text)
     revision: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    next_chunk: Mapped[int] = mapped_column(BigInteger, server_default="0")
+    validation_state: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -225,3 +227,15 @@ class ExtensionRecipeChunk(Base):
     )
     chunk_index: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     body: Mapped[bytes] = mapped_column(BYTEA)
+
+
+class ExtensionRecipeFrame(Base):
+    """One persisted JSON container in an upload validator."""
+
+    __tablename__ = "extension_recipe_frames"
+
+    upload_id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("extension_recipe_uploads.id"), primary_key=True
+    )
+    depth: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    body: Mapped[dict[str, Any]] = mapped_column(JSONB)

@@ -8,7 +8,7 @@ const zlib = require('node:zlib');
 const nodeCrypto = require('node:crypto');
 
 // The worker's globals the decoder needs: base64, streams, digest.
-const context = { URL, atob, Blob, Response, DecompressionStream, TextDecoder, crypto: globalThis.crypto };
+const context = { URL, atob, Blob, Response, DecompressionStream, TextDecoder, TextEncoder, crypto: globalThis.crypto };
 const { PolicyStore: Store, RecipeStore } = vm.runInNewContext(
   fs.readFileSync(path.join(__dirname, '../../extension/background/policy.js'), 'utf8').replace(/^export /gm, '') + '; ({ PolicyStore, RecipeStore })',
   context,
@@ -139,7 +139,18 @@ test('a published recipe decodes to the table, checked against its digest, and i
 test('a chunked recipe verifies every byte before it is cached', async () => {
   const raw = Buffer.from(JSON.stringify(table));
   const pieces = [raw.subarray(0, 17), raw.subarray(17)];
-  const digest = nodeCrypto.createHash('sha256').update(raw).digest('hex');
+  let digestBytes = Buffer.alloc(32);
+  for (const [index, piece] of pieces.entries()) {
+    const indexBytes = Buffer.alloc(8);
+    indexBytes.writeBigUInt64BE(BigInt(index));
+    const lengthBytes = Buffer.alloc(8);
+    lengthBytes.writeBigUInt64BE(BigInt(piece.length));
+    digestBytes = nodeCrypto.createHash('sha256').update(Buffer.concat([
+      Buffer.from('recipe-chunk-v2\0'), digestBytes, indexBytes, lengthBytes,
+      nodeCrypto.createHash('sha256').update(piece).digest(),
+    ])).digest();
+  }
+  const digest = digestBytes.toString('hex');
   const seen = [];
   const fetchFn = async (url) => {
     seen.push(url);
@@ -147,7 +158,7 @@ test('a chunked recipe verifies every byte before it is cached', async () => {
     const index = parsed.searchParams.get('chunk_index');
     if (index === null) return { status: 200, json: async () => ({
       schema_version: 2, adapter: 'workday', revision: digest, max_age_seconds: 300,
-      encoding: 'identity-chunks', chunk_count: pieces.length,
+      encoding: 'identity-chunks', digest_algorithm: 'chunk-chain-sha256', chunk_count: pieces.length,
     }) };
     return { status: 200, json: async () => ({ schema_version: 2, adapter: 'workday',
       revision: digest, index: Number(index), payload: pieces[Number(index)].toString('base64') }) };
@@ -165,10 +176,27 @@ test('a chunked recipe verifies every byte before it is cached', async () => {
   assert.equal(corrupt.ok, false);
 });
 
+test('a version 2 manifest verifies an older raw digest after rollback', async () => {
+  const raw = Buffer.from(JSON.stringify(table));
+  const revision = nodeCrypto.createHash('sha256').update(raw).digest('hex');
+  const fetchFn = async (url) => {
+    const index = new URL(url).searchParams.get('chunk_index');
+    if (index === null) return { status: 200, json: async () => ({
+      schema_version: 2, adapter: 'workday', revision, max_age_seconds: 300,
+      encoding: 'identity-chunks', digest_algorithm: 'raw-sha256', chunk_count: 1,
+    }) };
+    return { status: 200, json: async () => ({ schema_version: 2, adapter: 'workday',
+      revision, index: Number(index), payload: raw.toString('base64') }) };
+  };
+  const result = await new RecipeStore(storage(), fetchFn, RECIPES, () => 1000).resolve('workday');
+  assert.equal(result.ok, true);
+  assert.equal(result.config.revision, revision);
+});
+
 test('an invalid chunk manifest causes no chunk requests', async () => {
   let calls = 0;
   const invalid = { schema_version: 2, adapter: 'workday', revision: 'a'.repeat(64),
-    max_age_seconds: 300, encoding: 'identity-chunks', chunk_count: 1.5 };
+    max_age_seconds: 300, encoding: 'identity-chunks', digest_algorithm: 'chunk-chain-sha256', chunk_count: 1.5 };
   const fetchFn = async () => { calls++; return { status: 200, json: async () => invalid }; };
   const result = await new RecipeStore(storage(), fetchFn, RECIPES).resolve('workday');
   assert.equal(result.ok, false);

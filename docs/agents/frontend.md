@@ -108,14 +108,16 @@ never in `prefs`. A count of a person's views is the length of
 
 **A config-driven reader's table can be published, and the bundled copy is
 the fallback.** Admin recipe uploads store bounded byte chunks. Completion
-queues validation and publishes only a complete recipe. The revision is the
-sha256 of the uploaded bytes. `GET /v1/extension/recipe?schema_version=2&adapter=<id>`
-serves the current revision and chunk count. Fetch each chunk with that
-revision and `chunk_index`; verify the assembled bytes before parsing or
+queues one validation task per chunk and publishes only a complete recipe.
+The revision chains the SHA-256 of each chunk with its index and length.
+`GET /v1/extension/recipe?schema_version=2&adapter=<id>` serves the current
+revision, digest algorithm and chunk count. Fetch each chunk with that
+revision and `chunk_index`; verify the named digest before parsing or
 caching them. The extension pins a revision per fill and keeps an unexpired
 verified copy through an outage. `POST /v1/admin/extension/recipes/{adapter}/rollback`
-re-enables the previous publish. The version 1 single-request publish and
-single-response read stay only while older clients use them. Remove them
+re-enables the previous publish. Older JSONB revisions keep their raw-byte
+digest; the manifest names that algorithm. The version 1 single-response
+read stays only while older clients use it. Remove it
 after the fleet and extension have moved to version 2. This channel is for a
 developer-mode or self-hosted install: the Chrome Web Store's MV3 policy
 treats a behaviour-driving config as remote logic.

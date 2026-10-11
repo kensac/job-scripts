@@ -49213,6 +49213,10 @@
             "title": "Encoding",
             "default": "identity-chunks"
           },
+          "digest_algorithm": {
+            "type": "string",
+            "title": "Digest Algorithm"
+          },
           "chunk_count": {
             "type": "integer",
             "title": "Chunk Count"
@@ -49223,6 +49227,7 @@
           "adapter",
           "revision",
           "max_age_seconds",
+          "digest_algorithm",
           "chunk_count"
         ],
         "title": "RecipeChunkManifest"

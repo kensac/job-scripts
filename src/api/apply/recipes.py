@@ -14,9 +14,8 @@ base64-encoded: that keeps the selector tables out of casual view and out of
 a public repo diff, and stops nobody who reads the extension's decoder.
 
 Publishing keeps history: each publish is a row, the newest enabled row is
-served, an earlier one can be re-enabled (rollback), and the revision is the
-digest of the canonical table, so republishing the same table is the same
-revision.
+served, and an earlier one can be re-enabled (rollback). Version 1 revisions
+hash canonical bytes. Version 2 revisions chain ordered chunk digests.
 """
 
 from __future__ import annotations
@@ -57,6 +56,7 @@ class RecipeChunkManifest(BaseModel):
     revision: str
     max_age_seconds: int
     encoding: str = "identity-chunks"
+    digest_algorithm: str
     chunk_count: int
 
 
@@ -111,7 +111,6 @@ def encode(raw: bytes) -> str:
 def publish(adapter: str, body: Any, published_by: str | None) -> str:
     """Publish a bundled local table into the chunk store."""
     raw = validate(adapter, body)
-    revision = revision_of(raw)
     upload_id = uuid.uuid4()
     chunks = [raw[start : start + CHUNK_BYTES] for start in range(0, len(raw), CHUNK_BYTES)]
     with db.transaction():
@@ -127,13 +126,14 @@ def publish(adapter: str, body: Any, published_by: str | None) -> str:
         )
     from api.apply.recipe_uploads import process
 
-    process(upload_id)
+    for index in range(len(chunks)):
+        process(upload_id, index, enqueue_next=False)
     result = db.query_one(
-        "SELECT status, error FROM extension_recipe_uploads WHERE id = %s", (upload_id,)
+        "SELECT status, error, revision FROM extension_recipe_uploads WHERE id = %s", (upload_id,)
     )
     if result is None or result["status"] != "published":
         raise ValueError(result["error"] if result else "recipe upload failed")
-    return revision
+    return result["revision"]
 
 
 def current(adapter: str) -> dict[str, Any] | None:
@@ -196,7 +196,7 @@ def config_for(adapter: str, max_age_seconds: int) -> RecipeConfig | None:
         raw = b"".join(bytes(part["body"]) for part in parts)
     return RecipeConfig(
         adapter=adapter,
-        revision=row["revision"],
+        revision=revision_of(raw),
         max_age_seconds=max_age_seconds,
         payload=encode(raw),
         digest=revision_of(raw),
@@ -224,6 +224,7 @@ def chunk_manifest(adapter: str, max_age_seconds: int) -> RecipeChunkManifest | 
         revision=row["revision"],
         max_age_seconds=max_age_seconds,
         chunk_count=chunk_count,
+        digest_algorithm="raw-sha256" if row["body"] is not None else "chunk-chain-sha256",
     )
 
 

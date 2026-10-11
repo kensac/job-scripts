@@ -147,7 +147,7 @@ def complete_recipe_upload(
 ) -> RecipeUploadReceipt:
     with db.transaction():
         upload = db.query_one(
-            "SELECT status, chunk_count FROM extension_recipe_uploads WHERE id = %s FOR UPDATE",
+            "SELECT status, chunk_count, next_chunk FROM extension_recipe_uploads WHERE id = %s FOR UPDATE",
             (upload_id,),
         )
         if upload is None:
@@ -168,7 +168,10 @@ def complete_recipe_upload(
                 (str(upload_id),),
             )
             if active is None:
-                queue.enqueue("publish_extension_recipe", {"upload_id": str(upload_id)})
+                queue.enqueue(
+                    "publish_extension_recipe",
+                    {"upload_id": str(upload_id), "chunk_index": upload["next_chunk"]},
+                )
     return _upload_receipt(upload_id)
 
 

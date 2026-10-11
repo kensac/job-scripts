@@ -1,10 +1,9 @@
-"""Validate recipe JSON one byte at a time without retaining scalar values."""
+"""Validate recipe JSON while retaining only the current chunk and parser state."""
 
 from __future__ import annotations
 
-import codecs
-from dataclasses import dataclass, field
-from typing import BinaryIO
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 
 
 class InvalidRecipe(ValueError):
@@ -13,118 +12,7 @@ class InvalidRecipe(ValueError):
 
 _SPACE = {9, 10, 13, 32}
 _HEX = set(b"0123456789abcdefABCDEF")
-_ESCAPES = {
-    ord('"'): '"',
-    ord("\\"): "\\",
-    ord("/"): "/",
-    ord("b"): "\b",
-    ord("f"): "\f",
-    ord("n"): "\n",
-    ord("r"): "\r",
-    ord("t"): "\t",
-}
-
-
-class Bytes:
-    """A one-byte lookahead over a buffered file."""
-
-    def __init__(self, stream: BinaryIO):
-        self.stream = stream
-        self.lookahead: int | None = None
-
-    def peek(self) -> int | None:
-        if self.lookahead is None:
-            data = self.stream.read(1)
-            self.lookahead = data[0] if data else -1
-        return None if self.lookahead == -1 else self.lookahead
-
-    def take(self) -> int:
-        value = self.peek()
-        if value is None:
-            raise InvalidRecipe("recipe JSON ended early")
-        self.lookahead = None
-        return value
-
-    def space(self) -> None:
-        while self.peek() in _SPACE:
-            self.take()
-
-    def expect(self, value: int) -> None:
-        if self.take() != value:
-            raise InvalidRecipe("invalid recipe JSON syntax")
-
-    def string(self, keep: int = 0) -> tuple[str, bool]:
-        self.expect(ord('"'))
-        saved: list[str] = []
-        truncated = False
-        decoder = codecs.getincrementaldecoder("utf-8")("strict")
-
-        def capture(characters: str) -> None:
-            nonlocal truncated
-            for character in characters:
-                if len(saved) < keep:
-                    saved.append(character)
-                else:
-                    truncated = True
-
-        while True:
-            byte = self.take()
-            if byte == ord('"'):
-                try:
-                    capture(decoder.decode(b"", final=True))
-                except UnicodeDecodeError as exc:
-                    raise InvalidRecipe("invalid UTF-8 in recipe JSON") from exc
-                return "".join(saved), truncated
-            if byte == ord("\\"):
-                try:
-                    capture(decoder.decode(b"", final=True))
-                except UnicodeDecodeError as exc:
-                    raise InvalidRecipe("invalid UTF-8 in recipe JSON") from exc
-                decoder = codecs.getincrementaldecoder("utf-8")("strict")
-                escape = self.take()
-                if escape == ord("u"):
-                    digits = bytes(self.take() for _ in range(4))
-                    if any(digit not in _HEX for digit in digits):
-                        raise InvalidRecipe("invalid Unicode escape in recipe JSON")
-                    capture(chr(int(digits, 16)))
-                elif escape in _ESCAPES:
-                    capture(_ESCAPES[escape])
-                else:
-                    raise InvalidRecipe("invalid escape in recipe JSON")
-            elif byte < 32:
-                raise InvalidRecipe("control character in recipe JSON string")
-            else:
-                try:
-                    capture(decoder.decode(bytes((byte,)), final=False))
-                except UnicodeDecodeError as exc:
-                    raise InvalidRecipe("invalid UTF-8 in recipe JSON") from exc
-
-    def number(self) -> None:
-        if self.peek() == ord("-"):
-            self.take()
-        digit = self.peek()
-        if digit == ord("0"):
-            self.take()
-        elif digit is not None and ord("1") <= digit <= ord("9"):
-            while (digit := self.peek()) is not None and ord("0") <= digit <= ord("9"):
-                self.take()
-        else:
-            raise InvalidRecipe("invalid number in recipe JSON")
-        if self.peek() == ord("."):
-            self.take()
-            self.digits()
-        if self.peek() in (ord("e"), ord("E")):
-            self.take()
-            if self.peek() in (ord("+"), ord("-")):
-                self.take()
-            self.digits()
-
-    def digits(self) -> None:
-        first = self.peek()
-        if first is None or not ord("0") <= first <= ord("9"):
-            raise InvalidRecipe("invalid number in recipe JSON")
-        while (digit := self.peek()) is not None and ord("0") <= digit <= ord("9"):
-            self.take()
+_ESCAPES = {34: '"', 92: "\\", 47: "/", 98: "\b", 102: "\f", 110: "\n", 114: "\r", 116: "\t"}
 
 
 @dataclass
@@ -133,155 +21,363 @@ class Frame:
     scope: str
     state: str
     key: str = ""
-    seen: set[str] = field(default_factory=set)
+    seen: list[str] = field(default_factory=list)
     name_valid: bool = False
     variants_valid: bool = False
 
 
-def validate(stream: BinaryIO, adapter: str) -> None:
-    """Check JSON syntax and the reader's required shape with bounded state."""
-    source = Bytes(stream)
-    source.space()
-    source.expect(ord("{"))
-    stack = [Frame("object", "root", "key_or_end")]
-    root_name = False
-    root_matches = False
-    root_fields = False
-    match_count = 0
+class RecipeParser:
+    """A resumable byte parser. One feed accepts one stored upload chunk."""
 
-    def value(parent: Frame) -> None:
-        nonlocal root_name, root_matches, root_fields, match_count
-        source.space()
-        byte = source.peek()
-        required: str | None = None
-        if parent.scope == "root":
-            required = {"name": "string", "matches": "array", "fields": "array"}.get(parent.key)
-        elif parent.scope == "field":
-            required = {"name": "string", "variants": "array"}.get(parent.key)
-        elif parent.scope == "matches":
-            required = "string"
-        elif parent.scope == "fields":
-            required = "object"
+    def __init__(
+        self,
+        adapter: str,
+        checkpoint: dict | None,
+        load_frame: Callable[[int], dict | None],
+    ) -> None:
+        self.adapter = adapter
+        self.load_frame = load_frame
+        self.frames: dict[int, Frame] = {}
+        self.deleted_from: int | None = None
+        if checkpoint is None:
+            self.depth = 1
+            self.frames[0] = Frame("object", "root", "key_or_end")
+            self.mode = "root"
+            self.root_name = False
+            self.root_matches = False
+            self.root_fields = False
+            self.match_count = 0
+            self.string_context = ""
+            self.prefix = ""
+            self.truncated = False
+            self.utf8_left = 0
+            self.utf8_value = 0
+            self.utf8_min = 0
+            self.unicode_digits = ""
+            self.number_state = ""
+            self.literal = ""
+            self.literal_pos = 0
+        else:
+            for key, value in checkpoint.items():
+                setattr(self, key, value)
+
+    def frame(self, depth: int | None = None) -> Frame:
+        index = self.depth - 1 if depth is None else depth
+        if index not in self.frames:
+            raw = self.load_frame(index)
+            if raw is None:
+                raise InvalidRecipe("recipe parser state is missing")
+            self.frames[index] = Frame(**raw)
+        return self.frames[index]
+
+    def push(self, frame: Frame) -> None:
+        self.frames[self.depth] = frame
+        self.depth += 1
+
+    def pop(self) -> None:
+        current = self.frame()
+        if current.scope == "field" and not (current.name_valid and current.variants_valid):
+            raise InvalidRecipe("each field needs a name and variants list")
+        self.depth -= 1
+        self.deleted_from = (
+            self.depth if self.deleted_from is None else min(self.deleted_from, self.depth)
+        )
+
+    def required_kind(self, frame: Frame) -> str | None:
+        if frame.scope == "root":
+            return {"name": "string", "matches": "array", "fields": "array"}.get(frame.key)
+        if frame.scope == "field":
+            return {"name": "string", "variants": "array"}.get(frame.key)
+        if frame.scope == "matches":
+            return "string"
+        if frame.scope == "fields":
+            return "object"
+        return None
+
+    def start_value(self, byte: int) -> None:
+        parent = self.frame()
+        required = self.required_kind(parent)
         kind = (
             "object"
-            if byte == ord("{")
+            if byte == 123
             else "array"
-            if byte == ord("[")
+            if byte == 91
             else "string"
-            if byte == ord('"')
+            if byte == 34
             else "number"
-            if byte is not None and byte in b"-0123456789"
+            if byte in b"-0123456789"
             else "literal"
         )
-        if required is not None and kind != required:
+        if required is not None and required != kind:
             raise InvalidRecipe("recipe field has the wrong JSON type")
+        parent.state = "comma_or_end"
         if kind == "object":
-            source.take()
-            scope = "field" if parent.scope == "fields" else "other"
-            stack.append(Frame("object", scope, "key_or_end"))
+            self.push(
+                Frame("object", "field" if parent.scope == "fields" else "other", "key_or_end")
+            )
         elif kind == "array":
-            source.take()
             scope = (
                 parent.key
                 if parent.scope == "root" and parent.key in ("matches", "fields")
                 else "other"
             )
-            stack.append(Frame("array", scope, "value_or_end"))
+            self.push(Frame("array", scope, "value_or_end"))
             if parent.scope == "root" and parent.key == "matches":
-                root_matches = True
+                self.root_matches = True
             elif parent.scope == "root" and parent.key == "fields":
-                root_fields = True
+                self.root_fields = True
             elif parent.scope == "field" and parent.key == "variants":
                 parent.variants_valid = True
         elif kind == "string":
-            keep = (
-                len(adapter) + 1
-                if parent.scope == "root" and parent.key == "name"
-                else len("https://")
-                if parent.scope == "matches"
-                else 0
-            )
-            prefix, truncated = source.string(keep)
-            if parent.scope == "root" and parent.key == "name":
-                root_name = not truncated and prefix.lower() == adapter
-            elif parent.scope == "field" and parent.key == "name":
-                parent.name_valid = True
-            elif parent.scope == "matches":
-                if not prefix.startswith("https://"):
-                    raise InvalidRecipe("matches must contain only https:// patterns")
-                match_count += 1
+            self.start_string("value")
         elif kind == "number":
-            source.number()
-        elif byte in (ord("t"), ord("f"), ord("n")):
-            literal = {ord("t"): b"true", ord("f"): b"false", ord("n"): b"null"}[byte]
-            for character in literal:
-                source.expect(character)
+            self.mode = "number"
+            self.number_state = "start"
+            self.number(byte)
+        elif byte in (116, 102, 110):
+            self.mode = "literal"
+            self.literal = {116: "true", 102: "false", 110: "null"}[byte]
+            self.literal_pos = 1
         else:
             raise InvalidRecipe("invalid recipe JSON value")
 
-    while stack:
-        current = stack[-1]
-        source.space()
-        byte = source.peek()
-        if current.kind == "object":
-            if current.state in ("key_or_end", "key"):
-                if byte == ord("}") and current.state == "key_or_end":
-                    source.take()
-                    if current.scope == "field" and not (
-                        current.name_valid and current.variants_valid
-                    ):
-                        raise InvalidRecipe("each field needs a name and variants list")
-                    stack.pop()
-                    continue
-                key, truncated = source.string(len("variants"))
-                current.key = key if not truncated else ""
+    def start_string(self, role: str) -> None:
+        self.mode = "string"
+        self.string_context = role
+        self.prefix = ""
+        self.truncated = False
+        self.utf8_left = 0
+        self.utf8_value = 0
+        self.utf8_min = 0
+
+    def capture(self, character: str) -> None:
+        frame = self.frame()
+        keep = (
+            len("variants")
+            if self.string_context == "key"
+            else len(self.adapter) + 1
+            if frame.scope == "root" and frame.key == "name"
+            else len("https://")
+            if frame.scope == "matches"
+            else 0
+        )
+        if len(self.prefix) < keep:
+            self.prefix += character
+        else:
+            self.truncated = True
+
+    def string(self, byte: int) -> None:
+        if self.utf8_left:
+            if byte & 0xC0 != 0x80:
+                raise InvalidRecipe("invalid UTF-8 in recipe JSON")
+            self.utf8_value = (self.utf8_value << 6) | (byte & 0x3F)
+            self.utf8_left -= 1
+            if not self.utf8_left:
+                codepoint = self.utf8_value
+                if (
+                    codepoint < self.utf8_min
+                    or codepoint > 0x10FFFF
+                    or 0xD800 <= codepoint <= 0xDFFF
+                ):
+                    raise InvalidRecipe("invalid UTF-8 in recipe JSON")
+                self.capture(chr(codepoint))
+            return
+        if byte == 34:
+            self.mode = "default"
+            frame = self.frame()
+            if self.string_context == "key":
+                frame.key = self.prefix if not self.truncated else ""
                 relevant = (
                     {"name", "matches", "fields"}
-                    if current.scope == "root"
+                    if frame.scope == "root"
                     else {"name", "variants"}
-                    if current.scope == "field"
+                    if frame.scope == "field"
                     else set()
                 )
-                if current.key in relevant:
-                    if current.key in current.seen:
+                if frame.key in relevant:
+                    if frame.key in frame.seen:
                         raise InvalidRecipe("duplicate recipe field")
-                    current.seen.add(current.key)
-                source.space()
-                source.expect(ord(":"))
-                current.state = "value"
-            elif current.state == "value":
-                current.state = "comma_or_end"
-                value(current)
+                    frame.seen.append(frame.key)
+                frame.state = "colon"
+            elif frame.scope == "root" and frame.key == "name":
+                self.root_name = not self.truncated and self.prefix.lower() == self.adapter
+            elif frame.scope == "field" and frame.key == "name":
+                frame.name_valid = True
+            elif frame.scope == "matches":
+                if not self.prefix.startswith("https://"):
+                    raise InvalidRecipe("matches must contain only https:// patterns")
+                self.match_count += 1
+            return
+        if byte == 92:
+            self.mode = "escape"
+        elif byte < 32:
+            raise InvalidRecipe("control character in recipe JSON string")
+        elif byte < 128:
+            self.capture(chr(byte))
+        elif 0xC2 <= byte <= 0xDF:
+            self.utf8_left, self.utf8_value, self.utf8_min = 1, byte & 0x1F, 0x80
+        elif 0xE0 <= byte <= 0xEF:
+            self.utf8_left, self.utf8_value, self.utf8_min = 2, byte & 0x0F, 0x800
+        elif 0xF0 <= byte <= 0xF4:
+            self.utf8_left, self.utf8_value, self.utf8_min = 3, byte & 0x07, 0x10000
+        else:
+            raise InvalidRecipe("invalid UTF-8 in recipe JSON")
+
+    def number(self, byte: int) -> bool:
+        state = self.number_state
+        digit = 48 <= byte <= 57
+        if state == "start":
+            if byte == 45:
+                self.number_state = "minus"
+            elif byte == 48:
+                self.number_state = "zero"
+            elif 49 <= byte <= 57:
+                self.number_state = "int"
             else:
-                if byte == ord(","):
-                    source.take()
-                    current.state = "key"
-                elif byte == ord("}"):
-                    source.take()
-                    if current.scope == "field" and not (
-                        current.name_valid and current.variants_valid
-                    ):
-                        raise InvalidRecipe("each field needs a name and variants list")
-                    stack.pop()
+                raise InvalidRecipe("invalid number in recipe JSON")
+        elif state == "minus":
+            if byte == 48:
+                self.number_state = "zero"
+            elif 49 <= byte <= 57:
+                self.number_state = "int"
+            else:
+                raise InvalidRecipe("invalid number in recipe JSON")
+        elif state in ("zero", "int") and byte == 46:
+            self.number_state = "dot"
+        elif state in ("zero", "int", "fraction") and byte in (69, 101):
+            self.number_state = "exp"
+        elif state == "zero" and digit:
+            raise InvalidRecipe("invalid number in recipe JSON")
+        elif state in ("int", "fraction", "exp_digits") and digit:
+            pass
+        elif state == "dot" and digit:
+            self.number_state = "fraction"
+        elif state == "exp" and byte in (43, 45):
+            self.number_state = "exp_sign"
+        elif state in ("exp", "exp_sign") and digit:
+            self.number_state = "exp_digits"
+        elif state in ("zero", "int", "fraction", "exp_digits"):
+            self.mode = "default"
+            return False
+        else:
+            raise InvalidRecipe("invalid number in recipe JSON")
+        return True
+
+    def step(self, byte: int) -> None:
+        while True:
+            if self.mode == "root":
+                if byte in _SPACE:
+                    return
+                if byte != 123:
+                    raise InvalidRecipe("a recipe is an object")
+                self.mode = "default"
+                return
+            if self.mode == "string":
+                self.string(byte)
+                return
+            if self.mode == "escape":
+                if byte == 117:
+                    self.mode = "unicode"
+                    self.unicode_digits = ""
+                elif byte in _ESCAPES:
+                    self.capture(_ESCAPES[byte])
+                    self.mode = "string"
+                else:
+                    raise InvalidRecipe("invalid escape in recipe JSON")
+                return
+            if self.mode == "unicode":
+                if byte not in _HEX:
+                    raise InvalidRecipe("invalid Unicode escape in recipe JSON")
+                self.unicode_digits += chr(byte)
+                if len(self.unicode_digits) == 4:
+                    self.capture(chr(int(self.unicode_digits, 16)))
+                    self.mode = "string"
+                return
+            if self.mode == "number":
+                if self.number(byte):
+                    return
+                continue
+            if self.mode == "literal":
+                if self.literal_pos >= len(self.literal) or byte != ord(
+                    self.literal[self.literal_pos]
+                ):
+                    raise InvalidRecipe("invalid recipe JSON literal")
+                self.literal_pos += 1
+                if self.literal_pos == len(self.literal):
+                    self.mode = "default"
+                return
+            if byte in _SPACE:
+                return
+            if self.depth == 0:
+                raise InvalidRecipe("trailing data after recipe JSON")
+            frame = self.frame()
+            if frame.kind == "object":
+                if frame.state in ("key_or_end", "key"):
+                    if byte == 125 and frame.state == "key_or_end":
+                        self.pop()
+                    elif byte == 34:
+                        self.start_string("key")
+                    else:
+                        raise InvalidRecipe("invalid recipe JSON object")
+                elif frame.state == "colon":
+                    if byte != 58:
+                        raise InvalidRecipe("invalid recipe JSON object")
+                    frame.state = "value"
+                elif frame.state == "value":
+                    self.start_value(byte)
+                elif byte == 44:
+                    frame.state = "key"
+                elif byte == 125:
+                    self.pop()
                 else:
                     raise InvalidRecipe("invalid recipe JSON object")
-        elif current.state in ("value_or_end", "value"):
-            if byte == ord("]") and current.state == "value_or_end":
-                source.take()
-                stack.pop()
+            elif frame.state in ("value_or_end", "value"):
+                if byte == 93 and frame.state == "value_or_end":
+                    self.pop()
+                else:
+                    self.start_value(byte)
+            elif byte == 44:
+                frame.state = "value"
+            elif byte == 93:
+                self.pop()
             else:
-                current.state = "comma_or_end"
-                value(current)
-        elif byte == ord(","):
-            source.take()
-            current.state = "value"
-        elif byte == ord("]"):
-            source.take()
-            stack.pop()
-        else:
-            raise InvalidRecipe("invalid recipe JSON array")
-    source.space()
-    if source.peek() is not None:
-        raise InvalidRecipe("trailing data after recipe JSON")
-    if not (root_name and root_matches and root_fields and match_count):
-        raise InvalidRecipe("recipe is missing a valid name, matches, or fields")
+                raise InvalidRecipe("invalid recipe JSON array")
+            return
+
+    def feed(self, chunk: bytes) -> None:
+        for byte in chunk:
+            self.step(byte)
+
+    def finish(self) -> None:
+        if self.mode == "number" and self.number_state in ("zero", "int", "fraction", "exp_digits"):
+            self.mode = "default"
+        if (
+            self.mode != "default"
+            or self.depth
+            or not (self.root_name and self.root_matches and self.root_fields and self.match_count)
+        ):
+            raise InvalidRecipe("recipe is incomplete or missing a required field")
+
+    def checkpoint(self) -> dict:
+        keys = (
+            "depth",
+            "mode",
+            "root_name",
+            "root_matches",
+            "root_fields",
+            "match_count",
+            "string_context",
+            "prefix",
+            "truncated",
+            "utf8_left",
+            "utf8_value",
+            "utf8_min",
+            "unicode_digits",
+            "number_state",
+            "literal",
+            "literal_pos",
+        )
+        return {key: getattr(self, key) for key in keys}
+
+    def changed_frames(self) -> dict[int, dict]:
+        return {index: asdict(frame) for index, frame in self.frames.items() if index < self.depth}

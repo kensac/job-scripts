@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
-import io
 import tracemalloc
 
 import pytest
 
-from api.apply.recipe_json import InvalidRecipe, validate
+from api.apply.recipe_json import InvalidRecipe, RecipeParser
 
 
-def check(raw: bytes) -> None:
-    validate(io.BytesIO(raw), "workday")
+def check(raw: bytes, chunk_size: int = 65536) -> None:
+    frames: dict[int, dict] = {}
+    state = None
+    for start in range(0, len(raw), chunk_size):
+        parser = RecipeParser("workday", state, frames.get)
+        parser.feed(raw[start : start + chunk_size])
+        state = parser.checkpoint()
+        if parser.deleted_from is not None:
+            frames = {depth: body for depth, body in frames.items() if depth < parser.deleted_from}
+        frames.update(parser.changed_frames())
+    parser.finish()
 
 
 def test_required_keys_cannot_be_replaced_by_later_duplicates():
@@ -48,3 +56,23 @@ def test_invalid_json_is_rejected_at_its_first_bad_token():
     ):
         with pytest.raises(InvalidRecipe):
             check(raw)
+
+
+def test_every_token_can_cross_a_chunk_boundary():
+    check(
+        b'{"name":"Workday","matches":["https://a"],"fields":[{"name":"x","variants":[]}],'
+        b'"extra":"\\u0041\xc3\xa9"}',
+        chunk_size=1,
+    )
+
+
+def test_deep_nesting_uses_persisted_frames():
+    depth = 2000
+    check(
+        b'{"name":"Workday","matches":["https://a"],"fields":[],"extra":'
+        + b"[" * depth
+        + b"0"
+        + b"]" * depth
+        + b"}",
+        chunk_size=64,
+    )
