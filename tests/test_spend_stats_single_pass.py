@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from api import db
+from api import db, model_calls
 from api.routers.admin import queries
 from api.routers.admin.queries import (
     CheckTypeTotals,
@@ -37,6 +37,8 @@ from api.routers.spend import (
 )
 
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
+# The window's answers with their calls' usage, as the page reads them.
+_ANSWERS = model_calls.answers_with_usage(f"q.{_WINDOW} AND q.model IS NOT NULL")
 
 
 def _old_spend(params: dict) -> tuple[Any, ...]:
@@ -54,7 +56,7 @@ def _old_spend(params: dict) -> tuple[Any, ...]:
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                MIN(created_at) AS first_call,
                MAX(created_at) AS last_call
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         """,
         params,
     )
@@ -73,7 +75,7 @@ def _old_spend(params: dict) -> tuple[Any, ...]:
                    WHERE batch_id IS NULL
                      AND COALESCE(config_name, '') <> ALL(%(interactive)s)
                ), 0) AS unrealized_savings_usd
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         """,
         params,
     )
@@ -94,7 +96,7 @@ def _old_spend(params: dict) -> tuple[Any, ...]:
                    WHERE COALESCE(total_tokens, 0) = 0
                      AND status IN ('passed', 'rejected')
                ) AS joint_call_rows
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         GROUP BY check_type ORDER BY 3 DESC, check_type COLLATE "C" NULLS LAST
         """,
         params,
@@ -105,7 +107,7 @@ def _old_spend(params: dict) -> tuple[Any, ...]:
         SELECT model, COUNT(*) AS calls, COALESCE(SUM(cost_usd), 0) AS cost_usd,
                COALESCE(SUM(total_tokens), 0) AS total_tokens,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         GROUP BY model ORDER BY 3 DESC, model COLLATE "C"
         """,
         params,
@@ -118,7 +120,7 @@ def _old_spend(params: dict) -> tuple[Any, ...]:
                COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cost_usd,
                COALESCE(SUM(cost_usd) FILTER (WHERE batch_id IS NULL), 0) AS sync_cost_usd,
                COUNT(*) AS calls
-        FROM ai_queries WHERE {_WINDOW} AND model IS NOT NULL
+        FROM {_ANSWERS} a
         GROUP BY 1 ORDER BY 1
         """,
         params,
@@ -138,7 +140,7 @@ def _old_stats() -> LedgerStats:
                COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                SUM(cost_usd) AS cost_usd
-        FROM ai_queries
+        FROM ledger_rows
         """
     )
     by_check_type = db.query_as(
@@ -147,13 +149,13 @@ def _old_stats() -> LedgerStats:
         SELECT check_type, COUNT(*) AS count,
                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens
-        FROM ai_queries GROUP BY check_type
+        FROM ledger_rows GROUP BY check_type
         ORDER BY count DESC, check_type COLLATE "C" NULLS LAST
         """,
     )
     by_status = db.query_as(
         StatusTotals,
-        "SELECT status, COUNT(*) AS count FROM ai_queries GROUP BY status "
+        "SELECT status, COUNT(*) AS count FROM ledger_rows GROUP BY status "
         'ORDER BY count DESC, status COLLATE "C" NULLS LAST',
     )
     by_day = db.query_as(
@@ -170,7 +172,7 @@ def _old_stats() -> LedgerStats:
                SUM(cache_write_tokens) AS cache_write_tokens,
                COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens
-        FROM ai_queries GROUP BY day ORDER BY day ASC
+        FROM ledger_rows GROUP BY day ORDER BY day ASC
         """,
     )
     by_model = db.query(
@@ -187,7 +189,7 @@ def _old_stats() -> LedgerStats:
                COALESCE(SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_completion_tokens,
                COALESCE(SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL), 0) AS batched_cached_tokens,
                SUM(cost_usd) AS cost_usd
-        FROM ai_queries WHERE model IS NOT NULL
+        FROM ledger_rows WHERE model IS NOT NULL
         GROUP BY model ORDER BY queries DESC, model COLLATE "C"
         """
     )
@@ -265,6 +267,25 @@ def verdict_log():
             total = (
                 0 if n % 7 == 0 else (None if n % 10 == 0 else (prompt or 0) + (completion or 0))
             )
+            # Each answer's usage is its call's, as the writers record it.
+            call = db.query_one(
+                "INSERT INTO model_calls (purpose, model, batched, prompt_tokens, "
+                "completion_tokens, total_tokens, cached_tokens, cache_write_tokens, "
+                "reasoning_tokens, cost_usd) VALUES ('verify', %s, false, %s, %s, %s, %s, "
+                "%s, %s, %s) RETURNING id",
+                (
+                    model,
+                    prompt or 0,
+                    completion or 0,
+                    total or 0,
+                    0 if n % 6 == 0 else n * 3,
+                    None if model == "claude-x" or n % 4 == 0 else n * 2,
+                    None if n % 5 == 0 else n,
+                    # Six-decimal costs, many with an odd last digit, so cost / 2
+                    # needs a seventh place and SUM(cost / 2) is exercised exactly.
+                    None if n % 8 == 0 or model == "claude-x" else Decimal(n) / 997,
+                ),
+            )
             _insert(
                 created_at=f"{base['d'].isoformat()}+00:00",
                 model=model,
@@ -272,15 +293,7 @@ def verdict_log():
                 status=statuses[(n * 5) % len(statuses)],
                 config_name=configs[(n * 7) % len(configs)],
                 batch_id=f"b-{n}" if n % 3 == 0 else None,
-                prompt_tokens=prompt,
-                completion_tokens=completion,
-                total_tokens=total,
-                cached_tokens=None if n % 6 == 0 else n * 3,
-                cache_write_tokens=None if model == "claude-x" or n % 4 == 0 else n * 2,
-                reasoning_tokens=None if n % 5 == 0 else n,
-                # Six-decimal costs, many with an odd last digit, so cost / 2
-                # needs a seventh place and SUM(cost / 2) is exercised exactly.
-                cost_usd=None if n % 8 == 0 or model == "claude-x" else Decimal(n) / 997,
+                model_call_id=call["id"],
             )
             db.execute(
                 "UPDATE ai_queries SET created_at = created_at "
@@ -288,10 +301,8 @@ def verdict_log():
                 "WHERE id = (SELECT max(id) FROM ai_queries)",
                 (day_back, sign, int(hh), int(mm)),
             )
-    for gone in range(3):
-        row_id = _insert(
-            model="gpt-5-nano", check_type="closed", status="passed", cost_usd=5 + gone
-        )
+    for _ in range(3):
+        row_id = _insert(model="gpt-5-nano", check_type="closed", status="passed")
         db.execute("DELETE FROM ai_queries WHERE id = %s", (row_id,))
     # Every interesting population must be present, or the comparison below
     # proves nothing about it.
@@ -306,7 +317,7 @@ def verdict_log():
                COUNT(*) FILTER (WHERE COALESCE(total_tokens, 0) = 0
                                 AND status IN ('passed', 'rejected')) AS joint,
                COUNT(*) FILTER (WHERE created_at < now() - interval '30 days') AS outside
-        FROM ai_queries
+        FROM ledger_rows
         """
     )
     assert shape and all(v > 0 for v in shape.values()), shape

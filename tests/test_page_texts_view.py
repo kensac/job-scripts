@@ -13,13 +13,8 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # Page text read from ai_queries in the same statement. The admin row explorer
 # shows a stored row as it is, the text the model saw included, so it reads
-# the table. The link and clear tasks read an answer's copy to compare it with
-# the fetch that replaces it.
-_RAW_ROW_READERS = {
-    "api/routers/admin/queries.py",
-    "tasks/answer_copies.py",
-    "tasks/answer_links.py",
-}
+# the table.
+_RAW_ROW_READERS = {"api/routers/admin/queries.py"}
 _TEXT_FROM_TABLE = re.compile(
     r"input_content[^;]{0,400}?(?:FROM|JOIN) ai_queries"
     r"|(?:FROM|JOIN) ai_queries[^;]{0,400}?input_content",

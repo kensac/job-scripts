@@ -255,7 +255,7 @@ def answers_with_usage(scope: str) -> str:
     """The answers `scope` selects (a predicate over ai_queries `q`), each with
     its call's usage, as a subquery to alias: the first answer naming a call
     carries the call's numbers and its siblings zeros, how the writers stored
-    them, and an answer naming no call its own stored numbers.
+    them, and an answer naming no call none.
 
     For readers that aggregate a window. ledger_rows gives each row the same
     values through lookups in its select list, which suits a page of rows and
@@ -267,7 +267,7 @@ def answers_with_usage(scope: str) -> str:
     whose closed sibling falls outside the scope is still a sibling.
     """
     usage = ",\n".join(
-        f"CASE WHEN q.model_call_id IS NULL THEN q.{c} WHEN q.id = c.first_id THEN m.{c} "
+        f"CASE WHEN q.model_call_id IS NULL THEN NULL WHEN q.id = c.first_id THEN m.{c} "
         f"ELSE {'m.cost_usd * 0' if c == 'cost_usd' else '0'} END AS {c}"
         for c in _USAGE_COLUMNS
     )
