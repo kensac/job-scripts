@@ -6,6 +6,13 @@ because the signals only make sense beside them.
 
 ## The worker fleet
 
+**Resume PDF extraction runs after durable transfer.** The API writes and
+verifies each object part before recording it as received. Completion enqueues
+`process_resume_upload`; the worker reads verified parts into a disk-backed
+temporary file, extracts text, and changes the upload to ready with the resume
+write in one transaction. A failure leaves the original parts and its error
+visible in upload status. Retrying completion enqueues another task.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

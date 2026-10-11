@@ -5,21 +5,26 @@ from __future__ import annotations
 import base64
 import datetime
 import io
+import uuid
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.models import Ok
 from api.problem import SIZE_REFUSALS, refuse
+from core.payloads.blob_parts import BlobPart, BlobPartStore
 
 router = APIRouter()
 
 MAX_PDF_BYTES = 5 * 1024 * 1024
 MAX_RESUME_CHARS = 60_000
 _RESUME_COLS = (
-    "id, name, filename, length(text) AS chars, text, pdf IS NOT NULL AS has_pdf, "
+    "id, name, filename, length(text) AS chars, text, "
+    "(pdf IS NOT NULL OR pdf_upload_id IS NOT NULL) AS has_pdf, "
     "created_at, updated_at"
 )
 
@@ -81,8 +86,7 @@ def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
 
 @router.post("/user/resumes", status_code=201, responses=SIZE_REFUSALS)
 def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) -> Resume:
-    """Pasted text or a PDF, base64 in the body. The PDF's text is what is
-    kept; the file itself is not stored. Same name replaces the text."""
+    """Save pasted text or a legacy base64 PDF under a resume name."""
     text = (body.text or "").strip()
     data = None
     if body.pdf_base64:
@@ -102,15 +106,6 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) 
             )
     if not text:
         raise refuse(400, "NO_TEXT", "paste the resume text or attach a PDF")
-    # The PDF's bytes live in the database and are dumped and archived with
-    # it, so the count per person is bounded as well as the size per file.
-    kept = db.query_one(
-        "SELECT count(*) AS n FROM user_resumes WHERE user_id = %s AND name != %s",
-        (user.id, body.name.strip()),
-    )
-    cap = int(db.get_config("resumes_per_user", 10))
-    if kept and kept["n"] >= cap:
-        raise refuse(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
     row = db.query_one_as(
         Resume,
         f"""
@@ -118,6 +113,7 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) 
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (user_id, name) DO UPDATE
             SET text = EXCLUDED.text, filename = EXCLUDED.filename, pdf = EXCLUDED.pdf,
+                pdf_upload_id = NULL,
                 updated_at = now()
         RETURNING {_RESUME_COLS}
         """,
@@ -125,6 +121,19 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) 
     )
     assert row is not None  # an upsert with RETURNING always yields its row
     return row
+
+
+def _pdf_parts(upload_id: uuid.UUID, part_count: int) -> Iterator[bytes]:
+    store = BlobPartStore.from_env()
+    for part_index in range(part_count):
+        row = db.query_one(
+            "SELECT sha256, size FROM resume_upload_parts "
+            "WHERE upload_id = %s AND part_index = %s AND verified",
+            (upload_id, part_index),
+        )
+        if row is None:
+            raise RuntimeError("stored PDF part is missing")
+        yield store.read(BlobPart(upload_id, part_index, row["sha256"], row["size"]))
 
 
 @router.get(
@@ -138,16 +147,33 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)) -> Resp
     was never true of this route."""
 
     row = db.query_one(
-        "SELECT filename, pdf FROM user_resumes WHERE id = %s AND user_id = %s",
+        "SELECT filename, pdf, pdf_upload_id FROM user_resumes WHERE id = %s AND user_id = %s",
         (resume_id, user.id),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown resume")
-    if row["pdf"] is None:
+    if row["pdf"] is None and row["pdf_upload_id"] is None:
         raise refuse(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
     name = (row["filename"] or "resume.pdf").replace('"', "")
+    if row["pdf_upload_id"] is not None:
+        upload = db.query_one(
+            "SELECT size, next_part FROM resume_uploads WHERE id = %s AND status = 'ready'",
+            (row["pdf_upload_id"],),
+        )
+        if upload is None:
+            raise refuse(503, "FILE_UNAVAILABLE", "the stored PDF is unavailable")
+        return StreamingResponse(
+            _pdf_parts(row["pdf_upload_id"], upload["next_part"]),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{name}"',
+                "Content-Length": str(upload["size"]),
+            },
+        )
+    pdf_data = row["pdf"]
+    assert pdf_data is not None
     return Response(
-        bytes(row["pdf"]),
+        bytes(pdf_data),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{name}"'},
     )
