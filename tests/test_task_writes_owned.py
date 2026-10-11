@@ -1,7 +1,8 @@
 """A task row is written by the code that owns it, and nowhere else.
 
-The worker claims, requeues and reaps (api/worker.py). The runtime writes
-progress, parks, finishes and records batches, all behind the claim
+The worker claims, requeues and reaps (api/worker.py, api/worker_claims.py,
+api/worker_execution.py). The runtime writes progress, parks, finishes and
+records batches, all behind the claim
 (tasks/runtime/). api/queue.py inserts a task, merges payload keys and cancels.
 A handler that restates one of these writes drifts from it: the filter batch
 runner's own heartbeat had no claim guard and vouched for the run that replaced
@@ -18,7 +19,13 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 _UPDATE = re.compile(r"\bUPDATE\s+tasks\b", re.IGNORECASE)
 _INSERT = re.compile(r"\bINSERT\s+INTO\s+tasks\b", re.IGNORECASE)
 
-_UPDATE_OWNERS = ("tasks/runtime/", "api/worker.py", "api/queue.py")
+_UPDATE_OWNERS = (
+    "tasks/runtime/",
+    "api/worker.py",
+    "api/worker_claims.py",
+    "api/worker_execution.py",
+    "api/queue.py",
+)
 
 # Admission paths insert inside a transaction that checked for a conflicting
 # task under a lock, and publish only after that transaction commits, which

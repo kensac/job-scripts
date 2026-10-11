@@ -23,13 +23,17 @@ behind an hourly pull already running, and respects longer source intervals
 after running or successful work. Keep these checks in admission. Terminal
 status alone does not prevent a new run; intervals and per-cycle dedupe keys
 still apply.
-Cancellation remains an atomic transition from active states. Claiming and
-retry policy belong to `api.worker`; claim-aware writes and progress updates
+Cancellation remains an atomic transition from active states. Queue claim and
+reaping policy belong to `api.worker_claims`; task execution and failure
+settlement and claim-guarded heartbeats belong to `api.worker_execution`;
+cycle scheduling belongs to `api.worker_scheduling`. `api.worker` owns the
+process loop, held claims, slots and signal release. Claim-aware writes and progress updates
 belong to `tasks.runtime.lifecycle`.
 
-**A task row is written only by its owners.** `api.worker` claims, requeues,
-reaps and beats. `tasks.runtime` writes progress (`set_progress`,
-`checkpoint`), parks (`park_waiting`, `park_awaiting_batch`) and finishes, each
+**A task row is written only by its owners.** `api.worker_claims` claims
+and reaps; `api.worker_execution` settles transient and deferred runs and
+beats; `api.worker` releases claims on exit. `tasks.runtime` writes progress
+(`set_progress`, `checkpoint`), parks (`park_waiting`, `park_awaiting_batch`) and finishes, each
 behind the claim. `api.queue` inserts (`enqueue`), merges payload keys
 (`merge_payload`, unguarded on purpose: the keys record paid or finished work)
 and cancels. A handler that restates one of these writes drifts from it: the
@@ -48,7 +52,7 @@ can do, and the claim reads it; the kind allow and exclude lists narrow from
 there.
 
 **Eligible tasks are claimed by age, and a scheduled pull counts as one of
-its source's intervals younger.** The order is `api.worker.CLAIM_ORDER`:
+its source's intervals younger.** The order is `api.worker_claims.CLAIM_ORDER`:
 `created_at`, plus `sources.ingest_interval_hours` when the payload names a
 host, then `id`. Only the scheduler's pulls name a host (it is what `api.hosts`
 paces on), and they are the one kind enqueued hundreds at a time; every other
@@ -339,7 +343,7 @@ postings a parked sweep's `batch_requests` already name.
 **A resume is not a retry.** Every claim increments `attempts`, because
 `(worker, attempts)` is the generation stamp claim-guarded writes check, and
 it must never repeat. The retry budget is `attempts - batch_resumes`
-(`api.worker.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
+(`api.worker_claims.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
 and both the transient-error requeue and the reaper compare the difference
 with `task_max_attempts` (app_config). Counting resumes as attempts let 404 batch tasks reach
 the cap in the 30 days to 2026-10-04 by waiting alone; two were then failed at

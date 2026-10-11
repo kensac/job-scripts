@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from api import db, worker
+from api import db, worker, worker_execution
 
 
 def _worker_row():
@@ -23,7 +23,7 @@ def _worker_row():
 def _beats_are_a_thread() -> bool:
     import inspect
 
-    source = inspect.getsource(worker._run_held)
+    source = inspect.getsource(worker_execution.run_held)
     return "threading.Thread" in source and "asyncio.create_task(_liveness" not in source
 
 

@@ -202,12 +202,10 @@ forbidden_modules = ["api"]
 # api.apply.writes now reads its purpose off the shape rather than spelling it
 # a second time.
 #
-# Two are left, and both describe the same inherent edge.
-#
-# CORRECT, and this one never goes. api.worker IS the task runner, sits above
-# the handlers by definition, and loads HANDLERS to dispatch them. It reads the
-# runtime for the same reason. Only a worker that stopped being an `api` module
-# would drop these two lines, and it would not change a single import.
+# The worker is the task runner and sits above handlers by definition. Its
+# entry point and the claim, scheduling and execution modules load the handler
+# registry or runtime to dispatch work. These explicit edges are the only
+# service-to-handler imports allowed by this contract.
 #
 [[tool.importlinter.contracts]]
 name = "the services do not reach into the handlers"
@@ -217,4 +215,8 @@ forbidden_modules = ["tasks"]
 ignore_imports = [
     "api.worker -> tasks",
     "api.worker -> tasks.runtime",
+    "api.worker_claims -> tasks",
+    "api.worker_execution -> tasks",
+    "api.worker_execution -> tasks.runtime",
+    "api.worker_scheduling -> tasks",
 ]
