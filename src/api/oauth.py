@@ -1,229 +1,50 @@
-"""Per-user OAuth credentials for external providers, and the token refresh
-the workers call during ingest.
+"""Per-user OAuth grant storage, refresh, and revocation.
 
-Google is the only provider today, but the storage is keyed on (user_id,
-provider) because the current grant is known to be temporary: the OAuth client
-is in Testing mode with a restricted scope, so Google expires its refresh
-tokens after seven days. The two documented escapes - a verified production
-app, or IMAP with an app password - are both provider swaps, and this module
-exists so that neither is a rewrite.
+Consent state and provider configuration have separate owners. This module
+retains the existing public import path for routes and worker callers.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
 
 import requests
-from cryptography.fernet import InvalidToken
 from psycopg import Connection
 
 from api import crypto, db
-from api.config import ALL_GROUPS as ALL_GROUPS
-from api.config import group_access_allowed
-from core.env import env_list
+from api import oauth_authorization as consent
+from api import oauth_provider as provider
+
+OAuthState = consent.OAuthState
+authorization_url = consent.authorization_url
+issue_state = consent.issue_state
+verify_state = consent.verify_state
+
+ALL_GROUPS = provider.ALL_GROUPS
+CONNECT_GROUPS_KEY = provider.CONNECT_GROUPS_KEY
+GMAIL_SCOPES = provider.GMAIL_SCOPES
+GOOGLE = provider.GOOGLE
+STATE_TTL_SECONDS = provider.STATE_TTL_SECONDS
+OAuthError = provider.OAuthError
+NotConnected = provider.NotConnected
+NeedsReconnect = provider.NeedsReconnect
+StateInvalid = provider.StateInvalid
+ScopeDeclined = provider.ScopeDeclined
+ProviderError = provider.ProviderError
+_client_id = provider.client_id
+_client_secret = provider.client_secret
+connect_allowed = provider.connect_allowed
+redirect_uris = provider.redirect_uris
+
+_TOKEN_ENDPOINT = provider.TOKEN_ENDPOINT
+_REVOKE_ENDPOINT = provider.REVOKE_ENDPOINT
+_PROFILE_ENDPOINT = provider.PROFILE_ENDPOINT
+_EXPIRY_SKEW = provider.EXPIRY_SKEW
+_HTTP_TIMEOUT = provider.HTTP_TIMEOUT
+_DEAD_GRANT_ERROR = provider.DEAD_GRANT_ERROR
 
 logger = logging.getLogger(__name__)
-
-GOOGLE = "google"
-
-# Read-only, and deliberately nothing else. Every wider Gmail scope carries the
-# ability to send, modify or delete mail, which no part of this system has any
-# business holding. This list is asserted in the test suite so widening it
-# cannot happen quietly.
-GMAIL_SCOPES = ("https://www.googleapis.com/auth/gmail.readonly",)
-
-_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
-_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # noqa: S105 - a URL, not a secret
-_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
-_PROFILE_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
-
-# The redirect URIs registered on the OAuth client. This is not a preference
-# list: Google compares the redirect byte-for-byte, so an entry here that is
-# not also in the Google console fails at the consent screen with
-# redirect_uri_mismatch. Vercel preview deployments therefore cannot be
-# supported at all - their hostnames are minted per deploy.
-_REGISTERED_REDIRECT_URIS = (
-    "https://www.kanishksachdev.com/job-tracker/settings/gmail/callback",
-    "http://localhost:3000/job-tracker/settings/gmail/callback",
-)
-
-# How long an issued state parameter stays redeemable. It has to cover a person
-# reading Google's consent screen and choosing an account. It does not need to
-# be longer, because Google's authorization codes themselves expire after ten
-# minutes: a wider window here could only ever admit a state whose code is
-# already dead.
-STATE_TTL_SECONDS = 600
-
-# Treat an access token as spent this far before its nominal expiry. An ingest
-# run holds one token across a long series of Gmail calls, so the margin has to
-# cover the run drifting past the boundary mid-flight, not just one round trip.
-_EXPIRY_SKEW = "2 minutes"
-
-# Every call to Google is bounded by this. It is not a nicety: get_access_token
-# holds a Postgres row lock across the refresh request, so this timeout is
-# exactly the bound on how long one stuck request can stall every other worker
-# waiting for the same user's token.
-_HTTP_TIMEOUT = 10
-
-# The one token-endpoint error that means "this grant is gone, the user must
-# consent again" - revoked, expired, or the seven-day Testing-mode death.
-# invalid_client and the rest are operator faults and must not be laundered
-# into a reconnect prompt aimed at the user.
-_DEAD_GRANT_ERROR = "invalid_grant"
-
-# app_config key holding the groups allowed to connect a mailbox, as a JSON
-# list. Seeded to infra-admins. Opening the feature up is an edit through
-# PUT /v1/admin/config/{key}, not a deploy - which is the whole reason this is
-# not the hardcoded group set that routers/admin.py uses.
-CONNECT_GROUPS_KEY = "gmail_connect_groups"
-
-
-class OAuthError(Exception):
-    """Base for every failure in this module that a route needs to distinguish."""
-
-
-class NotConnected(OAuthError):
-    """No stored grant for this (user, provider)."""
-
-
-class NeedsReconnect(OAuthError):
-    """The provider rejected the stored refresh token.
-
-    This is the loud failure the whole feature turns on. A mail ingest that
-    quietly stops finding mail is indistinguishable from a quiet week, so every
-    path that discovers a dead grant must surface it rather than degrade.
-    """
-
-
-class StateInvalid(OAuthError):
-    """The state parameter was forged, expired, or issued to another user."""
-
-
-class ScopeDeclined(OAuthError):
-    """The user completed consent without granting the scope we need."""
-
-
-class ProviderError(OAuthError):
-    """The provider's endpoint failed in a way that is not the user's problem."""
-
-
-def _required_env(name: str) -> str:
-    """A worker without the credential is a misconfigured host, not a dead grant.
-
-    os.environ[...] raised a bare KeyError whose whole message was the variable
-    name, and it surfaced on the one task whose stated purpose is to notice a
-    revoked token. transmission and the laptop checkout both failed this way on
-    2026-09-04 while every container host passed, so the alarm built to tell
-    "your mail stopped" from "a quiet week" was reporting neither.
-
-    ProviderError, deliberately: this is not the user's problem and must never
-    be read as NeedsReconnect.
-    """
-    try:
-        return os.environ[name]
-    except KeyError:
-        raise ProviderError(
-            f"{name} is not set on worker {os.environ.get('JOBTRACKER_WORKER_NAME', '?')}; "
-            "the grant is fine, this host cannot refresh it"
-        ) from None
-
-
-def _client_id() -> str:
-    return _required_env("GOOGLE_OAUTH_CLIENT_ID")
-
-
-def _client_secret() -> str:
-    # Read at call time rather than bound at import: the value is injected from
-    # Infisical, and a module-level constant would freeze whatever was present
-    # when the process started. It never leaves this module.
-    return _required_env("GOOGLE_OAUTH_CLIENT_SECRET")
-
-
-def redirect_uris() -> list[str]:
-    return env_list("GMAIL_OAUTH_REDIRECT_URIS") or list(_REGISTERED_REDIRECT_URIS)
-
-
-def connect_allowed(groups: list[str]) -> bool:
-    return group_access_allowed(CONNECT_GROUPS_KEY, groups)
-
-
-@dataclass(frozen=True)
-class OAuthState:
-    user_id: int
-    provider: str
-    redirect_uri: str
-
-
-def issue_state(user_id: int, provider: str, redirect_uri: str) -> str:
-    """Mint a state parameter that the callback can verify without storing it.
-
-    The state is a Fernet token, so it is authenticated and timestamped by the
-    same primitive that protects the tokens at rest - no second scheme, and no
-    table of pending nonces to expire. It carries no random nonce because
-    Fernet already gives every token a random IV; a nonce would add entropy
-    nothing reads.
-
-    What makes this safe against an attacker planting their own authorization
-    code in someone else's account is not the opacity of the state but the pair
-    of checks in verify_state: the payload names the user it was issued to, and
-    the callback route is authenticated, so the two must agree. An attacker
-    cannot mint a state naming the victim, and cannot reach the callback as the
-    victim.
-    """
-    payload = json.dumps({"user_id": user_id, "provider": provider, "redirect_uri": redirect_uri})
-    return crypto.encrypt(payload).decode("ascii")
-
-
-def verify_state(state: str, *, user_id: int) -> OAuthState:
-    try:
-        payload = json.loads(crypto.decrypt(state.encode("ascii"), ttl=STATE_TTL_SECONDS))
-    except (InvalidToken, ValueError, UnicodeEncodeError) as exc:
-        raise StateInvalid("state is not valid or has expired") from exc
-    if not isinstance(payload, dict):
-        # The same key encrypts user API keys. Nothing exposes that ciphertext,
-        # but "it decrypted" must not be allowed to mean "it is a state": a
-        # plaintext that happens to parse as a JSON scalar would otherwise
-        # reach .get() and raise AttributeError instead of being rejected.
-        raise StateInvalid("state is not a state parameter")
-    if payload.get("user_id") != user_id:
-        raise StateInvalid("state was issued to a different user")
-    redirect_uri = payload.get("redirect_uri")
-    if redirect_uri not in redirect_uris():
-        # The registered set can shrink between issuing and redeeming. Re-check
-        # rather than trusting the value we signed, so a URI withdrawn from the
-        # client is not still honoured by states already in flight.
-        raise StateInvalid("state carries a redirect uri that is no longer registered")
-    return OAuthState(
-        user_id=user_id, provider=str(payload.get("provider") or GOOGLE), redirect_uri=redirect_uri
-    )
-
-
-def authorization_url(*, user_id: int, redirect_uri: str | None = None) -> str:
-    uris = redirect_uris()
-    target = redirect_uri or uris[0]
-    if target not in uris:
-        raise StateInvalid(f"redirect_uri must be one of {uris}")
-    params = {
-        "client_id": _client_id(),
-        "redirect_uri": target,
-        "response_type": "code",
-        "scope": " ".join(GMAIL_SCOPES),
-        # Both are required, for different reasons. Without access_type=offline
-        # there is no refresh token at all. With it but without prompt=consent,
-        # Google withholds a refresh token on a repeat grant - which is exactly
-        # the case here, because the seven-day expiry means every connect after
-        # the first is a repeat, and a reconnect that returned only a one-hour
-        # access token would leave the workers with nothing to refresh from.
-        "access_type": "offline",
-        "prompt": "consent",
-        "state": issue_state(user_id, GOOGLE, target),
-    }
-    return f"{_AUTH_ENDPOINT}?{urlencode(params)}"
 
 
 def _error_code(resp: requests.Response) -> str:
