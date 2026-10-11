@@ -7,14 +7,14 @@ from typing import Any
 from api import db, user_settings
 from api.board import criteria as board_criteria
 from api.mail import applications
-from api.posting_path_common import ConsumerPath, PathStep
-from api.posting_path_gates import (
+from api.posting_path.gates import (
     _criteria_step,
     _screen_step,
     _structural_step,
     _verdict_step,
     _volume_step,
 )
+from api.posting_path.models import ConsumerPath, PathStep
 from core.screening import TitleGateConfig, screen
 from core.volume_gate import VolumeGate
 
