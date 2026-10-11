@@ -58,7 +58,10 @@ These are instructions, not history. Follow them.
   `src/api/routers/source_management/`; `source_admin.py` registers them.
 - `src/tasks/`: the handlers the worker runs, grouped by domain where a
   workflow has several stages. `tasks.mail` owns sync, classification,
-  matching, and pointer backfill; `tasks.runtime` owns worker execution.
+  matching, and pointer backfill. `tasks.verification` owns new-posting
+  verification, re-verification, and their shared question construction;
+  `tasks.verify` keeps the worker-facing handler exports. `tasks.runtime` owns
+  worker execution.
 - `src/core/`: provider datasheets, pricing, routing, task shapes, storage
   primitives.
 - `alembic/`: migrations. See migrations.md before adding one.

@@ -6,8 +6,8 @@ import pytest
 
 from api import db
 from core import catalog
-from tasks import reverification
 from tasks import verify as tasks_verify
+from tasks.verification import reverification
 from tests.reverify_sweep_support import age_closed_verdict
 
 

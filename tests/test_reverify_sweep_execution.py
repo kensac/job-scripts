@@ -8,9 +8,9 @@ import pytest
 
 from api import db, fetching
 from core.fetching import ats as core_ats
-from tasks import reverification
 from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
+from tasks.verification import reverification
 from tests.factories import make_batch_result
 from tests.reverify_sweep_support import age_closed_verdict
 

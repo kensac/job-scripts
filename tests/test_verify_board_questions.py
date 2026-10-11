@@ -16,7 +16,8 @@ from api import db
 from core.answers import joint_question_key
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
-from tasks import new_posting_verification, verify
+from tasks import verify
+from tasks.verification import new_postings as new_posting_verification
 from tests.factories import make_batch_result
 
 PROMPT = "Entry-level software engineering roles."

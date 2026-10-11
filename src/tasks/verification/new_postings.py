@@ -20,7 +20,7 @@ from core.store import (
     decided_custom_urls,
 )
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
-from tasks.verification_questions import (
+from tasks.verification.questions import (
     _joint_spec,
     _submission_model,
     _verification_spec,

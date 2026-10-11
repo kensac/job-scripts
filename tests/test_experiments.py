@@ -16,8 +16,8 @@ from core import answers
 from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
 from tasks import comp as task_comp
-from tasks import new_posting_verification
 from tasks import verify as task_verify
+from tasks.verification import new_postings as new_posting_verification
 
 
 def _verdict(url: str, rejected: bool) -> str:

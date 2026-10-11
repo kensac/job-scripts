@@ -4,7 +4,8 @@ import pytest
 
 from api import db
 from core.batch import BatchSpec
-from tasks import locations, new_posting_verification, verify
+from tasks import locations, verify
+from tasks.verification import new_postings as new_posting_verification
 from tests.factories import make_batch_result
 
 
