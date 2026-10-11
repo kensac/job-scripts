@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.fetching import board_avature, boards
+from core.fetching import boards
+from core.fetching.boards import avature as board_avature
 
 # Search-result markup copied from each tenant's live page on 2026-10-05, the
 # share popups trimmed and the job's slug, id and title made parameters. Each

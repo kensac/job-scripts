@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.fetching import board_bytedance, boards
+from core.fetching import boards
+from core.fetching.boards import bytedance as board_bytedance
 from tests.board_responses import BoardResponse as _Resp
 
 

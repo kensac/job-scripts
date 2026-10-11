@@ -6,28 +6,28 @@ these, see [observability.md](observability.md).
 
 ## A source is a row, never a code path
 
-The format is read off its listings URL by `core/fetching/boards.py`. A new board in a
+The format is read off its listings URL by `core/fetching/boards/__init__.py`. A new board in a
 known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
 **Keep board selection separate from board fetching.**
-`core/fetching/boards.py` identifies the format from the listings URL, declares
+`core/fetching/boards/__init__.py` identifies the format from the listings URL, declares
 whether a source needs a company name and whether its complete pull can retire
 absent postings, and dispatches to the fetcher. Keep each provider's requests,
 pagination, completeness proof and posting parser together in its domain
-module named `board_<provider>.py`. A format's pagination, completeness
+module named `boards/<provider>.py`. A format's pagination, completeness
 proof, parser, and measured reasons for its rules stay together. Shared request
-pacing and posting construction live in `board_common.py`; date interpretation
-lives in `board_dates.py`. Markdown tables have their own parser in
-`board_markdown.py`. Its public result is still a `JobPosting`, and a pull
+pacing and posting construction live in `boards/common.py`; date interpretation
+lives in `boards/dates.py`. Markdown tables have their own parser in
+`boards/markdown.py`. Its public result is still a `JobPosting`, and a pull
 that cannot prove completeness raises `PartialPull` with every posting it did
 read.
 
 **A posting detail resolver owns one provider format.**
-`core/fetching/ats.py` selects and logs resolvers, keeps their URL identity
+`core/fetching/ats/__init__.py` selects and logs resolvers, keeps their URL identity
 rules and distinguishes posting hosts from mail-sender domains. Each provider
-resolves detail and availability in `ats_<provider>.py`; result types, request
-handling and shared listing text extraction live in `ats_common.py`. Eightfold
+resolves detail and availability in `ats/<provider>.py`; result types, request
+handling and shared listing text extraction live in `ats/common.py`. Eightfold
 remains source-bound: a posting URL alone cannot prove its tenant, so its
 resolver runs only with the configured listings URL. A resolver returns
 `AtsResult` with `GONE` only on an authoritative closure signal; a request
@@ -196,7 +196,7 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
-text; it is assembled by the same `core/fetching/ats.py` helpers the resolvers
+text; it is assembled by the same `core/fetching/ats/__init__.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
 it too, as a description and a requirement, and Jibe carries it; neither has a
 resolver. Amazon carries it too (the description and both qualification

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.fetching import board_common, boards, client
+from core.fetching import boards, client
+from core.fetching.boards import common as board_common
 
 
 @pytest.mark.parametrize(

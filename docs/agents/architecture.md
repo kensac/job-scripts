@@ -275,7 +275,7 @@ fresh copy:
   `core/batch_collection.py` and `core/batch_progress.py`.
   Prompts, inputs, context, output limits, model choice and persistence remain
   owned by their domain or task.
-- **Listing formats**: `core/fetching/boards.py`, one fetcher per board format, chosen
+- **Listing formats**: `core/fetching/boards/__init__.py`, one fetcher per board format, chosen
   by the listings URL. See [sources-and-boards.md](sources-and-boards.md).
 - **What the mail implies the board should say**: `mail_pipeline.proposals_for`
   and `answer_proposal`. The route that lists proposals and the queue that
