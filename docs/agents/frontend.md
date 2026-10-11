@@ -58,6 +58,15 @@ sideways.
 
 ## Talking to the API
 
+**Resume PDF transfer is resumable.** Start a transfer with
+`POST /user/resume-uploads`, send the file in numbered byte parts, then call
+`POST /user/resume-uploads/{id}/complete`. The status route reports the next
+part and processing result. Re-selecting the same file resumes at that part.
+The proxy streams request and response bodies; it never converts a PDF to
+text or holds the whole file. A resume appears in the library only after the
+worker extracts its text. Keep the uploaded parts if extraction fails so the
+person can retry processing.
+
 The personal board's `GET /user/jobs` accepts `column_filters`, a JSON array of
 at most 32 AND conditions. Render available fields and operators from its
 `filter_fields` response, not a separate client whitelist. These predicates
