@@ -49254,12 +49254,12 @@
           "payload": {
             "type": "string",
             "title": "Payload",
-            "description": "the canonical table, zlib-compressed and base64-encoded"
+            "description": "the recipe bytes, zlib-compressed and base64-encoded"
           },
           "digest": {
             "type": "string",
             "title": "Digest",
-            "description": "sha256 of the canonical table; equals revision"
+            "description": "sha256 of the served recipe bytes; equals revision"
           }
         },
         "type": "object",

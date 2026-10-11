@@ -165,6 +165,16 @@ test('a chunked recipe verifies every byte before it is cached', async () => {
   assert.equal(corrupt.ok, false);
 });
 
+test('an invalid chunk manifest causes no chunk requests', async () => {
+  let calls = 0;
+  const invalid = { schema_version: 2, adapter: 'workday', revision: 'a'.repeat(64),
+    max_age_seconds: 300, encoding: 'identity-chunks', chunk_count: 1.5 };
+  const fetchFn = async () => { calls++; return { status: 200, json: async () => invalid }; };
+  const result = await new RecipeStore(storage(), fetchFn, RECIPES).resolve('workday');
+  assert.equal(result.ok, false);
+  assert.equal(calls, 1);
+});
+
 test('a recipe that does not decode, does not match its digest, or is not this adapter is no recipe', async () => {
   const wrongDigest = encodedRecipe(table);
   wrongDigest.revision = wrongDigest.digest = 'b'.repeat(64);

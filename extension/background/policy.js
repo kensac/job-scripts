@@ -72,7 +72,7 @@ async function validateRecipe(raw, adapter) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   if (raw.schema_version === 2) {
     if (sortedKeys(raw) !== "adapter,chunk_count,chunks,encoding,max_age_seconds,revision,schema_version") return null;
-    if (raw.encoding !== "identity-chunks" || !Number.isInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
+    if (raw.encoding !== "identity-chunks" || !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
     if (!Array.isArray(raw.chunks) || raw.chunks.length !== raw.chunk_count) return null;
     if (typeof raw.revision !== "string" || !HEX64.test(raw.revision)) return null;
     if (typeof raw.adapter !== "string" || !ADAPTER_ID.test(raw.adapter) || raw.adapter !== adapter) return null;
@@ -226,6 +226,12 @@ export class RecipeStore extends PolicyStore {
 
   async validate(raw, adapter) {
     if (raw && raw.schema_version === 2 && !Object.hasOwn(raw, "chunks")) {
+      if (sortedKeys(raw) !== "adapter,chunk_count,encoding,max_age_seconds,revision,schema_version" ||
+          raw.adapter !== adapter || !ADAPTER_ID.test(adapter) ||
+          typeof raw.revision !== "string" || !HEX64.test(raw.revision) ||
+          raw.encoding !== "identity-chunks" ||
+          !Number.isInteger(raw.max_age_seconds) || raw.max_age_seconds < 0 || raw.max_age_seconds > 86400 ||
+          !Number.isSafeInteger(raw.chunk_count) || raw.chunk_count < 1) return null;
       const chunks = [];
       for (let index = 0; index < raw.chunk_count; index++) {
         const url = `${this.base}?schema_version=2&adapter=${encodeURIComponent(adapter)}&revision=${encodeURIComponent(raw.revision)}&chunk_index=${index}`;

@@ -47,8 +47,8 @@ class RecipeConfig(BaseModel):
     revision: str
     max_age_seconds: int
     encoding: str = ENCODING
-    payload: str = Field(description="the canonical table, zlib-compressed and base64-encoded")
-    digest: str = Field(description="sha256 of the canonical table; equals revision")
+    payload: str = Field(description="the recipe bytes, zlib-compressed and base64-encoded")
+    digest: str = Field(description="sha256 of the served recipe bytes; equals revision")
 
 
 class RecipeChunkManifest(BaseModel):
@@ -205,34 +205,51 @@ def config_for(adapter: str, max_age_seconds: int) -> RecipeConfig | None:
 
 def chunk_manifest(adapter: str, max_age_seconds: int) -> RecipeChunkManifest | None:
     row = db.query_one(
-        "SELECT r.revision, u.chunk_count FROM extension_recipes r "
-        "JOIN extension_recipe_uploads u ON u.id = r.upload_id "
+        "SELECT r.revision, r.body, u.chunk_count FROM extension_recipes r "
+        "LEFT JOIN extension_recipe_uploads u ON u.id = r.upload_id "
         "WHERE r.adapter = %s AND r.enabled ORDER BY r.published_at DESC LIMIT 1",
         (adapter,),
     )
     if row is None:
         return None
+    chunk_count = row["chunk_count"]
+    if chunk_count is None:
+        if row["body"] is None:
+            return None
+        # Old publishes were bounded by the version 1 request limit.
+        byte_count = len(canonical(row["body"]))
+        chunk_count = (byte_count + CHUNK_BYTES - 1) // CHUNK_BYTES
     return RecipeChunkManifest(
         adapter=adapter,
         revision=row["revision"],
         max_age_seconds=max_age_seconds,
-        chunk_count=row["chunk_count"],
+        chunk_count=chunk_count,
     )
 
 
 def chunk_for(adapter: str, revision: str, index: int) -> RecipeChunk | None:
     row = db.query_one(
-        "SELECT c.body FROM extension_recipes r "
-        "JOIN extension_recipe_chunks c ON c.upload_id = r.upload_id "
-        "WHERE r.adapter = %s AND r.revision = %s "
-        "AND c.chunk_index = %s",
-        (adapter, revision, index),
+        "SELECT r.body AS legacy_body, c.body AS chunk_body "
+        "FROM extension_recipes r "
+        "LEFT JOIN extension_recipe_chunks c ON c.upload_id = r.upload_id "
+        "AND c.chunk_index = %s "
+        "WHERE r.adapter = %s AND r.revision = %s",
+        (index, adapter, revision),
     )
     if row is None:
+        return None
+    if row["chunk_body"] is not None:
+        body = bytes(row["chunk_body"])
+    elif row["legacy_body"] is not None:
+        raw = canonical(row["legacy_body"])
+        body = raw[index * CHUNK_BYTES : (index + 1) * CHUNK_BYTES]
+        if not body:
+            return None
+    else:
         return None
     return RecipeChunk(
         adapter=adapter,
         revision=revision,
         index=index,
-        payload=base64.b64encode(row["body"]).decode("ascii"),
+        payload=base64.b64encode(body).decode("ascii"),
     )
