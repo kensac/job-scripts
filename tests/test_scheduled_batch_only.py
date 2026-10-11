@@ -121,7 +121,6 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
     fetch = db.query_one("SELECT id FROM page_texts WHERE url = %s", (job["url"],))["id"]
     assert answer["page_fetch_id"] == fetch
     assert answer["rebuilt"] == build_custom_input(job["company"], job["title"], text)
-    assert answer["copy"] is None, "the input rebuilds from the fetch it names, uncopied"
     assert answer["model_call_id"] is not None
 
 
@@ -194,12 +193,9 @@ def test_bulk_content_preserves_single_url_raw_content_semantics(f):
 
     urls = [f"https://content.test/{i}" for i in range(5)]
     f.make_fetch(urls[0], content="old raw")
-    f.make_verdict(urls[0], "custom", content="wrapped custom")
     f.make_fetch(urls[1], content="raw first")
-    f.make_verdict(urls[1], "closed", content="a newer copy on an answer")
     f.make_fetch(urls[2], content="nonempty")
     f.make_fetch(urls[2], content="")
-    f.make_verdict(urls[3], "custom", content="only wrapped")
     expected = {url: content for url in urls if (content := store.get_content(url)) is not None}
     assert expected == {urls[0]: "old raw", urls[1]: "raw first", urls[2]: "nonempty"}
     newest = {

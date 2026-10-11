@@ -187,7 +187,7 @@ _LOOKS_PERSONAL = re.compile(
 # Columns whose length is measured but whose text is never transferred: the
 # large text columns are ~80% of the database and pulling them to profile them
 # would move hundreds of megabytes across the WAN for a number.
-_LENGTH_ONLY = {"input_content", "instructions", "parsed_json", "body_text", "body_html", "prompt"}
+_LENGTH_ONLY = {"instructions", "parsed_json", "body_text", "body_html", "prompt"}
 
 # Not data. alembic_version is written by the migration that builds the schema,
 # and a corpus that inserted into it would claim a revision it is not at.

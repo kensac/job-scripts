@@ -24,7 +24,10 @@ from api.orm.base import Base, _now
 
 
 class AiQuery(Base):
-    """Every AI verdict and every stored page text, one row per call.
+    """Every model answer about a posting, and every failed attempt at one.
+    What it was asked is the page_fetches row it names (page_fetch_id,
+    rebuilt by core.answer_inputs) and what it cost is the model_calls row
+    (model_call_id); neither is copied here.
 
     The oldest table here: created by core/store.py's own DDL from the first
     commit and adopted by alembic in f3a4b5c6d7e8, so this class mirrors what
@@ -107,7 +110,6 @@ class AiQuery(Base):
     prompt_hash: Mapped[str | None] = mapped_column(Text)
     company: Mapped[str | None] = mapped_column(Text)
     job_title: Mapped[str | None] = mapped_column(Text)
-    instructions: Mapped[str | None] = mapped_column(Text)
     instructions_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey(
@@ -116,19 +118,10 @@ class AiQuery(Base):
             postgresql_not_valid=True,
         ),
     )
-    input_content: Mapped[str | None] = mapped_column(Text)
     parsed_json: Mapped[str | None] = mapped_column(Text)
-    prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    completion_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    total_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    cached_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
-    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     error: Mapped[str | None] = mapped_column(Text)
     worker: Mapped[str | None] = mapped_column(Text)
     batch_id: Mapped[str | None] = mapped_column(Text)
-    cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     # sha256 of the exact question a verdict answers: model, effort, schema,
     # instructions and input text. NULL is unknown provenance, never a match.
     # Re-verification reuses an answer whose question is unchanged instead of

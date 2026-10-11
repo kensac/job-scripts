@@ -205,7 +205,6 @@ async def test_collection_writes_the_board_verdict_the_board_run_then_reuses(
     [call] = {p["model_call_id"] for p in pointers}
     assert call is not None and pointers[0]["call_tokens"] == 2100
     assert pointers[2]["rebuilt"] == spec.input
-    assert pointers[2]["copy"] is None, "no copy is stored"
 
 
 @pytest.mark.asyncio
