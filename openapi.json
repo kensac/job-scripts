@@ -42118,7 +42118,7 @@
           "flags"
         ],
         "title": "Market",
-        "description": "What the roles this user is targeting ask for. Every count is against\n`postings`, the size of the slice, because a share hides how thin a slice\nis: \"3 of 7\" and \"43%\" read the same and mean very different things.\n\n`skills` is keyed by skill kind, which `core.requirements.SKILL_KINDS`\ndefines, so an empty slice still answers with every kind present."
+        "description": "What the roles this user is targeting ask for. Every count is against\n`postings`, the size of the slice, because a share hides how thin a slice\nis: \"3 of 7\" and \"43%\" read the same and mean very different things.\n\n`skills` is keyed by skill kind, which `core.derivations.requirements.SKILL_KINDS`\ndefines, so an empty slice still answers with every kind present."
       },
       "MarketFlags": {
         "properties": {
