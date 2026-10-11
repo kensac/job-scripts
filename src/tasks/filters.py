@@ -207,7 +207,7 @@ async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None
 
 async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -> None:
     """Centralized half-price path: one worker submits the whole chunk to the
-    OpenAI Batch API (core/batch.py enforces the enqueued-token budget in
+    OpenAI Batch API (core/batch/__init__.py enforces the enqueued-token budget in
     waves) and records every verdict when results land."""
     user_id = payload["user_id"]
     flt = run_configs.filter_of(payload)

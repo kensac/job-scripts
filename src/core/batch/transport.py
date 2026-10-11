@@ -12,8 +12,8 @@ from typing import TypedDict
 from openai import AsyncOpenAI
 from openai.types import Batch
 
-from core.batch_progress import TERMINAL_STATES
-from core.batch_specs import BatchSpec, _build_line, _estimate_tokens
+from core.batch.progress import TERMINAL_STATES
+from core.batch.specs import BatchSpec, _build_line, _estimate_tokens
 
 logger = logging.getLogger(__name__)
 BATCH_COMPLETION_WINDOW = "24h"
