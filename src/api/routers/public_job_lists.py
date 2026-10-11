@@ -18,6 +18,7 @@ from api.params import csv
 from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import catalog, verdict_reads
+from core.comp import PayPeriodParam, stored_period
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]
@@ -292,7 +293,7 @@ def get_public_job_list(
     remote: bool | None = None,
     min_comp: Decimal | None = Query(default=None, ge=0, le=100000000),
     comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
-    comp_period: Literal["year", "month", "week", "day", "hour"] | None = None,
+    comp_period: PayPeriodParam | None = None,
     hide_restricted: bool = False,
     if_none_match: str | None = Header(default=None),
 ) -> PublicJobList | Response:
@@ -328,7 +329,9 @@ def get_public_job_list(
         filters.append(
             "AND COALESCE(pay.comp_max, pay.comp_min) >= %(min_comp)s AND pay.comp_currency = %(comp_currency)s AND pay.comp_period = %(comp_period)s"
         )
-        params.update(min_comp=min_comp, comp_currency=comp_currency, comp_period=comp_period)
+        params.update(
+            min_comp=min_comp, comp_currency=comp_currency, comp_period=stored_period(comp_period)
+        )
     if hide_restricted:
         # A board may admit postings the clearance gate rejected (citizenship,
         # clearance, ITAR); a viewer can drop them. No verdict yet is not a rejection.
@@ -388,7 +391,7 @@ def get_public_job_list(
             str(remote),
             str(min_comp),
             comp_currency or "",
-            comp_period or "",
+            stored_period(comp_period) or "",
             str(hide_restricted),
             str(matched_count),
             "\0".join(wanted_terms),

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.mail import applications
 from api.problem import refuse
 from core import catalog
+from core.comp import stored_period
 
 
 class ColumnFilter(BaseModel):
@@ -109,14 +110,13 @@ def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dic
                 if abs(value) > Decimal("1e18"):
                     raise ValueError("Pay value exceeds the supported numeric range")
                 units = {r.field: r.value for r in rules if r.operator == "equals"}
-                if not units.get("comp_currency") or units.get("comp_period") not in (
-                    "year",
-                    "month",
-                    "week",
-                    "day",
-                    "hour",
+                if (
+                    not units.get("comp_currency")
+                    or stored_period(units.get("comp_period")) is None
                 ):
                     raise ValueError("Pay comparisons require an exact currency and pay period")
+            elif rule.field == "comp_period" and rule.operator in ("equals", "not_equals"):
+                value = stored_period(rule.value) or rule.value
             elif kind == "boolean":
                 if rule.value not in ("true", "false"):
                     raise ValueError("Boolean filters accept true or false")

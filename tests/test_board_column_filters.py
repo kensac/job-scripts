@@ -76,6 +76,37 @@ def test_invalid_filters_are_rejected_not_silently_ignored(client, user_headers,
     assert response.json()["detail"]["code"] == "INVALID_COLUMN_FILTER"
 
 
+@pytest.mark.parametrize("period", ["year", "yearly"])
+def test_a_pay_minimum_matches_a_yearly_posting(client, user_headers, f, period):
+    """job_comp stores 'yearly'; the board's form sends 'year'. Both must reach
+    it, and an hourly posting above the number must not."""
+    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    yearly = f.make_job(url="https://example.com/yearly")
+    hourly = f.make_job(url="https://example.com/hourly")
+    f.make_comp(
+        "https://example.com/yearly", comp_max=150000, comp_currency="USD", comp_period="yearly"
+    )
+    f.make_comp(
+        "https://example.com/hourly", comp_max=200000, comp_currency="USD", comp_period="hourly"
+    )
+    for jid in [yearly, hourly]:
+        db.execute(
+            "INSERT INTO user_jobs (user_id,job_id,status) VALUES (%s,%s,'saved')", (uid, jid)
+        )
+    rules = [
+        {"field": "comp_max", "operator": "gte", "value": "140000"},
+        {"field": "comp_currency", "operator": "equals", "value": "USD"},
+        {"field": "comp_period", "operator": "equals", "value": period},
+    ]
+    response = client.get(
+        "/v1/user/jobs",
+        headers=user_headers,
+        params={"column_filters": json.dumps(rules), "with_total": "true"},
+    )
+    assert response.status_code == 200
+    assert [row["job_id"] for row in response.json()["rows"]] == [yearly]
+
+
 def test_column_filters_apply_before_pagination_and_totals(client, user_headers, f):
     uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
     for company in ["Acme", "Other", "Acme"]:

@@ -1389,6 +1389,14 @@
               "anyOf": [
                 {
                   "enum": [
+                    "hourly",
+                    "daily",
+                    "weekly",
+                    "biweekly",
+                    "semimonthly",
+                    "monthly",
+                    "yearly",
+                    "one_time",
                     "year",
                     "month",
                     "week",
