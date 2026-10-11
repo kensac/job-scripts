@@ -11,6 +11,7 @@ without importing the code that runs it.
 
 from __future__ import annotations
 
+from tasks.answer_copies import handle_clear_answer_copies
 from tasks.answer_links import handle_link_answers
 from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batches import handle_poll_batches
@@ -81,6 +82,7 @@ HANDLERS = {
     "merge_olm_twins": handle_merge_olm_twins,
     "link_answers": handle_link_answers,
     **{d.kind: d.handle for d in DERIVATIONS},
+    "clear_answer_copies": handle_clear_answer_copies,
 }
 
 __all__ = ["DERIVATIONS", "HANDLERS"]

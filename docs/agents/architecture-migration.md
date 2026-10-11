@@ -156,8 +156,17 @@ reader:
      a UNION ALL arm is flattened into the outer query only while its FROM
      is one table, and the admin ledger's skip scans and newest-first pages
      need it flattened (`tests/test_admin_jobs_read_plan.py`).
-   - Next: the copies (`input_content`, the usage columns, `instructions`)
-     are cleared and dropped.
+   - `tasks.answer_copies`, queued each cycle until a run clears nothing,
+     empties the copies (`input_content`, the usage columns,
+     `instructions`), one id range at a time after linking it, and only
+     where `ledger_rows` reads the same without them: an input its fetch
+     rebuilds byte for byte or an empty one, usage its call shows on it or
+     zeros on a sibling or on an answer with no call. Anything else keeps
+     its copy and blocks the drop. `ai_queries` already has per-table
+     autovacuum at a 0.02 scale factor, so the rewritten row versions are
+     reclaimed as it goes.
+   - Next: the columns are dropped once proven empty, and the views stop
+     falling back to them.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves. See "The ledger of paid model calls" below.
 
