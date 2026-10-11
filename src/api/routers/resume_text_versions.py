@@ -247,10 +247,10 @@ def complete_new_text_version(
         if old is not None:
             archive_resume(old["id"], user.id)
         saved = db.query_one(
-            """INSERT INTO user_resumes (user_id, name, text, text_version_id)
-               VALUES (%s, %s, '', %s)
+            """INSERT INTO user_resumes (user_id, name, text_version_id)
+               VALUES (%s, %s, %s)
                ON CONFLICT (user_id, name) DO UPDATE SET
-                   text = '', text_version_id = EXCLUDED.text_version_id,
+                   text = NULL, text_version_id = EXCLUDED.text_version_id,
                    filename = NULL, pdf = NULL, pdf_upload_id = NULL, updated_at = now()
                RETURNING id""",
             (user.id, body.name.strip(), version_id),
@@ -288,7 +288,7 @@ def complete_text_version(
         _complete_parts(version_id, body.part_count, body.chars)
         archive_resume(resume_id, user.id)
         updated = db.query_one(
-            "UPDATE user_resumes SET text = '', text_version_id = %s, updated_at = now() "
+            "UPDATE user_resumes SET text = NULL, text_version_id = %s, updated_at = now() "
             "WHERE id = %s RETURNING updated_at",
             (version_id, resume_id),
         )

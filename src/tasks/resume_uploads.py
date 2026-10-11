@@ -76,10 +76,10 @@ def _save_resume(upload_id: uuid.UUID, row: dict[str, Any], version_id: uuid.UUI
             archive_resume(old["id"], row["user_id"])
         saved = db.query_one(
             """INSERT INTO user_resumes
-               (user_id, name, text, filename, pdf_upload_id, text_version_id)
-               VALUES (%s, %s, '', %s, %s, %s)
+               (user_id, name, filename, pdf_upload_id, text_version_id)
+               VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (user_id, name) DO UPDATE SET
-                   text = EXCLUDED.text, filename = EXCLUDED.filename,
+                   text = NULL, filename = EXCLUDED.filename,
                    pdf = NULL, pdf_upload_id = EXCLUDED.pdf_upload_id,
                    text_version_id = EXCLUDED.text_version_id, updated_at = now()
                RETURNING id""",

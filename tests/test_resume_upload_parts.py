@@ -101,7 +101,7 @@ async def test_large_transfer_retries_and_streams_download(
     resume = db.query_one(
         "SELECT id, user_id, text FROM user_resumes WHERE pdf_upload_id = %s", (upload_id,)
     )
-    assert resume is not None and resume["text"] == ""
+    assert resume is not None and resume["text"] is None
     info = client.get(f"/v1/user/resumes/{resume['id']}/text", headers=user_headers).json()
     assert info["chars"] == len("Complete resume text") and info["part_count"] == 1
     stored = client.get(f"/v1/user/resumes/{resume['id']}/text/parts/0", headers=user_headers)
@@ -112,7 +112,7 @@ async def test_large_transfer_retries_and_streams_download(
         (resume["id"],),
     )
     assert prior == {
-        "text": "",
+        "text": None,
         "pdf": None,
         "filename": None,
         "text_version_id": previous_version,
