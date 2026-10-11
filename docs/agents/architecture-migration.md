@@ -1112,7 +1112,8 @@ only caller already makes.
 `handle_reverify_open` decides whether a posting is ever looked at again and
 had no test at all, while the query for its re-listed branch was COPIED into
 `test_ingest.py` rather than called, so the copy could pass while the handler
-drifted. `tests/test_reverify_sweep.py` now drives the handler itself.
+drifted. `tests/test_reverify_sweep_candidates.py` now drives the splitter;
+`tests/test_reverify_sweep_execution.py` drives the fetch and submission path.
 
 `make coverage` prints it. Nothing gates on a threshold yet, and adding one
 before the remaining sweeps are covered would only ratchet in what is already
