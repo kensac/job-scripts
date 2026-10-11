@@ -10,7 +10,7 @@ import pytest
 from api import db
 from tasks import locations
 from tests.factories import make_batch_result
-from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 
 
 @pytest.fixture

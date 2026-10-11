@@ -12,7 +12,7 @@ import json
 
 from api import db, signals
 from api.routers import companies
-from tests.test_api_jobs import _insert_job
+from tests.job_board_support import _insert_job
 
 _OLD_REPOST_SQL = """
 WITH g AS (

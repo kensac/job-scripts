@@ -5,7 +5,7 @@ from __future__ import annotations
 from api import apply, db
 from api.mail import applications
 from tests.apply_support import ada_profile
-from tests.test_api_jobs import _insert_job, _uid
+from tests.job_board_support import _insert_job, _uid
 
 ASHBY_FORM_FIELDS = [
     {"key": "_systemfield_name", "label": "Legal Name", "kind": "text", "required": True},

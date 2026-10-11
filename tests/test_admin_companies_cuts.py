@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime
 
 from api import db, signals
-from tests.test_api_jobs import _insert_job
+from tests.job_board_support import _insert_job
 
 
 def _uid(headers: dict) -> int:

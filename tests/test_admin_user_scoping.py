@@ -8,7 +8,7 @@ import datetime
 from api import db
 from tasks import runtime as tasks_runtime
 from tests import factories
-from tests.test_api_jobs import _insert_job
+from tests.job_board_support import _insert_job
 
 
 def _uid(headers: dict) -> int:

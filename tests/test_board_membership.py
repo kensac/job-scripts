@@ -9,7 +9,7 @@ import pytest
 from api import db
 from api.board import visibility
 from tasks import board as board_tasks
-from tests.test_api_jobs import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 
 
 def _board(client, headers, source):

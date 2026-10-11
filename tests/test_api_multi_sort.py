@@ -7,7 +7,7 @@ from __future__ import annotations
 import datetime
 
 from api import sorting
-from tests.test_api_jobs import _insert_job, _pass_closed, _subscribe, _uid
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
 
 
 def test_parse_pairs_keys_with_dirs_and_drops_unknown_keys():
