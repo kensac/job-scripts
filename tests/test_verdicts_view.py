@@ -21,7 +21,7 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 # than answers: spend prices every call in a window and counts the decided
 # ones as a share of it. The ORM's index predicates describe ai_queries itself.
 _CALL_READERS = {
-    "api/routers/spend.py",
+    "api/spend/verdicts.py",
     "api/orm/ai.py",
 }
 _DECIDED = re.compile(r"status IN \('passed', ?'rejected'\)")

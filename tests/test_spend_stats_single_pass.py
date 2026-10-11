@@ -33,7 +33,7 @@ from api.routers.spend import (
     VerdictDaySpend,
     VerdictModelSpend,
     VerdictTotals,
-    _verdict_breakdowns,
+    read_verdict_breakdowns,
 )
 
 _WINDOW = "created_at >= now() - make_interval(days => %(days)s)"
@@ -329,7 +329,7 @@ def test_spend_single_pass_matches_the_per_cut_scans(verdict_log, zone):
     with db.transaction():
         db.execute(f"SET LOCAL timezone = '{zone}'")
         old = _old_spend(params)
-        new = _verdict_breakdowns(params)
+        new = read_verdict_breakdowns(params)
     for before, after in zip(old, new, strict=True):
         assert _dump(after) == _dump(before)
     # A NULL check_type is its own bucket, and the days really straddle.
@@ -351,6 +351,6 @@ def test_stats_single_pass_matches_the_per_cut_scans(verdict_log, zone):
 def test_stats_and_spend_on_an_empty_table():
     params = {"days": 30, "interactive": list(INTERACTIVE_CONTEXTS)}
     assert ledger_stats._compute_stats().model_dump_json() == _old_stats().model_dump_json()
-    old, new = _old_spend(params), _verdict_breakdowns(params)
+    old, new = _old_spend(params), read_verdict_breakdowns(params)
     assert [_dump(v) for v in new] == [_dump(v) for v in old]
     assert new[2:] == ([], [], [])

@@ -234,6 +234,15 @@ There is no other usage ledger: `api_usage`, the totals on `ai_batches` and
 the cost shares on `job_embeddings` were dropped once the ledger held their
 history.
 
+**Spend has separate cost populations.** `api/spend/ledger.py` owns
+recorded model-call totals and cuts. `api/spend/verdicts.py` owns verdict
+diagnostics, reach and supersession estimates. `api/routers/spend.py` exposes
+those populations with distinct labels and handles call-list and provider-cost
+routes. Keep recorded call counts distinct from verdict-row counts, preserve
+NULL for unknown prices, and reconcile daily and dimensional cuts to their
+own totals before changing a spend query. Money response fields remain
+numbers; declaring a Decimal response field would serialize it as a string.
+
 On resume, `collect_pending` attaches model provenance from each `ai_batches`
 row. `run_batched` resolves routing only for new submissions; absent persisted
 model metadata stays unknown. Filter and application handlers collect paid work
