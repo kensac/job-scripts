@@ -30,5 +30,5 @@ test("every adapter has one isolated build entry and no old runtime is packaged"
     assert.doesNotMatch(code, /__jtReader|__jtProfile|__jtATS/);
   }
   for (const removed of ["ats", "readers", "engine.js", "content.js", "manifest.json"]) assert.equal(existsSync(path.join(root, removed)), false, removed);
-  assert.deepEqual(manifest.permissions.sort(), ["scripting", "storage"]);
+  assert.deepEqual(manifest.permissions.sort(), ["alarms", "scripting", "storage", "unlimitedStorage"]);
 });

@@ -6,6 +6,7 @@ import datetime
 from typing import Any
 
 from sqlalchemy import (
+    UUID,
     BigInteger,
     Boolean,
     ForeignKey,
@@ -135,8 +136,43 @@ class ApplicationReport(Base):
     url: Mapped[str] = mapped_column(Text)
     host: Mapped[str] = mapped_column(Text)
     note: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    page: Mapped[Any] = mapped_column(JSONB)
+    # Older reports carry one JSON value. New reports keep their page in chunks.
+    page: Mapped[Any | None] = mapped_column(JSONB)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationReportUpload(Base):
+    """A report upload stays addressable after its chunks become a report."""
+
+    __tablename__ = "application_report_uploads"
+    __table_args__ = (UniqueConstraint("report_id"),)
+
+    id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    url: Mapped[str] = mapped_column(Text)
+    host: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    field_count: Mapped[int] = mapped_column(Integer)
+    chunk_count: Mapped[int] = mapped_column(BigInteger)
+    report_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("application_reports.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ApplicationReportChunk(Base):
+    """One bounded part of a report until the whole report is committed."""
+
+    __tablename__ = "application_report_chunks"
+
+    upload_id: Mapped[Any] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("application_report_uploads.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    chunk_index: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    body: Mapped[bytes] = mapped_column(BYTEA)
 
 
 class ExtensionRecipe(Base):

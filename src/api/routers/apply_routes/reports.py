@@ -38,8 +38,7 @@ MAX_REPORT_BYTES = 2_000_000
 
 @router.post("/user/apply/reports", status_code=201, responses=SIZE_REFUSALS)
 def create_report(body: PageReport, user: AuthedUser = Depends(require_user)) -> ReportCreated:
-    """The extension's report button: whatever it saw, kept whole for
-    triage. Capped so one page cannot fill the table by itself."""
+    """Accept reports from older extensions that send one JSON request."""
     if len(json.dumps(body.page)) > MAX_REPORT_BYTES:
         raise refuse(413, "REPORT_TOO_LARGE", "the page capture is over 2 MB")
     report = db.query_one_as(
@@ -66,9 +65,11 @@ def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> R
     return ReportList(
         reports=db.query_as(
             ProblemReport,
-            "SELECT id, url, host, note, created_at, page->>'title' AS title, "
-            "jsonb_array_length(COALESCE(page->'fields', '[]'::jsonb)) AS fields "
-            "FROM application_reports WHERE user_id = %s ORDER BY created_at DESC LIMIT %s",
+            "SELECT r.id, r.url, r.host, r.note, r.created_at, "
+            "COALESCE(r.page->>'title', u.title) AS title, "
+            "COALESCE(jsonb_array_length(r.page->'fields'), u.field_count, 0) AS fields "
+            "FROM application_reports r LEFT JOIN application_report_uploads u ON u.report_id = r.id "
+            "WHERE r.user_id = %s ORDER BY r.created_at DESC LIMIT %s",
             (user.id, max(1, min(limit, 500))),
         )
     )
@@ -78,8 +79,9 @@ def list_reports(limit: int = 50, user: AuthedUser = Depends(require_user)) -> R
 def get_report(report_id: int, user: AuthedUser = Depends(require_user)) -> ProblemReportDetail:
     row = db.query_one_as(
         ProblemReportDetail,
-        "SELECT id, url, host, note, page, created_at FROM application_reports "
-        "WHERE id = %s AND user_id = %s",
+        "SELECT r.id, r.url, r.host, r.note, r.page, r.created_at, u.chunk_count "
+        "FROM application_reports r LEFT JOIN application_report_uploads u ON u.report_id = r.id "
+        "WHERE r.id = %s AND r.user_id = %s",
         (report_id, user.id),
     )
     if not row:

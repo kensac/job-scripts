@@ -22,7 +22,7 @@ from api.board.person_state import board_row, touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
 from api.mail import applications
 from api.problem import refuse
-from api.routers.apply_routes import extension, profile, reports, suggestions
+from api.routers.apply_routes import extension, profile, report_uploads, reports, suggestions
 from api.routers.apply_routes.events import record_apply_event
 from api.routers.apply_routes.models import ResolvedForm, ResumeFile, Submitted
 from core.fetching import forms
@@ -301,5 +301,6 @@ router.include_router(extension.router)
 router.include_router(profile.router)
 router.include_router(suggestions.router)
 router.include_router(reports.router)
+router.include_router(report_uploads.router)
 
 SuggestField = suggestions.SuggestField
