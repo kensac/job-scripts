@@ -61,7 +61,7 @@ def _machine_row(uid: int, job_id: int) -> None:
 
 def _relist(job_id: int, source: str) -> None:
     db.execute(
-        "INSERT INTO job_listing_events (job_id, source, listed) VALUES (%s, %s, true)",
+        "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, 'reappeared')",
         (job_id, source),
     )
 

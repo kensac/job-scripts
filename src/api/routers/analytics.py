@@ -8,14 +8,13 @@ un-floored rate would let the smallest board render the loudest percentage.
 Two shape caveats are baked into the response rather than left for the reader
 to rediscover, because both invert the obvious reading of the numbers:
 
-`jobs.active` is not comparable across boards. catalog.upsert_postings sets it
-straight from the feed (`active = EXCLUDED.active`) and nothing else in the
-codebase ever clears it, so a board whose feed lists only live postings keeps
-every row it has ever seen at active=true, while a board whose feed carries an
-explicit per-posting flag accumulates rows marked inactive. That is a
-difference in feed format, not in board behaviour. `reports_inactive` says
-which kind each board is, and the closed-check funnel below is the instrument
-that IS applied uniformly to every board.
+`active` counts the board's postings that are available (catalog.IS_AVAILABLE):
+some switched-on source lists them. It is read from source observations, the
+same way for every board, and a complete pull of a board that lists every
+open posting records what it dropped. An aggregator's absence never closes a
+posting, so an aggregator's share stays high. `reports_inactive` says whether
+any of the board's postings is unavailable, and the closed-check funnel below
+is the instrument that asks the posting itself.
 
 `jobs.created_at` is when a row was loaded into this catalog, not when the
 posting was discovered - the whole table shares a floor from the last reseed,
@@ -56,8 +55,8 @@ _VERDICT_CHECKS = POSTING_CHECK_NAMES
 _INVENTORY_SQL = """
 SELECT source,
        count(*) AS total,
-       count(*) FILTER (WHERE active) AS active,
-       count(*) FILTER (WHERE NOT active) AS inactive,
+       count(*) FILTER (WHERE available) AS active,
+       count(*) FILTER (WHERE available IS NOT TRUE) AS inactive,
        count(date_posted) AS with_date_posted,
        count(*) FILTER (WHERE date_posted >= now() - interval '7 days') AS posted_7d,
        count(*) FILTER (WHERE date_posted >= now() - interval '30 days') AS posted_30d,
@@ -345,10 +344,9 @@ class BoardInventory(BaseModel):
     """How many postings this board has supplied, and how many it still calls
     live.
 
-    `active_share` is comparable only between boards with the same
-    `reports_inactive`. False means nothing this board ever supplied is marked
-    inactive, which means its feed has no way to say otherwise - a fact about
-    the feed's format, not about the board.
+    `active` is how many are available (catalog.IS_AVAILABLE). An
+    aggregator's absence never closes a posting, so compare `active_share`
+    between company boards, or between aggregators.
     """
 
     total: int
@@ -772,9 +770,9 @@ def _collect(min_sample: int) -> list[BoardAnalytics]:
 
 
 _CAVEATS = [
-    "jobs.active reflects only what a board's feed last reported; nothing in "
-    "the ingest path ever clears it. Compare active_share only between boards "
-    "with the same reports_inactive value.",
+    "active counts postings some switched-on source lists. An aggregator's "
+    "absence never closes a posting, so compare active_share between company "
+    "boards, or between aggregators.",
     "jobs.created_at is when a posting was loaded into this catalog, not when "
     "it was discovered. first_loaded_at is bounded below by the last reseed; "
     "use date_posted for age.",

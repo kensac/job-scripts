@@ -291,8 +291,9 @@ def schedule_ingest_cycle() -> None:
             dedupe_key=f"ingest:{s['name']}:{cycle}",
         )
     # The other half of the query above: a source it no longer selects is
-    # never pulled, so nothing else would retire its postings. A no-op once
-    # the catalog agrees (catalog.retire_switched_off).
+    # never pulled, so no observation says its postings changed. The hourly
+    # reconcile stores what catalog.AVAILABLE says of them, and writes
+    # nothing once the catalog agrees (catalog.reconcile_available).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
     # Messages whose current event or match pointer lags its log
     # (tasks.mail_pointers). Counting them is a pass over every message,
