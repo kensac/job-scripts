@@ -29,6 +29,9 @@ the part checkpoint and rolling digests, so a worker restart continues from
 stored progress. The source stays stored until a later guarded column drop.
 An expected copy failure is stored on the run. The task finishes so later
 values can start; the scheduler retries the failed value after fresh ones.
+A `done` task means one attempt ended. Check `resume_backfill_runs.failed_at`
+and `last_error`, then count old values still missing pointers to confirm
+completion.
 
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.

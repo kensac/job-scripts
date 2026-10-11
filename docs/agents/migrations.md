@@ -165,6 +165,8 @@ bucket's expiry and capacity have been checked. A failed copy leaves the
 source unchanged and records its error on the run. Scheduling tries values
 without a previous attempt first, then retries older attempts. A bad value
 must not block later values.
+Task status `done` does not prove the value moved. Check failed runs and count
+old values still missing pointers before calling the backfill complete.
 
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
