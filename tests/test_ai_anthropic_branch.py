@@ -1,9 +1,9 @@
 """The Anthropic branch of the model call runs, through the real library.
 
-ANTHROPIC_API_KEY is set in production and Anthropic's models are offered, and
-ai_queries held zero Anthropic calls across 241k rows on 2026-09-08. A
-library bump on a path nobody travels breaks silently, and surfaces as the
-first person's failed call rather than at roll time. So this runs api.ai's
+The 2026-09-08 measurement found zero Anthropic calls among 241k ai_queries
+rows, even though the provider branch was configured then. A library change
+on a rarely used path can first surface when someone selects that provider.
+This test runs api.ai's
 Anthropic branch through the installed anthropic client against a recorded
 Messages API response served by an httpx mock transport: a renamed request
 parameter, a moved response attribute or a changed default in the library

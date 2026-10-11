@@ -153,8 +153,8 @@ def test_another_users_suggestion_cannot_be_answered(client, user_headers, other
 
 def test_an_action_nothing_can_close_is_closeable_by_the_person(client, user_headers):
     """respond_to_offer settles only on a rejection, so accepting an offer,
-    declining it or signing never closes it: 146 open in production and not one
-    has ever resolved. For those kinds a person is the only producer, exactly
+    declining it or signing never closes it: a 2026-10-11 production audit found
+    146 open and none resolved. For those kinds a person is the only producer, exactly
     as the board is the only producer of `withdrawn`."""
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
     app_id = insert_application(uid, company="Acme", title="Engineer")

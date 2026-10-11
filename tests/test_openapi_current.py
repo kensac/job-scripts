@@ -8,18 +8,12 @@ _OPENAPI = pathlib.Path(__file__).resolve().parent.parent / "openapi.json"
 
 
 def test_committed_openapi_matches_the_routes():
-    """`make schema` regenerates this file and CLAUDE.md says to do it when
-    routes change. Nothing enforced it, so a stale schema merged green.
+    """Keep the committed schema equal to the routes FastAPI serves.
 
-    That happened: a rebase reset openapi.json to main's copy, the
-    regeneration was never committed, and the branch carried a schema missing
-    the very endpoint it added. CI passed, because a generated file nothing
-    compares against cannot fail - the shape of check that looks like coverage
-    and provides none.
-
-    A wrong schema is worse than a missing one: clients generate against it and
-    the error surfaces as a caller sending a parameter the server ignores,
-    which is silent on both ends.
+    `make schema` exports it, as docs/agents/generated-files.md requires after
+    route changes. A prior rebase restored the old schema and omitted a new
+    endpoint without failing CI. This comparison catches that drift before a
+    client generates against paths or parameters the server does not serve.
     """
     from api.app import app
 

@@ -109,11 +109,12 @@ def test_an_acknowledgement_is_a_reply_but_not_an_outcome(f):
 
 
 def test_timing_ignores_mail_derived_applications(f):
-    """For all 1,783 mail-derived applications in production, applied_at IS the
-    first matched message's sent_at, exactly. So a duration measured from it is
-    the gap between the first mail and the first DECIDING mail - zero whenever
-    a rejection arrives with nothing before it. It is not a slow measurement,
-    it is not a measurement."""
+    """Exclude mail-derived applications from response-time measurements.
+
+    The original 2026-09-02 test rationale recorded 1,783 such applications;
+    each had applied_at equal to its first matched message's sent_at. A duration
+    from that timestamp measures time between messages, not time since applying.
+    """
     uid = f.make_user()
     app = _apply(uid, "Acme", provenance="email", applied_day=1)
     _reply(uid, app, "rejection", domain="acme.test", day=20)
