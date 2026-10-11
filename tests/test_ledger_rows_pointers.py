@@ -9,7 +9,7 @@ from api import db
 from core.answers import VERIFY_INPUT_CHARS
 from core.filters import build_custom_input
 from core.store import add_ai_result
-from tests.factories import legacy_answer, paid_answer
+from tests.factories import paid_answer
 
 PAGE = "a posting body that is long enough to be a page " * 10
 NANO = "gpt-5-nano"
@@ -54,7 +54,7 @@ def test_an_answer_shows_the_input_rebuilt_from_the_fetch_it_names(f):
         page_fetch_id=fetch,
     )
     closed = add_ai_result("https://p.test/a", "passed", check_type="closed", page_fetch_id=fetch)
-    legacy = legacy_answer("https://p.test/c", "passed", check_type="closed", input_content="old")
+    unlinked = add_ai_result("https://p.test/c", "passed", check_type="closed")
 
     assert _row(custom)["input_content"] == build_custom_input("Acme", "Engineer", PAGE)
     assert _row(board)["input_content"] == build_custom_input(
@@ -62,7 +62,7 @@ def test_an_answer_shows_the_input_rebuilt_from_the_fetch_it_names(f):
     )
     assert _row(explained)["input_content"] == PAGE
     assert _row(closed)["input_content"] == PAGE
-    assert _row(legacy)["input_content"] == "old", "an unlinked answer shows its copy"
+    assert _row(unlinked)["input_content"] is None, "an answer naming no fetch shows none"
 
 
 def test_one_call_shows_on_its_first_answer_and_zeros_on_its_siblings(f):

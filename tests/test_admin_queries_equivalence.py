@@ -40,7 +40,7 @@ def _fill() -> None:
     db.execute(
         """
         INSERT INTO ai_queries (created_at, url, check_type, status, config_name, worker,
-                                company, total_tokens, duration_ms)
+                                company)
         SELECT now() - CASE WHEN i % 2 = 0 THEN interval '40 days' ELSE interval '1 day' END
                      - (i / 2) * interval '1 minute',
                'https://eq.test/' || i,
@@ -50,10 +50,33 @@ def _fill() -> None:
                     ELSE (ARRAY[NULL, 'verify-batch', '', 'a-cache', 'B-batch'])[1 + i % 5] END,
                CASE WHEN i % 2 = 0 THEN (ARRAY[NULL, 'oldbox', 'Pi'])[1 + i % 3]
                     ELSE (ARRAY[NULL, 'nas', '', 'Pi'])[1 + i % 4] END,
-               (ARRAY[NULL, 'Acme', 'acme', 'Zed'])[1 + i % 4],
-               (ARRAY[NULL, 10, 10, 7])[1 + i % 4],
-               CASE WHEN i % 3 = 0 THEN NULL ELSE i % 5 END
+               (ARRAY[NULL, 'Acme', 'acme', 'Zed'])[1 + i % 4]
         FROM generate_series(1, 48) i
+        """
+    )
+    # Tokens and durations are each answer's call's; an answer with no call
+    # has neither, so both sort keys keep their NULLs and ties.
+    _call_for_each(
+        "SELECT id, (ARRAY[NULL, 10, 10, 7])[1 + i % 4] AS total_tokens, "
+        "CASE WHEN i % 3 = 0 THEN NULL ELSE i % 5 END AS duration_ms "
+        "FROM (SELECT id, split_part(url, '/', 4)::int AS i FROM ai_queries) a "
+        "WHERE i % 4 <> 0"
+    )
+
+
+def _call_for_each(numbers: str) -> None:
+    """Give each answer selected by `numbers` (id, total_tokens, duration_ms)
+    its own call, as the writers record usage now."""
+    db.execute(
+        f"""
+        WITH n AS ({numbers}),
+        calls AS (
+            INSERT INTO model_calls (purpose, batched, prompt_tokens, completion_tokens,
+                                     total_tokens, cached_tokens, duration_ms, source, source_id)
+            SELECT 'verify', false, 0, 0, total_tokens, 0, duration_ms, 'verdict', id FROM n
+            RETURNING id, source_id
+        )
+        UPDATE ai_queries q SET model_call_id = calls.id FROM calls WHERE q.id = calls.source_id
         """
     )
 
@@ -91,7 +114,7 @@ def test_list_orders_exactly_as_with_nulls_last_everywhere(client, admin_headers
             expected = [
                 r["id"]
                 for r in db.query(
-                    f"SELECT id FROM ai_queries ORDER BY {key} {direction.upper()} NULLS LAST, "
+                    f"SELECT id FROM ledger_rows ORDER BY {key} {direction.upper()} NULLS LAST, "
                     "id DESC"
                 )
             ]

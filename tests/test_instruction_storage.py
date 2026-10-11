@@ -1,23 +1,21 @@
 from api import db
 from core import store
 from core.query_instructions import hydrate
-from tests.factories import legacy_answer
 
 
 def test_identical_instructions_share_storage_without_changing_verdict_identity():
     ids = [
-        legacy_answer(
+        store.add_ai_result(
             f"https://example.test/{index}",
             "passed",
             check_type="custom",
             prompt_hash=f"verdict-identity-{index}",
             instructions="Preserve exact instructions.\n",
-            input_content="Cached page content",
         )
         for index in range(2)
     ]
     rows = db.query(
-        "SELECT id,instructions,instructions_id,input_content,prompt_hash,to_jsonb(q)->'instructions_id' AS reference "
+        "SELECT id,instructions_id,prompt_hash,to_jsonb(q)->'instructions_id' AS reference "
         "FROM ai_queries q WHERE id=ANY(%s) ORDER BY id",
         (ids,),
     )
@@ -26,7 +24,6 @@ def test_identical_instructions_share_storage_without_changing_verdict_identity(
     assert rows[0]["reference"] == rows[1]["reference"]
     assert [r["prompt_hash"] for r in rows] == ["verdict-identity-0", "verdict-identity-1"]
     assert all(r["instructions"] == "Preserve exact instructions.\n" for r in rows)
-    assert all(r["input_content"] == "Cached page content" for r in rows)
 
 
 def test_null_empty_and_whitespace_instruction_values_remain_distinct():
@@ -35,7 +32,7 @@ def test_null_empty_and_whitespace_instruction_values_remain_distinct():
         store.add_ai_result("https://example.test/values", "passed", instructions=s) for s in values
     ]
     rows = db.query(
-        "SELECT instructions,instructions_id,to_jsonb(q)->'instructions_id' AS reference "
+        "SELECT instructions_id,to_jsonb(q)->'instructions_id' AS reference "
         "FROM ai_queries q WHERE id=ANY(%s) ORDER BY id",
         (ids,),
     )
@@ -79,13 +76,12 @@ def test_missing_reference_never_becomes_legacy_null():
 
 
 def test_admin_query_routes_return_the_referenced_text(client, admin_headers):
-    query_id = legacy_answer(
+    query_id = store.add_ai_result(
         "https://example.test/history",
         "passed",
         check_type="custom",
         prompt_hash="filter-key",
         instructions="Exact historical instructions",
-        input_content="Original cached content",
     )
     detail = client.get(f"/v1/admin/queries/{query_id}", headers=admin_headers).json()
     assert detail["instructions"] == "Exact historical instructions"
@@ -109,7 +105,6 @@ def test_dictionary_corruption_is_explicit():
         prompt_hash="key",
         instructions="original",
     )
-    db.execute("UPDATE ai_queries SET instructions=NULL WHERE id=%s", (query_id,))
     db.execute(
         "UPDATE ai_instruction_texts SET instructions='corrupted' WHERE id=(SELECT instructions_id FROM ai_queries WHERE id=%s)",
         (query_id,),
@@ -118,28 +113,27 @@ def test_dictionary_corruption_is_explicit():
         store.decided_custom_urls(["https://example.test/corrupt"], "key")
 
 
-def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(monkeypatch):
+def test_the_verdict_cache_check_reads_only_the_answer(monkeypatch):
     """The filter sweeps ask this once per candidate, 1.32M times in 36 hours
     (pg_stat_statements, 2026-10-03), and only ever test the answer. Reading
-    the whole row detoasted the cached page text on every one of them."""
+    the whole row detoasted the page text answers carried on every one of
+    them; answers carry none now, and the read still names only what it
+    needs."""
     import psycopg
 
-    long_text = "Posting text.\n" * 400
-    legacy_answer(
+    store.add_ai_result(
         "https://example.test/cached",
         "passed",
         check_type="custom",
         prompt_hash="key",
         model="gpt-5-nano",
         instructions="Exact instructions.",
-        input_content=long_text,
     )
-    legacy_answer(
+    store.add_ai_result(
         "https://example.test/undecided",
         "failed",
         check_type="custom",
         prompt_hash="key",
-        input_content=long_text,
     )
     statements = []
     execute = psycopg.Cursor.execute
@@ -159,7 +153,6 @@ def test_the_verdict_cache_check_answers_from_the_row_without_reading_page_text(
     ]
 
     assert answers == [{urls[0]}, {urls[0]}, set(), set()]
-    # The verdicts view has no page text column, so naming it is the guarantee.
     reads = [s for s in statements if "FROM verdicts" in s]
     assert reads
-    assert not [s for s in reads if "*" in s or "input_content" in s]
+    assert not [s for s in reads if "*" in s]

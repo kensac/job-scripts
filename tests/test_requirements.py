@@ -207,14 +207,6 @@ class TestCandidateSelection:
         f.make_fetch("https://stub.test/1", content="404")
         assert "https://stub.test/1" not in _candidates()
 
-    def test_prefers_the_raw_content_row_over_a_checks_copy(self, f):
-        url = "https://prefer.test/1"
-        f.make_fetch(url, content="RAW PAGE " * 40)
-        f.make_verdict(url, "closed", "passed", content="CHECK COPY " * 40)
-        row = db.query(_CANDIDATES, {"cap": 100})
-        picked = next(r for r in row if r["url"] == url)
-        assert picked["input_content"].startswith("RAW PAGE")
-
     def test_respects_the_cap(self, f):
         for i in range(4):
             f.make_fetch(f"https://capped.test/{i}", content=CONTENT)
@@ -229,7 +221,6 @@ class TestContentLateralParity:
         from core.store import CONTENT_LATERAL
 
         job_id, url = f.make_ready_job(content="RAW PAGE " * 40)
-        f.make_verdict(url, "closed", "passed", content="CHECK COPY " * 40)
         for source, expr in (("jobs j", "j.url"), ("(SELECT %(u)s::text AS url) c", "c.url")):
             rows = db.query(
                 f"SELECT q.input_content FROM {source} "

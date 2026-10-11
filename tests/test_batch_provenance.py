@@ -83,7 +83,7 @@ async def test_filter_collects_paid_results_without_current_key_or_content(f, mo
     monkeypatch.setattr(filters, "load_config", no_key)
     await filters.handle_run_filter_batch_chunk(task_id, payload)
     row = db.query_one(
-        "SELECT model, status, input_content, reason FROM ai_queries WHERE check_type = 'custom'"
+        "SELECT model, status, input_content, reason FROM ledger_rows WHERE check_type = 'custom'"
     )
     assert row == {
         "model": "gpt-5-mini",

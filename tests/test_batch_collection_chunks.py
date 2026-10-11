@@ -276,7 +276,7 @@ def _rows(task: int) -> dict:
             "SELECT q.url, q.status, q.reason, q.parsed_json, q.error, q.model, q.batch_id, "
             "q.prompt_tokens, q.completion_tokens, q.cached_tokens, q.reasoning_tokens, "
             "q.cost_usd, q.filter_name, q.prompt_hash, q.reasoning_effort, q.input_content, "
-            "t.instructions FROM ai_queries q "
+            "t.instructions FROM ledger_rows q "
             "LEFT JOIN ai_instruction_texts t ON t.id=q.instructions_id "
             "WHERE q.check_type='custom' ORDER BY q.url"
         ),

@@ -10,9 +10,9 @@ def _nodes(plan):
 
 def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch):
     db.execute(
-        "INSERT INTO ai_queries(url,created_at,status,total_tokens) "
+        "INSERT INTO ai_queries(url,created_at,status) "
         "SELECT 'https://history.test/'||i, "
-        "'2026-01-01'::timestamptz + i * interval '1 minute', 'passed', 10 "
+        "'2026-01-01'::timestamptz + i * interval '1 minute', 'passed' "
         "FROM generate_series(1,10000) i"
     )
     db.execute("ANALYZE ai_queries")
@@ -47,13 +47,33 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
 
 def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client, admin_headers):
     db.execute(
-        "INSERT INTO ai_queries(url,created_at,status,company,config_name,total_tokens) VALUES "
-        "('https://x.test/a','2026-01-03','passed','Alpha','recent',20), "
-        "('https://x.test/a','2026-01-01','rejected','Zeta','older',10), "
-        "('https://x.test/b','2026-01-03','failed','Beta','recent',NULL), "
-        "('https://x.test/b','2026-01-03','passed','Beta','recent',5), "
-        "('https://x.test/c','2026-01-02','passed',NULL,NULL,NULL), "
-        "(NULL,'2026-01-04','passed','Excluded',NULL,100)"
+        "INSERT INTO ai_queries(url,created_at,status,company,config_name) VALUES "
+        "('https://x.test/a','2026-01-03','passed','Alpha','recent'), "
+        "('https://x.test/a','2026-01-01','rejected','Zeta','older'), "
+        "('https://x.test/b','2026-01-03','failed','Beta','recent'), "
+        "('https://x.test/b','2026-01-03','passed','Beta','recent'), "
+        "('https://x.test/c','2026-01-02','passed',NULL,NULL), "
+        "(NULL,'2026-01-04','passed','Excluded',NULL)"
+    )
+    # Each answer's tokens are its call's.
+    db.execute(
+        """
+        WITH n AS (
+            SELECT id, CASE WHEN url = 'https://x.test/a' AND status = 'passed' THEN 20
+                            WHEN url = 'https://x.test/a' THEN 10
+                            WHEN url = 'https://x.test/b' AND status = 'passed' THEN 5
+                            WHEN url IS NULL THEN 100 END AS tokens
+            FROM ai_queries
+        ),
+        calls AS (
+            INSERT INTO model_calls (purpose, batched, prompt_tokens, completion_tokens,
+                                     total_tokens, cached_tokens, source, source_id)
+            SELECT 'verify', false, 0, 0, tokens, 0, 'verdict', id FROM n
+            WHERE tokens IS NOT NULL
+            RETURNING id, source_id
+        )
+        UPDATE ai_queries q SET model_call_id = calls.id FROM calls WHERE q.id = calls.source_id
+        """
     )
     first = client.get("/v1/admin/jobs", params={"page_size": 1}, headers=admin_headers)
     assert first.status_code == 200
