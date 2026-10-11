@@ -123,6 +123,8 @@ async def put_recipe_chunk(
             raise refuse(404, "NOT_FOUND", "unknown recipe upload")
         if chunk_index < 0 or chunk_index >= upload["chunk_count"]:
             raise refuse(400, "INVALID_CHUNK", "chunk index is outside this upload")
+        if chunk_index < upload["chunk_count"] - 1 and len(data) != extension_recipes.CHUNK_BYTES:
+            raise refuse(400, "INVALID_CHUNK", "non-final recipe chunks must be 64 KiB")
         existing = db.query_one(
             "SELECT body FROM extension_recipe_chunks WHERE upload_id = %s AND chunk_index = %s",
             (upload_id, chunk_index),

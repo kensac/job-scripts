@@ -119,7 +119,8 @@ def test_large_recipe_upload_is_chunked_and_published(client, admin_headers, use
     for index in reversed(range(len(pieces))):
         path = f"/v1/admin/extension/recipe-uploads/{upload_id}/chunks/{index}"
         assert client.put(path, headers=admin_headers, content=pieces[index]).status_code == 200
-    assert client.put(path, headers=admin_headers, content=b"changed").status_code == 409
+    changed = b"x" + pieces[0][1:]
+    assert client.put(path, headers=admin_headers, content=changed).status_code == 409
     assert (
         client.post(
             f"/v1/admin/extension/recipe-uploads/{upload_id}/complete", headers=admin_headers
@@ -186,15 +187,21 @@ def test_incomplete_or_invalid_recipe_never_becomes_current(client, admin_header
         ).status_code
         == 201
     )
+    too_short = client.put(f"{base}/chunks/0", headers=admin_headers, content=b'{"name":')
+    assert too_short.status_code == 400
+    assert too_short.json()["detail"]["code"] == "INVALID_CHUNK"
+    assert client.get(base, headers=admin_headers).json()["received_chunks"] == 0
     assert (
-        client.put(f"{base}/chunks/0", headers=admin_headers, content=b'{"name":').status_code
+        client.put(f"{base}/chunks/0", headers=admin_headers, content=b" " * 65536).status_code
         == 200
     )
     incomplete = client.post(f"{base}/complete", headers=admin_headers)
     assert incomplete.status_code == 409
     assert incomplete.json()["detail"]["code"] == "INCOMPLETE_RECIPE"
     assert (
-        client.put(f"{base}/chunks/1", headers=admin_headers, content=b'"Workday"').status_code
+        client.put(
+            f"{base}/chunks/1", headers=admin_headers, content=b'{"name":"Workday"'
+        ).status_code
         == 200
     )
     assert client.post(f"{base}/complete", headers=admin_headers).status_code == 200

@@ -107,7 +107,8 @@ never in `prefs`. A count of a person's views is the length of
 `GET /user/views` with no `page`.
 
 **A config-driven reader's table can be published, and the bundled copy is
-the fallback.** Admin recipe uploads store bounded byte chunks. Completion
+the fallback.** Admin recipe uploads store 64 KiB byte chunks. Every chunk
+except the last must be exactly 64 KiB; the last must be nonempty. Completion
 queues one validation task per chunk and publishes only a complete recipe.
 The revision chains the SHA-256 of each chunk with its index and length.
 `GET /v1/extension/recipe?schema_version=2&adapter=<id>` serves the current
