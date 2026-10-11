@@ -4,9 +4,8 @@ Scope is gmail.readonly and the code here issues list and get only. There is
 deliberately no send, no modify, and no delete path - not as policy but as
 absence, so no future edit can quietly acquire one.
 
-Incremental sync is a date window, `after:` some days before the newest
-message held (tasks.mail.sync._since), not Gmail's historyId cursor. The
-overlap re-reads a few messages, which dedupe on write.
+Recent mail uses a date window. A separate range sweep checks the whole
+mailbox, including messages delivered outside that window.
 """
 
 from __future__ import annotations
@@ -143,28 +142,33 @@ def to_imported(message: dict[str, Any]) -> ImportedMessage:
     )
 
 
-def list_message_ids(user_id: int, *, after: str | None = None) -> Iterator[str]:
-    """Every message id in the mailbox, oldest page first.
-
-    No query filter: the prefilter is a signal rather than a gate, so the
-    classifier sees the whole mailbox and the decision about what matters is
-    made once, downstream, where it can be revised.
-    """
+def list_message_page(
+    user_id: int,
+    *,
+    page_token: str | None = None,
+    after: str | None = None,
+    after_epoch: int | None = None,
+    before_epoch: int | None = None,
+) -> tuple[list[str], str | None]:
+    """Return one provider page and its continuation token."""
     token = oauth.get_access_token(user_id)
-    page: str | None = None
-    while True:
-        params: dict[str, Any] = {"maxResults": PAGE_SIZE, "includeSpamTrash": True}
-        if page:
-            params["pageToken"] = page
-        if after:
-            params["q"] = f"after:{after}"
-        data = _get("/messages", token, **params)
-        for message in data.get("messages") or ():
-            if message.get("id"):
-                yield message["id"]
-        page = data.get("nextPageToken")
-        if not page:
-            return
+    params: dict[str, Any] = {"maxResults": PAGE_SIZE, "includeSpamTrash": True}
+    if page_token:
+        params["pageToken"] = page_token
+    if after_epoch is not None or before_epoch is not None:
+        query_parts = []
+        if after_epoch is not None:
+            query_parts.append(f"after:{after_epoch - 1}")
+        if before_epoch is not None:
+            query_parts.append(f"before:{before_epoch}")
+        params["q"] = " ".join(query_parts)
+    elif after:
+        params["q"] = f"after:{after}"
+    data = _get("/messages", token, **params)
+    return (
+        [message["id"] for message in data.get("messages") or () if message.get("id")],
+        data.get("nextPageToken"),
+    )
 
 
 def fetch_message(user_id: int, message_id: str) -> ImportedMessage:

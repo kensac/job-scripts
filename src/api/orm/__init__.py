@@ -55,6 +55,7 @@ from api.orm.mail import (
     EmailEvent,
     EmailMessage,
     EventAnswer,
+    GmailScanCursor,
     UserOAuthToken,
 )
 from api.orm.managed_boards import ManagedBoard, ManagedBoardJob, ManagedBoardSource
@@ -95,6 +96,7 @@ __all__ = [
     "EventAnswer",
     "ExtensionRecipe",
     "FilterPreset",
+    "GmailScanCursor",
     "GroupBudget",
     "HealthAlert",
     "HostBudget",

@@ -35,4 +35,22 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="New messages one Gmail sync stores per mailbox. The rest wait for the next cycle.",
     ),
+    "mail_recent_pages_per_cycle": ConfigKey(
+        section="Mail",
+        default=1,
+        value_type=PositiveInt,
+        help="Recent Gmail list pages to read per mailbox and sync. Full-mailbox reconciliation checks pages outside this bound.",
+    ),
+    "mail_reconciliation_ranges_per_cycle": ConfigKey(
+        section="Mail",
+        default=10,
+        value_type=PositiveInt,
+        help="Full-mailbox Gmail date ranges to inspect per mailbox and sync. Large ranges split and resume in later cycles.",
+    ),
+    "mail_reconciliation_messages_per_cycle": ConfigKey(
+        section="Mail",
+        default=500,
+        value_type=PositiveInt,
+        help="Messages to fetch from full-mailbox pages per mailbox and sync. The remaining IDs stay saved for the next cycle.",
+    ),
 }

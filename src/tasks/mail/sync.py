@@ -20,7 +20,7 @@ from api import db, oauth
 from api.mail import gmail
 from api.mail import store as mail_store
 from api.queue import enqueue
-from core.mail.importer import read_archive
+from core.mail.importer import ImportedMessage, read_archive
 from tasks.runtime import set_progress
 
 logger = logging.getLogger(__name__)
@@ -31,11 +31,8 @@ logger = logging.getLogger(__name__)
 # "cannot allocate memory" as a named transient failure.
 IMPORT_FLUSH = int(os.environ.get("JOBTRACKER_MAIL_IMPORT_FLUSH", "500"))
 
-# How far back the sync window reaches before the newest message already
-# stored. Not a cursor: mail is delivered late and out of order, and a cursor
-# at the newest id would skip those permanently. Two days is generous against
-# Gmail's own delivery reordering while still bounding the listing, and
-# re-read messages dedupe on write at no cost beyond the fetch.
+# Recent mail gets a quick overlapping search. Full reconciliation covers
+# anything outside this window. Re-read messages dedupe on write.
 SYNC_OVERLAP_DAYS = int(os.environ.get("JOBTRACKER_MAIL_SYNC_OVERLAP_DAYS", "2"))
 
 
@@ -76,16 +73,10 @@ async def handle_probe_credentials(task_id: int, payload: dict[str, Any]) -> Non
 
 
 async def handle_sync_gmail(task_id: int, payload: dict[str, Any]) -> None:
-    """Store messages we do not already have.
+    """Read recent mail and continue a full-mailbox reconciliation.
 
-    The cursor is the absence of a row rather than a stored historyId or date.
-    That is slower per pass and much harder to get wrong: a crashed sweep
-    resumes exactly where it stopped, a re-run is a no-op, and nothing can
-    skip a message because a cursor advanced past it.
-
-    Run in a thread: every Gmail call and every INSERT below is blocking, and
-    this worker's event loop is also driving concurrent AI calls. Holding it
-    for a few hundred sequential HTTP round trips would stall those.
+    Run in a thread so blocking Gmail and database calls do not stall the
+    worker's event loop.
     """
     user_ids = [payload["user_id"]] if payload.get("user_id") else connected_user_ids()
     for user_id in user_ids:
@@ -96,43 +87,153 @@ async def handle_sync_gmail(task_id: int, payload: dict[str, Any]) -> None:
 
 def _sync_one(task_id: int, user_id: int) -> None:
     stored = 0
-    pending: list[Any] = []
-    seen = _stored_ids(user_id)
     limit = int(db.get_config("mail_sync_per_cycle"))
-    for message_id in gmail.list_message_ids(user_id, after=_since(user_id)):
-        if stored >= limit:
+    pages_left = int(db.get_config("mail_recent_pages_per_cycle"))
+    page_token: str | None = None
+    after = _since(user_id)
+    while pages_left and stored < limit:
+        ids, next_token = gmail.list_message_page(user_id, page_token=page_token, after=after)
+        pages_left -= 1
+        messages = [gmail.fetch_message(user_id, message_id) for message_id in ids]
+        stored += _store_unseen(user_id, messages, limit - stored)
+        set_progress(task_id, stored, limit, "gmail sync")
+        if not next_token:
             break
-        message = gmail.fetch_message(user_id, message_id)
-        # The list gives Gmail's own ids; dedupe is on the RFC Message-ID, so
-        # this is the earliest point the two can be compared. Re-fetching a
-        # message we already hold costs one quota unit and no write.
-        if message.provider_message_id in seen:
-            continue
-        pending.append(message)
-        stored += 1
-        if len(pending) >= IMPORT_FLUSH:
-            mail_store.store_messages(user_id, pending)
-            pending = []
-            set_progress(task_id, stored, limit, "gmail sync")
-    if pending:
-        mail_store.store_messages(user_id, pending)
+        page_token = next_token
     set_progress(task_id, stored, limit, "gmail sync")
     logger.info(f"gmail sync: stored {stored} new message(s) for user {user_id}")
+    _reconcile_one(task_id, user_id)
+
+
+def _store_unseen(user_id: int, messages: list[ImportedMessage], limit: int) -> int:
+    """Store new messages from one bounded provider page."""
+    if not messages:
+        return 0
+    ids = [message.provider_message_id for message in messages]
+    seen = {
+        row["provider_message_id"]
+        for row in db.query(
+            "SELECT provider_message_id FROM email_messages "
+            "WHERE user_id = %s AND provider_message_id = ANY(%s)",
+            (user_id, ids),
+        )
+    }
+    new_messages = []
+    for message in messages:
+        if message.provider_message_id not in seen:
+            new_messages.append(message)
+            seen.add(message.provider_message_id)
+    if new_messages:
+        mail_store.store_messages(user_id, new_messages[:limit])
+    return min(limit, len(new_messages))
+
+
+def _reconcile_one(task_id: int, user_id: int) -> None:
+    """Scan the mailbox in date ranges that resume without provider tokens."""
+    db.execute(
+        "INSERT INTO gmail_scan_cursors (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
+        (user_id,),
+    )
+    ranges_left = int(db.get_config("mail_reconciliation_ranges_per_cycle"))
+    messages_left = int(db.get_config("mail_reconciliation_messages_per_cycle"))
+    checked = 0
+    while messages_left:
+        cursor = db.query_one(
+            "SELECT pending_ids, ranges FROM gmail_scan_cursors WHERE user_id = %s",
+            (user_id,),
+        )
+        assert cursor is not None
+        pending = list(cursor["pending_ids"])
+        ranges = list(cursor["ranges"])
+        if pending:
+            batch_ids = pending[:messages_left]
+            messages = [gmail.fetch_message(user_id, message_id) for message_id in batch_ids]
+            _store_unseen(user_id, messages, len(messages))
+            checked += len(batch_ids)
+            messages_left -= len(batch_ids)
+            remaining = pending[len(batch_ids) :]
+            advanced = db.execute_count(
+                "UPDATE gmail_scan_cursors SET pending_ids = %s, updated_at = now() "
+                "WHERE user_id = %s AND pending_ids = %s AND ranges = %s",
+                (db.jsonb(remaining), user_id, db.jsonb(pending), db.jsonb(ranges)),
+            )
+            if advanced and not remaining and not ranges:
+                _finish_reconciliation(user_id)
+                break
+            continue
+
+        if not ranges:
+            # A completed traversal starts again on the next scheduled sync.
+            db.execute_count(
+                "UPDATE gmail_scan_cursors SET ranges = '[[null, null]]'::jsonb, "
+                "completed_at = NULL, updated_at = now() "
+                "WHERE user_id = %s AND ranges = '[]'::jsonb AND pending_ids = '[]'::jsonb",
+                (user_id,),
+            )
+            continue
+
+        if not ranges_left:
+            break
+
+        start_epoch, end_epoch = ranges[-1]
+        ids, next_token = gmail.list_message_page(
+            user_id, after_epoch=start_epoch, before_epoch=end_epoch
+        )
+        ranges_left -= 1
+        if next_token:
+            midpoint = _split_epoch(start_epoch, end_epoch)
+            if midpoint is None:
+                raise gmail.GmailError(
+                    "gmail has more than one page in a one-second range; "
+                    "the scan cannot safely advance"
+                )
+            # The last range is read first. Check the newer half first.
+            replacement = [*ranges[:-1], [start_epoch, midpoint], [midpoint, end_epoch]]
+            db.execute_count(
+                "UPDATE gmail_scan_cursors SET ranges = %s, updated_at = now() "
+                "WHERE user_id = %s AND pending_ids = '[]'::jsonb AND ranges = %s",
+                (db.jsonb(replacement), user_id, db.jsonb(ranges)),
+            )
+            continue
+
+        replacement = ranges[:-1]
+        claimed = db.execute_count(
+            "UPDATE gmail_scan_cursors SET pending_ids = %s, ranges = %s, "
+            "completed_at = NULL, updated_at = now() "
+            "WHERE user_id = %s AND pending_ids = '[]'::jsonb AND ranges = %s",
+            (db.jsonb(ids), db.jsonb(replacement), user_id, db.jsonb(ranges)),
+        )
+        if claimed and not ids and not replacement:
+            _finish_reconciliation(user_id)
+            break
+    set_progress(task_id, checked, checked, "gmail reconciliation")
+    logger.info("gmail reconciliation: checked %s message(s) for user %s", checked, user_id)
+
+
+def _split_epoch(start_epoch: int | None, end_epoch: int | None) -> int | None:
+    """Split one search range at a whole-second boundary."""
+    if start_epoch is None and end_epoch is None:
+        return int(datetime.datetime.now(datetime.UTC).timestamp())
+    if start_epoch is None:
+        assert end_epoch is not None
+        return end_epoch - max(1, abs(end_epoch))
+    if end_epoch is None:
+        return start_epoch + max(1, abs(start_epoch))
+    if end_epoch - start_epoch <= 1:
+        return None
+    return (start_epoch + end_epoch) // 2
+
+
+def _finish_reconciliation(user_id: int) -> None:
+    db.execute(
+        "UPDATE gmail_scan_cursors SET completed_at = now(), updated_at = now() "
+        "WHERE user_id = %s AND pending_ids = '[]'::jsonb AND ranges = '[]'::jsonb",
+        (user_id,),
+    )
 
 
 def _since(user_id: int) -> str | None:
-    """A Gmail `after:` bound, or None to walk the whole mailbox.
-
-    Without this, every sync lists all 38,685 ids and fetches each one only to
-    find it already stored - the mailbox re-read, daily, forever.
-
-    It is a WINDOW, not a cursor. The bound is set back by SYNC_OVERLAP_DAYS
-    from the newest message already held, so mail that arrives out of order,
-    or is delivered late, still falls inside it. A cursor advanced to the
-    newest id would skip those permanently; overlapping re-reads a handful of
-    messages that then dedupe on write, which is the cheap direction to be
-    wrong in.
-    """
+    """Return the recent-search date; the full sweep covers earlier mail."""
     row = db.query_one(
         "SELECT MAX(sent_at) AS newest FROM email_messages WHERE user_id = %s", (user_id,)
     )
@@ -148,15 +249,6 @@ def _since(user_id: int) -> str | None:
     # hours.
     newest = newest.astimezone(datetime.UTC)
     return (newest - datetime.timedelta(days=SYNC_OVERLAP_DAYS)).strftime("%Y/%m/%d")
-
-
-def _stored_ids(user_id: int) -> set[str]:
-    return {
-        r["provider_message_id"]
-        for r in db.query(
-            "SELECT provider_message_id FROM email_messages WHERE user_id = %s", (user_id,)
-        )
-    }
 
 
 async def handle_import_archive(task_id: int, payload: dict[str, Any]) -> None:
