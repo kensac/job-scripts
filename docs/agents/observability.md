@@ -885,9 +885,9 @@ or garbage collection may remove referenced objects.
 
 **Resume PDF parts remain available while any resume or revision references
 them.** Do not expire or delete `uploads/v1/` objects or their receipts.
-Account changes must not cascade away resume uploads, text versions, parts,
-or revisions. Verify bucket lifecycle rules before using object parts as the
-sole PDF copy.
+Account changes must not cascade away current resumes, uploads, text versions,
+parts, or revisions. Verify bucket lifecycle rules before using object parts
+as the sole PDF copy.
 
 **A new receipt's vectors are written to object storage before the receipt
 exists, and the receipt holds only `embedding_vectors_ref`.** There is no

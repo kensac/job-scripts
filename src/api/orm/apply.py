@@ -33,7 +33,7 @@ class UserResume(Base):
     __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
