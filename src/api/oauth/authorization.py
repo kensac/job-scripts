@@ -9,17 +9,17 @@ from urllib.parse import urlencode
 from cryptography.fernet import InvalidToken
 
 from api import crypto
-from api.oauth_provider import (
+from api.oauth.provider import (
     AUTH_ENDPOINT as _AUTH_ENDPOINT,
 )
-from api.oauth_provider import (
+from api.oauth.provider import (
     GMAIL_SCOPES,
     GOOGLE,
     STATE_TTL_SECONDS,
     StateInvalid,
     redirect_uris,
 )
-from api.oauth_provider import (
+from api.oauth.provider import (
     client_id as _client_id,
 )
 
