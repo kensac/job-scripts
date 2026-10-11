@@ -49,7 +49,7 @@ def latest_per(key: str, columns: str, where: str, *, alias: str = "v", join: st
     The ORDER BY is the key then newest id, so an index on (url, check_type,
     id) or (url, prompt_hash, id) yields rows already in order. A key on
     jobs.id (`join="JOIN jobs j ON j.url = v.url"`) sorts integers where a
-    url key sorts text: api/analytics_queries.py measured 1.15 s against
+    url key sorts text: api/analytics/queries.py measured 1.15 s against
     245 ms for the same rows."""
     return (
         f"SELECT DISTINCT ON ({key}) {columns} FROM verdicts {alias} {join} "

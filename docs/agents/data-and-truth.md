@@ -85,9 +85,9 @@ samples.
 
 ## Source analytics ownership
 
-Source analytics SQL belongs in `api/analytics_queries.py`, including each
+Source analytics SQL belongs in `api/analytics/queries.py`, including each
 query's denominator and missing-value conditions. Query row and response
-shapes belong in `api/analytics_models.py`. `api/analytics_assembly.py` joins
+shapes belong in `api/analytics/models.py`. `api/analytics/assembly.py` joins
 the source-keyed aggregates and applies sample floors; the route only sets
 access and request bounds. Keep the numerator, denominator, null meaning,
 and caveats together when changing a metric.

@@ -4,7 +4,7 @@ import decimal
 from urllib.parse import urlencode
 
 from api import db
-from api.analytics_models import (
+from api.analytics.models import (
     BoardAnalytics,
     BoardDecay,
     BoardDrill,
@@ -29,7 +29,7 @@ from api.analytics_models import (
     _SpendRow,
     _YieldRow,
 )
-from api.analytics_queries import (
+from api.analytics.queries import (
     _CUSTOM_SQL,
     _FIRST_CLOSED_SQL,
     _FUNNEL_SQL,
