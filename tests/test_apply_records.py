@@ -142,27 +142,15 @@ def test_old_report_backfill_verifies_chunks_before_clearing_page(client, user_h
     assert json.loads(stored) == page
 
 
-def test_resumes_per_person_are_bounded_because_each_carries_its_pdf(client, user_headers):
-    db.execute(
-        "INSERT INTO app_config (key, value) VALUES ('resumes_per_user', '2') "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
-    )
-    for name in ("one", "two"):
+def test_resume_library_has_no_count_limit(client, user_headers):
+    names = {f"resume {index}" for index in range(11)}
+    for name in sorted(names):
         made = client.post(
             "/v1/user/resumes", json={"name": name, "text": "a resume"}, headers=user_headers
         )
         assert made.status_code == 201, made.text
-    # Replacing one by name is not a third.
-    assert (
-        client.post(
-            "/v1/user/resumes", json={"name": "two", "text": "newer"}, headers=user_headers
-        ).status_code
-        == 201
-    )
-    refused = client.post(
-        "/v1/user/resumes", json={"name": "three", "text": "a resume"}, headers=user_headers
-    )
-    assert refused.status_code == 409 and refused.json()["detail"]["code"] == "TOO_MANY_RESUMES"
+    listed = client.get("/v1/user/resumes", headers=user_headers).json()["resumes"]
+    assert {resume["name"] for resume in listed} == names
 
 
 def test_a_submit_moves_the_board_row_without_a_reload(client, user_headers, monkeypatch):

@@ -86,8 +86,7 @@ def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
 
 @router.post("/user/resumes", status_code=201, responses=SIZE_REFUSALS)
 def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) -> Resume:
-    """Pasted text or a PDF, base64 in the body. The PDF's text is what is
-    kept; the file itself is not stored. Same name replaces the text."""
+    """Save pasted text or a legacy base64 PDF under a resume name."""
     text = (body.text or "").strip()
     data = None
     if body.pdf_base64:
@@ -107,15 +106,6 @@ def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) 
             )
     if not text:
         raise refuse(400, "NO_TEXT", "paste the resume text or attach a PDF")
-    # The PDF's bytes live in the database and are dumped and archived with
-    # it, so the count per person is bounded as well as the size per file.
-    kept = db.query_one(
-        "SELECT count(*) AS n FROM user_resumes WHERE user_id = %s AND name != %s",
-        (user.id, body.name.strip()),
-    )
-    cap = int(db.get_config("resumes_per_user", 10))
-    if kept and kept["n"] >= cap:
-        raise refuse(409, "TOO_MANY_RESUMES", f"up to {cap} resumes; delete one first")
     row = db.query_one_as(
         Resume,
         f"""

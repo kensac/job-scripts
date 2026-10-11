@@ -55,13 +55,6 @@ def _save_resume(upload_id: uuid.UUID, row: dict[str, Any], text: str) -> None:
         )
         if locked is None or locked["status"] == "ready":
             return
-        kept = db.query_one(
-            "SELECT count(*) AS n FROM user_resumes WHERE user_id = %s AND name != %s",
-            (row["user_id"], row["name"]),
-        )
-        cap = int(db.get_config("resumes_per_user", 10))
-        if kept and kept["n"] >= cap:
-            raise RuntimeError("the user resume library is full")
         saved = db.query_one(
             """INSERT INTO user_resumes (user_id, name, text, filename, pdf_upload_id)
                VALUES (%s, %s, %s, %s, %s)
