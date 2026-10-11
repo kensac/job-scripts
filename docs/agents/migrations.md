@@ -136,6 +136,9 @@ value has moved and that current writers use the new storage. Remove all reads
 of the old column in one release. After every fleet reader runs that release,
 drop the column through a migration that proves the column empty. Keep the
 application report chunks because they are each page's durable copy.
+For application reports, verify zero rows with a non-null old page, zero
+reports without an upload row, and zero completed uploads whose stored chunk
+count differs from the declared count before dropping the old column.
 
 Do not put a large data operation inside a migration. Migrations run at every
 container start behind the schema lock, so a long one stalls every deploy.

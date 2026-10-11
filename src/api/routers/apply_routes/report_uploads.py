@@ -50,8 +50,8 @@ def store_single_request_report(user: AuthedUser, url: str, note: str, page: dic
     with db.transaction():
         report = db.query_one_as(
             ReportCreated,
-            "INSERT INTO application_reports (user_id, url, host, note, page) "
-            "VALUES (%s, %s, %s, %s, NULL) RETURNING id, created_at",
+            "INSERT INTO application_reports (user_id, url, host, note) "
+            "VALUES (%s, %s, %s, %s) RETURNING id, created_at",
             (user.id, url, host, note),
         )
         assert report is not None
@@ -211,8 +211,8 @@ def complete_report_upload(
         # Chunks remain the only copy of the complete page.
         report = db.query_one_as(
             ReportCreated,
-            "INSERT INTO application_reports (user_id, url, host, note, page) "
-            "VALUES (%s, %s, %s, %s, NULL) RETURNING id, created_at",
+            "INSERT INTO application_reports (user_id, url, host, note) "
+            "VALUES (%s, %s, %s, %s) RETURNING id, created_at",
             (user.id, upload["url"], upload["host"], upload["note"]),
         )
         assert report is not None

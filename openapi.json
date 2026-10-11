@@ -45963,7 +45963,7 @@
           "created_at"
         ],
         "title": "ProblemReportDetail",
-        "description": "One report with the capture itself, which is the part triage reads.\nThe list above carries a title and a field count out of the same column\nrather than the whole page."
+        "description": "Report metadata. The page field stays null for older API clients.\n\nReaders fetch the complete page from numbered chunks when opened."
       },
       "ProblemResponse": {
         "properties": {

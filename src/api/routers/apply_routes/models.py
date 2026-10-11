@@ -70,9 +70,10 @@ class ReportList(BaseModel):
 
 
 class ProblemReportDetail(BaseModel):
-    """One report with the capture itself, which is the part triage reads.
-    The list above carries a title and a field count out of the same column
-    rather than the whole page."""
+    """Report metadata. The page field stays null for older API clients.
+
+    Readers fetch the complete page from numbered chunks when opened.
+    """
 
     id: int
     url: str
