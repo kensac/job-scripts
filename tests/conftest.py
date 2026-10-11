@@ -161,7 +161,7 @@ from api import db  # noqa: E402  (import only after DATABASE_URL is set)
 # symptom is never a truncation error - it is a foreign key violation on an id
 # that existed when the row was read and did not when it was written, with the
 # id varying run to run. Reproduced deterministically: two concurrent runs of
-# tests/test_mail_match_task.py against one database produced 1 and 3 failures
+# tests/test_mail_match_*.py against one database produced 1 and 3 failures
 # with "Key (user_id)=(4) is not present in table users" and "Key (job_id)=(5)
 # is not present in table jobs". Each run passes alone.
 #
