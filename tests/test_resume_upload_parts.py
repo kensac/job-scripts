@@ -99,22 +99,23 @@ async def test_large_transfer_retries_and_streams_download(
     state = client.get(path, headers=user_headers).json()
     assert state["status"] == "ready" and state["received_size"] == len(original)
     resume = db.query_one(
-        "SELECT id, user_id, text FROM user_resumes WHERE pdf_upload_id = %s", (upload_id,)
+        "SELECT id, user_id, text_version_id FROM user_resumes WHERE pdf_upload_id = %s",
+        (upload_id,),
     )
-    assert resume is not None and resume["text"] is None
+    assert resume is not None and resume["text_version_id"] is not None
     info = client.get(f"/v1/user/resumes/{resume['id']}/text", headers=user_headers).json()
     assert info["chars"] == len("Complete resume text") and info["part_count"] == 1
     stored = client.get(f"/v1/user/resumes/{resume['id']}/text/parts/0", headers=user_headers)
     assert stored.json()["text"] == "Complete resume text"
     assert resume_text(resume["user_id"], resume["id"]) == "Complete resume text"
     prior = db.query_one(
-        "SELECT text, pdf, filename, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
+        "SELECT filename, pdf_upload_id, text_version_id "
+        "FROM user_resume_revisions WHERE resume_id = %s",
         (resume["id"],),
     )
     assert prior == {
-        "text": None,
-        "pdf": None,
         "filename": None,
+        "pdf_upload_id": None,
         "text_version_id": previous_version,
     }
     downloaded = client.get(f"/v1/user/resumes/{resume['id']}/pdf", headers=user_headers)

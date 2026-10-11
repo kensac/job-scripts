@@ -21,23 +21,9 @@ the current resume. A failure leaves the PDF and any partial text version
 stored; the upload status shows the error. Retrying completion starts a new
 text version. Replacing a resume saves its prior text and PDF in revisions.
 
-**Old resume copies run only on Hetzner.** `backfill_resumes` is claimable only
-when `JOBTRACKER_HOST_NAME=hetzner` and its handler checks the same value.
-The persisted `resume_backfill_enabled` setting starts off. Once enabled, each
-task copies or verifies one old text or PDF part. `resume_backfill_runs` keeps
-the part checkpoint and rolling digests, so a worker restart continues from
-stored progress. The source stays stored until a later guarded column drop.
-An expected copy failure is stored on the run. The task finishes so later
-values can start; the scheduler retries the failed value after fresh ones.
-A `done` task means one attempt ended. Check `resume_backfill_runs.failed_at`
-and `last_error`, then count old values still missing pointers to confirm
-completion.
-
-**Old resume values clear only on Hetzner after the reader rollout.** The
-persisted `resume_legacy_clear_enabled` setting starts off. Each task checks
-one canonical part against the old value. `resume_legacy_clear_runs` records
-progress and failure. A done task is one attempt; completion means no old
-values remain and no failed clearing runs need review.
+**Resume conversion history stays recorded.** Keep `resume_backfill_runs` and
+`resume_legacy_clear_runs` so each copied and cleared value remains auditable.
+New resumes and revisions use canonical text versions and PDF uploads only.
 
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.

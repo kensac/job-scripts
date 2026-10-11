@@ -79,8 +79,8 @@ def _save_resume(upload_id: uuid.UUID, row: dict[str, Any], version_id: uuid.UUI
                (user_id, name, filename, pdf_upload_id, text_version_id)
                VALUES (%s, %s, %s, %s, %s)
                ON CONFLICT (user_id, name) DO UPDATE SET
-                   text = NULL, filename = EXCLUDED.filename,
-                   pdf = NULL, pdf_upload_id = EXCLUDED.pdf_upload_id,
+                   filename = EXCLUDED.filename,
+                   pdf_upload_id = EXCLUDED.pdf_upload_id,
                    text_version_id = EXCLUDED.text_version_id, updated_at = now()
                RETURNING id""",
             (row["user_id"], row["name"], row["filename"], upload_id, version_id),

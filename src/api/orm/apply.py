@@ -35,11 +35,7 @@ class UserResume(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(Text)
-    text: Mapped[str | None] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
-    # The file itself, kept only so the extension can attach it to a form;
-    # NULL for a resume that was pasted.
-    pdf: Mapped[bytes | None] = mapped_column(BYTEA)
     pdf_upload_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id", name="fk_user_resumes_pdf_upload")
     )
@@ -107,9 +103,7 @@ class UserResumeRevision(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"))
     resume_id: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(Text)
-    text: Mapped[str | None] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
-    pdf: Mapped[bytes | None] = mapped_column(BYTEA)
     pdf_upload_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id")
     )

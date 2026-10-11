@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from api import db, hosts, metrics, telemetry
@@ -96,8 +95,6 @@ def claim_task(worker_name: str, too_heavy: list[str] | None = None) -> dict[str
                          worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending'
                       AND kind = ANY(%(known)s) {kinds_clause}
-                      AND (kind <> ALL(ARRAY['backfill_resumes', 'clear_resume_legacy'])
-                           OR %(worker_host)s = 'hetzner')
                       -- Not before its time, and not against a host whose
                       -- slot for this address is still closed (api.hosts).
                       AND (not_before IS NULL OR not_before <= now())
@@ -114,7 +111,6 @@ def claim_task(worker_name: str, too_heavy: list[str] | None = None) -> dict[str
             "kinds": WORKER_KINDS,
             "exclude": exclude,
             "worker": worker_name,
-            "worker_host": os.environ.get("JOBTRACKER_HOST_NAME", ""),
             "egress": hosts.EGRESS_GROUP,
         },
     )

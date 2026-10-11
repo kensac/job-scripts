@@ -67,13 +67,13 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
     assert actual == first_part + second_part
     assert resume_text(_uid(user_headers), resume_id) == "A" * 12_000
     prior = db.query_one(
-        "SELECT text, pdf, filename, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
+        "SELECT filename, pdf_upload_id, text_version_id "
+        "FROM user_resume_revisions WHERE resume_id = %s",
         (resume_id,),
     )
     assert prior == {
-        "text": None,
-        "pdf": None,
         "filename": None,
+        "pdf_upload_id": None,
         "text_version_id": first_version,
     }
 

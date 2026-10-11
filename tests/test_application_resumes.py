@@ -22,9 +22,6 @@ class TestResumes:
             headers=user_headers,
         )
         assert r.status_code == 200
-        assert db.query_one(
-            "SELECT text, pdf FROM user_resumes WHERE id = %s", (r.json()["resume_id"],)
-        ) == {"text": None, "pdf": None}
         rows = client.get("/v1/user/resumes", headers=user_headers).json()["resumes"]
         assert [(x["name"], x["chars"]) for x in rows] == [("master", 12)]
         resume_id = r.json()["resume_id"]
@@ -54,12 +51,8 @@ class TestResumes:
         assert r.status_code == 410 and r.json()["detail"]["code"] == "USE_RESUME_PARTS"
         assert client.get("/v1/user/resumes", headers=user_headers).json()["resumes"] == []
 
-    def test_rename_keeps_canonical_text_and_legacy_revision(self, client, user_headers):
+    def test_rename_keeps_canonical_text_and_revision(self, client, user_headers):
         resume_id = seed_text_resume(_uid(user_headers), "old", "Original text")
-        db.execute(
-            "UPDATE user_resumes SET text = 'stale text', pdf = %s WHERE id = %s",
-            (b"stale PDF", resume_id),
-        )
         text_change = client.patch(
             f"/v1/user/resumes/{resume_id}",
             json={"text": "replacement"},
@@ -84,11 +77,10 @@ class TestResumes:
             client.get(f"/v1/user/resumes/{resume_id}/pdf", headers=user_headers).status_code == 404
         )
         assert db.query_one(
-            "SELECT text, pdf, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
+            "SELECT pdf_upload_id, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
             (resume_id,),
         ) == {
-            "text": "stale text",
-            "pdf": b"stale PDF",
+            "pdf_upload_id": None,
             "text_version_id": db.query_one(
                 "SELECT text_version_id FROM user_resumes WHERE id = %s", (resume_id,)
             )["text_version_id"],
@@ -115,11 +107,11 @@ class TestResumes:
         )
         assert client.delete(f"/v1/user/resumes/{rid}", headers=user_headers).status_code == 200
 
-    def test_missing_canonical_copy_does_not_read_old_columns(self, client, user_headers):
+    def test_missing_canonical_copy_is_unavailable(self, client, user_headers):
         row = db.query_one(
-            "INSERT INTO user_resumes (user_id, name, text, filename, pdf) "
-            "VALUES (%s, 'old', 'old text', 'old.pdf', %s) RETURNING id",
-            (_uid(user_headers), b"old PDF"),
+            "INSERT INTO user_resumes (user_id, name, filename) "
+            "VALUES (%s, 'old', 'old.pdf') RETURNING id",
+            (_uid(user_headers),),
         )
         assert row is not None
         resume_id = row["id"]
