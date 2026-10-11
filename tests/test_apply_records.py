@@ -28,8 +28,9 @@ def test_a_report_keeps_the_page_whole_for_triage(client, user_headers, other_us
     ).json()
     assert json.loads(base64.b64decode(chunk["data"])) == page
     assert db.query_one(
-        "SELECT page FROM application_reports WHERE id = %s", (made.json()["id"],)
-    ) == {"page": None}
+        "SELECT count(*) AS count FROM information_schema.columns "
+        "WHERE table_name = 'application_reports' AND column_name = 'page'"
+    ) == {"count": 0}
     assert client.get("/v1/user/apply/reports", headers=other_user_headers).json()["reports"] == []
     too_big = {"html": "x" * 2_100_000}
     assert (
