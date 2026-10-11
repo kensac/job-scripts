@@ -37,16 +37,17 @@ from api.orm.board import (
     UserJobHistory,
     UserJobWorkingSet,
 )
-from api.orm.catalog import (
-    Job,
+from api.orm.catalog_derivations import (
     JobEmbedding,
-    JobListingEvent,
     JobProfile,
     JobRequirements,
     JobSkill,
-    Listing,
     Location,
-    PostingUpload,
+)
+from api.orm.catalog_postings import Job, PostingUpload
+from api.orm.catalog_sources import (
+    JobListingEvent,
+    Listing,
     Source,
     SourceGroup,
     SourceRequest,
