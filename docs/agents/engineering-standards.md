@@ -91,8 +91,9 @@ should say so.
 
 **A value an administrator might want to change lives in `app_config`, not
 in code.** Retry windows, caps, cycle sizes: declare the default, typed
-validation, help text, choices, `kind` and `section` in `api/config.py`
-(`CONFIG_KEYS`), and read it at the point of use with `db.get_config`. Database
+validation, help text, choices, `kind` and `section` in the owning
+`api/config_keys/` section module, which `api.config.CONFIG_KEYS` assembles,
+and read it at the point of use with `db.get_config`. Database
 seeding and GET /admin/config derive from that registry; the admin config page
 renders every key from its metadata, so a new key needs no frontend entry; four
 keys in one evening each needed one before it did. **The whole entry is served,

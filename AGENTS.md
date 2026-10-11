@@ -32,6 +32,7 @@ These are instructions, not history. Follow them.
 |---|---|
 | [working-agreement.md](docs/agents/working-agreement.md) | Take a task, own a feature, or coordinate with another agent |
 | [engineering-standards.md](docs/agents/engineering-standards.md) | Write or change any code |
+| [config-registry.md](docs/agents/config-registry.md) | Change a persisted app setting or its validation |
 | [data-and-truth.md](docs/agents/data-and-truth.md) | Put a number, a state, or an inference in front of a person |
 | [admin-query-reads.md](docs/agents/admin-query-reads.md) | Change admin model-call ledger, posting inspection, or stats routes |
 | [architecture.md](docs/agents/architecture.md) | Change the mail pipeline, the matcher, pricing, or a named place |

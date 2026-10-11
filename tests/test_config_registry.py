@@ -1,7 +1,7 @@
 """GET /admin/config serves the registry beside the values: type, kind,
 section, default, help and choices per key, so the admin page renders any
 tunable, files it under a heading and marks it changed without a frontend
-entry, and a new key is one entry in api.config.CONFIG_KEYS."""
+entry, and a new key is one entry in its api.config_keys section module."""
 
 from __future__ import annotations
 
@@ -47,6 +47,16 @@ def test_every_key_is_filed_under_a_named_section():
         "Mail",
     }
     assert not [k for k, s in admin_config._CONFIG_KEYS.items() if s.section == "General"]
+
+
+def test_section_registries_have_distinct_keys_and_matching_sections():
+    from api.config import _CONFIG_KEYS_BY_SECTION, CONFIG_KEYS
+
+    keys = [key for section_keys in _CONFIG_KEYS_BY_SECTION.values() for key in section_keys]
+    assert len(keys) == len(set(keys)) == len(CONFIG_KEYS)
+    for section, section_keys in _CONFIG_KEYS_BY_SECTION.items():
+        assert section_keys
+        assert all(spec.section == section for spec in section_keys.values())
 
 
 def test_the_served_default_is_the_registry_default(client, admin_headers):
