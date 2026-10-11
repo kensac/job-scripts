@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 def test_oracle_reads_the_site_off_the_url_and_pages_by_offset(monkeypatch):

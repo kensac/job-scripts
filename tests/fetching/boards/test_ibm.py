@@ -6,7 +6,7 @@ import pytest
 
 from core.fetching import boards
 from core.fetching.boards import ibm as board_ibm
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 IBM_HITS = [
     {

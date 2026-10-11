@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.fetching import boards, client
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 def test_workable_follows_the_next_page_token(monkeypatch):

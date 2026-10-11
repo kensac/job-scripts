@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 def test_lever_takes_the_company_from_the_source(monkeypatch):

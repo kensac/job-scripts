@@ -7,7 +7,7 @@ import datetime
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 # Rows as textron.taleo.net, aarcorp.taleo.net and baesystems.taleo.net
 # returned them on 2026-10-05. Which column is which is per careersection:

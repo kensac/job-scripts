@@ -7,7 +7,7 @@ import datetime
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 # Joby card whose locations sit in the header, joined by " | ". Verbatim but
 # for the description snippet, which the fetcher does not read.
