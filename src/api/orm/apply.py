@@ -188,8 +188,7 @@ class ExtensionRecipe(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     adapter: Mapped[str] = mapped_column(Text)
     revision: Mapped[str] = mapped_column(Text)
-    body: Mapped[Any | None] = mapped_column(JSONB)
-    upload_id: Mapped[Any | None] = mapped_column(
+    upload_id: Mapped[Any] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("extension_recipe_uploads.id", name="fk_extension_recipes_upload_id"),
     )

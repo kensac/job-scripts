@@ -108,8 +108,8 @@ def _publish(upload_id: uuid.UUID, adapter: str, published_by: str | None, revis
     if current is None:
         db.execute(
             "INSERT INTO extension_recipes "
-            "(adapter, revision, body, upload_id, published_by, enabled) "
-            "VALUES (%s, %s, NULL, %s, %s, TRUE)",
+            "(adapter, revision, upload_id, published_by, enabled) "
+            "VALUES (%s, %s, %s, %s, TRUE)",
             (adapter, revision, upload_id, published_by),
         )
     else:
