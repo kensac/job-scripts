@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 def _switch_off_if_given_up(source: str, exc: Exception) -> None:
     """This failed pull, with the run before it, reached
-    ingest_give_up_after_failures: the board is switched off, which retires
-    its postings (catalog.retire_switched_off) and opens source_switched_off
+    ingest_give_up_after_failures: the board is switched off, which makes
+    its postings unavailable (catalog.AVAILABLE) and opens source_switched_off
     so an administrator sees why. Switched back on, the board is pulled at
     the next cycle and one more failure switches it off again."""
     run = queue.failure_runs([source]).get(source)
@@ -127,24 +127,16 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             properties={"source": source["name"], "values": listings_inline},
         )
     upserted = catalog.upsert_postings(postings, source["name"])
-    # A company board lists every open posting, so a catalog row this pull
-    # did not admit is closed (the board dropped it) or retired (the pattern
-    # no longer admits it); either way it stops costing checks and leaves
-    # boards through demote_closed. Listed and admitted again, the upsert
-    # above sets it active. Not for aggregator lists, whose rows age off on
-    # their own schedule, and not on an empty pull, which is a broken fetch
-    # rather than an empty board. Nothing did this before: 4,554 of 6,306
-    # active company-board rows on 2026-09-04 were titles the pattern no
-    # longer admitted, each still eligible for every sweep.
+    # What the pull says, as facts: availability is read from them
+    # (catalog.AVAILABLE, stored in jobs.available). A complete pull of a
+    # board that lists every open posting (boards.AUTHORITATIVE) records the
+    # rows it left out as unlisted, which makes them unavailable; an
+    # aggregator's absence never closes anything; and a pull that cannot show
+    # it saw everything (partial, or empty, which is a broken fetch rather
+    # than an empty board) records no absence. jobs.active is frozen and not
+    # written (docs/agents/architecture-migration.md, the jobs.active
+    # contract).
     authoritative = boards.kind(source["listings_url"]) in boards.AUTHORITATIVE
-    if fetched and complete and authoritative:
-        retired = catalog.retire_unlisted(source["name"], [p.url for p in postings])
-        metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
-    else:
-        retired = 0
-    # The same pull as facts, beside jobs.active until availability is read
-    # from them (docs/agents/architecture-migration.md, phase 3). Absence
-    # from a pull that cannot show it saw everything is not recorded.
     observed = catalog.observe(
         source["name"],
         task_id,
@@ -152,6 +144,8 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         {p.url for p in pattern_matched},
         None if not (fetched and complete) else "unlisted" if authoritative else "not_listed",
     )
+    retired = observed.get("unlisted", 0)
+    metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
     metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
     metrics.INGEST_JOBS.labels(source["name"], "title_pattern_missed").inc(
         fetched - len(pattern_matched)
@@ -283,49 +277,18 @@ def schedule_filter_runs(cycle: str) -> None:
 
 
 async def handle_retire_switched_off(task_id: int, payload: dict[str, Any]) -> None:
-    """Retires the postings of every switched-off source (catalog.retire_switched_off)."""
+    """Brings jobs.available to catalog.AVAILABLE over the whole catalog
+    (catalog.reconcile_available). A switched-off source's postings stop
+    being available here, within the hour, unless a switched-on source lists
+    them; so does a title pattern setting flip. The task keeps its name,
+    which the worker's schedule and its history key on."""
     from core import catalog
 
-    enforced = bool(db.get_config("source_title_patterns_enabled"))
-    retired = await asyncio.to_thread(
-        catalog.retire_switched_off,
-        enforced,
-        int(db.get_config("listings_seen_refresh_hours")),
-    )
-    for source, n in retired.items():
-        metrics.INGEST_JOBS.labels(source, "retired").inc(n)
-    total = sum(retired.values())
-    # Right after the legacy rule has run, so jobs.active is as current as it
-    # gets. Phase 3's shadow comparison (docs/agents/architecture-migration.md);
-    # it goes with the jobs.active fallback in catalog.IS_AVAILABLE. The
-    # reconcile first, so the shadow reads the stored value as current.
     reconciled = await asyncio.to_thread(catalog.reconcile_available)
-    shadow = _summarise(await asyncio.to_thread(catalog.availability_shadow))
     set_progress(
         task_id,
-        total,
-        total,
-        f"retired {total} postings of {len(retired)} switched-off sources",
-        extra={
-            "retired": total,
-            "sources": len(retired),
-            "available_reconciled": reconciled,
-            "availability_shadow": shadow,
-        },
+        reconciled,
+        reconciled,
+        f"stored availability changed on {reconciled} postings",
+        extra={"available_reconciled": reconciled},
     )
-
-
-def _summarise(rows: list[dict]) -> dict[str, dict]:
-    """One cell per (legacy, projected): its count, the ten owning sources
-    holding most of it, and a few job ids to open."""
-    cells: dict[str, dict] = {}
-    for r in sorted(rows, key=lambda r: -r["n"]):
-        cell = cells.setdefault(
-            f"legacy={r['legacy']} projected={r['projected']}",
-            {"n": 0, "sources": {}, "examples": []},
-        )
-        cell["n"] += r["n"]
-        if len(cell["sources"]) < 10:
-            cell["sources"][r["source"]] = r["n"]
-        cell["examples"] = (cell["examples"] + r["examples"])[:5]
-    return cells

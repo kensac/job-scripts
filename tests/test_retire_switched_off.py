@@ -1,4 +1,9 @@
-"""A posting is never active only because of a source nobody pulls."""
+"""A posting is never available only because of a source nobody pulls.
+
+The hourly retire_switched_off task keeps its name and now stores
+catalog.AVAILABLE (catalog.reconcile_available): a source switched off or on
+changes availability without an observation, and lands here.
+"""
 
 from __future__ import annotations
 
@@ -9,128 +14,58 @@ from core import catalog
 from tasks import ingest
 
 
-def _listed(url: str, source: str, *, kept: bool) -> None:
+def _observe(job_id: int, source: str, kind: str = "appeared") -> None:
     db.execute(
-        "INSERT INTO listings (url, source, pattern_id, kept) VALUES (%s, %s, %s, %s)",
-        (url, source, catalog.title_pattern_id(""), kept),
+        "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, %s)",
+        (job_id, source, kind),
     )
 
 
-def _active(job_id: int) -> bool:
-    return db.query_one("SELECT active FROM jobs WHERE id = %s", (job_id,))["active"]
+def _available(job_id: int) -> bool:
+    return db.query_one(
+        f"SELECT {catalog.IS_AVAILABLE.format(job='j')} AS a FROM jobs j WHERE j.id = %s",
+        (job_id,),
+    )["a"]
 
 
-def _events(job_id: int) -> list[bool]:
-    return [
-        r["listed"]
-        for r in db.query(
-            "SELECT listed FROM job_listing_events WHERE job_id = %s ORDER BY id", (job_id,)
-        )
-    ]
-
-
-def test_switched_off_source_postings_are_retired_unless_an_active_source_admits_them(f):
+def test_switched_off_source_postings_are_unavailable_unless_a_switched_on_source_lists_them(f):
     f.make_source("off", active=False)
-    f.make_source("on", active=True)
-    alone = f.make_job(source="off", url="https://jobs.test/alone")
-    shared = f.make_job(source="off", url="https://jobs.test/shared")
-    screened = f.make_job(source="off", url="https://jobs.test/screened")
-    by_off = f.make_job(source="off", url="https://jobs.test/by-off")
-    on_job = f.make_job(source="on", url="https://jobs.test/on")
-    # Another switched-on source lists and admits it: its next pull would
-    # put it straight back, so it stays.
-    _listed("https://jobs.test/shared", "on", kept=True)
-    # Listed but its pattern does not admit it: under enforcement the next
-    # pull would not touch it.
-    _listed("https://jobs.test/screened", "on", kept=False)
-    # Its own listing, which is no evidence: the source is off.
-    _listed("https://jobs.test/by-off", "off", kept=True)
+    f.make_source("on")
+    alone = f.make_job(source="off")
+    shared = f.make_job(source="off")
+    _observe(alone, "off")
+    _observe(shared, "off")
+    _observe(shared, "on")
 
-    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 3}
+    catalog.reconcile_available()
 
-    assert not _active(alone) and not _active(screened) and not _active(by_off)
-    assert _active(shared), "a url an active source admits is still listed"
-    assert _active(on_job), "a switched-on source's rows are its own pull's business"
-    assert _events(alone) == [False], "a retirement is an observation, like retire_unlisted's"
-    assert _events(shared) == []
-
-    # Idempotent: the next cycle has nothing to do.
-    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {}
+    assert not _available(alone)
+    assert _available(shared), "a switched-on source still lists it"
 
 
-def test_without_enforcement_any_listing_by_an_active_source_keeps_the_row(f):
-    f.make_source("off", active=False)
-    f.make_source("on", active=True)
-    screened = f.make_job(source="off", url="https://jobs.test/screened")
-    _listed("https://jobs.test/screened", "on", kept=False)
+def test_re_enabling_a_source_makes_its_postings_available_again(f):
+    f.make_source("flip", active=False)
+    job = f.make_job(source="flip")
+    _observe(job, "flip")
+    catalog.reconcile_available()
+    assert not _available(job)
 
-    assert catalog.retire_switched_off(patterns_enforced=False, refresh_hours=24) == {}
-    assert _active(screened), "with enforcement off the pull admits every listed posting"
-
-
-def test_a_listing_the_active_source_dropped_does_not_keep_the_row(f):
-    """Listings are never deleted, so a row an active source stopped listing
-    is still there. It must not keep a switched-off source's posting active:
-    that source's next pull would not put it back. A row as far behind its
-    source's newest row as refresh_hours no longer counts; one inside it does."""
-    f.make_source("off", active=False)
-    f.make_source("on", active=True)
-    dropped = f.make_job(source="off", url="https://jobs.test/dropped")
-    listed = f.make_job(source="off", url="https://jobs.test/listed")
-    _listed("https://jobs.test/dropped", "on", kept=True)
-    _listed("https://jobs.test/listed", "on", kept=True)
-    _listed("https://jobs.test/newest", "on", kept=True)
-    db.execute(
-        "UPDATE listings SET last_seen_at = now() - interval '25 hours' "
-        "WHERE url = 'https://jobs.test/dropped'"
-    )
-    db.execute(
-        "UPDATE listings SET last_seen_at = now() - interval '23 hours' "
-        "WHERE url = 'https://jobs.test/listed'"
-    )
-
-    assert catalog.retire_switched_off(patterns_enforced=False, refresh_hours=24) == {"off": 1}
-    assert not _active(dropped)
-    assert _active(listed)
+    db.execute("UPDATE sources SET active = true WHERE name = 'flip'")
+    catalog.reconcile_available()
+    assert _available(job)
 
 
-def test_re_enabled_source_pull_puts_its_postings_back(f, monkeypatch):
-    """Retirement is reversible through the ordinary upsert, which logs the return."""
-    from core.fetching import boards
-    from core.fetching.posting import JobPosting
-
-    f.make_source("off", active=False)
-    job = f.make_job(source="off", url="https://jobs.test/back")
-    catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24)
-    assert not _active(job)
-
-    db.execute("UPDATE sources SET active = true WHERE name = 'off'")
-    post = JobPosting(
-        company="Acme",
-        locations=[],
-        title="Engineer",
-        url="https://jobs.test/back",
-        terms=[],
-        active=True,
-        date_posted=0,
-        raw_url="",
-    )
-    monkeypatch.setattr(boards, "fetch_listings", lambda url, company=None: [post])
-    asyncio.run(ingest.handle_ingest_source(f.make_task("ingest_source"), {"source": "off"}))
-    assert _active(job)
-    assert _events(job) == [False, True]
-
-
-def test_the_task_retires_and_the_scheduler_queues_it_every_cycle(f):
+def test_the_task_reconciles_and_the_scheduler_queues_it_every_cycle(f):
     f.make_source("off", active=False)
     job = f.make_job(source="off")
+    _observe(job, "off")
     task_id = f.make_task("retire_switched_off")
 
     asyncio.run(ingest.handle_retire_switched_off(task_id, {}))
 
-    assert not _active(job)
+    assert not _available(job)
     progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
-    assert progress["retired"] == 1
+    assert progress["available_reconciled"] == 1
 
     worker.schedule_ingest_cycle()
     assert db.query_one(
@@ -138,7 +73,7 @@ def test_the_task_retires_and_the_scheduler_queues_it_every_cycle(f):
     )
 
 
-def test_a_row_an_ingest_holds_is_skipped_and_retired_next_cycle(f):
+def test_a_row_an_ingest_holds_is_skipped_and_stored_next_cycle(f):
     """It runs beside every ingest. Waiting on a held row is how two writers
     deadlock; skipping it costs one cycle."""
     from core.pool import pool
@@ -146,9 +81,11 @@ def test_a_row_an_ingest_holds_is_skipped_and_retired_next_cycle(f):
     f.make_source("off", active=False)
     held = f.make_job(source="off", url="https://jobs.test/held")
     free = f.make_job(source="off", url="https://jobs.test/free")
+    _observe(held, "off")
+    _observe(free, "off")
     with pool.connection() as holder:
         holder.execute("SELECT 1 FROM jobs WHERE id = %s FOR UPDATE", (held,))
-        assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 1}
-    assert _active(held) and not _active(free)
-    assert catalog.retire_switched_off(patterns_enforced=True, refresh_hours=24) == {"off": 1}
-    assert not _active(held)
+        assert catalog.reconcile_available() == 1
+    assert _available(held) and not _available(free)
+    assert catalog.reconcile_available() == 1
+    assert not _available(held)

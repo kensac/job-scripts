@@ -16,9 +16,7 @@ _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 _READ = re.compile(r"\bj\.active\b")
 
 # Files that read the feed's own flag on purpose.
-_FEED_STATE = {
-    "core/catalog.py": "writes jobs.active and compares it (retire, upsert, shadow)",
-}
+_FEED_STATE: dict[str, str] = {}
 
 # Readers whose meaning is availability and that have not moved yet. Each
 # entry leaves with the change that moves it.
@@ -38,3 +36,23 @@ def test_no_new_reader_of_the_feed_flag():
 def test_listed_files_still_read_it():
     # A file that stopped reading j.active leaves the list, so it cannot go stale.
     assert (set(_FEED_STATE) | _NOT_YET_MOVED) - _readers() == set()
+
+
+_WRITE = re.compile(
+    r"UPDATE\s+jobs\s+SET\s+active\b|active\s*=\s*EXCLUDED\.active"
+    r"|INSERT\s+INTO\s+jobs\s*\([^)]*\bactive\b",
+    re.IGNORECASE,
+)
+
+# jobs.active is frozen (docs/agents/architecture-migration.md, the jobs.active
+# contract). The dev seed fills a disposable database only.
+_WRITES_ALLOWED = {"api/devseed.py"}
+
+
+def test_nothing_writes_the_frozen_feed_flag():
+    writers = {
+        str(path.relative_to(_SRC))
+        for path in _SRC.rglob("*.py")
+        if _WRITE.search(path.read_text())
+    }
+    assert writers - _WRITES_ALLOWED == set()

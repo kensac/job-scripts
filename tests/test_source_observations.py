@@ -214,19 +214,6 @@ def test_an_administrators_correction_holds_until_a_source_says_something_new(f)
     assert not catalog.set_active(job_id + 999, False)
 
 
-def test_the_shadow_counts_each_disagreement_once(f):
-    f.make_source("board")
-    _pull("board", [_posting(A), _posting(B)], {A, B}, "unlisted")
-    # The legacy flag says closed where the observations say listed.
-    db.execute("UPDATE jobs SET active = false WHERE url = %s", (B,))
-    cells = ingest._summarise(catalog.availability_shadow())
-    assert {k: v["n"] for k, v in cells.items()} == {
-        "legacy=True projected=True": 1,
-        "legacy=False projected=True": 1,
-    }
-    assert cells["legacy=False projected=True"]["sources"] == {"board": 1}
-
-
 def _stored(url: str) -> bool | None:
     return db.query_one("SELECT available FROM jobs WHERE url = %s", (url,))["available"]
 
@@ -259,3 +246,26 @@ def test_the_stored_projection_follows_observations_corrections_and_switches(f):
         == 0
     )
     assert _stored(B) is True, "no observation decides: its feed state"
+
+
+def test_a_complete_pull_closes_an_owned_row_it_never_observed(f):
+    """A row stored from the frozen feed flag has no observation to change.
+    The owning board's complete pull leaving it out is one."""
+    f.make_source("board")
+    f.make_job(url=A, source="board", active=True)
+    f.make_job(url=B, source="board", active=True)
+    catalog.reconcile_available()
+    assert _stored(A) is True
+    assert _pull("board", [_posting(B)], {B}, "unlisted") == {"appeared": 1, "unlisted": 1}
+    assert _stored(A) is False
+    # A partial or empty pull records no absence, so it closes nothing.
+    f.make_job(url="https://jobs.test/c", source="board", active=True)
+    catalog.reconcile_available()
+    assert _pull("board", [_posting(B)], {B}, None) == {}
+    assert _stored("https://jobs.test/c") is True
+
+
+def test_a_switched_off_source_holds_no_unobserved_row_available(f):
+    f.make_source("off", active=False)
+    f.make_job(url=A, source="off", active=True)
+    assert _available(A) is False

@@ -22,8 +22,8 @@ row and fails on the deadlock.
 
 **`core.catalog` is the only writer of `jobs`.** A new write is a named
 function there, so it keeps the lock order and a later change to what a
-column means has one place to land. `jobs.active` outside a pull is written
-only by `catalog.set_active`. `tests/test_catalog_one_writer.py` fails on an
+column means has one place to land. `jobs.active` is frozen and written by
+nothing; availability is `jobs.available`, stored by `catalog`. `tests/test_catalog_one_writer.py` fails on an
 `INSERT`, `UPDATE`, `DELETE` or `MERGE` of `jobs` anywhere else under `src`;
 its allow-list holds only the pay and near-copy columns the derived facts move
 is taking off `jobs`, and fails once a listed file stops writing.

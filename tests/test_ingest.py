@@ -162,6 +162,9 @@ def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
     putting the posting back is the one event that says otherwise."""
     from core import catalog
 
+    # A switched-on source someone follows: what makes it available and worth
+    # a check.
+    f.subscribe(f.make_user(), f.make_source("rocketlab"))
     post = _posting("Software Engineer")
     catalog.upsert_postings([post], "rocketlab")
     verdicts.record_manual(
@@ -173,18 +176,12 @@ def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
         job_title=post.title,
         context="test",
     )
-    row = db.query_one("SELECT id, active FROM jobs WHERE url = %s", (post.url,))
-    assert row and row["active"] and _listing_events(row["id"]) == []
+    kept = {post.url}
+    assert catalog.observe("rocketlab", None, [post], kept, "unlisted") == {"appeared": 1}
 
-    # The board drops it, so the pull no longer admits it.
-    catalog.retire_unlisted("rocketlab", [])
-    assert not db.query_one("SELECT active FROM jobs WHERE url = %s", (post.url,))["active"]
-    assert _listing_events(row["id"]) == [False], "the board dropping it is an observation too"
-
-    # And the board lists it again.
-    catalog.upsert_postings([post], "rocketlab")
-    assert db.query_one("SELECT active FROM jobs WHERE url = %s", (post.url,))["active"]
-    assert _listing_events(row["id"]) == [False, True], "the return must be recorded"
+    # The board drops it from a complete pull, then lists it again.
+    assert catalog.observe("rocketlab", None, [], set(), "unlisted") == {"unlisted": 1}
+    assert catalog.observe("rocketlab", None, [post], kept, "unlisted") == {"reappeared": 1}
 
     # Which is what puts it in front of the sweep that re-fetches the page.
     assert post.url in _relisted_candidates()
@@ -202,15 +199,6 @@ def test_a_posting_the_feed_puts_back_is_stamped_and_reaches_the_recheck(f):
     assert post.url not in _relisted_candidates()
 
 
-def _listing_events(job_id: int) -> list[bool]:
-    return [
-        r["listed"]
-        for r in db.query(
-            "SELECT listed FROM job_listing_events WHERE job_id = %s ORDER BY id", (job_id,)
-        )
-    ]
-
-
 def _relisted_candidates() -> set[str]:
     """The re-listed branch of the reverify candidate query, on its own."""
     from core.store import AI_ELIGIBLE_JOB
@@ -218,9 +206,9 @@ def _relisted_candidates() -> set[str]:
     rows = db.query(
         f"""
         SELECT j.url FROM jobs j
-        WHERE j.active AND {AI_ELIGIBLE_JOB.format(job="j")}
-          AND (SELECT MAX(e.at) FROM job_listing_events e
-               WHERE e.job_id = j.id AND e.listed) > COALESCE(
+        WHERE j.available AND {AI_ELIGIBLE_JOB.format(job="j")}
+          AND (SELECT MAX(o.at) FROM source_observations o
+               WHERE o.job_id = j.id AND o.kind = 'reappeared') > COALESCE(
                 (SELECT MAX(q.created_at) FROM ai_queries q
                  WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
         """
@@ -301,6 +289,7 @@ def test_a_changed_posting_rewrites_its_row_and_only_its_row():
 
     moved = dataclasses.replace(posts[0], locations=["Remote"])
     retermed = dataclasses.replace(posts[1], terms=["Fall 2027"])
+    # The feed's own inactive flag is an observation now, not a column.
     closed = dataclasses.replace(posts[2], active=False)
     dated = dataclasses.replace(posts[3], date_posted=1_700_000_000, company="Rocket Lab")
     catalog.upsert_postings([moved, retermed, closed, dated, posts[4]], "rocketlab")
@@ -309,13 +298,11 @@ def test_a_changed_posting_rewrites_its_row_and_only_its_row():
     assert {u for u in before if after[u] != before[u]} == {
         moved.url,
         retermed.url,
-        closed.url,
         dated.url,
     }
     rows = _catalog_rows()
     assert rows[moved.url]["locations"] == ["Remote"]
     assert rows[retermed.url]["terms"] == ["Fall 2027"]
-    assert rows[closed.url]["active"] is False
     assert rows[dated.url]["date_posted"] is not None
     assert rows[dated.url]["company"] == "Rocket Lab"
 
@@ -333,25 +320,6 @@ def test_a_feed_listing_an_uploaded_posting_takes_it_over_even_when_nothing_else
     assert _catalog_rows()[post.url]["source"] == "rocketlab"
     status = db.query_one("SELECT status FROM posting_uploads WHERE job_id = %s", (job_id,))
     assert status == {"status": "done"}
-
-
-def test_a_return_rewrites_the_row_and_records_the_event_once():
-    from core import catalog
-
-    post = _posting("Software Engineer")
-    catalog.upsert_postings([post], "rocketlab")
-    job_id = db.query_one("SELECT id FROM jobs WHERE url = %s", (post.url,))["id"]
-    catalog.retire_unlisted("rocketlab", [])
-    before = _job_versions()
-
-    catalog.upsert_postings([post], "rocketlab")
-    returned = _job_versions()
-    catalog.upsert_postings([post], "rocketlab")
-
-    assert returned[post.url] != before[post.url]
-    assert _job_versions() == returned
-    assert db.query_one("SELECT active FROM jobs WHERE id = %s", (job_id,))["active"]
-    assert _listing_events(job_id) == [False, True]
 
 
 def test_a_partial_pull_admits_what_it_saw_and_retires_nothing(monkeypatch, f):
@@ -379,7 +347,7 @@ def test_a_partial_pull_admits_what_it_saw_and_retires_nothing(monkeypatch, f):
     monkeypatch.setattr(verdicts, "refresh_content", no_fetch)
 
     def active() -> set[str]:
-        rows = db.query("SELECT title FROM jobs WHERE source = 'capped' AND active")
+        rows = db.query("SELECT title FROM jobs WHERE source = 'capped' AND available")
         return {r["title"] for r in rows}
 
     for expected in (
