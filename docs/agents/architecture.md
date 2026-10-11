@@ -189,9 +189,18 @@ build the market table from a smaller slice than the filters admit. If the
 verified-open cost still reads as too high, that is the next step, and it
 is the same one-line change to the same two selections.
 
+**Verification has three owners.** `tasks/verification_questions.py` builds the
+request and hashes its exact submitted shape. `tasks/reverification.py`
+refreshes existing verdicts from current pages and compares that question
+identity before reusing an answer. `tasks/new_posting_verification.py` selects
+uncleared postings, reuses verified near copies, and records new closed,
+clearance and board verdicts. Keep candidate selection and result settlement
+with their respective sweep; only request construction is shared. The task
+registry still maps the same three handler kinds through `tasks/verify.py`.
+
 **The same question is not bought twice.** A verification verdict records
 `request_sha256`, the hash of everything that could change its answer: model,
-effort, schema, instructions and the exact page text (`tasks/verify.py`,
+effort, schema, instructions and the exact page text (`tasks/verification_questions.py`,
 `question_sha256`, hashed from the request as submitted). Re-verification
 re-fetches the page and, where the latest closed and clearance verdicts both
 answered the identical question, writes the standing answer again under

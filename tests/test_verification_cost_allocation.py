@@ -5,7 +5,7 @@ import pytest
 
 from api import db
 from core.batch import BatchSpec
-from tasks import verify
+from tasks import new_posting_verification, verify
 from tests.factories import make_batch_result
 
 
@@ -39,7 +39,7 @@ async def test_joint_verification_allocates_cost_once_and_survives_replay(f, mon
     async def collect(*args):
         return [result], SimpleNamespace(model="gpt-5-nano")
 
-    monkeypatch.setattr(verify, "run_batched", collect)
+    monkeypatch.setattr(new_posting_verification, "run_batched", collect)
     for _ in range(2):
         if kind == "verify_new":
             await verify.handle_verify_new(task, {})

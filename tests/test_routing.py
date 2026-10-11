@@ -304,7 +304,7 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # There is no declaration for run_batched to take, and routing it would
     # change which jobs land on the board.
     #
-    # verify.py reattaches before fetching its rows, so its in-flight check has
+    # reverification.py reattaches before fetching its rows, so its in-flight check has
     # to happen earlier than run_batched performs it. Folding it in would make
     # a resumed chunk re-read the catalog to reach a batch it already has.
     #
@@ -317,7 +317,7 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     #
     # The runtime is where submit_or_collect lives, so it is not in the sweep
     # below: the glob reads the handler modules and the runtime is a package.
-    KNOWN = {"filters.py", "verify.py", "derive.py"}
+    KNOWN = {"filters.py", "reverification.py", "derive.py"}
     root = pathlib.Path(__file__).resolve().parent.parent / "src" / "tasks"
     assert root.is_dir(), root
     offenders = [
