@@ -43,6 +43,17 @@ are collected after a split and that each assertion still exercises the
 same production path. Do not turn a module fixture into a suite-wide fixture
 just to share it.
 
+## Test database bootstrap and reset
+
+Keep `tests/conftest.py` responsible for pytest hooks and fixture scopes. Its
+startup must validate the disposable database, set `DATABASE_URL` before
+importing `api.db`, claim exclusive database use, and provision the schema
+before importing `tests/database_reset.py`. That reset module snapshots the
+mutable tables and synced-copy stamp once, after provisioning. Keep scratch
+Postgres creation in `tests/database_bootstrap.py`; it must not import `api.db`
+before the URL is set. Preserve the corpus-last collection hook so an unmarked
+test cannot empty the corpus after its final build.
+
 ## Generated corpus ownership
 
 Keep measured column distributions in `tests/production_profile.json`; refresh
