@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.mail.current import current_event, current_match
-from api.mail.pipeline_actions import STATUS_QUESTION, answer
+from api.mail.pipeline.actions import STATUS_QUESTION, answer
 
 
 class ProposedFrom(BaseModel):
