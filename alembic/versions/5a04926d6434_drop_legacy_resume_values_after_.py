@@ -8,6 +8,7 @@ Only deploy this after the reader cutover is live on every host and the
 Hetzner clearing pass has compared and emptied all four legacy columns.
 The guards refuse a drop if a legacy value remains or a text pointer is absent.
 The canonical-state check refuses incomplete text or PDF parts.
+The retired disabled config rows are removed; both run ledgers remain.
 """
 
 from collections.abc import Sequence
@@ -27,19 +28,28 @@ def _require_canonical_copies() -> None:
     connection = op.get_bind()
     enabled = connection.execute(
         sa.text("""
-        SELECT value FROM app_config WHERE key = 'resume_backfill_enabled'
+        SELECT key FROM app_config
+        WHERE key IN ('resume_backfill_enabled', 'resume_legacy_clear_enabled')
+          AND value <> 'false'::jsonb
     """)
-    ).scalar_one_or_none()
-    if enabled is True:
-        raise RuntimeError("resume backfill scheduling is still enabled")
+    ).scalars().all()
+    if enabled:
+        raise RuntimeError(f"retired resume scheduling is still enabled: {enabled}")
     active = connection.execute(
         sa.text("""
         SELECT count(*) FROM tasks
-        WHERE kind = 'backfill_resumes' AND status IN ('pending', 'running')
+        WHERE kind IN ('backfill_resumes', 'clear_resume_legacy')
+          AND status IN ('pending', 'running')
     """)
     ).scalar_one()
     if active:
-        raise RuntimeError(f"{active} resume backfill tasks are still active")
+        raise RuntimeError(f"{active} retired resume tasks are still active")
+    unfinished = connection.execute(sa.text("""
+        SELECT count(*) FROM resume_legacy_clear_runs
+        WHERE stage <> 'done' OR failed_at IS NOT NULL
+    """)).scalar_one()
+    if unfinished:
+        raise RuntimeError(f"{unfinished} resume clearing runs are unfinished")
     for table in _TABLES:
         missing = connection.execute(
             sa.text(f"""
@@ -50,12 +60,20 @@ def _require_canonical_copies() -> None:
                OR v.user_id <> r.user_id
                OR (SELECT count(*) FROM resume_text_parts p
                    WHERE p.version_id = v.id) <> v.part_count
+               OR (SELECT COALESCE(min(p.part_index), 0) FROM resume_text_parts p
+                   WHERE p.version_id = v.id) <> 0
+               OR (SELECT COALESCE(max(p.part_index), -1) FROM resume_text_parts p
+                   WHERE p.version_id = v.id) <> v.part_count - 1
                OR (SELECT COALESCE(sum(length(p.text)), 0) FROM resume_text_parts p
                    WHERE p.version_id = v.id) <> v.chars
                OR (r.pdf_upload_id IS NOT NULL AND
                    (u.id IS NULL OR u.status <> 'ready' OR u.user_id <> r.user_id
                     OR (SELECT count(*) FROM resume_upload_parts p
                         WHERE p.upload_id = u.id AND p.verified) <> u.next_part
+                    OR (SELECT COALESCE(min(p.part_index), 0) FROM resume_upload_parts p
+                        WHERE p.upload_id = u.id AND p.verified) <> 0
+                    OR (SELECT COALESCE(max(p.part_index), -1) FROM resume_upload_parts p
+                        WHERE p.upload_id = u.id AND p.verified) <> u.next_part - 1
                     OR (SELECT COALESCE(sum(p.size), 0) FROM resume_upload_parts p
                         WHERE p.upload_id = u.id AND p.verified) <> u.size))
         """)
@@ -90,6 +108,11 @@ def upgrade() -> None:
     op.drop_column("user_resumes", "text")
     op.drop_column("user_resumes", "pdf")
     # ### end Alembic commands ###
+    op.execute("""
+        DELETE FROM app_config
+        WHERE key IN ('resume_backfill_enabled', 'resume_legacy_clear_enabled')
+          AND value = 'false'::jsonb
+    """)
 
 
 def downgrade() -> None:

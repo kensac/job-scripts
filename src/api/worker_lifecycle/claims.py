@@ -96,8 +96,6 @@ def claim_task(worker_name: str, too_heavy: list[str] | None = None) -> dict[str
                          worker = %(worker)s
         WHERE id = (SELECT id FROM tasks WHERE status = 'pending'
                       AND kind = ANY(%(known)s) {kinds_clause}
-                      AND (kind <> ALL(ARRAY['backfill_resumes', 'clear_resume_legacy'])
-                           OR %(worker_host)s = 'hetzner')
                       -- Not before its time, and not against a host whose
                       -- slot for this address is still closed (api.hosts).
                       AND (not_before IS NULL OR not_before <= now())

@@ -131,65 +131,12 @@ set NOT NULL and drop the CHECK in a short transaction.
 
 ## Long-running work
 
-**Move legacy resumes to versioned storage on Hetzner.** New text writes store
-complete text in `resume_text_parts`; new PDF writes store verified object
-parts. Older `user_resumes` rows and archived revisions keep their old text
-and PDF bytes readable during the fleet rollout. Deploy the additive backend
-first with PDF uploads paused. Verify the live bucket has no expiry rule and
-enough capacity, then turn on `resume_pdf_uploads_enabled` in admin config.
-Deploy the frontend that sends parts. After that frontend is live,
-retire legacy JSON/base64 resume writes. Keep the rename operation and
-read-only access to old text and PDF values. The retired request shape cannot
-process unlimited input in bounded memory. After
-every writer uses the new path, backfill each old text value in a small
-transaction on a Hetzner host. Compare exact reconstructed text before
-setting its version pointer.
-Copy each old PDF to object parts, compare byte count and checksum with the
-source, then set its upload pointer. Cover both current rows and
-`user_resume_revisions`. Resume partial runs by selecting rows without a
-pointer. Never run this backfill from a laptop. Verify every old value has a
-matching new copy before a release removes old-column readers. After every
-host runs that release, a later merged migration checks that no old value is
-the sole copy and drops the old text and PDF columns. Do not clear old values
-before that guarded migration.
-
-`resume_backfill_enabled` is the persisted start gate. Leave it off until old
-writers are retired and the fleet is on the backfill release. The scheduler
-then queues one part at a time. Claiming permits `backfill_resumes` only when
-`JOBTRACKER_HOST_NAME=hetzner`; the handler checks that name again. A durable
-`resume_backfill_runs` row checkpoints each part and a second pass compares
-source and copy digests. Finalization takes a short source-row lock before it
-sets the pointer. The old value stays in place.
-`resume_pdf_uploads_enabled` also gates PDF copies. Leave it off until the live
-bucket's expiry and capacity have been checked. A failed copy leaves the
-source unchanged and records its error on the run. Scheduling tries values
-without a previous attempt first, then retries older attempts. A bad value
-must not block later values.
-Task status `done` does not prove the value moved. Check failed runs and count
-old values still missing pointers before calling the backfill complete.
-
-**Clear old resume values after all readers move.** Keep
-`resume_legacy_clear_enabled` off until every old text and PDF has a canonical
-pointer and all fleet readers use canonical storage. The clearing scheduler
-also checks that no old value lacks a pointer. Hetzner tasks compare one old
-part with its canonical part while holding the source row lock. The run keeps
-its progress and errors. A final short transaction locks the source row again,
-checks that it has not changed, checks complete canonical metadata, and clears
-only that old field. Keep both run ledgers. Count remaining old values and
-failed clearing runs before dropping the old columns through a later migration.
-Canonical resume writers leave the old text and PDF columns NULL. When a
-resume changes, its revision copies any old inline values exactly before the
-current row is updated, so an unconverted value remains available for backfill.
-
-**Drop old resume columns only after their values are empty.** The clearing
-task on Hetzner must compare each old text or PDF value with its complete
-canonical copy before setting that old value to NULL. Cover current resumes
-and archived revisions. The later drop migration validates that all four old
-columns are NULL, every row has a ready text version, and every referenced
-PDF upload has complete verified parts. Keep `resume_backfill_runs` as the
-record of copy and verification progress. Ship the column drop only after all
-fleet readers run the versioned storage release and no old backfill task is
-pending or running.
+**Resume storage is versioned.** Current resumes and archived revisions point to
+immutable text versions and verified PDF uploads. Keep every text part and PDF
+part while any resume or revision references it. Retain `resume_backfill_runs`
+and `resume_legacy_clear_runs` as the record of the completed conversion. Do
+not add a route or tool that converts canonical storage back to inline text or
+PDF columns. A later storage change needs its own measured, guarded migration.
 
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
