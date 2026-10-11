@@ -78,7 +78,8 @@ class ProblemReportDetail(BaseModel):
     url: str
     host: str | None
     note: str
-    page: dict[str, Any]
+    page: dict[str, Any] | None
+    chunk_count: int | None = None
     created_at: datetime.datetime
 
 

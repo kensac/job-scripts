@@ -27,3 +27,13 @@ arms tracking, and a confirmation signal or explicit confirmation records it.
 Verify a runtime split with extension typecheck, build, unit tests, and the
 browser tests. The browser suite exercises startup, form filling, review,
 manual edits, and submission tracking, which static checks do not establish.
+
+## Page reports
+
+Keep all captured non-script markup without a length cap. The background worker saves a report in
+local storage before sending it. It retries pending reports after a failed
+request or worker restart. Split each report into bounded requests, and reuse
+the same upload id and chunk indexes on retries. The API marks a report
+complete only after every chunk is stored. A completed report keeps its chunks
+as the page's durable copy; list and detail reads must not assemble the whole
+page in the API process. Remove the local copy only after completion succeeds.

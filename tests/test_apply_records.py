@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import uuid
+
 from api import db
+from api.apply.report_backfill import move_one_report, remaining_pages
 from tests.job_board_support import _insert_job, _uid
 
 
@@ -18,7 +23,14 @@ def test_a_report_keeps_the_page_whole_for_triage(client, user_headers, other_us
     assert listed[0]["title"] == "Apply" and listed[0]["fields"] == 1
     assert listed[0]["note"] == "the select did not take"
     full = client.get(f"/v1/user/apply/reports/{made.json()['id']}", headers=user_headers).json()
-    assert full["page"] == page
+    assert full["page"] is None and full["chunk_count"] == 1
+    chunk = client.get(
+        f"/v1/user/apply/reports/{made.json()['id']}/chunks/0", headers=user_headers
+    ).json()
+    assert json.loads(base64.b64decode(chunk["data"])) == page
+    assert db.query_one(
+        "SELECT page FROM application_reports WHERE id = %s", (made.json()["id"],)
+    ) == {"page": None}
     assert client.get("/v1/user/apply/reports", headers=other_user_headers).json()["reports"] == []
     too_big = {"html": "x" * 2_100_000}
     assert (
@@ -29,6 +41,105 @@ def test_a_report_keeps_the_page_whole_for_triage(client, user_headers, other_us
         ).status_code
         == 413
     )
+
+
+def test_chunked_report_retries_and_retains_complete_page(client, user_headers, other_user_headers):
+    upload_id = str(uuid.uuid4())
+    page = {"title": "Large form", "fields": [{"key": "large"}], "html": "a" * 2_100_000 + "🧭"}
+    data = json.dumps(page, ensure_ascii=False).encode("utf-8")
+    chunks = [data[i : i + 65_536] for i in range(0, len(data), 65_536)]
+    path = f"/v1/user/apply/report-uploads/{upload_id}"
+    start = {
+        "id": upload_id,
+        "url": "https://x.test/apply",
+        "note": "large form",
+        "title": page["title"],
+        "field_count": 1,
+        "chunk_count": len(chunks),
+    }
+    created = client.post("/v1/user/apply/report-uploads", json=start, headers=user_headers)
+    assert created.status_code == 201, created.text
+    assert client.post(f"{path}/complete", headers=user_headers).status_code == 409
+    assert (
+        client.put(f"{path}/chunks/0", content=chunks[0], headers=other_user_headers).status_code
+        == 404
+    )
+    for index in reversed(range(len(chunks))):
+        response = client.put(f"{path}/chunks/{index}", content=chunks[index], headers=user_headers)
+        assert response.status_code == 200, response.text
+    assert (
+        client.put(f"{path}/chunks/0", content=chunks[0], headers=user_headers).status_code == 200
+    )
+    assert (
+        client.put(f"{path}/chunks/0", content=b"changed", headers=user_headers).status_code == 409
+    )
+    report = client.post(f"{path}/complete", headers=user_headers)
+    assert report.status_code == 201, report.text
+    assert client.post(f"{path}/complete", headers=user_headers).json() == report.json()
+    assert (
+        client.put(f"{path}/chunks/0", content=chunks[0], headers=user_headers).status_code == 200
+    )
+    assert (
+        client.put(f"{path}/chunks/0", content=b"changed", headers=user_headers).status_code == 409
+    )
+    report_id = report.json()["id"]
+    detail = client.get(f"/v1/user/apply/reports/{report_id}", headers=user_headers).json()
+    assert detail["page"] is None and detail["chunk_count"] == len(chunks)
+    assert (
+        client.get(f"/v1/user/apply/reports/{report_id}", headers=other_user_headers).status_code
+        == 404
+    )
+    stored = b"".join(
+        base64.b64decode(
+            client.get(
+                f"/v1/user/apply/reports/{report_id}/chunks/{index}", headers=user_headers
+            ).json()["data"]
+        )
+        for index in range(len(chunks))
+    )
+    assert stored == data
+    assert json.loads(stored) == page
+    listed = client.get("/v1/user/apply/reports", headers=user_headers).json()["reports"]
+    assert listed[0]["title"] == "Large form" and listed[0]["fields"] == 1
+
+
+def test_chunked_report_refuses_oversized_part_without_losing_upload(client, user_headers):
+    upload_id = str(uuid.uuid4())
+    path = f"/v1/user/apply/report-uploads/{upload_id}"
+    started = client.post(
+        "/v1/user/apply/report-uploads",
+        json={"id": upload_id, "url": "https://x.test/apply", "field_count": 0, "chunk_count": 1},
+        headers=user_headers,
+    )
+    assert started.status_code == 201
+    oversized = client.put(f"{path}/chunks/0", content=b"x" * 65_537, headers=user_headers)
+    assert oversized.status_code == 413
+    assert client.get(path, headers=user_headers).json()["received_chunks"] == 0
+
+
+def test_old_report_backfill_verifies_chunks_before_clearing_page(client, user_headers):
+    page = {"title": "Older form", "fields": [], "html": "🧭" + "x" * 130_000}
+    report = db.query_one(
+        "INSERT INTO application_reports (user_id, url, host, note, page) "
+        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (_uid(user_headers), "https://x.test/apply", "x.test", "old", db.jsonb(page)),
+    )
+    assert report is not None
+    assert remaining_pages() == 1
+    assert move_one_report() == report["id"]
+    assert remaining_pages() == 0
+    assert move_one_report() is None
+    detail = client.get(f"/v1/user/apply/reports/{report['id']}", headers=user_headers).json()
+    assert detail["page"] is None and detail["chunk_count"] > 1
+    stored = b"".join(
+        base64.b64decode(
+            client.get(
+                f"/v1/user/apply/reports/{report['id']}/chunks/{index}", headers=user_headers
+            ).json()["data"]
+        )
+        for index in range(detail["chunk_count"])
+    )
+    assert json.loads(stored) == page
 
 
 def test_resumes_per_person_are_bounded_because_each_carries_its_pdf(client, user_headers):

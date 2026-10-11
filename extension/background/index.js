@@ -1,5 +1,6 @@
 import { SubmissionStore } from "./submissions.js";
 import { PolicyStore, RecipeStore } from "./policy.js";
+import { ReportUploadQueue } from "./report-uploads.js";
 export function startBackground() {
 // Every API call goes through here: a fetch from the service worker with
 // host permission on the site rides the site's session cookie, while one
@@ -11,11 +12,12 @@ const SITE = "https://www.kanishksachdev.com";
 const API = `${SITE}/job-tracker/api/`;
 
 async function call({ path, method = "GET", body }) {
+  const binary = body instanceof Uint8Array;
   const res = await fetch(API + path, {
     method,
     credentials: "include",
-    headers: body ? { "content-type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { "content-type": binary ? "application/octet-stream" : "application/json" } : {},
+    body: binary ? body : body ? JSON.stringify(body) : undefined,
     redirect: "manual",
   });
   const type = res.headers.get("content-type") || "";
@@ -51,6 +53,16 @@ async function get({ url }) {
 
 
 const submissions = new SubmissionStore(chrome.storage.session, call);
+const reportUploads = new ReportUploadQueue(chrome.storage.local, (path, method, body) => call({ path, method, body }));
+const wakeReportUploads = async () => {
+  void reportUploads.pump();
+  return { ok: true };
+};
+chrome.alarms.create("report-uploads", { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "report-uploads") void reportUploads.pump();
+});
+void reportUploads.pump();
 // The server's feature switches, from a fixed public route (no session,
 // no identity): the content script names an adapter and gets back a
 // validated configuration or unavailable. See policy.js.
@@ -111,6 +123,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   (msg.kind === "panel" ? panelOp(msg, sender)
     : msg.kind === "panel-event" ? panelEvent(msg, sender)
     : msg.kind === "submission" ? submissions.handle(msg, sender)
+    : msg.kind === "report-pump" ? wakeReportUploads()
     : msg.kind === "policy" ? policy.resolve(msg.adapter)
     : msg.kind === "recipe" ? recipes.resolve(msg.adapter)
     : (msg.kind === "pdf" ? pdf : msg.kind === "get" ? get : call)(msg))

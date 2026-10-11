@@ -457,9 +457,9 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const reviewController = createApplicationReview({ state: { get fill() { return fill; }, get filled() { return filled; }, get reviewState() { return reviewState; }, set reviewState(value) { reviewState = value; }, get reviewMessage() { return reviewMessage; }, set reviewMessage(value) { reviewMessage = value; }, get panelUp() { return panelUp; }, touched }, render, on, api, surface, operation, fieldByKey, reader, boxOf, allowed, askable, entryByKey, execute, taskApi, put, esc, trackFilledJob, run });
   const { show, loadReview, drawReview, reviewAction } = reviewController;
 
-  const { capture, autoReport } = createApplicationReportCapture({ reader, boxOf, plain, traces, api, VERSION, BUILD, getFields: () => fields, getFill: () => fill, getReviewState: () => reviewState, getFilled: () => filled, getLastError: () => lastError, getPolicy: () => policy, getRecipeRevision: () => recipeRevision });
+  const { queueReport, autoReport } = createApplicationReportCapture({ reader, boxOf, plain, traces, send, VERSION, BUILD, getFields: () => fields, getFill: () => fill, getReviewState: () => reviewState, getFilled: () => filled, getLastError: () => lastError, getPolicy: () => policy, getRecipeRevision: () => recipeRevision });
 
-  const reportPanel = createReportPanel({ on, surface, reader, readFields, getFields: () => fields, api, capture, esc });
+  const reportPanel = createReportPanel({ on, surface, reader, readFields, getFields: () => fields, queueReport, esc });
 
   const runPage = createPageFill({
     state: {
