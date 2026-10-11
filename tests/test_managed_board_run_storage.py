@@ -8,7 +8,7 @@ from dataclasses import asdict
 import pytest
 
 from api import db
-from api import managed_board_runs as runs
+from api import managed_boards as runs
 from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable
 from tasks import managed_boards as managed_task
 from tasks.runtime import payload_recovery

@@ -6,7 +6,7 @@ import datetime
 import logging
 import os
 
-from api import db, managed_board_runs, queue, telemetry
+from api import db, managed_boards, queue, telemetry
 from api.board import visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
@@ -158,8 +158,8 @@ def schedule_ingest_cycle() -> None:
         if attempt in _managed_board_schedule_attempts:
             continue
         try:
-            managed_board_runs.admit(board["id"], dedupe_key=f"managed-board:{board['id']}:{cycle}")
-        except managed_board_runs.RunRefusal as exc:
+            managed_boards.admit(board["id"], dedupe_key=f"managed-board:{board['id']}:{cycle}")
+        except managed_boards.RunRefusal as exc:
             logger.info(
                 "Managed board %s not scheduled: %s (%s)",
                 board["id"],

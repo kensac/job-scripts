@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db, managed_board_runs, run_configs
+from api import db, managed_boards, run_configs
 from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
@@ -62,7 +62,7 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     # The board's settings are stored once, not copied into the run.
     assert not {"prompt", "prompt_hash", "on_ambiguous", "sources", "criteria"} & set(payload)
     assert run_configs.with_board_settings(payload)["sources"] == ["managed-source"]
-    jobs = managed_board_runs.run_jobs(payload)
+    jobs = managed_boards.run_jobs(payload)
     assert [job["id"] for job in jobs] == [job_id]
     assert jobs[0]["source"] == "managed-source"
     assert jobs[0]["content_query_id"] is not None
@@ -355,7 +355,7 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
         "payload"
     ]
     assert payload["execution_mode"] == "sponsor_filter_reuse"
-    ids = [job["id"] for job in managed_board_runs.run_jobs(payload)]
+    ids = [job["id"] for job in managed_boards.run_jobs(payload)]
     assert ids == [included_id]
     assert {rejected_id, wrong_model_id, person_only_id}.isdisjoint(ids)
 
@@ -390,7 +390,7 @@ def test_projection_revision_cas_preserves_previous_projection(f):
     )
     db.execute("UPDATE managed_boards SET revision = 2 WHERE id = %s", (board["id"],))
     with pytest.raises(RuntimeError, match="configuration changed"):
-        managed_board_runs.replace_projection(
+        managed_boards.replace_projection(
             {
                 "managed_board_id": board["id"],
                 "revision": 1,

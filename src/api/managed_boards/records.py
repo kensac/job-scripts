@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import budget, db, task_jobs
-from api.managed_board_admission import _TaskId
+from api.managed_boards.admission import _TaskId
 from api.task_admission import TaskProgress
 from api.task_jobs import run_jobs
 

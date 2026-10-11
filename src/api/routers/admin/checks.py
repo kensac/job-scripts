@@ -137,7 +137,7 @@ async def run_single_check(
             )
         if not flt and check.startswith("hash:"):
             # A managed board's question is cached by its prompt hash too, and
-            # its verdicts are named for the board (managed_board_runs).
+            # its verdicts are named for the board (managed_boards).
             flt = db.query_one(
                 "SELECT NULL AS user_id, 'managed-board:' || id AS name, prompt, on_ambiguous, "
                 "prompt_hash FROM managed_boards WHERE prompt_hash = %s ORDER BY id LIMIT 1",

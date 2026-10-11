@@ -79,7 +79,7 @@ writer runs beside this one. A person with no rows reads as never computed.
 `tests/test_board_visible_diff.py` pins all of it, including that writer.
 
 **A managed board rebuild writes the same way.**
-`managed_board_runs.replace_projection` brings `managed_board_jobs` to the
+`managed_boards.replace_projection` brings `managed_board_jobs` to the
 run's answer in one statement: delete the members that left, update the ones
 whose sort moved, insert the ones that joined. It runs inside the
 transaction that holds the board row `FOR UPDATE` under the revision check, so
@@ -90,12 +90,12 @@ posting joined; the rebuild's own time is `managed_boards.projection_updated_at`
 `tests/test_managed_board_projection_diff.py` keeps the old writer as the
 oracle and checks a reader during an open rebuild.
 
-`api.managed_board_selection` owns candidate and verification-question selection.
-`api.managed_board_admission` plans a run, stores its verified candidates
+`api.managed_boards.selection` owns candidate and verification-question selection.
+`api.managed_boards.admission` plans a run, stores its verified candidates
 outside a transaction, then locks the board and rechecks the board revision,
 active task, and sponsor reservation before inserting the task. Publish only
-after that transaction commits. `api.managed_board_records` owns run summaries,
-token accounting, and the projection write. `api.managed_board_runs` keeps the
+after that transaction commits. `api.managed_boards.records` owns run summaries,
+token accounting, and the projection write. `api.managed_boards` keeps the
 public entry points stable. A moved check must retain its original transaction
 boundary and must not drop stored candidate data or verdicts.
 
@@ -207,7 +207,7 @@ so a screen applied after selection meets the same posting on every run: the
 filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
 filter batch chunks in the 7 days before read pages only to skip them again.
 Each screen applies where candidates are chosen: `tasks.filters._run_filters`
-per filter, `managed_board_admission._plan` per board run (the run payload records
+per filter, `managed_boards.admission._plan` per board run (the run payload records
 `title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
@@ -224,7 +224,7 @@ Internships 2026-10-05, `internship_v1` skips
 candidate has passed verification, so verification has always read the posting
 first, and each board then paid to read the same text again. `verify_new` asks
 each published board whose run would buy an answer
-(`managed_board_runs.verification_questions`: its sources, criteria, enforced
+(`managed_boards.verification_questions`: its sources, criteria, enforced
 title screens admit the posting, it has no verdict under its
 prompt and model, and it runs on verification's model and effort) inside the
 same request (`core.answers.joint_verification`). The board's verdict is

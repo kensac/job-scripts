@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from api import ai, db, managed_board_runs, metrics
+from api import ai, db, managed_boards, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core import catalog, near_copy, verdict_reads
@@ -268,7 +268,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                 return
         model, effort = _submission_model()
         questions = (
-            managed_board_runs.verification_questions(rows, model, effort)
+            managed_boards.verification_questions(rows, model, effort)
             if db.get_config("verify_answers_board_questions")
             else {}
         )

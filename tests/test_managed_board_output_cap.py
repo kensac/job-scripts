@@ -25,7 +25,7 @@ def test_the_reservation_constant_is_not_a_cap():
     """It is named `RESERVATION` because it sizes the budget hold, not the
     model. Using it as `max_output_tokens` is what caused the truncation, so
     the two must not be the same number by accident either."""
-    from api import managed_board_runs as runs
+    from api import managed_boards as runs
 
     # 320 is the measured p95 of a successful verdict. A reservation smaller
     # than that under-holds budget for one run in twenty.

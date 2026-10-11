@@ -1,13 +1,13 @@
 """Public entry points for managed-board run selection, admission, and records."""
 
-from api.managed_board_admission import (
+from api.managed_boards.admission import (
     ACTIVE_SQL,
     MANAGED_BOARD_RUN_KINDS,
     ManagedBoardRunQueued,
     RunRefusal,
     admit,
 )
-from api.managed_board_records import (
+from api.managed_boards.records import (
     LATEST_SQL,
     ManagedBoardCost,
     ManagedBoardRun,
@@ -17,7 +17,7 @@ from api.managed_board_records import (
     replace_projection,
     run_jobs,
 )
-from api.managed_board_selection import (
+from api.managed_boards.selection import (
     BATCH_OUTPUT_TOKENS,
     FILTER_OUTPUT_RESERVATION_TOKENS,
     MANAGED_FILTER_EXECUTION_VERSION,
