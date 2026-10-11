@@ -12,9 +12,8 @@ from psycopg.types.json import Jsonb
 
 from api.config import CONFIG_KEYS
 
-# The pool and the instrumentation that must precede it live in core/pool.py,
-# which core/store.py and core/catalog.py share. See that module for why
-# there used to be two.
+# The pool and its instrumentation live in core.pool, shared by store and
+# catalog writes.
 from core.pool import connection as _connection
 from core.pool import pool, statement, transaction
 

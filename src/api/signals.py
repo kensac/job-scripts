@@ -10,10 +10,10 @@ the first time we checked" is an observation; "this posting will close soon" is
 not, and at these sample sizes it would be a lie. The floors below are what
 keeps the difference enforceable rather than editorial.
 
-Two columns are deliberately unused. `jobs.active` is whatever a board's feed
-last said and nothing ever clears it, so it measures whether a board still
-LISTS a posting, not whether the posting is open. `jobs.created_at` is a
-catalog-load timestamp bounded below by the last reseed, so any "first seen"
+Two columns are deliberately unused. `jobs.active` is frozen historical feed
+state, not current availability or proof that a posting is open.
+`jobs.created_at` is a catalog-load timestamp bounded below by the last
+reseed, so any "first seen"
 derived from it would be an artefact of a database rebuild. Age comes from
 date_posted and openness comes from the closed-check.
 """

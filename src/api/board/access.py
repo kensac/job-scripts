@@ -1,18 +1,8 @@
-"""May this signed-in user address this job, and what happens when they may not.
+"""Authorize access to one posting for routes.
 
-Not in routers/jobs.py, which is where this lived while routers/application.py
-and routers/requirements.py imported it from there. A gate three routers share
-is not one router's private helper, and importing it from a sibling router
-pulls that whole module in to get one function.
-
-Not in api/visibility.py either, though that owns the predicate underneath.
-The task runtime imports visibility (tasks/board.py runs the recompute), and
-the 404 below is a FastAPI concern, so putting it there would put the web
-framework in the worker's import path.
-
-The raise stays attached to the read. Which status a refusal gets is part of
-this gate's contract rather than a caller's decision, and a caller free to
-forget it is how the hole the docstring below describes was opened.
+Several routers share this gate. It reads `api.board.visibility` and owns the
+HTTP refusal, keeping FastAPI concerns out of the worker's visibility code.
+The read and refusal stay together so callers cannot omit the access check.
 """
 
 from __future__ import annotations

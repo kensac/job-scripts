@@ -23,21 +23,12 @@ from api.orm.base import Base, _now
 
 
 class JobListingEvent(Base):
-    """A feed said this posting was listed, or stopped saying so.
+    """Retained feed-state changes recorded before source observations.
 
-    Append only. `jobs.active` is the current answer and this is how it got
-    there, which is a different question and the one nothing could answer: a
-    posting that drops off a board and returns leaves no trace in a boolean,
-    so a closed verdict stayed permanent (#504) and, once that was fixed by
-    re-checking on a return, nothing measured how often a board returns the
-    same posting. A board that flaps bills a re-check every time.
-
-    Written only on a change. A pull that says what the last pull said is not
-    an observation worth a row, and at 74,000 postings an hour it would be
-    millions of rows a day saying nothing.
-
-    The same shape as email_events and application_matches: latest row wins on
-    read, and the index is (job_id, id DESC) for exactly that.
+    `jobs.active` is frozen. Current availability is stored in
+    `jobs.available` from `source_observations`; these older events remain
+    available for historical inspection. The `(job_id, id DESC)` index finds
+    the latest event for a posting.
     """
 
     __tablename__ = "job_listing_events"
@@ -64,10 +55,9 @@ class SourceObservation(Base):
     never deleted: availability is a projection over the latest row per
     (job, source) and can always be recomputed from here.
 
-    `job_listing_events` is not this. It logs flips of jobs.active, so a
-    second source listing an already active posting leaves no row there,
-    and its false rows do not say whether the board dropped the posting,
-    the pattern stopped admitting it, or the source was switched off.
+    `job_listing_events` recorded earlier changes to `jobs.active` without
+    identifying each source's state. Its false rows cannot distinguish a
+    dropped posting, a title pattern exclusion, or a switched-off source.
     """
 
     __tablename__ = "source_observations"
@@ -181,7 +171,8 @@ class Source(Base):
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     # The employer a company board belongs to; NULL for an aggregator, whose
-    # rows name it. Required for the boards that never say (core/boards.py).
+    # rows name it. Required for formats that omit the company
+    # (core.fetching.boards).
     company: Mapped[str | None] = mapped_column(Text)
     # Case-insensitive regex a title must match to be ingested; NULL takes all.
     title_pattern: Mapped[str | None] = mapped_column(Text)

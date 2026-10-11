@@ -1,25 +1,11 @@
-"""The pace the fleet keeps against each upstream host, per egress address.
+"""Pace requests per upstream host and egress address.
 
-A board host limits by address, not by worker: hetzner and hetzner-2 share
-one and refused together while oci was fine. So the budget is a row per
-(host, egress_group) that every worker on that address reads and writes.
-
-    take(host)      before a pull: this address's next slot, or when it opens
-    refused(host)   on a 429: the gap doubles and the slot moves out
-    succeeded(host) on a good pull: the gap narrows toward the configured floor
-
-Additive increase, multiplicative decrease, the loop TCP uses: the pace
-settles where the host stops refusing and follows it if the host changes its
-mind, with no number to maintain by hand. app_config ingest_host_pace_seconds
-is a FLOOR per host, never a ceiling; a host with no entry starts unpaced and
-learns its gap from its first refusal.
-
-A host here is core.fetching.hosts.pace_key of the URL the caller speaks to,
-so a platform that serves many hosts from one upstream is one row.
-
-Every worker in a container carries JOBTRACKER_EGRESS_GROUP naming the
-address it speaks from; without it the worker name stands in, which is right
-for a host running one worker and wrong for a box running two.
+Workers sharing an address share a `(host, egress_group)` budget. `take`
+reserves its next slot, `refused` doubles the gap after a 429, and `succeeded`
+reduces the gap toward the `ingest_host_pace_seconds` floor in app_config.
+An unconfigured host starts without a gap. The host key comes from
+`core.fetching.hosts.pace_key`; `JOBTRACKER_EGRESS_GROUP` names the shared
+address, with the worker name as fallback.
 """
 
 from __future__ import annotations

@@ -1,19 +1,9 @@
 import { commitControl, setNative } from "./dom";
-// Greenhouse's hosted application form (job-boards.greenhouse.io,
-// boards.greenhouse.io, job-boards.eu.greenhouse.io), including the form
-// an employer embeds on its own careers site, which is the same page in
-// an iframe (boards.greenhouse.io/embed/job_app?for=<board>&token=<id>).
-//
-// Greenhouse publishes the form itself: GET boards-api.greenhouse.io/v1/
-// boards/<board>/jobs/<id>?questions=true (fetched by the background
-// worker, since the page's content security policy does not list that
-// host) answers with every
-// field's name, label, type and, for a choice, its options. The field name
-// is the id of the control on the page and the key the API's form reader
-// stores drafts under, so the reader pairs the API's fields with the DOM
-// rather than reading widgets. Choices are react-select: the menu opens on
-// a mousedown on its control (the focus that follows does the opening, so
-// the tab must be visible) and an option is chosen with a click on it.
+// Hosted and embedded Greenhouse forms use the same field reader. The
+// background worker fetches board questions because the page's content
+// security policy blocks the boards API. API field names match DOM control
+// ids and draft keys. The reader pairs API labels and options with those
+// controls; react-select choices require a visible tab and pointer events.
 /** @param {import("./types").AdapterContext} context */
 export function createAdapter(context) {
   const FORM = "form#application-form";
