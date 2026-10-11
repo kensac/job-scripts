@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from api import db, hosts, metrics, telemetry
@@ -112,7 +111,6 @@ def claim_task(worker_name: str, too_heavy: list[str] | None = None) -> dict[str
             "kinds": WORKER_KINDS,
             "exclude": exclude,
             "worker": worker_name,
-            "worker_host": os.environ.get("JOBTRACKER_HOST_NAME", ""),
             "egress": hosts.EGRESS_GROUP,
         },
     )
