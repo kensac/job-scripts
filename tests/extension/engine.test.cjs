@@ -2,9 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { buildSync } = require('../../extension/node_modules/esbuild');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../../extension/adapters/recipe.js'), 'utf8')
-  .replace(/^import .*;\n/gm, '').replace('export function', 'function');
+const recipePath = path.join(__dirname, '../../extension/adapters/recipe.js');
+const source = fs.readFileSync(recipePath, 'utf8');
 function engine(overrides = {}) {
   const context = {
     window: {},
@@ -18,8 +19,12 @@ function engine(overrides = {}) {
     },
     ...overrides,
   };
-  const instrumented = source.replace('  return {\n    host: cfg.name', '  window.test = {runActions, fillGroup};\n  return {\n    host: cfg.name');
-  vm.runInNewContext(instrumented + '; createRecipeAdapter([{ name: "Test", matches: ["https://example.com/*"] }], { operation, profile: {} });', context);
+  const instrumented = source.replace('  return {\n    host: recipeConfig.name', '  window.test = {runActions, fillGroup};\n  return {\n    host: recipeConfig.name');
+  const bundled = buildSync({
+    stdin: { contents: instrumented + '; createRecipeAdapter([{ name: "Test", matches: ["https://example.com/*"] }], { operation, profile: {} });', resolveDir: path.dirname(recipePath), sourcefile: recipePath },
+    bundle: true, format: 'iife', write: false, platform: 'browser',
+  }).outputFiles[0].text;
+  vm.runInNewContext(bundled, context);
   return context;
 }
 test('recipe Enter retains keyboard identity and legacy codes', async () => {
@@ -37,10 +42,10 @@ test('recipe Enter retains keyboard identity and legacy codes', async () => {
 for (const alternatives of [false, true]) test(`failed add preserves first entry, alternative wrappers: ${alternatives}`, async () => {
   let fills = 0;
   let adds = 0;
-  const input = {tagName:'INPUT', getAttribute(){return null;}, setAttribute(){}, dispatchEvent(){}, set value(v){ fills++; }};
+  const input = {tagName:'INPUT',offsetParent:{}, getAttribute(){return null;}, setAttribute(){}, dispatchEvent(){}, set value(v){ fills++; }};
   const block = {compareDocumentPosition(){return 4;}};
   const wrapper = {compareDocumentPosition(){return 0;}};
-  const add = {click(){adds++;}, dispatchEvent(){}};
+  const add = {offsetParent:{},click(){adds++;}, dispatchEvent(){}};
   const c = engine({
     Node:{ELEMENT_NODE:1,DOCUMENT_POSITION_FOLLOWING:4},
     XPathResult:{ORDERED_NODE_SNAPSHOT_TYPE:7},
@@ -53,7 +58,7 @@ for (const alternatives of [false, true]) test(`failed add preserves first entry
     setTimeout: callback => callback(),
     Date: class extends Date { static now() { return this.clock = (this.clock || 0) + 5000; } },
   });
-  await c.window.test.fillGroup({containerPath: alternatives ? ['block', 'wrapper'] : ['block'],addButtonPath:['add'],fields:[{name:'school',variants:[{paths:['input'],method:'default'}]}]}, [{school:'First'},{school:'Second'}],null,'education');
+  await c.window.test.fillGroup({containerPath: alternatives ? ['block', 'wrapper'] : ['block'],addButtonPath:['add'],fields:[{name:'school',variants:[{paths:['input'],method:'setValueOnly'}]}]}, [{school:'First'},{school:'Second'}],null,'education');
   assert.equal(fills,1);
   assert.equal(adds,1);
 });

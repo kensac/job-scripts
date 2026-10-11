@@ -121,6 +121,15 @@ nobody who reads the decoder. This channel is for a developer-mode or
 self-hosted install: the Chrome Web Store's MV3 policy treats a
 behaviour-driving config as remote logic (Kanishk chose remote, 2026-09-09).
 
+**Keep the recipe reader split by domain behavior.** `recipe.js` owns
+adapter selection, form flow and the public reader contract.
+`recipe-selectors.js` owns XPath expansion and lookup; `recipe-controls.js`
+owns browser control events; `recipe-values.js` owns profile value and date
+mapping; `recipe-actions.js` owns recipe action execution and option matching;
+`recipe-fields.js` owns question discovery. Pass the active recipe through a
+getter where a helper reads it, because `useConfig` can replace it between
+reads. Keep each adapter instance's trace and observed options separate.
+
 ### Updates and resets
 
 Do not infer update semantics from the HTTP verb or a nullable request type.
