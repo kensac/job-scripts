@@ -12,7 +12,7 @@ else to classify" is the normal state, so this became the normal path: two
 batches reached 'completed' at the provider with 0 tokens recorded, and 2,646
 messages sat unclassified behind claims nobody would ever collect.
 
-The existing coverage misses it by construction: test_mail_classify.py builds a
+The existing coverage misses it by construction: test_mail_classify_selection.py builds a
 SECOND task id to test the cross-task case, so it can never exercise a task
 excluding itself.
 """
