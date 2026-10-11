@@ -110,7 +110,8 @@ two workers cannot both claim the same evidence. Keep current event and match
 queries person-scoped, and do not activate classification from this task.
 
 **A matcher sweep starts from what changed since the last finished sweep.**
-`api/mail/match.last_sweep_start` is the cutoff: the start of the newest
+`api/mail/match_sweeps.last_sweep_start` is the cutoff, re-exported by
+`api.mail.match`: the start of the newest
 finished `match_mail` that covered the user and had no `limit`. The worker
 enqueues a sweep only when `changed_since` finds a new application, event or
 match, or a board row moved into an applied status. A sweep skips a user with
