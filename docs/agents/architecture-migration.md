@@ -139,34 +139,26 @@ reader:
      closure, ingest) has neither.
    - What an answer was asked is `core.answer_inputs.sql` over its fetch:
      the page, wrapped with the company and title for a custom filter, cut
-     where its code path cut it. `tasks.answer_links`, queued each cycle
-     until a run links nothing, fills both pointers on older answers, only
-     where exact: a fetch whose rebuilt input equals the stored copy byte
-     for byte, and a call by the joins in the ledger section below. Text
-     an answer saw that no fetch holds becomes a fetch first (method
-     `verification`, the answer's id). Where that answer is newer than every
-     fetch of its url, its text becomes the url's current page, because it is
-     the newest text the system saw; nothing is kept only as a copy.
+     where its code path cut it. Answers older than the pointers were
+     given them in 2026-10 only where exact: a fetch whose rebuilt input
+     equalled the stored copy byte for byte, and a call by the joins in the
+     ledger section below. Text an answer saw that no fetch held became a
+     fetch first (method `verification`, the answer's id), even where it
+     became the url's current page, because it was the newest text the
+     system saw; nothing was kept only as a copy.
    - Writers store no copy of the input or the usage. Readers read both
      through `ledger_rows`: an answer with a fetch shows the input rebuilt
      from it, an answer with a call shows the call's numbers on the first
      answer naming the call and zeros on its siblings (how the writers
-     stored them), and an answer with neither shows what it stored. Each
+     stored them), and an answer with neither shows none. Each
      derived column is a correlated lookup in the select list, not a join:
      a UNION ALL arm is flattened into the outer query only while its FROM
      is one table, and the admin ledger's skip scans and newest-first pages
      need it flattened (`tests/test_admin_jobs_read_plan.py`).
-   - `tasks.answer_copies`, queued each cycle until a run clears nothing,
-     empties the copies (`input_content`, the usage columns,
-     `instructions`), one id range at a time after linking it, and only
-     where `ledger_rows` reads the same without them: an input its fetch
-     rebuilds byte for byte or an empty one, usage its call shows on it or
-     zeros on a sibling or on an answer with no call. Anything else keeps
-     its copy and blocks the drop. `ai_queries` already has per-table
-     autovacuum at a 0.02 scale factor, so the rewritten row versions are
-     reclaimed as it goes.
-   - Next: the columns are dropped once proven empty, and the views stop
-     falling back to them.
+   - The copies (`input_content`, the usage columns, `instructions`) were
+     emptied in 2026-10, only where `ledger_rows` read the same without
+     them, and no code names them. Next: the columns are dropped once
+     proven empty, and the views stop falling back to them.
 4. Call usage as one ledger that other tables point at instead of copying
    cost into themselves. See "The ledger of paid model calls" below.
 
@@ -293,8 +285,8 @@ aggregate for the first answer per call, not `ledger_rows`' per-row lookups,
 which took 11 min 51 s against 6.6 s for the 30-day cuts on production on
 2026-10-10: a sum over a window reads the join, a page of rows reads the
 view.
-`tests/test_ledger_rows_pointers.py` holds the page equal for the same
-answers stored as copies and as pointers. Every page keeps the one-pass shape
+The switch held the page equal for the same answers stored as copies and
+as pointers (#953). Every page keeps the one-pass shape
 (engineering-standards.md, `tests/test_spend_stats_single_pass.py`), and a
 switched read ships with a test that holds the new query equal to the old
 one on the same rows for the era where both are right.
@@ -344,10 +336,10 @@ it showed.
      $30.88, `api_usage`-only calls $2.02.
    - A verdict's call is a join, not a copied id: a batched verdict's is
      `(batch_id, url) = (provider_batch_id, custom_id)`, a backfilled live
-     verdict's is `source_id`. `tasks.answer_links` stores it as the
-     verdict's `model_call_id`, with a live call its caller booked apart
+     verdict's is `source_id`; both were stored as the verdict's
+     `model_call_id` in 2026-10, with a live call its caller booked apart
      from its verdict, matched on model, tokens and the minute after only
-     where each side has one candidate.
+     where each side had one candidate.
    - Receipts are deleted with their task, so this runs before they
      expire. The contract step deletes the task with the columns it reads.
 3. Switch reads one page at a time, each with its equality test. Windows

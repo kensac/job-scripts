@@ -12,9 +12,9 @@ the code path that wrote it (its config_name):
 - a closed or clearance answer read the page as it was.
 
 `sql` is that function in SQL, so an answer that points at its fetch
-(page_fetch_id) carries no copy. tasks.answer_links points an older answer at
-a fetch only where this rebuilds its copy byte for byte; where no fetch held
-the text, it stores the text the answer saw as a fetch first.
+(page_fetch_id) carries no copy. Every older answer was pointed at a fetch
+only where this rebuilt its copy byte for byte, the text no fetch held stored
+as a fetch first, before the copies were emptied (2026-10).
 """
 
 from __future__ import annotations
@@ -60,19 +60,3 @@ def sql(q: str, text: str) -> str:
     """The input of answer `q` (an ai_queries alias) rebuilt from page text
     `text` (an expression, usually a page_fetches alias's content)."""
     return f"(CASE WHEN {wrapped(q)} THEN {header(q)} || {_cut(q, text)} ELSE {_cut(q, text)} END)"
-
-
-def seen(q: str) -> str:
-    """The page text answer `q` saw, cut out of its stored copy: the copy
-    without its header. Only meaningful where the header is the one `q`'s
-    columns rebuild (`header_matches`)."""
-    return (
-        f"(CASE WHEN {wrapped(q)} THEN substr({q}.input_content, length({header(q)}) + 1) "
-        f"ELSE {q}.input_content END)"
-    )
-
-
-def header_matches(q: str) -> str:
-    """The stored copy starts with the header `q`'s columns rebuild, or `q`
-    wraps nothing."""
-    return f"(NOT {wrapped(q)} OR left({q}.input_content, length({header(q)})) = {header(q)})"

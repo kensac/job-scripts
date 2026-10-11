@@ -312,22 +312,6 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running', 'done') LIMIT 1"
     ):
         enqueue("merge_olm_twins", {"cycle": cycle}, dedupe_key=f"olm-twins:{cycle}")
-    # Older answers pointed at their page fetch and call (tasks.answer_links),
-    # one run at a time, until a run finishes having linked nothing.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'link_answers' "
-        "AND (status IN ('pending', 'running') "
-        "     OR (status = 'done' AND progress->>'total' = '0')) LIMIT 1"
-    ):
-        enqueue("link_answers", {"cycle": cycle}, dedupe_key=f"answer-links:{cycle}")
-    # The copies answers carried are emptied (tasks.answer_copies), one run at
-    # a time, until a run clears nothing; then the release after drops them.
-    if not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'clear_answer_copies' "
-        "AND (status IN ('pending', 'running') "
-        "     OR (status = 'done' AND progress->>'total' = '0')) LIMIT 1"
-    ):
-        enqueue("clear_answer_copies", {"cycle": cycle}, dedupe_key=f"answer-copies:{cycle}")
     # Board membership for every person who can have one, every
     # board_refresh_minutes, so new verdicts reach a board without anyone
     # touching a preference. Bucketed like the ingest cycle; a person's own

@@ -17,9 +17,16 @@ def test_the_funnel_counts_screened_postings_and_paid_reviews(client, admin_head
     f.make_job(source=other, title="Registered Nurse")  # not the board's source
     _, url = f.make_ready_job(source=source, title="Software Engineer")
     for cost in ("0.002", "0.004"):
-        f.make_verdict(url, "custom", "passed", prompt_hash=board["prompt_hash"])
+        # A review and the call that paid for it, at the cost it recorded.
+        f.paid_answer(
+            url,
+            check_type="custom",
+            model="gpt-5-nano",
+            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            prompt_hash=board["prompt_hash"],
+        )
         db.execute(
-            "UPDATE ai_queries SET cost_usd = %s WHERE id = (SELECT max(id) FROM ai_queries)",
+            "UPDATE model_calls SET cost_usd = %s WHERE id = (SELECT max(id) FROM model_calls)",
             (Decimal(cost),),
         )
     set_config("title_screens", {board["prompt_hash"]: "nontechnical_occupations_v1"})
