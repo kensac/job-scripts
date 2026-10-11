@@ -50,8 +50,7 @@ class TextPart(BaseModel):
 
 def _resume(resume_id: int, user_id: int) -> dict:
     row = db.query_one(
-        "SELECT id, text, text_version_id, updated_at FROM user_resumes "
-        "WHERE id = %s AND user_id = %s",
+        "SELECT id, text_version_id, updated_at FROM user_resumes WHERE id = %s AND user_id = %s",
         (resume_id, user_id),
     )
     if row is None:
@@ -63,12 +62,7 @@ def _resume(resume_id: int, user_id: int) -> dict:
 def text_info(resume_id: int, user: AuthedUser = Depends(require_user)) -> TextVersionInfo:
     row = _resume(resume_id, user.id)
     if row["text_version_id"] is None:
-        return TextVersionInfo(
-            version_id=None,
-            chars=len(row["text"]),
-            part_count=1,
-            updated_at=row["updated_at"],
-        )
+        raise refuse(503, "TEXT_UNAVAILABLE", "the saved resume text is unavailable")
     version = db.query_one(
         "SELECT chars, part_count FROM resume_text_versions WHERE id = %s AND ready",
         (row["text_version_id"],),
@@ -89,9 +83,7 @@ def text_part(resume_id: int, index: int, user: AuthedUser = Depends(require_use
         raise refuse(404, "NOT_FOUND", "unknown text part")
     row = _resume(resume_id, user.id)
     if row["text_version_id"] is None:
-        if index:
-            raise refuse(404, "NOT_FOUND", "unknown text part")
-        return TextPart(text=row["text"])
+        raise refuse(503, "TEXT_UNAVAILABLE", "the saved resume text is unavailable")
     part = db.query_one(
         "SELECT p.text FROM resume_text_parts p JOIN resume_text_versions v "
         "ON v.id = p.version_id WHERE p.version_id = %s AND p.part_index = %s AND v.ready",

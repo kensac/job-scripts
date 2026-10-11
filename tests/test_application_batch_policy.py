@@ -6,6 +6,7 @@ from api.board import visibility
 from core import batch
 from core.batch import BatchSpec
 from tasks import application, runtime
+from tests.resume_support import seed_text_resume
 
 
 def _setup(f, *, cached=True):
@@ -14,9 +15,7 @@ def _setup(f, *, cached=True):
     f.subscribe(uid, source)
     jid, url = f.make_ready_job(source=source)
     visibility.recompute(uid)
-    db.execute(
-        "INSERT INTO user_resumes(user_id,name,text) VALUES(%s,'main','Python engineer')", (uid,)
-    )
+    seed_text_resume(uid, "main", "Python engineer")
     if cached:
         db.execute(
             "INSERT INTO application_forms(url,questions) VALUES(%s,%s)",

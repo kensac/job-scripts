@@ -25,9 +25,9 @@ MAX_NAME_CHARS = 120
 # A character can use two JSON Unicode escapes.
 MAX_RENAME_BODY_BYTES = MAX_NAME_CHARS * 12 + 32
 _RESUME_COLS = (
-    "id, name, filename, COALESCE((SELECT chars FROM resume_text_versions "
-    "WHERE id = text_version_id), length(text)) AS chars, text, text_version_id, "
-    "(pdf IS NOT NULL OR pdf_upload_id IS NOT NULL) AS has_pdf, "
+    "id, name, filename, (SELECT chars FROM resume_text_versions "
+    "WHERE id = text_version_id AND ready) AS chars, ''::text AS text, text_version_id, "
+    "(pdf_upload_id IS NOT NULL) AS has_pdf, "
     "created_at, updated_at"
 )
 
@@ -64,13 +64,13 @@ class ResumeRename(BaseModel):
 
 @router.get("/user/resumes")
 def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
-    return ResumeList(
-        resumes=db.query_as(
-            Resume,
-            f"SELECT {_RESUME_COLS} FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
-            (user.id,),
-        )
+    rows = db.query(
+        f"SELECT {_RESUME_COLS} FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC",
+        (user.id,),
     )
+    if any(row["chars"] is None for row in rows):
+        raise refuse(503, "TEXT_UNAVAILABLE", "the saved resume text is unavailable")
+    return ResumeList(resumes=[Resume(**row) for row in rows])
 
 
 @router.post("/user/resumes", status_code=410)
@@ -102,35 +102,27 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)) -> Resp
     was never true of this route."""
 
     row = db.query_one(
-        "SELECT filename, pdf, pdf_upload_id FROM user_resumes WHERE id = %s AND user_id = %s",
+        "SELECT filename, pdf_upload_id FROM user_resumes WHERE id = %s AND user_id = %s",
         (resume_id, user.id),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown resume")
-    if row["pdf"] is None and row["pdf_upload_id"] is None:
+    if row["pdf_upload_id"] is None:
         raise refuse(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
     name = (row["filename"] or "resume.pdf").replace('"', "")
-    if row["pdf_upload_id"] is not None:
-        upload = db.query_one(
-            "SELECT size, next_part FROM resume_uploads WHERE id = %s AND status = 'ready'",
-            (row["pdf_upload_id"],),
-        )
-        if upload is None:
-            raise refuse(503, "FILE_UNAVAILABLE", "the stored PDF is unavailable")
-        return StreamingResponse(
-            _pdf_parts(row["pdf_upload_id"], upload["next_part"]),
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'inline; filename="{name}"',
-                "Content-Length": str(upload["size"]),
-            },
-        )
-    pdf_data = row["pdf"]
-    assert pdf_data is not None
-    return Response(
-        bytes(pdf_data),
+    upload = db.query_one(
+        "SELECT size, next_part FROM resume_uploads WHERE id = %s AND status = 'ready'",
+        (row["pdf_upload_id"],),
+    )
+    if upload is None:
+        raise refuse(503, "FILE_UNAVAILABLE", "the stored PDF is unavailable")
+    return StreamingResponse(
+        _pdf_parts(row["pdf_upload_id"], upload["next_part"]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{name}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{name}"',
+            "Content-Length": str(upload["size"]),
+        },
     )
 
 

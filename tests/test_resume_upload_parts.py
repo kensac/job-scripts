@@ -14,6 +14,7 @@ from api.resumes.text_versions import store_text
 from core.payloads.blob_parts import PART_BYTES, BlobPartStore
 from tasks import resume_uploads
 from tests.job_board_support import _uid
+from tests.resume_support import seed_text_resume
 
 
 @pytest.fixture(autouse=True)
@@ -55,12 +56,10 @@ async def test_large_transfer_retries_and_streams_download(
         "_extract",
         lambda _, user_id, *__: store_text(user_id, ["Complete resume text"])[0],
     )
-    old_resume = db.query_one(
-        "INSERT INTO user_resumes (user_id, name, text, pdf, filename) "
-        "VALUES (%s, 'master', 'Previous resume text', %s, 'previous.pdf') RETURNING id",
-        (_uid(user_headers), b"previous PDF bytes"),
-    )
-    assert old_resume is not None
+    previous_id = seed_text_resume(_uid(user_headers), "master", "Previous resume text")
+    previous_version = db.query_one(
+        "SELECT text_version_id FROM user_resumes WHERE id = %s", (previous_id,)
+    )["text_version_id"]
     original = b"p" * (6 * PART_BYTES + 7)
     started = client.post(
         "/v1/user/resume-uploads",
@@ -109,13 +108,14 @@ async def test_large_transfer_retries_and_streams_download(
     assert stored.json()["text"] == "Complete resume text"
     assert resume_text(resume["user_id"], resume["id"]) == "Complete resume text"
     prior = db.query_one(
-        "SELECT text, pdf, filename FROM user_resume_revisions WHERE resume_id = %s",
+        "SELECT text, pdf, filename, text_version_id FROM user_resume_revisions WHERE resume_id = %s",
         (resume["id"],),
     )
     assert prior == {
-        "text": "Previous resume text",
-        "pdf": b"previous PDF bytes",
-        "filename": "previous.pdf",
+        "text": "",
+        "pdf": None,
+        "filename": None,
+        "text_version_id": previous_version,
     }
     downloaded = client.get(f"/v1/user/resumes/{resume['id']}/pdf", headers=user_headers)
     assert downloaded.status_code == 200, downloaded.text
