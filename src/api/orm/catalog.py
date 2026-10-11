@@ -58,27 +58,11 @@ class Job(Base):
     source: Mapped[str] = mapped_column(Text)
     # core.near_copy.key of the text verification read; twins share it.
     near_copy_key: Mapped[str | None] = mapped_column(Text)
-    # NOT "this role is open". This is feed state, and it means different
-    # things by source. catalog.upsert_postings writes whatever the board last
-    # said (active = EXCLUDED.active); a feed with a per-posting flag
-    # accumulates false that way. For a company board that lists every open
-    # posting (boards.AUTHORITATIVE), catalog.retire_unlisted also clears it
-    # on every pull for rows the pull did not admit - which is the board
-    # dropping the posting OR the source's title pattern no longer admitting
-    # it, and only the first is a closure. Aggregator rows are never cleared
-    # by absence.
-    #
-    # It is therefore not comparable across sources, and reading it as closure
-    # has already shipped one user-facing bug: 478 applications were badged
-    # "no longer live" off this flag, of which 114 had a closed-check saying
-    # the posting was OPEN and 363 had never been checked at all. Exactly one
-    # was backed by evidence.
-    #
-    # What it IS good for: every sweep and every selection gates on it, so a
-    # false row costs no checks and leaves boards through demote_closed.
-    # For "is this role still open", use the closed check - an AI verdict
-    # against the posting url, applied uniformly across boards. Job rows serve
-    # it as `closed_verdict` ('open' | 'closed' | NULL for never checked).
+    # Frozen feed state: what each board's feed last said, before
+    # availability moved to source_observations (catalog.AVAILABLE, stored in
+    # `available`). Nothing writes it and nothing reads it; it keeps its last
+    # values because data is retained (docs/agents/architecture-migration.md,
+    # the jobs.active contract). A new row takes the default.
     active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     # catalog.AVAILABLE, stored: whether some switched-on source lists it,
     # from source_observations. NULL is cannot tell (no source has observed

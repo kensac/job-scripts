@@ -253,8 +253,8 @@ is no more than `listings_seen_refresh_hours` behind the newest `last_seen_at`
 of its source. A pull refreshes every row it lists that is older than that
 interval, so every listed row passes; a dropped row stops passing within the
 interval plus one pull; a source whose pulls fail keeps its rows current,
-because nothing newer moves its newest row. `retire_switched_off`, the admin
-screened list and the pattern preview's `would_add` and `would_drop` read it.
+because nothing newer moves its newest row. The admin screened list and the
+pattern preview's `would_add` and `would_drop` read it.
 The preview's title counts and samples read every row, so a candidate pattern
 is judged against every title the board has listed.
 
@@ -468,8 +468,8 @@ tenants stop a search at 2,000 results (first page total=2000, later pages wrap
 to the first): 19 of 355 measured on 2026-10-05, among them Airbus, NVIDIA and
 Walmart. `_workday` then reads the tenant again one value of its own facets at
 a time, the two widest facets whose every value is under the window, and raises
-`boards.PartialPull` with the union. Ingest admits those postings but skips
-`retire_unlisted`, because a posting outside the slices is not evidence of a
+`boards.PartialPull` with the union. Ingest admits those postings but records
+no absence, because a posting outside the slices is not evidence of a
 closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
 of about 2,940. Sources filter at our gate, the title pattern, and not at the
 board: a listings URL carries no search. Oracle serves at most 10,000 rows of a search, newest first,
@@ -610,35 +610,29 @@ Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
 challenge, also to a browser-fingerprinted client, so they are not sources
 (IBM is read through its own search API, `_ibm`).
 
-## A switched-off source holds no posting active
+## A switched-off source holds no posting available
 
-A source that is off is never pulled, so no pull will ever retire its rows,
-and `active` on them stops meaning anything. On 2026-10-04 that was 50,994
-active rows of 115 switched-off sources (24,736 of them `sr_domino_s`, about
-9,800 the seven jobright aggregators).
+A source that is off is never pulled, so nothing it said can be refreshed. A
+posting is available when some switched-on source's latest observation of it
+admits it (`catalog.AVAILABLE`), so a posting only a switched-off source
+lists is not, and a posting another source still lists stays available,
+whichever source first stored it. On 2026-10-04, before this rule, the flag
+held 50,994 active rows of 115 switched-off sources (24,736 of them
+`sr_domino_s`).
 
-`catalog.retire_switched_off` runs every cycle as the `retire_switched_off`
-task and retires every active row of a switched-off source, logged in
-`job_listing_events` like any other retirement. It is the one place this
-happens, so every way a source goes off reaches it: the sources page, a bundle
-switch, the automatic switch-off of a failing board, a direct write. A row
-retires within the hour, not at the click. It is a no-op once the catalog
-agrees, and skips rows a concurrent upsert holds rather than waiting on them.
+Switching a source writes no observation, so the hourly `retire_switched_off`
+task (the name is kept) runs `catalog.reconcile_available`, which stores the
+answer in `jobs.available` wherever it changed. Every way a source goes off
+reaches it: the sources page, a bundle switch, the automatic switch-off of a
+failing board, a direct write. A posting changes within the hour, not at the
+click. It writes nothing once the catalog agrees, and skips rows a concurrent
+writer holds rather than waiting on them.
 
-The exception is a url that a switched-on source lists and would admit: its
-`listings` row belongs to a source that is on, and is `kept` by that source's
-pattern or pattern enforcement is off. That source's next pull would put the
-row straight back and queue a re-check. A posting is therefore active while
-some source that is still pulled says so, whichever source first stored it.
-Only a `listings` row its source still lists counts (`catalog.LISTED_NOW`), so
-a row the other source stops listing retires within
-`listings_seen_refresh_hours` plus one of that source's pulls.
-
-Retirement follows the ordinary path from there: inactive rows leave boards
-through `demote_closed`, which removes only rows nobody has touched, so a
-posting a person gave a status, applied to or wrote a note on stays on their board.
-Switched back on, the source's first pull reactivates its rows through the
-upsert, and each return is logged.
+From there, a posting no longer available leaves boards through
+`demote_closed`, which removes only rows nobody has touched, so a posting a
+person gave a status, applied to or wrote a note on stays on their board.
+Switched back on, the source's postings are available again at the next
+reconcile.
 
 ## A re-check answers both axes, because it has already paid for the page
 
@@ -666,20 +660,17 @@ run asks for verdicts that PASSED, so no path led back to the page: the
 posting stayed closed forever on the copy fetched the moment it closed. On
 2026-09-10 that held 1,125 postings whose feed still listed them.
 
-So the catalog appends to `job_listing_events` when a feed changes its mind:
-`listed` true when a pull puts a posting back, false when an authoritative
-pull stops admitting one. The reverify sweep takes as a candidate any active
-posting whose latest return is newer than its latest closed verdict. The
+So the reverify sweep takes as a candidate any available posting whose
+latest `reappeared` observation (a source listing it again after any other
+answer, `source_observations`) is newer than its latest closed verdict. The
 verdict itself settles it, because a fresh answer is newer than the return
-that asked for it.
+that asked for it. `job_listing_events` held these returns before
+observations began, and is frozen.
 
 A row per change, never per pull. At 74,000 postings an hour, a row per
-observation would be millions a day saying nothing changed.
-
-`jobs.active` remains the current answer and the log is how it got there,
-which is the question a boolean cannot answer. It is what makes a flapping
-board countable, and a flapping board matters now precisely because a return
-bills a re-check.
+observation would be millions a day saying nothing changed. It is what makes
+a flapping board countable, and a flapping board matters precisely because a
+return bills a re-check.
 
 Key it on the edge, never on a timer. A sweep over everything ever closed
 grows without bound and is mostly postings that can no longer change: 464 of

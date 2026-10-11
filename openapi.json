@@ -33375,7 +33375,7 @@
           "reports_inactive"
         ],
         "title": "BoardInventory",
-        "description": "How many postings this board has supplied, and how many it still calls\nlive.\n\n`active_share` is comparable only between boards with the same\n`reports_inactive`. False means nothing this board ever supplied is marked\ninactive, which means its feed has no way to say otherwise - a fact about\nthe feed's format, not about the board."
+        "description": "How many postings this board has supplied, and how many it still calls\nlive.\n\n`active` is how many are available (catalog.IS_AVAILABLE). An\naggregator's absence never closes a posting, so compare `active_share`\nbetween company boards, or between aggregators."
       },
       "BoardOptions": {
         "properties": {

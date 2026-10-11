@@ -45,7 +45,6 @@ def upsert_postings(postings: list[JobPosting], source: str) -> int:
             p.locations,
             p.terms,
             source,
-            p.active,
             datetime.datetime.fromtimestamp(p.date_posted, tz=datetime.UTC)
             if p.date_posted
             else None,
@@ -60,39 +59,6 @@ def upsert_postings(postings: list[JobPosting], source: str) -> int:
     for start in range(0, len(rows), _BATCH):
         _upsert_batch(rows[start : start + _BATCH])
     return len(rows)
-
-
-def retire_unlisted(source: str, listed_and_admitted: list[str]) -> int:
-    """Marks inactive every active row of this source that the pull did not
-    admit. Only for a board that lists every open posting (boards.AUTHORITATIVE),
-    where absence is closure; the caller decides that. Rows come back active
-    through upsert_postings when the board lists them and the pattern admits
-    them again, so a pattern change in either direction is one pull away."""
-    with pool.connection() as conn:
-        # Locked in url order (_LOCK_ORDER) before the update, as every
-        # multi-row writer of jobs and listings does; a bare UPDATE locks in
-        # scan order and deadlocks against another board's upsert of a shared
-        # url.
-        dropped = conn.execute(
-            "UPDATE jobs SET active = false WHERE id IN ("
-            "  SELECT id FROM jobs WHERE source = %s AND active AND url <> ALL(%s) "
-            f"  ORDER BY url {_LOCK_ORDER} FOR UPDATE) "
-            "RETURNING id",
-            (source, listed_and_admitted),
-        ).fetchall()
-        # The board stopped listing it, which is an observation. jobs.active
-        # is the current answer; this is how it got there, and a boolean
-        # cannot say how many times it has changed.
-        if dropped:
-            conn.cursor().executemany(
-                "INSERT INTO job_listing_events (job_id, source, listed) VALUES (%s, %s, false)",
-                [(row["id"], source) for row in dropped],
-            )
-    # A row no observation decides stores the flag (_STORED), so it follows
-    # this write now rather than at the next reconcile. After the commit, so
-    # the refresh's snapshot sees it.
-    refresh_available(sorted(row["id"] for row in dropped))
-    return len(dropped)
 
 
 def set_near_copy_keys(keys: dict[str, str]) -> None:
@@ -140,73 +106,20 @@ LISTED_NOW: LiteralString = (
 )
 
 
-def retire_switched_off(patterns_enforced: bool, refresh_hours: int) -> dict[str, int]:
-    """Marks inactive every active row whose source is switched off, unless a
-    switched-on source lists the url and would admit it. A switched-off source
-    is never pulled, so nothing else ever retires its rows: on 2026-10-04
-    production held 50,994 active rows of 115 switched-off sources, 24,736 of
-    them sr_domino_s. The exception is a url whose listings row belongs to a
-    source that is on, kept by its pattern or admitted because enforcement is
-    off: that source's next pull would put it back, and every return queues a
-    re-check (371 rows on that day). Re-enabled, the source's own pull
-    reactivates its rows through upsert_postings, so this is reversible.
-    Only a listings row its source still lists counts (LISTED_NOW): rows are
-    kept after the board drops them, and a dropped one would otherwise keep
-    the posting active forever.
-
-    Runs every cycle and is a no-op once the catalog agrees, which is what
-    reaches every way a source is switched off: the sources page, a bundle
-    switch, the automatic switch-off of a board that keeps failing, or a
-    direct write. Rows a concurrent upsert holds are skipped, not waited on,
-    and the next cycle takes them, so it cannot deadlock against an ingest.
-    It still locks in url order (_LOCK_ORDER), as every multi-row writer of
-    jobs does. Returns the count per source."""
-    with pool.connection() as conn:
-        rows = conn.execute(
-            f"""
-            WITH doomed AS (
-                SELECT j.id FROM jobs j JOIN sources s ON s.name = j.source AND NOT s.active
-                WHERE j.active AND NOT EXISTS (
-                    SELECT 1 FROM listings l JOIN sources o ON o.name = l.source AND o.active
-                    WHERE l.url = j.url AND (l.kept OR NOT %(enforced)s)
-                      AND {LISTED_NOW.format(listing="l", source="l.source")})
-                ORDER BY j.url {_LOCK_ORDER} FOR UPDATE OF j SKIP LOCKED
-            ),
-            retired AS (
-                UPDATE jobs SET active = false FROM doomed
-                WHERE jobs.id = doomed.id AND jobs.active
-                RETURNING jobs.id, jobs.source
-            ),
-            logged AS (
-                INSERT INTO job_listing_events (job_id, source, listed)
-                SELECT id, source, false FROM retired
-            )
-            SELECT source, count(*) AS n FROM retired GROUP BY source
-            """,
-            {"enforced": patterns_enforced, "refresh_hours": refresh_hours},
-        ).fetchall()
-    return {r["source"]: r["n"] for r in rows}
-
-
 # Every write to jobs is in this module; tests/test_catalog_one_writer.py fails
 # on one anywhere else. The writes below are single-row, so they take one row
 # lock and have no order to keep (_LOCK_ORDER is for multi-row writes).
 
 
 def set_active(job_id: int, active: bool) -> bool:
-    """The one write of jobs.active that is not a pull's: an administrator's
-    correction. Pulls write it through upsert_postings, retire_unlisted and
-    retire_switched_off. Recorded as an observation under CORRECTION_SOURCE
-    too, in the same transaction, because readers take availability from
-    observations (AVAILABLE): the correction holds until a source says
-    something new about the posting. False when no such job."""
+    """An administrator's correction of whether a posting is available,
+    recorded as an observation under CORRECTION_SOURCE and stored in
+    jobs.available in the same transaction: it holds until a source says
+    something new about the posting. jobs.active is frozen and not written
+    (docs/agents/architecture-migration.md, the jobs.active contract). False
+    when no such job."""
     with transaction(), connection() as conn:
-        if (
-            conn.execute(
-                "UPDATE jobs SET active = %s WHERE id = %s RETURNING id", (active, job_id)
-            ).fetchone()
-            is None
-        ):
+        if conn.execute("SELECT 1 FROM jobs WHERE id = %s", (job_id,)).fetchone() is None:
             return False
         conn.execute(
             "INSERT INTO source_observations (job_id, source, kind) VALUES (%s, %s, %s)",
@@ -242,7 +155,8 @@ def correct_posting(job_id: int, fields: dict) -> dict | None:
                     {"jid": job_id, **{c: fields[c] for c in columns}},
                 )
             return conn.execute(
-                "SELECT id, url, company, title, locations, terms, active FROM jobs WHERE id = %s",
+                "SELECT j.id, j.url, j.company, j.title, j.locations, j.terms, "
+                f"{IS_AVAILABLE.format(job='j')} AS active FROM jobs j WHERE j.id = %s",
                 (job_id,),
             ).fetchone()
 
@@ -342,8 +256,10 @@ PATTERNS_ENFORCED: LiteralString = (
 #   job's latest observation, so it lasts until a source says something new;
 # - true when some switched-on source's latest observation admits it:
 #   appeared, reappeared, not_listed (aggregator absence never closes), or
-#   filtered while patterns are not enforced (retire_switched_off's rule);
+#   filtered while patterns are not enforced;
 # - false when it has observations and none of those;
+# - false when no source has observed it and its owning source is switched
+#   off: nothing that is pulled says it is listed;
 # - false when it is a sheet_import row: imported once on 2026-08-24, with no
 #   sources row and nothing that pulls it, so it is a switched-off source
 #   (decided 2026-10-10). A person who touched one keeps it through their own
@@ -369,6 +285,8 @@ AVAILABLE: LiteralString = (
     + """))
              THEN true
              WHEN EXISTS (SELECT 1 FROM source_observations o WHERE o.job_id = {job}.id)
+             THEN false
+             WHEN EXISTS (SELECT 1 FROM sources s WHERE s.name = {job}.source AND NOT s.active)
              THEN false
              WHEN {job}.source = 'sheet_import' THEN false
         END))"""
@@ -439,7 +357,7 @@ def reconcile_available() -> int:
     """jobs.available over the whole catalog, in id chunks of their own
     transaction: what observations do not announce, a source switched on or
     off and the title pattern setting flipped, lands here within the hour,
-    as retire_switched_off's own rule does. Only rows that differ are locked,
+    in the hourly retire_switched_off task. Only rows that differ are locked,
     and rows a concurrent writer holds are skipped for the next run, so it
     cannot deadlock against an ingest. Safe to stop and rerun. Returns the
     rows written."""
@@ -461,24 +379,6 @@ def reconcile_available() -> int:
             ]
             written += _refresh_available(conn, stale, skip_locked=True)
     return written
-
-
-def availability_shadow() -> list[dict]:
-    """jobs.active against jobs.available over the whole catalog, in one
-    snapshot: a count per (legacy, projected, owning source) with up to three
-    example job ids. Read-only. Run beside retire_switched_off until the
-    fallback in IS_AVAILABLE goes, so each cycle leaves one comparison on its
-    task."""
-    with pool.connection() as conn:
-        return conn.execute(
-            """
-            SELECT legacy, projected, source, count(*) AS n,
-                   (array_agg(id ORDER BY id))[1:3] AS examples
-            FROM (SELECT j.id, j.source, j.active AS legacy, j.available AS projected
-                  FROM jobs j) p
-            GROUP BY legacy, projected, source
-            """
-        ).fetchall()
 
 
 def observe(
@@ -532,6 +432,21 @@ def observe(
                 now = "reappeared"
             if now != was:
                 rows.append((job["url"], job["id"], now))
+        if absence == "unlisted":
+            # A row this board owns that it has never been observed listing
+            # (stored from the frozen feed flag, _STORED) is dropped by this
+            # complete pull like any other: record it, or nothing would ever
+            # close it. Only rows stored available, so the closed history is
+            # not written out again.
+            rows += [
+                (r["url"], r["id"], absence)
+                for r in conn.execute(
+                    "SELECT j.id, j.url FROM jobs j WHERE j.source = %s AND j.available "
+                    "AND j.url <> ALL(%s) AND NOT EXISTS (SELECT 1 FROM source_observations o "
+                    "WHERE o.job_id = j.id AND o.source = %s)",
+                    (source, list(by_url), source),
+                ).fetchall()
+            ]
         if absence:
             gone = [
                 job_id for job_id, was in latest.items() if was in _ADMITTED or was == "filtered"
@@ -573,21 +488,9 @@ _LOCK_ORDER: LiteralString = 'COLLATE "C"'
 
 
 def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
-    # The urls this pull says are open. Which of them the catalog currently
-    # holds as inactive is read BEFORE the upsert, because afterwards they all
-    # look the same: the transition is only visible from the old row.
-    proposed = [row[0] for row in batch if row[7]]
     for attempt in range(retries):
         try:
             with pool.connection() as conn, conn.cursor() as cur:
-                returning = (
-                    cur.execute(
-                        "SELECT id, url, source FROM jobs WHERE url = ANY(%s) AND NOT active",
-                        (proposed,),
-                    ).fetchall()
-                    if proposed
-                    else []
-                )
                 # Uploads this pull will take over (source becomes the feed's,
                 # the SET below): read before the upsert, because afterwards
                 # they no longer say upload. Driven by upload rows not yet
@@ -611,14 +514,13 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                 # row even when its WHERE refuses the update.
                 cur.executemany(
                     """
-                INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active,
+                INSERT INTO jobs (url, raw_url, company, title, locations, terms, source,
                                   available, date_posted)
                 SELECT v.url, v.raw_url, v.company, v.title, v.locations, v.terms, v.source,
-                       v.active, v.active, v.date_posted
+                       true, v.date_posted
                 FROM (VALUES (%s::text, %s::text, %s::text, %s::text, %s::text[], %s::text[],
-                              %s::text, %s::boolean, %s::timestamptz))
-                    AS v (url, raw_url, company, title, locations, terms, source, active,
-                          date_posted)
+                              %s::text, %s::timestamptz))
+                    AS v (url, raw_url, company, title, locations, terms, source, date_posted)
                 WHERE NOT EXISTS (
                     SELECT 1 FROM jobs j
                     WHERE j.url = v.url
@@ -626,11 +528,11 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                                 THEN v.company ELSE j.company END,
                            CASE WHEN j.source = 'upload' OR j.title = ''
                                 THEN v.title ELSE j.title END,
-                           v.locations, v.terms, v.active,
+                           v.locations, v.terms,
                            COALESCE(j.date_posted, v.date_posted),
                            CASE WHEN j.source = 'upload' THEN v.source ELSE j.source END)
                           IS NOT DISTINCT FROM
-                          (j.company, j.title, j.locations, j.terms, j.active,
+                          (j.company, j.title, j.locations, j.terms,
                            j.date_posted, j.source)
                 )
                 ON CONFLICT (url) DO UPDATE SET
@@ -640,7 +542,6 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                                  THEN EXCLUDED.title ELSE jobs.title END,
                     locations = EXCLUDED.locations,
                     terms = EXCLUDED.terms,
-                    active = EXCLUDED.active,
                     date_posted = COALESCE(jobs.date_posted, EXCLUDED.date_posted),
                     source = CASE WHEN jobs.source = 'upload'
                                   THEN EXCLUDED.source ELSE jobs.source END
@@ -655,14 +556,6 @@ def _upsert_batch(batch: list[tuple], retries: int = 3) -> None:
                         "UPDATE posting_uploads SET status = 'done' "
                         "WHERE job_id = ANY(%s) AND status <> 'done'",
                         (taken,),
-                    )
-                # The feed put these back after having dropped them. One row
-                # per return, which is what makes a flapping board countable.
-                if returning:
-                    cur.executemany(
-                        "INSERT INTO job_listing_events (job_id, source, listed) "
-                        "VALUES (%s, %s, true)",
-                        [(r["id"], r["source"]) for r in returning],
                     )
             return
         except errors.DeadlockDetected:
