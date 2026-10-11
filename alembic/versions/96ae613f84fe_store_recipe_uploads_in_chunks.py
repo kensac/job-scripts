@@ -1,7 +1,7 @@
 """store recipe uploads in chunks
 
 Revision ID: 96ae613f84fe
-Revises: 05c8725a6302
+Revises: 8a0c1eca7abe
 Create Date: 2026-10-11 16:40:13.348513
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '96ae613f84fe'
-down_revision: Union[str, None] = '05c8725a6302'
+down_revision: Union[str, None] = '8a0c1eca7abe'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
