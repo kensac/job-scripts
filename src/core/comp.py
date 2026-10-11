@@ -43,6 +43,28 @@ assert set(PERIOD_TO_YEARLY) | {"one_time"} == set(COMP_PERIODS), (
     "every period either converts to a year or is deliberately excluded"
 )
 
+# The pay filters (the board's column filters, the public list) take a period
+# as their forms spell it ("year") or as job_comp stores it ("yearly"). Only the
+# stored spelling is in job_comp, so a filter compares that one: compared as
+# sent, a pay minimum in the short spelling matched no posting (production on
+# 2026-10-11 held 20,951 yearly and 13,872 hourly rows, and none spelled short).
+_SHORT_PERIODS: dict[str, CompPeriod] = {
+    "year": "yearly",
+    "month": "monthly",
+    "week": "weekly",
+    "day": "daily",
+    "hour": "hourly",
+}
+PayPeriodParam = Literal[CompPeriod, "year", "month", "week", "day", "hour"]
+
+
+def stored_period(value: str | None) -> CompPeriod | None:
+    """The job_comp.comp_period a filter's period means, or None when it names
+    none."""
+    wanted = (value or "").strip().lower()
+    wanted = _SHORT_PERIODS.get(wanted, wanted)
+    return next((period for period in COMP_PERIODS if period == wanted), None)
+
 
 class CompExtract(BaseModel):
     """Standardised so the number is comparable across postings. Amounts stay
