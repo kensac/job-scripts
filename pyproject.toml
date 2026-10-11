@@ -214,8 +214,8 @@ forbidden_modules = ["tasks"]
 ignore_imports = [
     "api.worker -> tasks",
     "api.worker -> tasks.runtime",
-    "api.worker_claims -> tasks",
-    "api.worker_execution -> tasks",
-    "api.worker_execution -> tasks.runtime",
-    "api.worker_scheduling -> tasks",
+    "api.worker_lifecycle.claims -> tasks",
+    "api.worker_lifecycle.execution -> tasks",
+    "api.worker_lifecycle.execution -> tasks.runtime",
+    "api.worker_lifecycle.scheduling -> tasks",
 ]

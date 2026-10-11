@@ -23,17 +23,17 @@ from api import (
     hosts,
     metrics,
     telemetry,
-    worker_claims,
-    worker_execution,
-    worker_scheduling,
 )
 from api.queue import enqueue as enqueue
-from api.worker_claims import CLAIM_ORDER as CLAIM_ORDER
-from api.worker_claims import EXCLUDE_KINDS, WORKER_KINDS
-from api.worker_claims import RETRIES_SPENT as RETRIES_SPENT
-from api.worker_claims import _kinds_clause as _kinds_clause
-from api.worker_execution import _exhausted as _exhausted
-from api.worker_execution import _is_transient as _is_transient
+from api.worker_lifecycle import claims as worker_claims
+from api.worker_lifecycle import execution as worker_execution
+from api.worker_lifecycle import scheduling as worker_scheduling
+from api.worker_lifecycle.claims import CLAIM_ORDER as CLAIM_ORDER
+from api.worker_lifecycle.claims import EXCLUDE_KINDS, WORKER_KINDS
+from api.worker_lifecycle.claims import RETRIES_SPENT as RETRIES_SPENT
+from api.worker_lifecycle.claims import _kinds_clause as _kinds_clause
+from api.worker_lifecycle.execution import _exhausted as _exhausted
+from api.worker_lifecycle.execution import _is_transient as _is_transient
 from core import pool
 from tasks import HANDLERS as HANDLERS
 from tasks.runtime import (

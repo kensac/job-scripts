@@ -13,7 +13,8 @@ import time
 
 import pytest
 
-from api import db, worker, worker_execution
+from api import db, worker
+from api.worker_lifecycle import execution as worker_execution
 
 
 def _worker_row():
