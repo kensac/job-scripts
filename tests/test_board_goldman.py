@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from core.fetching import board_goldman, boards
+from core.fetching import boards
+from core.fetching.boards import goldman as board_goldman
 from tests.board_responses import BoardResponse as _Resp
 
 GOLDMAN_ROLES = [
