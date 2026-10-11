@@ -10,6 +10,19 @@ The format is read off its listings URL by `core/fetching/boards.py`. A new boar
 known format is added on the Sources page, and a new format is one fetcher
 returning the same `JobPosting` as the rest.
 
+**Keep board selection separate from board fetching.**
+`core/fetching/boards.py` identifies the format from the listings URL, declares
+whether a source needs a company name and whether its complete pull can retire
+absent postings, and dispatches to the fetcher. Keep each provider's requests,
+pagination, completeness proof and posting parser together in its domain
+module named `board_<provider>.py`. A format's pagination, completeness
+proof, parser, and measured reasons for its rules stay together. Shared request
+pacing and posting construction live in `board_common.py`; date interpretation
+lives in `board_dates.py`. Markdown tables have their own parser in
+`board_markdown.py`. Its public result is still a `JobPosting`, and a pull
+that cannot prove completeness raises `PartialPull` with every posting it did
+read.
+
 **Every request a fetcher makes goes through `core.fetching.client`.** Board
 pulls, ATS resolvers, form reads and the aggregator feeds share one session:
 one user agent, one timeout, one transport retry (three retries on a 5xx or
