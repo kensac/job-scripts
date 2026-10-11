@@ -15,8 +15,8 @@ from __future__ import annotations
 import pytest
 
 from api import db
-from tasks import new_posting_verification
 from tasks import verify as tasks_verify
+from tasks.verification import new_postings as new_posting_verification
 
 
 @pytest.fixture

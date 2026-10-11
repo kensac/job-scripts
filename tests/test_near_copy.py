@@ -6,8 +6,8 @@ import pytest
 
 from api import db
 from core.near_copy import key
-from tasks import new_posting_verification
 from tasks import verify as tasks_verify
+from tasks.verification import new_postings as new_posting_verification
 from tests.test_verify_board_questions import _board
 
 BODY = "We are hiring a store associate.\nYou will stock shelves and help customers.\n" * 5

@@ -31,7 +31,7 @@ from tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from tasks.verification_questions import _EFFORT, _verification_spec, question_sha256
+from tasks.verification.questions import _EFFORT, _verification_spec, question_sha256
 
 logger = logging.getLogger(__name__)
 
