@@ -17,7 +17,7 @@ from core.embeddings import (
     EMBEDDING_MODEL,
 )
 from core.store import CONTENT_LATERAL
-from tasks.derive import Derivation, Row
+from tasks.derivations.sweep import Derivation, Row
 
 logger = logging.getLogger(__name__)
 

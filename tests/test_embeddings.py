@@ -6,7 +6,7 @@ import pytest
 from api import db
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.pricing import estimate_cost_usd
-from tasks.embeddings import _CANDIDATES, _store
+from tasks.derivations.embeddings import _CANDIDATES, _store
 
 CONTENT = "a long job description " * 20
 

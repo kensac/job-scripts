@@ -3,7 +3,8 @@ import pytest
 from api import db
 from api.board import visibility
 from core import batch
-from tasks import embeddings, runtime
+from tasks import runtime
+from tasks.derivations import embeddings
 
 
 @pytest.mark.asyncio

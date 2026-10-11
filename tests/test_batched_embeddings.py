@@ -9,7 +9,8 @@ from api.ai import batch_results, request_snapshots
 from core import batch
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.payloads.objects import BundleMemberRef, PayloadRef, PayloadStore
-from tasks import embeddings, runtime
+from tasks import runtime
+from tasks.derivations import embeddings
 
 
 def _spec():

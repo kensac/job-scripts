@@ -187,7 +187,8 @@ class TestNoSilentSubstitution:
         candidate is not free - see the cache test below - so widening one is a
         decision someone should have to make deliberately."""
         from core import shapes
-        from tasks import comp, verify
+        from tasks import verify
+        from tasks.derivations import compensation as comp
 
         for shape in (
             comp.COMP_TASK,
@@ -199,7 +200,8 @@ class TestNoSilentSubstitution:
 
     def test_wired_extraction_defaults_use_the_requested_model(self):
         from core import shapes
-        from tasks import comp, verify
+        from tasks import verify
+        from tasks.derivations import compensation as comp
 
         for shape in (comp.COMP_TASK, verify.VERIFY_TASK, shapes.LOCATIONS_TASK):
             choice = resolve(shape)
@@ -269,7 +271,8 @@ def test_no_call_site_still_hardcodes_a_batched_model():
     nobody can review, price or capability-check."""
     import inspect
 
-    from tasks import comp, verify
+    from tasks import verify
+    from tasks.derivations import compensation as comp
 
     for module in (comp, verify):
         source = inspect.getsource(module)
@@ -303,26 +306,27 @@ def test_every_batched_call_site_goes_through_the_standard_caller():
     # to happen earlier than run_batched performs it. Folding it in would make
     # a resumed chunk re-read the catalog to reach a batch it already has.
     #
-    # derive.py submits embeddings, which are not a Responses call: they pack
+    # derivations/sweep.py submits embeddings, which are not a Responses call: they pack
     # inputs for the embeddings endpoint, with no TaskShape, no reasoning
     # effort and no output cap, so run_batched has nothing to resolve for
     # them. Every other derivation goes through run_batched. Their spend lands
     # in the ledger through the same batch_event_hook under purpose
     # "embedding" (2026-09-09).
     #
-    # The runtime is where submit_or_collect lives, so it is not in the sweep
-    # below: the glob reads the handler modules and the runtime is a package.
-    KNOWN = {"filters.py", "reverification.py", "derive.py"}
+    # The runtime implements submit_or_collect; check handler modules only.
+    KNOWN = {"verification/reverification.py", "derivations/sweep.py"}
     root = pathlib.Path(__file__).resolve().parent.parent / "src" / "tasks"
     assert root.is_dir(), root
     offenders = [
-        path.name
-        for path in sorted(root.glob("*.py"))
+        path.relative_to(root).as_posix()
+        for path in sorted(root.rglob("*.py"))
+        if "runtime" not in path.relative_to(root).parts
         # A CALL, not a mention: the first version matched the bare name and
         # tripped on a comment explaining what submit_or_collect does to a
         # payload. A test that fires on prose gets edited to pass rather than
         # obeyed.
-        if "submit_or_collect(" in path.read_text() and path.name not in KNOWN
+        if "submit_or_collect(" in path.read_text()
+        and path.relative_to(root).as_posix() not in KNOWN
     ]
     assert offenders == [], (
         f"{offenders} call submit_or_collect directly; use run_batched so the "

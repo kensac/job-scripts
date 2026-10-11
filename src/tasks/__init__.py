@@ -15,11 +15,14 @@ from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batch_objects import handle_consolidate_batch_objects
 from tasks.batches import handle_poll_batches
 from tasks.board import handle_recompute_board
-from tasks.comp import PAY
 from tasks.content import handle_fetch_missing_content
-from tasks.derive import Derivation
+from tasks.derivations.compensation import PAY
+from tasks.derivations.embeddings import EMBEDDINGS
+from tasks.derivations.job_profiles import PROFILES
+from tasks.derivations.locations import LOCATIONS
+from tasks.derivations.requirements import REQUIREMENTS
+from tasks.derivations.sweep import Derivation
 from tasks.digests import handle_send_digests
-from tasks.embeddings import EMBEDDINGS
 from tasks.filters import (
     handle_run_all_filters,
     handle_run_filter,
@@ -28,8 +31,6 @@ from tasks.filters import (
 )
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
-from tasks.job_profiles import PROFILES
-from tasks.locations import LOCATIONS
 from tasks.mail.classification.handler import handle_classify_mail
 from tasks.mail.matching.handler import handle_match_mail
 from tasks.mail.pointers import handle_backfill_mail_pointers
@@ -39,7 +40,6 @@ from tasks.mail.sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
-from tasks.requirements import REQUIREMENTS
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
     handle_reverify_chunk,
@@ -48,7 +48,7 @@ from tasks.verify import (
 )
 
 # Every derived fact, switched on or off. The worker schedules each one and
-# dispatches its kind to the shared sweep (tasks.derive).
+# dispatches its kind to the shared sweep (tasks.derivations.sweep).
 DERIVATIONS: tuple[Derivation, ...] = (PAY, REQUIREMENTS, PROFILES, EMBEDDINGS, LOCATIONS)
 
 HANDLERS = {

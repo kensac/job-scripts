@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from tasks import comp, requirements
+from tasks.derivations import compensation as comp
+from tasks.derivations import requirements
 
 
 @pytest.mark.parametrize(
@@ -48,7 +49,7 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", answer)
     task_id = f.make_task("extract_requirements", status="running")
     await requirements.REQUIREMENTS.handle(task_id, {})
     row = db.query_one("SELECT yoe_min, yoe_max FROM job_requirements WHERE url = %s", (url,))
@@ -61,7 +62,7 @@ async def test_existing_negative_years_are_reextracted_even_when_the_page_hash_m
     async def must_not_repeat(*args, **kwargs):
         pytest.fail("A repaired unchanged posting must not be extracted again")
 
-    monkeypatch.setattr("tasks.derive.run_batched", must_not_repeat)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", must_not_repeat)
     db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
     await requirements.REQUIREMENTS.handle(
         f.make_task("extract_requirements", status="running"), {}
@@ -95,7 +96,7 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")
     await comp.PAY.handle(task_id, {})
     row = db.query_one(
@@ -112,7 +113,7 @@ async def test_legacy_annual_compensation_is_repaired_from_the_cached_posting_on
     async def must_not_repeat(*args, **kwargs):
         pytest.fail("A repaired compensation record must not be extracted again")
 
-    monkeypatch.setattr("tasks.derive.run_batched", must_not_repeat)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", must_not_repeat)
     db.execute("UPDATE tasks SET status = 'done' WHERE status <> 'done'")
     await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
 
@@ -133,7 +134,7 @@ async def test_a_nonfinite_compensation_answer_does_not_mark_extraction_complete
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", answer)
     task_id = f.make_task("extract_comp", status="running")
     await comp.PAY.handle(task_id, {})
     assert db.query_one("SELECT url FROM job_comp WHERE url = %s", (url,)) is None

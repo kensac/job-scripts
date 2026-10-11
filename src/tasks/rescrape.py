@@ -7,7 +7,7 @@ Comparing the stored hash to the new text separates the two, and the unchanged
 ones have their row id refreshed so they do not come back every cycle. Nothing
 is paid for; the row keeps the answer it had.
 
-This was spelled twice, in tasks/embeddings.py and tasks/requirements.py,
+This was spelled twice, in tasks/derivations/embeddings.py and tasks/derivations/requirements.py,
 differing only in the table, the truncation limit and one word of a log line.
 The embeddings copy said so in its own docstring - "Same reasoning as the
 requirements sweep" - and only the requirements copy had a test. A sweep that

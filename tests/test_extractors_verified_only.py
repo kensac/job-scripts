@@ -8,7 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tasks import comp, requirements
+from tasks.derivations import compensation as comp
+from tasks.derivations import requirements
 
 
 def _refused(f, task_id, specs):
@@ -39,7 +40,7 @@ async def test_comp_extracts_only_from_verified_open_postings(client, user_heade
         asked.extend(s.custom_id for s in specs)
         return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake)
     task = f.make_task("extract_comp", status="running")
     await comp.PAY.handle(task, {})
     assert asked == [open_url]
@@ -58,7 +59,7 @@ async def test_requirements_extracts_only_from_verified_open_postings(
         asked.extend(s.custom_id for s in specs)
         return _refused(f, task_id, specs), SimpleNamespace(model="gpt-5-nano")
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake)
     task = f.make_task("extract_requirements", status="running")
     await requirements.REQUIREMENTS.handle(task, {})
     assert asked == [open_url]

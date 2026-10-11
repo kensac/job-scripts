@@ -15,7 +15,7 @@ from core.job_profile import (
     job_profile_spec,
 )
 from core.shapes import JOB_PROFILE_TASK
-from tasks.derive import Derivation, Row
+from tasks.derivations.sweep import Derivation, Row
 
 
 def _content_hash(content: str) -> str:
