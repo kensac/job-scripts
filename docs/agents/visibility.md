@@ -3,6 +3,22 @@
 Who sees which posting, who owns a row, and the response shapes every list
 endpoint keeps to.
 
+## Mail reads and corrections stay person-scoped
+
+A person's mailbox list, message detail, candidate picker and conversation
+routes belong under `api.routers.mail`. Keep mailbox filtering in `mailbox`,
+assignment in `message_assignment`, history and manual classification in
+`message_detail`, and thread reads in `conversations`. Both thread reads and
+thread assignment use the provider-derived key in `conversation_identity`.
+Never group by subject or sender.
+
+**Check ownership before reading or changing a message.** Object routes use
+`api.mail.store.owned_message`; mailbox and conversation queries constrain
+`email_messages.user_id` to the authenticated person. A conversation key may
+exist for another person, so the key alone never grants access. Keep manual
+classification as an append-only correction. The automatic mail classifier
+remains paused.
+
 ## The working set is scope, not visibility
 
 Two tables, two questions.
