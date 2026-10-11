@@ -6,9 +6,10 @@ import pytest
 
 from api import db, worker
 from api.ai import batch_results, request_snapshots
-from core import batch, payload_objects
+from core import batch
 from core.batch import BatchSpec
-from core.payload_objects import MAX_CONNECTIONS, BundleMemberRef, PayloadStore, encode_payload
+from core.payloads import objects as payload_store
+from core.payloads.objects import MAX_CONNECTIONS, BundleMemberRef, PayloadStore, encode_payload
 from tasks import runtime
 from tests.factories import ObjectClient
 
@@ -91,7 +92,7 @@ def test_bundles_split_by_size_and_upload_concurrently_within_the_pool(f, object
     specs = [BatchSpec(str(index), input=str(index)) for index in range(3 * MAX_CONNECTIONS)]
     # Room for two members per bundle, so one task's requests take many objects.
     size = len(encode_payload(batch_results.snapshot_of(specs[10])))
-    monkeypatch.setattr(payload_objects, "BUNDLE_MAX_BYTES", 2 * size + 1)
+    monkeypatch.setattr(payload_store, "BUNDLE_MAX_BYTES", 2 * size + 1)
     assert batch_results.snapshot_specs(task_id, specs) == specs
     stored = rows(task_id)
     assert all(row["snapshot_ref"]["version"] == 3 for row in stored)

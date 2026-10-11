@@ -10,7 +10,7 @@ from typing import Any
 
 from api import db
 from core.batch import BatchSpec
-from core.payload_objects import BundleCache, BundleMemberRef, PayloadStore, PayloadUnavailable
+from core.payloads.objects import BundleCache, BundleMemberRef, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 # The bundle's fields of a member reference, held once on batch_objects. A

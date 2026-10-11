@@ -20,7 +20,7 @@ from typing import Any, Literal, LiteralString
 
 from psycopg.types.json import Jsonb
 
-from core.payload_objects import (
+from core.payloads.objects import (
     MAX_CONNECTIONS,
     BundleCache,
     PayloadStore,

@@ -8,7 +8,7 @@ import pytest
 from api import db
 from api.ai import batch_results, request_snapshots
 from core.batch import BatchResult, BatchSpec
-from core.payload_objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
+from core.payloads.objects import PayloadRef, PayloadStore, PayloadUnavailable, encode_payload
 from tests.factories import ObjectClient
 
 

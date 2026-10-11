@@ -8,7 +8,7 @@ from api import db, worker
 from api.ai import batch_results, request_snapshots
 from core import batch
 from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
-from core.payload_objects import BundleMemberRef, PayloadRef, PayloadStore
+from core.payloads.objects import BundleMemberRef, PayloadRef, PayloadStore
 from tasks import embeddings, runtime
 
 

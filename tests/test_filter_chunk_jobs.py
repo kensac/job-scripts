@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, db, run_configs, task_jobs
-from core.payload_objects import PayloadStore, PayloadUnavailable
+from core.payloads.objects import PayloadStore, PayloadUnavailable
 from core.store import add_ai_result
 from tasks import filters
 from tasks.board import in_flight_urls, submission_exclusions

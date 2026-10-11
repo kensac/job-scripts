@@ -6,7 +6,7 @@ from typing import Any
 
 from api import db, events
 from api.ai import batch_results, request_snapshots
-from core.payload_objects import BundleCache, PayloadStore, PayloadUnavailable
+from core.payloads.objects import BundleCache, PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 
 MARKER = "payload_recovery"

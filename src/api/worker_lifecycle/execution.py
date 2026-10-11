@@ -11,7 +11,7 @@ from typing import Any
 import psycopg
 
 from api import db, events, metrics, telemetry
-from core.payload_objects import PayloadUnavailable
+from core.payloads.objects import PayloadUnavailable
 from tasks import HANDLERS
 from tasks.runtime import (
     CHUNK_KINDS,

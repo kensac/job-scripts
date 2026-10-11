@@ -1,7 +1,7 @@
 import pytest
 
 from api import db, worker
-from core.payload_objects import PayloadUnavailable
+from core.payloads.objects import PayloadUnavailable
 from tasks import runtime
 
 
@@ -68,7 +68,7 @@ def test_recovery_preflights_receipt_vectors(f, monkeypatch):
 
     from api.ai import batch_results
     from core.batch import BatchResult
-    from core.payload_objects import PayloadStore
+    from core.payloads.objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
     from tests.factories import ObjectClient
 
@@ -217,7 +217,7 @@ def test_recovery_refuses_accepted_work_without_replay_state(f):
 async def test_restored_task_consumes_original_receipt_without_new_submission(f, monkeypatch):
     from api.ai import batch_results
     from core import batch
-    from core.payload_objects import PayloadStore
+    from core.payloads.objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
     from tests.factories import ObjectClient
 
@@ -259,7 +259,7 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
 def test_completed_collection_recovery_ignores_consumed_only_missing_snapshot(f, monkeypatch):
     from api.ai import batch_results, request_snapshots
     from core.batch import BatchResult, BatchSpec
-    from core.payload_objects import PayloadStore
+    from core.payloads.objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
 
     objects = PayloadStore.from_env()

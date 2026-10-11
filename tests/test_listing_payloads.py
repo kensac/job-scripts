@@ -9,8 +9,8 @@ import hashlib
 import pytest
 
 from api import db
-from core.listing_payloads import COLUMNS, resolve
-from core.payload_objects import PayloadStore, PayloadUnavailable, encode_payload
+from core.payloads.listings import COLUMNS, resolve
+from core.payloads.objects import PayloadStore, PayloadUnavailable, encode_payload
 from tests.factories import ObjectClient
 from tests.test_listings import LISTED, LONG_RAW, LONG_TEXT, _ingest, _versions
 

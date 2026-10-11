@@ -22,7 +22,7 @@ from api.managed_boards.selection import (
 )
 from api.task_admission import ACTIVE_STATUSES
 from core import providers, routing
-from core.payload_objects import PayloadStore, PayloadUnavailable
+from core.payloads.objects import PayloadStore, PayloadUnavailable
 from core.pool import in_transaction
 from core.routing import NoEligibleModel, resolve
 from core.screening import Recipe

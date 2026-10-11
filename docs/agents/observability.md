@@ -873,7 +873,7 @@ exists, and the receipt holds only `embedding_vectors_ref`.** There is no
 inline shape: 0 of 1,619 receipts held inline vectors on 2026-10-10, and the
 tools that moved them were removed. `batch_results.checkpoint` uploads every
 result's vectors with `PayloadStore.put_verified` outside any transaction,
-concurrently up to `payload_objects.MAX_CONNECTIONS`, then writes the receipts
+concurrently up to `core.payloads.objects.MAX_CONNECTIONS`, then writes the receipts
 and clears the collected batch IDs in one transaction. Storage that is
 unconfigured or failing raises `PayloadUnavailable` before any receipt is
 written, with the provider batch IDs still pending, so the task takes the
@@ -915,9 +915,9 @@ proved it empty, and `snapshot_ref` is NOT NULL.
 **A new request is written to object storage before its row exists, and the row
 holds only the reference.** `batch_results.snapshot_specs` puts every request
 the task has no row for into bundles (`PayloadStore.put_bundle`, split at
-`payload_objects.BUNDLE_MAX_BYTES` by `bundle_groups`). The bundles upload
+`core.payloads.objects.BUNDLE_MAX_BYTES` by `bundle_groups`). The bundles upload
 outside any transaction, concurrently up to the client's connection pool
-(`payload_objects.MAX_CONNECTIONS`), and each one is read back member by member
+(`core.payloads.objects.MAX_CONNECTIONS`), and each one is read back member by member
 before anything is written. Then each request is inserted with its member
 reference. One call's requests are one task's, so a bundle never
 mixes tasks. Never write a request inline or as a per-row (version 2)
@@ -1049,7 +1049,7 @@ lists rarely repeat across runs, so each run adds its list to the bucket.
 
 **A filter run writes each batch chunk's list the same way.** `_run_filters`
 uploads every batch unit's list with `put_verified` outside any transaction,
-concurrently up to `payload_objects.MAX_CONNECTIONS`, before it enqueues the
+concurrently up to `core.payloads.objects.MAX_CONNECTIONS`, before it enqueues the
 first chunk; each chunk payload holds `jobs_ref`, `candidate_count` and
 `urls`. Storage that is unconfigured or failing raises `PayloadUnavailable`
 from the parent with no chunk enqueued and nothing paid, so the parent takes
