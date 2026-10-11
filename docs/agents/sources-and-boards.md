@@ -23,6 +23,16 @@ lives in `board_dates.py`. Markdown tables have their own parser in
 that cannot prove completeness raises `PartialPull` with every posting it did
 read.
 
+**A posting detail resolver owns one provider format.**
+`core/fetching/ats.py` selects and logs resolvers, keeps their URL identity
+rules and distinguishes posting hosts from mail-sender domains. Each provider
+resolves detail and availability in `ats_<provider>.py`; result types, request
+handling and shared listing text extraction live in `ats_common.py`. Eightfold
+remains source-bound: a posting URL alone cannot prove its tenant, so its
+resolver runs only with the configured listings URL. A resolver returns
+`AtsResult` with `GONE` only on an authoritative closure signal; a request
+failure or uncertain tenant is `ERROR` or `UNSUPPORTED` as appropriate.
+
 **Every request a fetcher makes goes through `core.fetching.client`.** Board
 pulls, ATS resolvers, form reads and the aggregator feeds share one session:
 one user agent, one timeout, one transport retry (three retries on a 5xx or
