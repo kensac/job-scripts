@@ -49,11 +49,3 @@ def test_the_funnel_counts_screened_postings_and_paid_reviews(client, admin_head
     set_config("title_screens", {})
     off = client.get("/v1/admin/review-gates/report?days=7", headers=admin_headers).json()
     assert off["rows"] == []
-
-
-def test_decision_history_is_empty_and_says_why(client, admin_headers):
-    body = client.get(
-        "/v1/admin/review-gates/decisions?url=https://x.test/a", headers=admin_headers
-    ).json()
-    assert body["rows"] == [] and body["total"] == 0
-    assert "no longer stored" in body["coverage"]

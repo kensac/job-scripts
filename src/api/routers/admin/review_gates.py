@@ -73,11 +73,6 @@ class ReviewDecisions(BaseModel):
     coverage: str = NOT_STORED
 
 
-@router.get("/review-gates/decisions")
-def decisions(admin: AuthedUser = Depends(require_admin)) -> ReviewDecisions:
-    return ReviewDecisions()
-
-
 class GateFunnelRow(BaseModel):
     stage: str
     mode: str

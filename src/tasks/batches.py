@@ -74,8 +74,8 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
         return
 
     # The provider guarantees a terminal state inside the window we asked for,
-    # so that window IS the deadline - no invented timeout, and it moves
-    # automatically if BATCH_COMPLETION_WINDOW ever changes.
+    # so past that window a finished batch no longer waits on its siblings,
+    # whatever batch_straggler_hours says. It moves with BATCH_COMPLETION_WINDOW.
     window = completion_window_seconds()
     # A task on several batches resumes early once some have finished and the
     # rest have run past this many hours: the resumed handler collects the
@@ -100,31 +100,36 @@ async def handle_poll_batches(task_id: int, payload: dict[str, Any]) -> None:
             resume_parked(t["id"])
             resumed += 1
             continue
-        if finished and not _younger_than([b for b in ids if b not in finished], straggler_seconds):
-            resume_parked(t["id"])
-            partial += 1
-            continue
         overdue = db.query_one(
             "SELECT 1 FROM ai_batches WHERE provider_batch_id = ANY(%s) "
             "AND submitted_at < now() - make_interval(secs => %s) LIMIT 1",
             (ids, window),
         )
-        if overdue:
-            # Past the provider's own guarantee. Resume anyway: collection
-            # records whatever did land and leaves the rest to the next sweep,
-            # which is strictly better than failing and discarding paid work.
-            logger.warning(
-                f"Task {t['id']} batches exceeded the {window}s completion window; collecting"
-            )
+        if not finished:
+            # A provider batch yields nothing until it is terminal
+            # (core.batch.collect_finished_batches), so resuming here collects
+            # nothing and parks again. Past the window that is every poll:
+            # task 8540662 was resumed 752 times by 2026-10-11, nearly all in the
+            # 17 hours after its window passed, on one batch the provider still
+            # called in_progress at 203 of 206. It waits parked instead; the batch
+            # row and this poll's label show it.
+            if overdue:
+                logger.warning(
+                    f"Task {t['id']} batches exceeded the {window}s completion window "
+                    "and none has finished"
+                )
+                expired += 1
+            continue
+        if overdue or not _younger_than([b for b in ids if b not in finished], straggler_seconds):
             resume_parked(t["id"])
-            expired += 1
+            partial += 1
     orphaned = _expire_orphans(window)
     set_progress(
         task_id,
-        resumed + partial + expired,
+        resumed + partial,
         len(parked),
         f"{resumed} resumed, {partial} resumed on stragglers, {expired} past the completion "
-        f"window, {orphaned} orphaned batch row(s) expired",
+        f"window with nothing finished, {orphaned} orphaned batch row(s) expired",
     )
 
 

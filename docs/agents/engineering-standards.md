@@ -47,7 +47,7 @@ What the rule does not cover:
   a delete an administrator makes.
 - Rebuilding a derived projection (`board_visible`, `user_job_working_set`,
   `managed_board_jobs`, a `job_skills` re-derive), which removes no fact.
-- Removing an exact duplicate (`mail_olm_twins`).
+- Removing an exact duplicate of a stored row.
 
 **Because nothing is deleted, existence is not currency.** A reader that
 means "true now" says so with a predicate on the row's own timestamps, never

@@ -31,7 +31,6 @@ from tasks.job_profiles import PROFILES
 from tasks.locations import LOCATIONS
 from tasks.mail_classify import handle_classify_mail
 from tasks.mail_match import handle_match_mail
-from tasks.mail_olm_twins import handle_merge_olm_twins
 from tasks.mail_pointers import handle_backfill_mail_pointers
 from tasks.mail_sync import (
     handle_import_archive,
@@ -77,7 +76,6 @@ HANDLERS = {
     "run_managed_board": handle_run_managed_board,
     "run_managed_board_batch": handle_run_managed_board_batch,
     "backfill_mail_pointers": handle_backfill_mail_pointers,
-    "merge_olm_twins": handle_merge_olm_twins,
     **{d.kind: d.handle for d in DERIVATIONS},
 }
 

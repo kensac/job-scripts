@@ -3267,145 +3267,6 @@
         }
       }
     },
-    "/v1/user/jobs/{job_id}/review-decisions": {
-      "get": {
-        "summary": "Own Review Decisions",
-        "operationId": "own_review_decisions_v1_user_jobs__job_id__review_decisions_get",
-        "parameters": [
-          {
-            "name": "job_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Job Id"
-            }
-          },
-          {
-            "name": "x-service-token",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-Service-Token"
-            }
-          },
-          {
-            "name": "x-user-sub",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Sub"
-            }
-          },
-          {
-            "name": "x-user-email",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Email"
-            }
-          },
-          {
-            "name": "x-user-name",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Name"
-            }
-          },
-          {
-            "name": "x-user-groups",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Groups"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewDecisions"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/user/jobs/{job_id}/path": {
       "get": {
         "summary": "Own Posting Path",
@@ -20628,136 +20489,6 @@
         }
       }
     },
-    "/v1/admin/review-gates/decisions": {
-      "get": {
-        "summary": "Decisions",
-        "operationId": "decisions_v1_admin_review_gates_decisions_get",
-        "parameters": [
-          {
-            "name": "x-service-token",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-Service-Token"
-            }
-          },
-          {
-            "name": "x-user-sub",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Sub"
-            }
-          },
-          {
-            "name": "x-user-email",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Email"
-            }
-          },
-          {
-            "name": "x-user-name",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Name"
-            }
-          },
-          {
-            "name": "x-user-groups",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "",
-              "title": "X-User-Groups"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewDecisions"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/admin/review-gates/report": {
       "get": {
         "summary": "Report",
@@ -33891,10 +33622,6 @@
       },
       "BoardYield": {
         "properties": {
-          "board_rows": {
-            "type": "integer",
-            "title": "Board Rows"
-          },
           "with_status": {
             "type": "integer",
             "title": "With Status"
@@ -33925,7 +33652,6 @@
         },
         "type": "object",
         "required": [
-          "board_rows",
           "with_status",
           "applied",
           "users",
@@ -54316,10 +54042,6 @@
             "type": "integer",
             "title": "Acted On"
           },
-          "tracked": {
-            "type": "integer",
-            "title": "Tracked"
-          },
           "applied": {
             "type": "integer",
             "title": "Applied"
@@ -54333,12 +54055,11 @@
         "required": [
           "visible",
           "acted_on",
-          "tracked",
           "applied",
           "hidden"
         ],
         "title": "Totals",
-        "description": "`visible` is the postings the person can see (the board, less what\nthey hid) and `acted_on` the postings they acted on (person state). Those\nare the two populations this page names (phase 2b).\n\n`tracked`, `applied` and `hidden` are the old user_jobs counts, kept until\nthe frontend reads the new ones: `tracked` counts every user_jobs row,\nincluding machine rows for postings that have since left the board."
+        "description": "`visible` is the postings the person can see (the board, less what\nthey hid) and `acted_on` the postings they acted on (person state). Those\nare the two populations this page names (phase 2b).\n\n`applied` and `hidden` are the older user_jobs counts."
       },
       "TrackedFill": {
         "properties": {
@@ -55203,10 +54924,6 @@
             ],
             "title": "Bypass Sponsorship Filter"
           },
-          "board_rows": {
-            "type": "integer",
-            "title": "Board Rows"
-          },
           "acted_on": {
             "type": "integer",
             "title": "Acted On"
@@ -55245,7 +54962,6 @@
           "ai_provider",
           "ai_model",
           "bypass_sponsorship_filter",
-          "board_rows",
           "acted_on",
           "working_set",
           "visible",
@@ -55254,7 +54970,7 @@
           "owner_tokens_week"
         ],
         "title": "UserLedgerRow",
-        "description": "One person, with the counts the ledger sorts on. Each is a\ncorrelated count rather than a join, so a person with no board rows and no\nfilters still appears with zeros.\n\n`acted_on`, `working_set` and `visible` are the three labelled\npopulations (phase 2b): postings the person acted on, postings their\nfilters picked, postings they can see. `board_rows` is the old overloaded\nuser_jobs count, kept until the frontend reads the three.\n\n`has_byo_key` says whether they hold their own provider key, which is what\ndecides whose budget their runs come out of. The key itself never leaves\nthe database."
+        "description": "One person, with the counts the ledger sorts on. Each is a\ncorrelated count rather than a join, so a person with no board rows and no\nfilters still appears with zeros.\n\n`acted_on`, `working_set` and `visible` are the three labelled\npopulations (phase 2b): postings the person acted on, postings their\nfilters picked, postings they can see.\n\n`has_byo_key` says whether they hold their own provider key, which is what\ndecides whose budget their runs come out of. The key itself never leaves\nthe database."
       },
       "UserMail": {
         "properties": {

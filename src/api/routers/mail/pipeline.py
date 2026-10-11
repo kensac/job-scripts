@@ -319,7 +319,7 @@ def pipeline(
     # "waiting" is applied AND acknowledged, "over" is rejected AND closed AND
     # withdrawn. A single-valued filter makes a lens either impossible or a
     # client-side re-derivation of a set the server already knows.
-    stages = {s.strip() for s in stage.split(",") if s.strip()} if stage else set()
+    stages = set(params_.csv(stage))
     if stage == "dismissed":
         rows = [r for r in rows if r.dismissed_at is not None]
         stages = set()

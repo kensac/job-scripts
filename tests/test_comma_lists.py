@@ -1,7 +1,7 @@
 """A comma list is parsed by `api.params.csv` (query parameters and headers)
 or `core.env.env_list` (environment variables), never by a local copy.
 
-Eleven copies existed outside mail, and one had drifted: the admin users lookup accepted
+Thirteen copies existed, and one had drifted: the admin users lookup accepted
 negative ids that the shared user parser refused.
 """
 
@@ -14,14 +14,11 @@ from core.env import env_list
 from core.paths import PROJECT_ROOT
 
 # sorting.py splits on purpose without dropping blanks: a key and its
-# direction are paired by position. The mail routers are being moved onto
-# the shared parser by the mail workstream.
+# direction are paired by position.
 _ALLOWED = {
     "src/api/params.py",
     "src/core/env.py",
     "src/api/sorting.py",
-    "src/api/routers/mail/pipeline.py",
-    "src/api/routers/mail/messages.py",
 }
 
 
