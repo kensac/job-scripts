@@ -310,19 +310,11 @@ def test_analytics_needs_admin(client, user_headers):
     assert client.get("/v1/admin/mail/analytics", headers=user_headers).status_code == 403
 
 
-def test_a_literal_route_is_registered_before_the_one_that_would_swallow_it():
-    """/admin/mail/analytics was silently answered by /admin/mail/{message_id}
-    until it was moved above it. FastAPI matches in registration order and does
-    not fall through on a failed conversion, so the literal path has to come
-    first - and nothing about the code reads wrong when it does not.
-
-    Read off the module that declares both, because the mail router is now
-    assembled from several and holds their includes rather than their routes.
-    Order between two paths is decided where they are written down."""
-    from api.routers.mail import debug
-
-    paths = [r.path for r in debug.router.routes]
-    assert paths.index("/admin/mail/analytics") < paths.index("/admin/mail/{message_id}")
+def test_analytics_literal_route_reaches_its_handler(client, admin_headers):
+    """The analytics path must resolve before the message ID route."""
+    response = client.get("/v1/admin/mail/analytics", headers=admin_headers)
+    assert response.status_code == 200
+    assert "corpus" in response.json()
 
 
 def _msg_with(f, uid, kind, method, mid_suffix):

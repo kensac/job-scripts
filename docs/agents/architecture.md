@@ -285,3 +285,15 @@ separately from ledger estimates. Missing configuration or failed reads return
 unavailable costs, never a zero bill. Provider data can arrive late or change;
 do not overwrite historical usage estimates or allocate organization costs to
 users without attribution evidence.
+
+## Administrative mail debug ownership
+
+`api.routers.mail.debug` assembles the routes in registration order. Register
+the consistency and analytics paths before the message ID path, or the ID path
+will intercept their names. `debug_inspection` owns filtered current-verdict
+lists and complete message histories. `debug_analytics` owns read-only
+distributions and their stated populations. `debug_actions` owns explicit
+administrator corrections, which append verdicts through the shared writers.
+`debug_models` declares the response and correction shapes. Keep classification
+activation separate from these inspection and correction routes; the paused
+classification switch must stay paused until the product changes it.
