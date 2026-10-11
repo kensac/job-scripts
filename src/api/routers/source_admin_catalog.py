@@ -95,11 +95,12 @@ def _check_source(
     compile. Both would surface only as a failed ingest an hour later.
     `stored` is the pattern the row holds now, which is valid as it is."""
     _check_pattern_length(title_pattern, stored)
-    if boards.kind(listings_url) in boards.NEEDS_COMPANY and not (company or "").strip():
+    board_format = boards.format_for_url(listings_url)
+    if board_format.needs_company and not (company or "").strip():
         raise refuse(
             400,
             "COMPANY_REQUIRED",
-            f"a {boards.kind(listings_url)} board never names its company; "
+            f"a {board_format.name} board never names its company; "
             "set company to the employer it belongs to",
         )
     if title_pattern:
