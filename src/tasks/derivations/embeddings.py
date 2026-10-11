@@ -10,7 +10,7 @@ from typing import Any
 from api import db
 from api.board import visibility
 from core.batch import BatchResult, BatchSpec
-from core.embeddings import (
+from core.derivations.embeddings import (
     EMBEDDING_BATCH_SIZE,
     EMBEDDING_DIMENSIONS,
     EMBEDDING_INPUT_CHARS,

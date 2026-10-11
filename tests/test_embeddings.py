@@ -4,7 +4,7 @@ import psycopg
 import pytest
 
 from api import db
-from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.pricing import estimate_cost_usd
 from tasks.derivations.embeddings import _CANDIDATES, _store
 
@@ -187,7 +187,7 @@ class TestUnchangedRescrapes:
     def test_an_unchanged_rescrape_re_stamps_the_embedding_instead_of_repaying(self, f):
         import hashlib
 
-        from core.embeddings import EMBEDDING_INPUT_CHARS
+        from core.derivations.embeddings import EMBEDDING_INPUT_CHARS
         from tasks import rescrape
 
         _, url = f.make_ready_job(content="a posting long enough to embed " * 20)

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from api.mail import applications
 from api.problem import refuse
 from core import catalog
-from core.comp import canonical_compensation_period
+from core.derivations.compensation import canonical_compensation_period
 
 
 class ColumnFilter(BaseModel):

@@ -7,7 +7,7 @@ from typing import Any
 
 from api import db, job_profile_derivation
 from core.batch import BatchResult, BatchSpec
-from core.job_profile import (
+from core.derivations.job_profile import (
     CLASSIFIER_VERSION,
     JOB_PROFILE_INPUT_CHARS,
     JOB_PROFILE_MODEL,

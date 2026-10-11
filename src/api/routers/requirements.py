@@ -22,7 +22,7 @@ from api.auth import AuthedUser, require_user
 from api.board import eligibility, visibility
 from api.board.access import require_visible_job
 from api.problem import refuse
-from core.requirements import (
+from core.derivations.requirements import (
     CLEARANCE_LEVELS,
     DEGREE_LEVELS,
     EMPLOYMENT_TYPES,
@@ -87,7 +87,7 @@ class Market(BaseModel):
     `postings`, the size of the slice, because a share hides how thin a slice
     is: "3 of 7" and "43%" read the same and mean very different things.
 
-    `skills` is keyed by skill kind, which `core.requirements.SKILL_KINDS`
+    `skills` is keyed by skill kind, which `core.derivations.requirements.SKILL_KINDS`
     defines, so an empty slice still answers with every kind present."""
 
     postings: int

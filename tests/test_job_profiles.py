@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL, JobProfileAnswer
+from core.derivations.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL, JobProfileAnswer
 from tasks.derivations import job_profiles
 from tests.factories import make_batch_result
 

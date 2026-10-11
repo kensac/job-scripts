@@ -18,7 +18,7 @@ from api.params import csv
 from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import catalog, verdict_reads
-from core.comp import PayPeriodParam, canonical_compensation_period
+from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]

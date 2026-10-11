@@ -102,8 +102,8 @@ def steps() -> Mapping[str, ExperimentStep]:
     its answer are compared. Imported lazily so the schemas are loaded only
     when an experiment needs the declarations."""
     from core.answers import VERIFICATION_REQUEST, FilterDecision
-    from core.comp import COMP_INPUT_CHARS, COMP_INSTRUCTIONS, CompExtract
-    from core.requirements import (
+    from core.derivations.compensation import COMP_INPUT_CHARS, COMP_INSTRUCTIONS, CompExtract
+    from core.derivations.requirements import (
         REQUIREMENTS_INPUT_CHARS,
         REQUIREMENTS_INSTRUCTIONS,
         RequirementsExtract,

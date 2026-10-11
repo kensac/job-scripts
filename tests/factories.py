@@ -304,7 +304,7 @@ def make_requirements(
     """A job_requirements row plus its job_skills rows, written the way the
     handler writes them - canonical skill beside the raw text - so a test that
     passes here is testing the same shape production reads."""
-    from core import skills as skills_lib
+    from core.derivations import skills as skills_lib
 
     columns = {
         "yoe_min": None,
@@ -355,7 +355,7 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
     """A job_embeddings row. `seed` shifts the vector along one axis, which is
     enough to order neighbours deterministically without a test having to write
     1536 numbers out."""
-    from core.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
+    from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 
     if vector is None:
         vector = [1.0] + [0.0] * (EMBEDDING_DIMENSIONS - 1)

@@ -13,7 +13,7 @@ from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.mail import applications
 from core import catalog, verdict_reads
-from core.comp import CompBasis, CompPeriod
+from core.derivations.compensation import CompBasis, CompPeriod
 
 router = APIRouter()
 Verdict = Literal["passed", "rejected"]

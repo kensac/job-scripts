@@ -7,7 +7,7 @@ from typing import Any
 from api import compensation_candidates, db
 from core import catalog, verdict_reads
 from core.batch import BatchResult, BatchSpec, structured_response_spec
-from core.comp import (
+from core.derivations.compensation import (
     COMP_BASES,
     COMP_INPUT_CHARS,
     COMP_INSTRUCTIONS,

@@ -54,9 +54,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Frozen literal, not an import from core.embeddings. A migration has to mean
+# Frozen literal, not an import from core.derivations.embeddings. A migration has to mean
 # the same thing forever, and a constant that later moved would silently
-# rewrite what this one did. core.embeddings.EMBEDDING_DIMENSIONS is the live
+# rewrite what this one did. core.derivations.embeddings.EMBEDDING_DIMENSIONS is the live
 # value, and a test asserts the created column still matches it.
 #
 # 1536 is text-embedding-3-small's native width, kept rather than reduced.
