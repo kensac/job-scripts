@@ -16,7 +16,7 @@ import pytest
 
 from api import db
 from tasks import verify as tasks_verify
-from tasks.verification import new_postings as new_posting_verification
+from tasks.verification import new_postings
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def submitted(monkeypatch):
         seen.extend(spec.custom_id for spec in specs)
         return [], None
 
-    monkeypatch.setattr(new_posting_verification, "run_batched", fake_run_batched)
+    monkeypatch.setattr(new_postings, "run_batched", fake_run_batched)
     return seen
 
 

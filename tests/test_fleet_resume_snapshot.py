@@ -5,7 +5,7 @@ import pytest
 from api import db
 from core.batch import BatchSpec
 from tasks import locations, verify
-from tasks.verification import new_postings as new_posting_verification
+from tasks.verification import new_postings
 from tests.factories import make_batch_result
 
 
@@ -64,7 +64,7 @@ async def test_verify_resume_uses_original_subject_when_current_selection_is_emp
         assert specs == []
         return [result], SimpleNamespace(model="original-model")
 
-    monkeypatch.setattr(new_posting_verification, "run_batched", collect, raising=False)
+    monkeypatch.setattr(new_postings, "run_batched", collect, raising=False)
     await verify.handle_verify_new(task, {})
     rows = db.query(
         "SELECT check_type,model,company FROM ai_queries WHERE url = %s ORDER BY check_type", (url,)
