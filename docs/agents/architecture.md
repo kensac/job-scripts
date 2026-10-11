@@ -128,6 +128,11 @@ Where such a derivation restates one that `mail/pipeline.py` also serves
 (`events_by_application`, `proposals_for`), a test holds the two equal. A
 surface that ranks before it pages reads only what ranking needs for every row
 and reads the shown columns for the page alone.
+The resolve queue keeps current-row selection and ranking in `resolve/queue_items.py`,
+shared row shapes in `resolve/queue_types.py`, and page-only detail reads and
+response construction in `resolve/queue_item_rendering.py`. Preserve that
+selection-before-page-detail boundary and the response shape when changing a
+queue item.
 
 ## Matching
 
