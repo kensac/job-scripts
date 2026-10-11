@@ -15,9 +15,9 @@ import pytest
 from api import ai, db, fetching
 from core import page_fetches
 from core.store import add_ai_result
-from tasks import filters as tasks_filters
 from tasks import ingest as tasks_ingest
 from tasks.board import in_flight_urls
+from tasks.filtering import personal_runs as tasks_filters
 from tests.factories import filter_config, make_task
 
 

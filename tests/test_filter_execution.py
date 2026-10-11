@@ -3,7 +3,7 @@ import pytest
 from api import ai, db
 from api.model_calls import Payer
 from core.store import Page
-from tasks import filter_execution
+from tasks.filtering import execution as filter_execution
 
 
 @pytest.mark.asyncio

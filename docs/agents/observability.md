@@ -298,7 +298,7 @@ result, a filter verdict cost about ten round trips (BEGIN, the receipt lock,
 the instruction lookup, the verdict, the ledger row, the review outcome, the
 acknowledgement, COMMIT), which for a 23,396-result run measured 230,353
 round trips: 6.6 h at the 103 ms `oci` is from the database. Filter collection
-(`tasks.filter_execution`) now passes `COLLECT_CHUNK` results to
+(`tasks.filtering.execution`) now passes `COLLECT_CHUNK` results to
 `batch_results.consume_results`, which locks and acknowledges them in one
 statement each; verdicts go in through `verdicts.record_ai_verdicts` (one
 pipelined insert) and outcomes and ledger rows through `db.pipeline()`. The

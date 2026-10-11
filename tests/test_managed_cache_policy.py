@@ -6,7 +6,7 @@ from api.model_calls import Payer
 from core import batch
 from core.answers import FilterDecision
 from core.store import Page
-from tasks import filter_execution
+from tasks.filtering import execution as filter_execution
 
 
 @pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"])

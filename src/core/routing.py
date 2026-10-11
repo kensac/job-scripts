@@ -70,7 +70,7 @@ class ModelChangeEffect(StrEnum):
     # reconciled either.
     MIXES = "mixes"
     # The sweep's skip-check is scoped by model, so the next cycle sees no
-    # completed work and re-pays for all of it. tasks/filters.py is the case:
+    # completed work and re-pays for all of it. tasks/filtering/personal_runs.py is the case:
     # decided_custom_urls(urls, prompt_hash, cfg.model).
     RERUNS = "reruns"
 

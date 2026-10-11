@@ -10,8 +10,8 @@ import pytest
 from api import ai, db, run_configs, task_jobs
 from core.payloads.objects import PayloadStore, PayloadUnavailable
 from core.store import add_ai_result
-from tasks import filters
 from tasks.board import in_flight_urls, submission_exclusions
+from tasks.filtering import personal_runs as filters
 from tasks.runtime import payload_recovery
 from tests.factories import ObjectClient, make_task
 

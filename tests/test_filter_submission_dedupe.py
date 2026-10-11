@@ -101,7 +101,7 @@ def test_failed_task_with_paid_batches_still_owns_its_work():
 
 @pytest.mark.asyncio
 async def test_handler_rechecks_after_content_preparation(monkeypatch):
-    from tasks import filters
+    from tasks.filtering import personal_runs as filters
 
     task = _chunk()
     payload = db.query_one("SELECT payload FROM tasks WHERE id=%s", (task,))["payload"]

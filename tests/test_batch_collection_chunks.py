@@ -33,7 +33,7 @@ from api.ai import batch_results
 from api.model_calls import Payer
 from core.answers import FilterDecision
 from core.batch import BatchResult, structured_response_spec
-from tasks import filter_execution
+from tasks.filtering import execution as filter_execution
 from tests.conftest import _reset_to_empty
 
 SNAPSHOT = filter_execution.FilterSnapshot("chunked", "prompt", "filter", "chunk-hash")

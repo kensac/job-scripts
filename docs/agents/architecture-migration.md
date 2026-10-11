@@ -848,7 +848,7 @@ drift apart in one commit and are caught in the next test run rather than in a
 bug report about a missing field.
 
 Adopt it where a row is READ, not where one becomes JSON for a task payload.
-`tasks/filters.py` puts candidate rows into `payload["jobs"]`, so typing that
+`tasks/filtering/personal_runs.py` puts candidate rows into `payload["jobs"]`, so typing that
 one buys a conversion at the boundary and nothing else. An HTTP response is
 not such a boundary: FastAPI serialises a declared model, and declaring it is
 most of the value, because the shape reaches openapi.json and the frontend
@@ -1094,7 +1094,7 @@ total:
 | `core/store.py` | 59%, 50 of 123 statements | now 98%, 1 of 50 |
 | `tasks/verify.py` | 70%, 58 of 195 | now 94%, 11 of 191 |
 | `tasks/ingest.py` | 81% | |
-| `tasks/filters.py` | 82%, 42 of 228 | |
+| `tasks/filtering/personal_runs.py` | 82%, 42 of 228 | |
 
 The gap was concentrated in the sweeps and the store, which is exactly where
 this session found its two live defects: a closed verdict that could never be
