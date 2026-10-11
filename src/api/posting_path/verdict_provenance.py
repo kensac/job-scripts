@@ -1,55 +1,15 @@
-"""Posting path response shapes and shared verdict provenance."""
+"""Verdict origin and cached reads for one posting path."""
 
 from __future__ import annotations
 
 import contextvars
-import datetime
-from typing import Any, Literal
-
-from pydantic import BaseModel
+from typing import Any
 
 from api import db
 from core import verdict_reads
 
-Outcome = Literal["passed", "failed", "skipped", "pending", "info"]
-
-# Each board and filter asks for the same closed and clearance verdicts; one
-# path reads them once.
+# One path reads each closed and clearance verdict once.
 _LATEST: contextvars.ContextVar[dict[tuple[str, str], Any]] = contextvars.ContextVar("path_latest")
-Basis = Literal["recorded", "evaluated_now"]
-
-
-class PathStep(BaseModel):
-    stage: str
-    outcome: Outcome
-    label: str
-    detail: str | None = None
-    basis: Basis
-    at: datetime.datetime | None = None
-    # What an action on this step addresses (re-check, explain).
-    check: str | None = None
-    prompt_hash: str | None = None
-    filter_id: int | None = None
-
-
-class ConsumerPath(BaseModel):
-    kind: Literal["managed_board", "filter", "board"]
-    id: int | None
-    name: str
-    owner: str | None = None
-    included: bool | None
-    summary: str
-    steps: list[PathStep]
-
-
-class PostingPath(BaseModel):
-    job_id: int
-    url: str
-    title: str | None
-    source: str
-    steps: list[PathStep]
-    consumers: list[ConsumerPath]
-
 
 # Where a verdict row came from, by config_name, in the words the drawer uses.
 _ORIGIN = {

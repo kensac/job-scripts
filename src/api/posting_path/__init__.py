@@ -9,14 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
-from api.posting_path_catalog import _catalog_steps, _content_step, _verification_steps
-from api.posting_path_common import _LATEST
-from api.posting_path_common import Basis as Basis
-from api.posting_path_common import ConsumerPath as ConsumerPath
-from api.posting_path_common import Outcome as Outcome
-from api.posting_path_common import PathStep as PathStep
-from api.posting_path_common import PostingPath as PostingPath
-from api.posting_path_consumers import _filter_paths, _managed_board_path, _personal_board_path
+from api.posting_path.catalog import _catalog_steps, _content_step, _verification_steps
+from api.posting_path.consumers import _filter_paths, _managed_board_path, _personal_board_path
+from api.posting_path.models import Basis as Basis
+from api.posting_path.models import ConsumerPath as ConsumerPath
+from api.posting_path.models import Outcome as Outcome
+from api.posting_path.models import PathStep as PathStep
+from api.posting_path.models import PostingPath as PostingPath
+from api.posting_path.verdict_provenance import _LATEST
 from core import catalog
 from core.volume_gate import VolumeGate
 

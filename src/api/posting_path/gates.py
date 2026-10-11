@@ -6,8 +6,8 @@ from typing import Any
 
 from api import db
 from api.board import criteria as board_criteria
-from api.posting_path_common import (
-    PathStep,
+from api.posting_path.models import PathStep
+from api.posting_path.verdict_provenance import (
     _latest_verdict,
     _near_copy_source_url,
     _verdict_origin,
