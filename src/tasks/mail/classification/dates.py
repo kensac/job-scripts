@@ -156,22 +156,13 @@ def parse_when(
     sent_at: datetime.datetime | None = None,
     kind: str | None = None,
 ) -> ParsedWhen | None:
-    """The moment an email named, or nothing. Never a guess.
+    """Parse a stated mail date without inventing an instant.
 
-    Four outcomes, deliberately distinct:
-
-    A full ISO timestamp or prose date resolves exactly.
-
-    A date with no year resolves against the message it came from, and only
-    for a forward-looking kind - "Jan. 15" in a rejection is the day you
-    applied, not next January. Marked inferred either way.
-
-    A date with a time AND a zone resolves to a true instant. A date with a
-    time but NO zone keeps the date and drops the time, because a naive local
-    time stored as UTC is a silently wrong answer rather than a missing one.
-
-    Anything with no resolvable date at all ("Tuesday at 2:00 PM", "soon")
-    becomes nothing, and the caller keeps the raw string.
+    Full dates resolve directly. Yearless dates use the message date and are
+    marked inferred; only forward-looking kinds can select a future year.
+    A time needs a zone to become an instant. Without a zone, keep the date
+    and drop the time rather than storing a local time as UTC. Return None
+    for phrases without a resolvable date; the caller retains the raw text.
     """
     if not value:
         return None

@@ -1,32 +1,14 @@
-"""Derived facts: one registration each, one sweep for all of them.
+"""Run registered model derivations through one sweep.
 
-A derived fact is a model's answer about something we already hold (a page we
-fetched, a location string), stored so nothing pays for it twice. Pay,
-requirements, job profiles, embeddings and locations each had their own sweep
-repeating one skeleton: pick candidates from the current page text, skip the
-ones whose text did not change, submit a batch, collect it, check the page is
-still the one that was asked about, parse, store. Five copies of that skeleton
-had drifted in what they called a failure, whether they rechecked their switch
-at handoff, and whether two runs could overlap.
+Each `Derivation` supplies candidate selection, requests, storage, routing
+and an optional app_config switch. The worker schedules every registration in
+`tasks.DERIVATIONS`. A disabled switch prevents new submissions, including
+at handoff. Already submitted batches are still collected.
 
-A `Derivation` declares what differs: its table, its input (page text cut to
-`input_chars`, or something else when that is None), its recipe version, its
-model routing, its staleness rule (`select`, which returns only stale or
-missing answers) and its store. `sweep` is the skeleton, written once.
-Adding a derivation is a registration in `tasks.DERIVATIONS`; the worker
-schedules and dispatches every registered one.
-
-A switched-off derivation is still registered. Its `switch` names the
-app_config row, and off means no new submission: the scheduler does not
-enqueue it, and a run started by hand stops before selecting and again at
-handoff. Paid batches already submitted are still collected, because
-collection is reachable whatever the switch says.
-
-Not every derived value is registered. `jobs.near_copy_key` (core.near_copy)
-is computed in process, costs nothing, and records the text verification
-read, so the twin it finds was judged on the same text. A staleness rule
-would recompute it from a newer page and break that. Measured 2026-10-10 on
-3,000 sampled keyed postings: 2 keys differ from the current page's.
+`jobs.near_copy_key` stays outside this sweep. It is computed without a model
+and records the text verification read. Recomputing it from a newer page could
+change the comparison basis. In a 2026-10-10 sample, 2 of 3,000 keyed postings
+had keys different from their current pages.
 """
 
 from __future__ import annotations
@@ -63,28 +45,18 @@ Row = dict[str, Any]
 class Derivation:
     """One derived fact.
 
-    `select(cap, payload)` is the staleness rule: it returns the candidates
-    whose answer is missing or no longer matches its input, at most `cap`.
-    A page-text derivation returns `url`, `content_row_id` and `input_content`
-    per row, plus `stored_hash` when `skip_unchanged` is set.
+    `select(cap, payload)` returns at most `cap` missing or stale candidates.
+    Page-text rows provide url, content_row_id and input_content. They also
+    provide stored_hash when skip_unchanged is set.
 
-    `requests(rows)` builds the batch specs. Their context is what collection
-    reads back, so a change to it must still read a context an older image
-    submitted.
+    `requests(rows)` builds batch specs. Collection must keep reading contexts
+    submitted by older workers. `store(result, context, answer)` returns a
+    receipt outcome; only "written" counts as done. When `answer` is None,
+    the store reads the raw result, as embeddings do.
 
-    `store(result, context, answer)` writes one result and returns its receipt
-    outcome; only "written" counts as done. `answer` is the parsed `answer`
-    model, or None when `answer` is None and the store reads the raw result
-    itself (embeddings pack many postings into one request).
-
-    `recipe` is the version of the instructions and schema. A table that
-    stores it (job_profiles.classifier_version) re-derives when it changes; a
-    derivation whose table does not store it says None, and keeps its answers
-    across a recipe change.
-
-    Routing: `shape` goes through core.routing (and a person's configured
-    model); `model` pins one. With no shape, `model` is submitted as is on the
-    request's own endpoint, which is how embeddings run.
+    `recipe` versions instructions and schema when the table stores a version.
+    `shape` uses core.routing and the person's model setting; `model` pins one.
+    Without a shape, `model` selects the request endpoint directly.
     """
 
     kind: str
