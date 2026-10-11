@@ -18,7 +18,7 @@ from api.params import csv
 from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import catalog, verdict_reads
-from core.comp import PayPeriodParam, stored_period
+from core.comp import PayPeriodParam, canonical_compensation_period
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]
@@ -330,7 +330,9 @@ def get_public_job_list(
             "AND COALESCE(pay.comp_max, pay.comp_min) >= %(min_comp)s AND pay.comp_currency = %(comp_currency)s AND pay.comp_period = %(comp_period)s"
         )
         params.update(
-            min_comp=min_comp, comp_currency=comp_currency, comp_period=stored_period(comp_period)
+            min_comp=min_comp,
+            comp_currency=comp_currency,
+            comp_period=canonical_compensation_period(comp_period),
         )
     if hide_restricted:
         # A board may admit postings the clearance gate rejected (citizenship,
@@ -391,7 +393,7 @@ def get_public_job_list(
             str(remote),
             str(min_comp),
             comp_currency or "",
-            stored_period(comp_period) or "",
+            canonical_compensation_period(comp_period) or "",
             str(hide_restricted),
             str(matched_count),
             "\0".join(wanted_terms),

@@ -57,6 +57,10 @@ duplication. Do not fix the copy.
 
 ## Comments and deprecations
 
+Name public conversion functions for the domain value they return. When a
+function maps request spelling to a stored vocabulary, name the stored domain
+and update all callers before removing the old name.
+
 Write comments and docstrings as short statements of the current rule and its
 reason. Check the code that implements the claim before changing it. Keep a
 measurement when it explains a non-obvious bound or choice, with its date and
