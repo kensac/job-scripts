@@ -13,6 +13,7 @@ from api.apply.drafting import resume_text
 from api.resumes.text_versions import store_text
 from core.payloads.blob_parts import PART_BYTES, BlobPartStore
 from tasks import resume_uploads
+from tests.job_board_support import _uid
 
 
 @pytest.fixture(autouse=True)
@@ -54,16 +55,12 @@ async def test_large_transfer_retries_and_streams_download(
         "_extract",
         lambda _, user_id, *__: store_text(user_id, ["Complete resume text"])[0],
     )
-    old_resume = client.post(
-        "/v1/user/resumes",
-        json={"name": "master", "text": "Previous resume text"},
-        headers=user_headers,
+    old_resume = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text, pdf, filename) "
+        "VALUES (%s, 'master', 'Previous resume text', %s, 'previous.pdf') RETURNING id",
+        (_uid(user_headers), b"previous PDF bytes"),
     )
-    assert old_resume.status_code == 201
-    db.execute(
-        "UPDATE user_resumes SET pdf = %s, filename = %s WHERE id = %s",
-        (b"previous PDF bytes", "previous.pdf", old_resume.json()["id"]),
-    )
+    assert old_resume is not None
     original = b"p" * (6 * PART_BYTES + 7)
     started = client.post(
         "/v1/user/resume-uploads",

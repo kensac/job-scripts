@@ -3,6 +3,7 @@ from __future__ import annotations
 from api import db
 from tests.application_support import _available_owner_key as _available_owner_key
 from tests.application_support import _job_for, _user_id
+from tests.resume_support import create_text_resume
 
 
 class TestOneDraftAtATime:
@@ -16,9 +17,7 @@ class TestOneDraftAtATime:
 
         uid = _user_id()
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/6")
-        client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        )
+        create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         r = client.post(f"/v1/user/jobs/{job_id}/application/draft", json={}, headers=user_headers)
         assert r.status_code == 202
         task_id = r.json()["task_id"]

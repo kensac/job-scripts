@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import base64
 import datetime
-import io
+import json
 import uuid
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from api import db
 from api.auth import AuthedUser, require_user
 from api.models import Ok
-from api.problem import SIZE_REFUSALS, refuse
+from api.problem import refuse
 from api.resumes.revisions import archive_resume, lock_owner
 from core.payloads.blob_parts import BlobPart, BlobPartStore
 
 router = APIRouter()
 
-MAX_PDF_BYTES = 5 * 1024 * 1024
-MAX_RESUME_CHARS = 60_000
+MAX_NAME_CHARS = 120
+# A character can use two JSON Unicode escapes.
+MAX_RENAME_BODY_BYTES = MAX_NAME_CHARS * 12 + 32
 _RESUME_COLS = (
     "id, name, filename, COALESCE((SELECT chars FROM resume_text_versions "
     "WHERE id = text_version_id), length(text)) AS chars, text, text_version_id, "
@@ -57,23 +58,8 @@ class ResumeRef(BaseModel):
     name: str
 
 
-class ResumeCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    text: str | None = Field(default=None, max_length=MAX_RESUME_CHARS)
-    pdf_base64: str | None = None
-    filename: str | None = Field(default=None, max_length=200)
-
-
-class ResumePatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    text: str | None = Field(default=None, min_length=1, max_length=MAX_RESUME_CHARS)
-
-
-def pdf_text(data: bytes) -> str:
-    from pypdf import PdfReader
-
-    reader = PdfReader(io.BytesIO(data))
-    return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+class ResumeRename(BaseModel):
+    name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
 
 
 @router.get("/user/resumes")
@@ -87,51 +73,9 @@ def list_resumes(user: AuthedUser = Depends(require_user)) -> ResumeList:
     )
 
 
-@router.post("/user/resumes", status_code=201, responses=SIZE_REFUSALS)
-def create_resume(body: ResumeCreate, user: AuthedUser = Depends(require_user)) -> Resume:
-    """Save pasted text or a legacy base64 PDF under a resume name."""
-    text = (body.text or "").strip()
-    data = None
-    if body.pdf_base64:
-        try:
-            data = base64.b64decode(body.pdf_base64, validate=True)
-        except Exception as exc:
-            raise refuse(400, "INVALID_PDF", "the attachment is not valid base64") from exc
-        if len(data) > MAX_PDF_BYTES:
-            raise refuse(413, "PDF_TOO_LARGE", "PDFs up to 5 MB")
-        try:
-            text = pdf_text(data)
-        except Exception as exc:
-            raise refuse(400, "INVALID_PDF", "could not read that PDF") from exc
-        if not text:
-            raise refuse(
-                400, "NO_TEXT", "that PDF has no extractable text; paste the resume instead"
-            )
-    if not text:
-        raise refuse(400, "NO_TEXT", "paste the resume text or attach a PDF")
-    with db.transaction():
-        lock_owner(user.id)
-        old = db.query_one(
-            "SELECT id FROM user_resumes WHERE user_id = %s AND name = %s",
-            (user.id, body.name.strip()),
-        )
-        if old is not None:
-            archive_resume(old["id"], user.id)
-        row = db.query_one_as(
-            Resume,
-            f"""
-        INSERT INTO user_resumes (user_id, name, text, filename, pdf)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (user_id, name) DO UPDATE
-            SET text = EXCLUDED.text, filename = EXCLUDED.filename, pdf = EXCLUDED.pdf,
-                pdf_upload_id = NULL, text_version_id = NULL,
-                updated_at = now()
-        RETURNING {_RESUME_COLS}
-        """,
-            (user.id, body.name.strip(), text, body.filename, data),
-        )
-    assert row is not None  # an upsert with RETURNING always yields its row
-    return row
+@router.post("/user/resumes", status_code=410)
+def legacy_create_resume(user: AuthedUser = Depends(require_user)) -> None:
+    raise refuse(410, "USE_RESUME_PARTS", "send resume text or PDF in numbered parts")
 
 
 def _pdf_parts(upload_id: uuid.UUID, part_count: int) -> Iterator[bytes]:
@@ -190,34 +134,62 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)) -> Resp
     )
 
 
-@router.patch("/user/resumes/{resume_id}")
-def patch_resume(
-    resume_id: int, body: ResumePatch, user: AuthedUser = Depends(require_user)
-) -> Resume:
+def _rename_resume(resume_id: int, name: str, user_id: int) -> Resume:
     with db.transaction():
-        lock_owner(user.id)
+        lock_owner(user_id)
         old = db.query_one(
             "SELECT id FROM user_resumes WHERE id = %s AND user_id = %s",
-            (resume_id, user.id),
+            (resume_id, user_id),
         )
         if old is None:
             raise refuse(404, "NOT_FOUND", "unknown resume")
-        archive_resume(resume_id, user.id)
+        occupied = db.query_one(
+            "SELECT id FROM user_resumes WHERE user_id = %s AND name = %s",
+            (user_id, name),
+        )
+        if occupied is not None and occupied["id"] != resume_id:
+            raise refuse(409, "NAME_EXISTS", "another resume has that name")
+        archive_resume(resume_id, user_id)
         row = db.query_one_as(
             Resume,
             f"""
         UPDATE user_resumes
-           SET name = COALESCE(%s, name), text = COALESCE(%s, text),
-               text_version_id = CASE WHEN %s IS NULL THEN text_version_id ELSE NULL END,
-               updated_at = now()
+           SET name = %s, updated_at = now()
          WHERE id = %s AND user_id = %s
         RETURNING {_RESUME_COLS}
         """,
-            (body.name.strip() if body.name else None, body.text, body.text, resume_id, user.id),
+            (name, resume_id, user_id),
         )
-    if not row:
-        raise refuse(404, "NOT_FOUND", "unknown resume")
+    assert row is not None
     return row
+
+
+@router.patch("/user/resumes/{resume_id}")
+async def patch_resume(
+    resume_id: int, request: Request, user: AuthedUser = Depends(require_user)
+) -> Resume:
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(chunk) > MAX_RENAME_BODY_BYTES - len(data):
+            raise refuse(413, "RENAME_TOO_LARGE", "send only the resume name")
+        data.extend(chunk)
+    try:
+        body = json.loads(data)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise refuse(400, "INVALID_NAME", "send a resume name") from exc
+    if not isinstance(body, dict):
+        raise refuse(400, "INVALID_NAME", "send a resume name")
+    if "text" in body or "pdf_base64" in body:
+        raise refuse(410, "USE_RESUME_PARTS", "send resume text or PDF in numbered parts")
+    if set(body) != {"name"}:
+        raise refuse(400, "INVALID_NAME", "send only the resume name")
+    try:
+        name = ResumeRename.model_validate(body).name.strip()
+    except ValidationError as exc:
+        raise refuse(400, "INVALID_NAME", "send a resume name") from exc
+    if not name:
+        raise refuse(400, "INVALID_NAME", "send a resume name")
+    return await run_in_threadpool(_rename_resume, resume_id, name, user.id)
 
 
 @router.delete("/user/resumes/{resume_id}")
