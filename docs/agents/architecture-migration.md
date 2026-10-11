@@ -292,7 +292,7 @@ switched read ships with a test that holds the new query equal to the old
 one on the same rows for the era where both are right.
 
 **Board spend counts paid model requests, not fetches.**
-`api/analytics_queries._SPEND_SQL` reads the `model_calls` ledger for
+`api.analytics.queries._SPEND_SQL` reads the `model_calls` ledger for
 posting checks. One batched verification answer can produce several verdicts,
 so a verdict row is not one call. A page fetch costs bandwidth but is not a
 model request. Sum recorded `cost_usd` rather than repricing historical calls,
@@ -680,7 +680,7 @@ files listed there:
 | Reader | Meaning | Stands |
 |---|---|---|
 | `core/catalog/jobs.py` and `core/catalog/observations.py` (historical catalog writers) | feed state, written and compared | historical; `jobs.active` is now frozen |
-| `api/analytics_queries.py` source inventory | the owning feed's own flag, per source | stays |
+| `api/analytics/queries.py` source inventory | the owning feed's own flag, per source | stays |
 | `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
 | `api/routers/filters.py` preset coverage gates | how many postings a preset would show | moved, once availability was stored |
@@ -696,7 +696,7 @@ the one before it is running on every worker.
    `j.available`, with NULL read as not available, and the board recompute is
    measured against its 27 s baseline. Two readers still read feed state, and
    each moves to observations: the source inventory in
-   `api/analytics_queries.py` counts each source's latest observations, and
+   `api/analytics/queries.py` counts each source's latest observations, and
    the re-listing branch in `tasks/verify.py` keys on a `reappeared`
    observation newer than the last closed check, not on `job_listing_events`.
    `posting_path` stops reading `job_listing_events` too.

@@ -179,7 +179,7 @@ def test_the_set_of_posting_checks_has_one_definition():
     than spelling the names. A spelled list is one a new check does not join,
     and the failure is silent: the check runs, and the reader ignores it.
     """
-    from api.analytics_queries import _VERDICT_CHECKS
+    from api.analytics.queries import _VERDICT_CHECKS
     from api.health import sources as health_sources
     from core.checks import POSTING_CHECK_NAMES
 

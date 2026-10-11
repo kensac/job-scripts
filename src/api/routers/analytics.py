@@ -27,13 +27,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from api import db
-from api.analytics_assembly import collect_source_analytics as _collect
-from api.analytics_models import (
+from api.analytics.assembly import collect_source_analytics as _collect
+from api.analytics.models import (
     BoardAnalyticsDetail,
     BoardAnalyticsList,
     OverlapPartner,
 )
-from api.analytics_queries import _OVERLAP_PARTNERS_SQL
+from api.analytics.queries import _OVERLAP_PARTNERS_SQL
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE
