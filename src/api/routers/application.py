@@ -2,8 +2,15 @@
 
 from fastapi import APIRouter
 
-from api.routers import application_answers, application_resumes
+from api.routers import (
+    application_answers,
+    application_resumes,
+    resume_text_versions,
+    resume_uploads,
+)
 
 router = APIRouter()
 router.include_router(application_resumes.router)
+router.include_router(resume_uploads.router)
+router.include_router(resume_text_versions.router)
 router.include_router(application_answers.router)

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from api import db, user_settings
 from api.apply.writes import PURPOSE as PURPOSE
+from api.resumes.text_versions import text_prefix
 from core.answers import DEFAULT_STYLE
 
 
@@ -120,14 +121,20 @@ def question_input(
 def resume_text(user_id: int, resume_id: int | None) -> str | None:
     if resume_id is not None:
         row = db.query_one(
-            "SELECT text FROM user_resumes WHERE user_id = %s AND id = %s", (user_id, resume_id)
+            "SELECT text, text_version_id FROM user_resumes WHERE user_id = %s AND id = %s",
+            (user_id, resume_id),
         )
     else:
         row = db.query_one(
-            "SELECT text FROM user_resumes WHERE user_id = %s ORDER BY updated_at DESC LIMIT 1",
+            "SELECT text, text_version_id FROM user_resumes "
+            "WHERE user_id = %s ORDER BY updated_at DESC LIMIT 1",
             (user_id,),
         )
-    return row["text"] if row else None
+    if row is None:
+        return None
+    if row["text_version_id"] is not None:
+        return text_prefix(row["text_version_id"], 12_000)
+    return row["text"]
 
 
 def writing_style(user_id: int) -> str | None:

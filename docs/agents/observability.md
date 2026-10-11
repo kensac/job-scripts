@@ -13,6 +13,14 @@ chunk does nothing. The last task publishes the revision only if the whole
 recipe is valid. Invalid uploads remain stored and never become current. The
 completion route can retry a failed task from the last saved chunk.
 
+**Resume PDF extraction runs after durable transfer.** The API verifies each
+object part before recording it as received. Completion enqueues
+`process_resume_upload`. The worker reads parts into a disk-backed file and
+writes extracted text as ordered parts. Only a complete text version becomes
+the current resume. A failure leaves the PDF and any partial text version
+stored; the upload status shows the error. Retrying completion starts a new
+text version. Replacing a resume saves its prior text and PDF in revisions.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 
@@ -874,6 +882,18 @@ bucket, content-addressed key, SHA-256, uncompressed byte size and format
 version. The vectors themselves are an object. Receipt identity, outcome and
 acknowledgement timestamps remain in Postgres. No object lifecycle expiration
 or garbage collection may remove referenced objects.
+
+**Resume PDF parts remain available while any resume or revision references
+them.** Do not expire or delete `uploads/v1/` objects or their receipts.
+Account changes must not cascade away current resumes, uploads, text versions,
+parts, or revisions. Verify bucket lifecycle rules before using object parts
+as the sole PDF copy.
+
+**PDF resume uploads start paused.** The persisted
+`resume_pdf_uploads_enabled` setting stays off until the live bucket is checked
+for expiry rules and available capacity. The admin config page exposes its
+switch. The API and worker check it before completing an upload. Text resume
+parts and existing PDF downloads remain available while uploads are paused.
 
 **A new receipt's vectors are written to object storage before the receipt
 exists, and the receipt holds only `embedding_vectors_ref`.** There is no
