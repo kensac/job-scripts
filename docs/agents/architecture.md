@@ -286,6 +286,19 @@ unavailable costs, never a zero bill. Provider data can arrive late or change;
 do not overwrite historical usage estimates or allocate organization costs to
 users without attribution evidence.
 
+## Person pipeline route ownership
+
+`api.routers.mail.pipeline` registers the person's pipeline views before the
+application ID actions. `pipeline_rows` owns person-scoped application reads,
+match tiers, and derived stages. `pipeline_views` owns summary, list, and
+detail responses. `pipeline_actions` owns match corrections and application
+dismissal or restoration. **Keep every action scoped to an application owned
+by the caller, and bind a match ID to that application before appending a
+correction.** A match ID alone never grants access to its message. Stage stays
+derived from current mail events; corrections append to the history instead
+of rewriting earlier decisions. These routes do not activate automatic mail
+classification.
+
 ## Administrative mail debug ownership
 
 `api.routers.mail.debug` assembles the routes in registration order. Register

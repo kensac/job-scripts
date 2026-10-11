@@ -110,16 +110,16 @@ def test_the_owner_is_told_a_correction_was_an_administrators(client, admin, f):
         (msg_id, app_id, admin_id),
     )
 
-    from api.routers.mail.pipeline import _corrected_by
+    from api.routers.mail.pipeline_rows import correction_actor_label
 
-    assert _corrected_by(admin_id, uid) == "administrator"
-    assert _corrected_by(uid, uid) == "you"
+    assert correction_actor_label(admin_id, uid) == "administrator"
+    assert correction_actor_label(uid, uid) == "you"
     # Four answers, not three. A machine wrote it, or a person did and there
     # is no record of which - every human correction predating this column
     # lands in the second case, and the logs are append-only so it can never
     # be resolved. Rendering that as "nobody corrected it" would be a lie.
-    assert _corrected_by(None, uid, model="gpt-5-nano") == "model"
-    assert _corrected_by(None, uid) == "unknown"
+    assert correction_actor_label(None, uid, model="gpt-5-nano") == "model"
+    assert correction_actor_label(None, uid) == "unknown"
 
 
 def test_reverting_restores_the_models_answer_and_records_the_actor(client, admin, f):
