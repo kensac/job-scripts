@@ -25,13 +25,13 @@ from api.routers import (
     public_job_lists,
     requirements,
     resolve,
+    saved_views,
     source_admin,
     sources,
     spend,
     stats,
     task_models,
     users,
-    views,
 )
 
 # uvicorn configures its own loggers and leaves the root at WARNING, so the
@@ -85,7 +85,7 @@ async def _capture_unhandled(request: Request, call_next):
 app.include_router(users.router, prefix="/v1", responses=REFUSALS)
 app.include_router(public_job_lists.router, prefix="/v1", responses=PUBLIC_REFUSALS)
 app.include_router(
-    views.router, prefix="/v1", dependencies=[Depends(require_user)], responses=REFUSALS
+    saved_views.router, prefix="/v1", dependencies=[Depends(require_user)], responses=REFUSALS
 )
 app.include_router(jobs.router, prefix="/v1", responses=REFUSALS)
 app.include_router(application.router, prefix="/v1", responses=REFUSALS)
