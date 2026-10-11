@@ -1,16 +1,9 @@
-"""The shapes a decided answer is read in, written once.
+"""Shared SQL builders for reading decided answers from verdicts.
 
-`verdicts` says which ai_queries rows are answers. This says how a reader asks
-of them: the latest answer to a check, whether an answer exists. Each shape
-was hand-written in several modules, so "latest" (highest id) and "what a
-closed answer shows a person" were restated per reader and free to drift.
-`tests/test_verdicts_view.py` fails when a module outside this one writes a
-latest-answer shape against the view.
-
-The SQL builders take SQL expressions from the caller (`url="j.url"`,
-`prompt_hash="e.prompt_hash"`). A check is a name, checked against the
-registry and inlined as a literal, never a caller's value.
-"""
+The builders select the latest answer or test whether one exists. Callers
+provide SQL expressions for URL and prompt hash. A named check is validated
+against the registry before it becomes a SQL literal. Custom checks are
+identified by their prompt hash."""
 
 from __future__ import annotations
 

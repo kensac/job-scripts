@@ -1,25 +1,10 @@
-"""What every configurable task declares it needs, and the registry of them.
+"""Task declarations shared by handlers, routing, and fleet pricing.
 
-These are declarations, not behaviour: a purpose, the models the call site has
-judged fit, an output cap, a token estimate, how much one cycle does, and the
-measured evidence behind the choice. Nothing here runs a task.
-
-They live below the handlers because both layers read them and only one layer
-runs them. `api.budget` prices a fleet cycle from SHAPES and the configuration
-screen offers what SHAPES holds, so while these were declared inside the
-handler modules the services had to import the handlers to read a constant.
-That was five of the nine exceptions on the import contract.
-
-SHAPES cannot be a registry that the handlers write into on import. A registry
-would be empty for anything that has not imported `tasks`, which is exactly the
-caller this move exists for, and the failure would be a fleet cost silently
-computed over no tasks rather than an error.
-
-The constants a shape reads came with it: the model, the output cap, the effort
-preference and the per-cycle size ARE the declaration. A declared per-cycle
-size is the seeded default of an app_config row; the handler and the fleet
-budget both read the row through api.task_config.configured_shape.
-"""
+SHAPES declares each task's purpose, candidate models, output cap, token
+estimate, cycle size, and supporting evidence. The registry is complete at
+import time, so budget readers do not need to import task handlers. A declared
+cycle size seeds app_config; handlers and the fleet budget read the persisted
+value through api.task_config.configured_shape."""
 
 from __future__ import annotations
 

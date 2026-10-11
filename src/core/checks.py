@@ -1,21 +1,9 @@
-"""The posting checks: what the model is asked, what it must answer, and how
-a verdict is read out of the answer.
+"""The registry of posting checks and their answer contracts.
 
-THE REGISTRY IS THE ONLY PLACE A CHECK IS DEFINED. Adding one is an entry in
-POSTING_CHECKS, not an arm on a dispatch ladder. There were two such ladders,
-in routers/jobs.py and routers/admin.py, thirty lines each, the same shape,
-and they had already drifted: admin grew a reason-less response schema and a
-second addressing mode that jobs never got.
-
-The prompt, the response model and the reader are one set per check; a caller
-holding one without the others cannot run the check. That is why they are
-together, and why the entry carries the reader rather than leaving each
-caller to write the same lambda.
-
-Not every check is a static entry. A custom filter's instructions are built
-per filter at request time, so `custom` is a family addressed by prompt hash
-rather than a row here. See core/filters.py.
-"""
+Each POSTING_CHECKS entry owns its prompt, response model, and verdict reader.
+Callers use the entry together instead of defining separate dispatch rules.
+Custom filters build instructions per request and use a prompt hash, so they
+are not static registry entries. See core/filters.py."""
 
 from __future__ import annotations
 
@@ -75,18 +63,11 @@ class JobClosedVerdict(BaseModel):
 
 @dataclass(frozen=True)
 class PostingCheck:
-    """One check over a posting page.
+    """One posting check and its persisted answer name.
 
-    `name` is the check_type written to ai_queries, and the string every
-    reader of that column compares against. It is here so that comparing
-    against it is an attribute lookup rather than a literal.
-
-    `verdict_of` reads (rejected, reason) out of a parsed response, which is
-    the only shape the recording paths take.
-
-    `terse_model` answers the same question without a reason. None means the
-    check has no cheaper form.
-    """
+    `name` is ai_queries.check_type. `verdict_of` returns the rejection flag
+    and reason from a parsed response. `terse_model`, when present, answers
+    without a reason."""
 
     name: str
     instructions: str
@@ -121,14 +102,9 @@ CLEARANCE = PostingCheck(
 # The checks a posting page is judged by, in the order a sweep runs them.
 POSTING_CHECKS: dict[str, PostingCheck] = {c.name: c for c in (CLOSED, CLEARANCE)}
 
-# The same set as a plain tuple, for the queries that mean "every posting
-# check" rather than one named one. Bind it as a parameter; do not spell the
-# names into SQL, because a spelled list is one a new check does not join.
-#
-# Not every literal in a query is this. `check_type = 'closed'` in the
-# re-verification sweep means the closed check specifically and is correct as
-# it stands, and board_eligibility.STRUCTURAL names both checks because it
-# gives them DIFFERENT policies: closed must pass, clearance must pass unless
-# the person bypasses it. That is a policy per check, not a set, and widening
-# it to whatever is registered would be a silent change to who sees what.
+# Bind this tuple for queries that mean every registered check. A query that
+# spells out the names would omit checks added later.
+# Queries for one check remain literal. board_eligibility.STRUCTURAL also names
+# both checks deliberately: each has a different visibility policy. Expanding
+# that policy to every registered check would change who sees a posting.
 POSTING_CHECK_NAMES: tuple[str, ...] = tuple(POSTING_CHECKS)

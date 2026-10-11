@@ -1,26 +1,11 @@
-"""Make a stranger's HTML safe to put in front of a person.
+"""Sanitise mail HTML on read and block remote fetches on render.
 
-Two separate jobs, and they are not the same job.
+nh3 removes markup outside the allowlist. The second pass moves remote image
+sources to data-blocked-* attributes. A reader can offer to load them without
+contacting the sender automatically.
 
-SAFETY is nh3 (the Rust `ammonia` bindings): an allowlist sanitiser, not a
-blocklist. Hand-written stripping is how XSS ships - the interesting inputs are
-the ones nobody thought of - so the allowlist is delegated to a library whose
-entire purpose is that, and this module only decides the policy.
-
-PRIVACY is the second pass, and nh3 deliberately does not do it: a sanitiser's
-job is to stop markup executing, and a remote image does not execute anything.
-It just phones home. Every remote image in recruiter and marketing mail is a
-read receipt, so rendering one tells the sender the moment he opened it -
-which is not something a later change can take back. Remote sources are moved
-to data-blocked-* attributes rather than deleted, so a reader can offer to
-load them and the choice stays the person's.
-
-Sanitisation happens on READ, not at import. The stored html is the message as
-it arrived: keeping the original means a better sanitiser improves every
-message ever received, and it is the same reason body_html exists at all -
-this codebase has already destroyed one irreplaceable copy by deriving in
-place.
-"""
+The stored HTML remains as received. A changed sanitiser can improve the
+display of existing messages without replacing their source data."""
 
 from __future__ import annotations
 
@@ -70,10 +55,8 @@ _TAGS = {
     "ul",
 }
 
-# `style` is NOT here. Mail CSS is written assuming it owns the document, and
-# a `position: fixed` rule in a recruiter's template would escape the reader
-# and lay itself over the application. Layout attributes that cannot leave
-# their own element are kept so tables still read as tables.
+# Do not allow `style`: fixed-position mail CSS could cover the application.
+# Local table layout attributes remain so tables are readable.
 _ATTRS = {
     "a": {"href", "title"},
     "img": {"src", "srcset", "alt", "width", "height"},
@@ -82,18 +65,12 @@ _ATTRS = {
     "table": {"width"},
 }
 
-# http and https are allowed so a URL SURVIVES to the privacy pass below. A
-# link is not a fetch - it goes nowhere until the person clicks it - and
-# stripping hrefs would leave a message whose "apply here" led nowhere. The
-# things that fetch on render are handled by _REMOTE_FETCHING, not here.
-#
-# `cid:` is an image attached to the message itself, so it phones nobody.
+# Keep links until a person clicks them. The privacy pass below blocks remote
+# sources that fetch on render. `cid:` identifies an attached image.
 _URL_SCHEMES = {"http", "https", "mailto", "tel", "cid"}
 
-# Attributes that make the browser fetch the moment it renders, as opposed to
-# when a person acts. Only the ones on tags the allowlist keeps can appear at
-# all - `background` and `poster` are dropped wholesale with their tags - but
-# they are listed so adding a tag later cannot quietly reintroduce a fetch.
+# Block attributes that fetch on render. The allowlist already drops some of
+# them, but this list also protects future additions to the allowed tags.
 _REMOTE_FETCHING = ("src", "srcset", "background", "poster")
 
 _REMOTE = re.compile(r"^\s*(?:https?:)?//", re.IGNORECASE)
