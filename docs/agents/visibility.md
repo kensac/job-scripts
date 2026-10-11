@@ -90,6 +90,15 @@ posting joined; the rebuild's own time is `managed_boards.projection_updated_at`
 `tests/test_managed_board_projection_diff.py` keeps the old writer as the
 oracle and checks a reader during an open rebuild.
 
+`api.managed_board_selection` owns candidate and verification-question selection.
+`api.managed_board_admission` plans a run, stores its verified candidates
+outside a transaction, then locks the board and rechecks the board revision,
+active task, and sponsor reservation before inserting the task. Publish only
+after that transaction commits. `api.managed_board_records` owns run summaries,
+token accounting, and the projection write. `api.managed_board_runs` keeps the
+public entry points stable. A moved check must retain its original transaction
+boundary and must not drop stored candidate data or verdicts.
+
 `FAST` enumerates the three authorized ID sets first: computed membership,
 uploads, and acted-on rows. `UNION` deduplicates overlaps before joining jobs
 and the current user's private state. Keep this set-first shape: an OR over
@@ -198,7 +207,7 @@ so a screen applied after selection meets the same posting on every run: the
 filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
 filter batch chunks in the 7 days before read pages only to skip them again.
 Each screen applies where candidates are chosen: `tasks.filters._run_filters`
-per filter, `managed_board_runs._plan` per board run (the run payload records
+per filter, `managed_board_admission._plan` per board run (the run payload records
 `title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
