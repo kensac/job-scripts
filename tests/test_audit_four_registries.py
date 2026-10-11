@@ -8,7 +8,7 @@ import datetime
 from api import db
 from tasks import runtime as tasks_runtime
 from tests import mail_log
-from tests.test_api_pipeline import _app
+from tests.pipeline_data import insert_application
 
 
 def _uid(headers: dict) -> int:
@@ -108,8 +108,8 @@ def test_admin_mail_takes_lists_on_kind_method_and_source(client, admin_headers,
 
 def test_pipeline_takes_provenance_lists_and_serves_stages(client, user_headers):
     uid = _uid(user_headers)
-    tracker = _app(uid, company="A", prov="tracker")
-    email = _app(uid, company="B", prov="email")
+    tracker = insert_application(uid, company="A", prov="tracker")
+    email = insert_application(uid, company="B", prov="email")
     body = client.get(
         "/v1/user/pipeline", params={"provenance": "tracker,email"}, headers=user_headers
     ).json()
