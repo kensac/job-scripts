@@ -198,3 +198,58 @@ def test_available_memory_is_the_tighter_of_cgroup_and_host(tmp_path: Path):
     assert available_memory_mb(cg, proc) == 224
     (cg / "memory.max").write_text("max\n")
     assert available_memory_mb(cg, proc) == 2000
+
+
+@pytest.mark.parametrize(
+    ("host", "admin", "ceiling", "start"),
+    [
+        (None, None, 1, None),  # neither: one at a time, no slots
+        (None, 3, 3, 1),  # the admin entry alone climbs from one, as before
+        (4, None, 4, 4),  # the host value alone starts at its ceiling
+        (4, 2, 2, 2),  # the admin entry lowers the host
+        (4, 8, 4, 4),  # but cannot raise it
+        (40, None, 10, 10),  # the pool still bounds it
+    ],
+)
+def test_host_task_slots_set_the_ceiling_and_the_start(
+    monkeypatch, set_config, host, admin, ceiling, start
+):
+    monkeypatch.setattr(worker, "TASK_SLOTS", host)
+    monkeypatch.setattr(worker, "WORKER_NAME", "slots-host")
+    monkeypatch.setattr(worker.pool, "MAX_SIZE", 20)
+    if admin is not None:
+        set_config("worker_task_slots", {"slots-host": admin})
+    got, s = worker._refresh_slots(None)
+    assert got == ceiling
+    assert (s.limiter.limit if s else None) == start
+
+
+def test_host_task_slots_still_back_off_on_memory(monkeypatch, set_config, f):
+    monkeypatch.setattr(worker, "TASK_SLOTS", 4)
+    monkeypatch.setattr(worker, "THREADED_KINDS", frozenset({KIND}))
+    monkeypatch.setattr(worker, "available_memory_mb", lambda: None)
+    running = [f.make_task(KIND) for _ in range(2)]
+    waiting = f.make_task(KIND)
+    release = threading.Event()
+
+    async def probe(task_id, payload):
+        await asyncio.to_thread(release.wait, 5)
+
+    monkeypatch.setitem(worker.HANDLERS, KIND, probe)
+    set_config("worker_memory_reserve_mb", 512)
+    _, s = worker._refresh_slots(None)
+    assert s is not None and s.limiter.limit == 4
+    try:
+        with asyncio.Runner() as runner:
+            s.step(runner)
+            s.step(runner)
+            assert sorted(s.held) == running
+            monkeypatch.setattr(worker, "available_memory_mb", lambda: 100.0)
+            s.step(runner)
+            assert s.limiter.limit == 2
+            assert _row(waiting)["status"] == "pending", "claimed with no memory to run it"
+    finally:
+        release.set()
+        deadline = time.monotonic() + 10
+        while worker._in_flight and time.monotonic() < deadline:
+            time.sleep(0.02)

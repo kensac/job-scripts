@@ -701,7 +701,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
         }
         # Without JIT. Its cost estimate is in the millions, so JIT compiles
         # the whole plan, and on production (2026-10-10) the same plan took
-        # 78 s with it and 21 to 43 s without: 38 s went to hashing the
+        # 78 s with it and 24 s without: 38 s went to hashing the
         # 16,000 targets.
         with db.transaction():
             db.execute("SET LOCAL jit = off")
