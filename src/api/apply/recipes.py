@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import uuid
 import zlib
 from typing import Any
 
@@ -31,9 +32,10 @@ from pydantic import BaseModel, Field
 
 from api import db
 
-# Tables are hundreds of kilobytes raw (Avature 573 KB, Workday 518 KB on
-# 2026-09-09); the cap leaves room without admitting an accident.
-MAX_BYTES = 2_000_000
+# The version 1 extension fetches one encoded response. Larger recipes use
+# version 2 chunks; old extensions use their bundled copy for those recipes.
+LEGACY_RESPONSE_BYTES = 2_000_000
+CHUNK_BYTES = 64 * 1024
 ENCODING = "deflate+base64"
 
 
@@ -47,6 +49,23 @@ class RecipeConfig(BaseModel):
     encoding: str = ENCODING
     payload: str = Field(description="the canonical table, zlib-compressed and base64-encoded")
     digest: str = Field(description="sha256 of the canonical table; equals revision")
+
+
+class RecipeChunkManifest(BaseModel):
+    schema_version: int = 2
+    adapter: str
+    revision: str
+    max_age_seconds: int
+    encoding: str = "identity-chunks"
+    chunk_count: int
+
+
+class RecipeChunk(BaseModel):
+    schema_version: int = 2
+    adapter: str
+    revision: str
+    index: int
+    payload: str
 
 
 def canonical(body: dict[str, Any]) -> bytes:
@@ -78,8 +97,6 @@ def validate(adapter: str, body: Any) -> bytes:
         if not isinstance(field.get("variants"), list):
             raise ValueError(f"fields[{i}] needs a variants list")
     raw = canonical(body)
-    if len(raw) > MAX_BYTES:
-        raise ValueError(f"recipe is {len(raw):,} bytes; the cap is {MAX_BYTES:,}")
     return raw
 
 
@@ -92,29 +109,36 @@ def encode(raw: bytes) -> str:
 
 
 def publish(adapter: str, body: Any, published_by: str | None) -> str:
-    """Validate, store and make current. Returns the revision."""
+    """Publish a bundled local table into the chunk store."""
     raw = validate(adapter, body)
     revision = revision_of(raw)
+    upload_id = uuid.uuid4()
+    chunks = [raw[start : start + CHUNK_BYTES] for start in range(0, len(raw), CHUNK_BYTES)]
     with db.transaction():
         db.execute(
-            """
-            INSERT INTO extension_recipes (adapter, revision, body, published_by, enabled)
-            VALUES (%s, %s, %s, %s, TRUE)
-            ON CONFLICT (adapter, revision) DO UPDATE
-                SET enabled = TRUE, published_at = now(), published_by = EXCLUDED.published_by
-            """,
-            (adapter, revision, db.jsonb(body), published_by),
+            "INSERT INTO extension_recipe_uploads "
+            "(id, adapter, chunk_count, published_by, status) "
+            "VALUES (%s, %s, %s, %s, 'pending')",
+            (upload_id, adapter, len(chunks), published_by),
         )
-        db.execute(
-            "UPDATE extension_recipes SET enabled = FALSE WHERE adapter = %s AND revision <> %s",
-            (adapter, revision),
+        db.executemany(
+            "INSERT INTO extension_recipe_chunks (upload_id, chunk_index, body) VALUES (%s, %s, %s)",
+            [(upload_id, index, chunk) for index, chunk in enumerate(chunks)],
         )
+    from api.apply.recipe_uploads import process
+
+    process(upload_id)
+    result = db.query_one(
+        "SELECT status, error FROM extension_recipe_uploads WHERE id = %s", (upload_id,)
+    )
+    if result is None or result["status"] != "published":
+        raise ValueError(result["error"] if result else "recipe upload failed")
     return revision
 
 
 def current(adapter: str) -> dict[str, Any] | None:
     return db.query_one(
-        "SELECT adapter, revision, body, published_by, published_at FROM extension_recipes "
+        "SELECT adapter, revision, body, upload_id, published_by, published_at FROM extension_recipes "
         "WHERE adapter = %s AND enabled ORDER BY published_at DESC LIMIT 1",
         (adapter,),
     )
@@ -143,9 +167,11 @@ def rollback(adapter: str) -> str | None:
 
 def history() -> list[dict[str, Any]]:
     return db.query(
-        "SELECT adapter, revision, enabled, published_by, published_at, "
-        "length(body::text) AS bytes FROM extension_recipes "
-        "ORDER BY adapter, published_at DESC"
+        "SELECT r.adapter, r.revision, r.enabled, r.published_by, r.published_at, "
+        "coalesce(length(r.body::text), "
+        "(SELECT sum(octet_length(c.body)) FROM extension_recipe_chunks c "
+        "WHERE c.upload_id = r.upload_id)) AS bytes FROM extension_recipes r "
+        "ORDER BY r.adapter, r.published_at DESC"
     )
 
 
@@ -153,11 +179,60 @@ def config_for(adapter: str, max_age_seconds: int) -> RecipeConfig | None:
     row = current(adapter)
     if not row:
         return None
-    raw = canonical(row["body"])
+    if row["body"] is not None:
+        raw = canonical(row["body"])
+    else:
+        size = db.query_one(
+            "SELECT coalesce(sum(octet_length(body)), 0) AS bytes "
+            "FROM extension_recipe_chunks WHERE upload_id = %s",
+            (row["upload_id"],),
+        )
+        if size is None or size["bytes"] > LEGACY_RESPONSE_BYTES:
+            return None
+        parts = db.query(
+            "SELECT body FROM extension_recipe_chunks WHERE upload_id = %s ORDER BY chunk_index",
+            (row["upload_id"],),
+        )
+        raw = b"".join(bytes(part["body"]) for part in parts)
     return RecipeConfig(
         adapter=adapter,
         revision=row["revision"],
         max_age_seconds=max_age_seconds,
         payload=encode(raw),
         digest=revision_of(raw),
+    )
+
+
+def chunk_manifest(adapter: str, max_age_seconds: int) -> RecipeChunkManifest | None:
+    row = db.query_one(
+        "SELECT r.revision, u.chunk_count FROM extension_recipes r "
+        "JOIN extension_recipe_uploads u ON u.id = r.upload_id "
+        "WHERE r.adapter = %s AND r.enabled ORDER BY r.published_at DESC LIMIT 1",
+        (adapter,),
+    )
+    if row is None:
+        return None
+    return RecipeChunkManifest(
+        adapter=adapter,
+        revision=row["revision"],
+        max_age_seconds=max_age_seconds,
+        chunk_count=row["chunk_count"],
+    )
+
+
+def chunk_for(adapter: str, revision: str, index: int) -> RecipeChunk | None:
+    row = db.query_one(
+        "SELECT c.body FROM extension_recipes r "
+        "JOIN extension_recipe_chunks c ON c.upload_id = r.upload_id "
+        "WHERE r.adapter = %s AND r.revision = %s "
+        "AND c.chunk_index = %s",
+        (adapter, revision, index),
+    )
+    if row is None:
+        return None
+    return RecipeChunk(
+        adapter=adapter,
+        revision=revision,
+        index=index,
+        payload=base64.b64encode(row["body"]).decode("ascii"),
     )

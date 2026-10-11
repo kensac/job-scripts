@@ -37,3 +37,12 @@ the same upload id and chunk indexes on retries. The API marks a report
 complete only after every chunk is stored. A completed report keeps its chunks
 as the page's durable copy; list and detail reads must not assemble the whole
 page in the API process. Remove the local copy only after completion succeeds.
+
+## Published recipes
+
+Fetch a version 2 manifest, then fetch each chunk for its named revision.
+Reject a missing or changed chunk. Hash the assembled bytes before parsing
+the table or saving it in local storage. A failed refresh may reuse only an
+unexpired verified copy. Otherwise use the bundled table. The public chunk
+route remains readable by revision after a newer publish so a refresh can
+finish while an administrator changes the current recipe.

@@ -6,6 +6,11 @@ because the signals only make sense beside them.
 
 ## The worker fleet
 
+`publish_extension_recipe` validates one complete admin upload from durable
+chunks. An incomplete or invalid upload never becomes current. A failed task
+can be queued again through the upload completion route; the same immutable
+chunks are rechecked.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

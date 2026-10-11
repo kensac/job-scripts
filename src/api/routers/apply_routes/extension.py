@@ -31,18 +31,25 @@ def extension_config(
     return extension_policy.resolve(policy, adapter)
 
 
-@router.get("/extension/recipe", response_model=extension_recipes.RecipeConfig)
+@router.get(
+    "/extension/recipe",
+    response_model=extension_recipes.RecipeConfig
+    | extension_recipes.RecipeChunkManifest
+    | extension_recipes.RecipeChunk,
+)
 def extension_recipe(
     response: Response,
     adapter: extension_policy.AdapterId,
     schema_version: int = Query(ge=1),
+    revision: str | None = None,
+    chunk_index: int | None = Query(default=None, ge=0),
 ):
     """The published table for a config-driven reader, or 404 when only the
     bundled copy exists. Same public terms as /extension/config: no profile,
     answers or credentials; the extension pins a revision per fill and keeps
     the bundled table as its fallback (api.apply.recipes)."""
     response.headers["Cache-Control"] = "no-store"
-    if schema_version != 1:
+    if schema_version not in (1, 2):
         raise refuse(409, "UNSUPPORTED_CONFIG_SCHEMA", "this configuration schema is not supported")
     try:
         policy = extension_policy.ExtensionPolicy.model_validate(db.get_config("extension_policy"))
@@ -50,7 +57,17 @@ def extension_recipe(
         raise refuse(
             503, "INVALID_EXTENSION_POLICY", "extension configuration is unavailable"
         ) from exc
-    config = extension_recipes.config_for(adapter, policy.max_age_seconds)
+    if schema_version == 2:
+        if chunk_index is not None:
+            if revision is None:
+                raise refuse(400, "MISSING_REVISION", "recipe revision is required")
+            chunk = extension_recipes.chunk_for(adapter, revision, chunk_index)
+            if chunk is None:
+                raise refuse(404, "NOT_FOUND", "unknown recipe chunk")
+            return chunk
+        config = extension_recipes.chunk_manifest(adapter, policy.max_age_seconds)
+    else:
+        config = extension_recipes.config_for(adapter, policy.max_age_seconds)
     if config is None:
         raise refuse(
             404, "NO_RECIPE", "no published recipe for this adapter; the bundled table applies"

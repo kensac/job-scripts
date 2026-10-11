@@ -129,11 +129,40 @@ test('a published recipe decodes to the table, checked against its digest, and i
   assert.equal(got.ok, true);
   assert.deepEqual(JSON.parse(JSON.stringify(got.config.recipe)), table);
   assert.equal(got.config.revision.length, 64);
-  assert.equal(saved.data['recipe:1:workday'].config.encoding, 'deflate+base64');
+  assert.equal(saved.data['recipe:2:workday'].config.encoding, 'deflate+base64');
   const offline = async () => { throw new Error('offline'); };
   const again = await new RecipeStore(saved, offline, RECIPES, () => 1000 + 10_000).resolve('workday');
   assert.equal(again.cached, true);
   assert.equal(again.config.recipe.name, 'Workday');
+});
+
+test('a chunked recipe verifies every byte before it is cached', async () => {
+  const raw = Buffer.from(JSON.stringify(table));
+  const pieces = [raw.subarray(0, 17), raw.subarray(17)];
+  const digest = nodeCrypto.createHash('sha256').update(raw).digest('hex');
+  const seen = [];
+  const fetchFn = async (url) => {
+    seen.push(url);
+    const parsed = new URL(url);
+    const index = parsed.searchParams.get('chunk_index');
+    if (index === null) return { status: 200, json: async () => ({
+      schema_version: 2, adapter: 'workday', revision: digest, max_age_seconds: 300,
+      encoding: 'identity-chunks', chunk_count: pieces.length,
+    }) };
+    return { status: 200, json: async () => ({ schema_version: 2, adapter: 'workday',
+      revision: digest, index: Number(index), payload: pieces[Number(index)].toString('base64') }) };
+  };
+  const saved = storage();
+  const got = await new RecipeStore(saved, fetchFn, RECIPES, () => 1000).resolve('workday');
+  assert.equal(got.ok, true);
+  assert.equal(got.config.recipe.name, 'Workday');
+  assert.equal(seen.length, 3);
+  assert.equal(saved.data['recipe:2:workday'].config.chunks.length, 2);
+  const cached = await new RecipeStore(saved, async () => { throw new Error('offline'); }, RECIPES, () => 2000).resolve('workday');
+  assert.equal(cached.cached, true);
+  saved.data['recipe:2:workday'].config.chunks[1] = Buffer.from('broken').toString('base64');
+  const corrupt = await new RecipeStore(saved, async () => { throw new Error('offline'); }, RECIPES, () => 3000).resolve('workday');
+  assert.equal(corrupt.ok, false);
 });
 
 test('a recipe that does not decode, does not match its digest, or is not this adapter is no recipe', async () => {
