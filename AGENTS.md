@@ -44,6 +44,7 @@ These are instructions, not history. Follow them.
 | [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |
 | [generated-files.md](docs/agents/generated-files.md) | Change a route, a model, or anything CI regenerates |
 | [frontend.md](docs/agents/frontend.md) | Change any user-visible surface |
+| [extension-runtime.md](docs/agents/extension-runtime.md) | Change the extension application runtime |
 
 ## Repository map
 

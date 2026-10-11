@@ -1,5 +1,13 @@
 import { panelSurface } from "../ui/panel.js";
 import { isStopped } from "./operation";
+import { createApplicationPreferences } from "./preferences";
+import { createApplicationReportCapture } from "./report-capture";
+import { createSubmissionTracker } from "./submission-tracker";
+import { createApplicationReview } from "./answer-review";
+import { createApplicationContext } from "./application-context";
+import { createPageFill } from "./page-fill";
+import { createReportPanel } from "./report-panel";
+import { createPanelShell } from "./panel-shell";
 // The generic half of the extension. It runs on every page of an ATS
 // host, watches for the application form to appear (the ATS is a single-
 // page app, so the posting page becomes the form without a reload), and
@@ -102,9 +110,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     submission = null;
   }
   if (!adapter && !submission) return;
-  let submissionBusy = false;
-  let submissionView = null;
-  let clearingSubmission = false;
   const sleep = (ms) => operation.sleep(ms);
   const esc = (s) =>
     String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -117,58 +122,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // drafts cover the ones the board knew about). The admin's never-fill
   // list (location, for one) is applied by the API, which names the
   // fields it kept back so the panel lists them as the person's.
-  // The panel's preferences: minimised, the AI switch, the theme. In
-  // chrome.storage.local, which every ATS host shares, so a panel minimised
-  // on one board stays minimised on the next; localStorage was per origin
-  // and forgot between hosts (job-scripts-5c, 2026-09-08). Read before the
-  // first paint so the panel never flashes the default.
-  const prefs = { collapsed: false, aiAll: false, theme: null, autoAdvance: false };
-  const loadPrefs = async () => {
-    try {
-      const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme", "autoAdvance"], r));
-      if (got && typeof got.collapsed === "boolean") prefs.collapsed = got.collapsed;
-      else prefs.collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
-      if (got && typeof got.aiAll === "boolean") prefs.aiAll = got.aiAll;
-      else prefs.aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
-      prefs.theme = got && (got.theme === "light" || got.theme === "dark") ? got.theme : null;
-      if (got && typeof got.autoAdvance === "boolean") prefs.autoAdvance = got.autoAdvance;
-    } catch (_) {
-      // Nothing stored or no storage: the defaults hold.
-    }
-  };
-  // The person's copy: user_settings.prefs.apply through the settings
-  // endpoints, so the same panel greets them in every browser they sign in
-  // to (Kanishk, 2026-09-08). The account's value wins over the browser's
-  // cache at start; a change goes to both. Merged on write so the other
-  // prefs on the row (auto_draft) keep.
-  const PREF_KEYS = ["collapsed", "aiAll", "theme", "autoAdvance"];
-  const syncPrefsFromAccount = async () => {
-    const res = await api("user/settings", "GET");
-    const mine = res.ok && res.json && res.json.prefs && res.json.prefs.apply;
-    if (!mine || typeof mine !== "object") return;
-    for (const k of PREF_KEYS) if (k in mine) prefs[k] = mine[k];
-    try {
-      chrome.storage.local.set({ collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme, autoAdvance: prefs.autoAdvance });
-    } catch (_) {
-      // The cache is a convenience; the account has it.
-    }
-  };
-  const savePrefsToAccount = async () => {
-    const res = await api("user/settings", "GET");
-    if (!res.ok || !res.json) return;
-    const all = { ...(res.json.prefs || {}), apply: { collapsed: prefs.collapsed, aiAll: prefs.aiAll, theme: prefs.theme, autoAdvance: prefs.autoAdvance } };
-    await api("user/settings", "PUT", { prefs: all });
-  };
-  const savePref = (key, value) => {
-    try {
-      chrome.storage.local.set({ [key]: value });
-    } catch (_) {
-      // Nothing to remember it in; it holds for this page.
-    }
-    savePrefsToAccount();
-  };
-  await loadPrefs();
-  await syncPrefsFromAccount();
+  const { prefs, savePref, load: loadPreferences } = createApplicationPreferences(api);
+  await loadPreferences();
   if (lifecycle.isInvalid) return;
   const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (prefs.aiAll && e.kind === "long"));
 
@@ -198,36 +153,8 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // The theme: data-jt-theme="light" or "dark" for an explicit choice, and
   // no attribute at all for "system", which follows prefers-color-scheme in
   // panel.css. The button cycles light, dark, system and names the next.
-  const THEME_NEXT = { light: "dark", dark: null, null: "light" };
-  const themeLabel = (t) => (t === "light" ? "Light" : t === "dark" ? "Dark" : "System");
-  const render = (html) => {
-    if (!panelUp) return;
-    const themeTitle = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
-    surface.paint(`
-      <div class="head">
-        <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><div><h3>Job Tracker</h3><span class="eyebrow">Apply assistant</span></div></div>
-        <div class="head-actions"><button id="jt-theme" aria-label="${esc(themeTitle)}" title="${esc(themeTitle)}">${prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐"}</button>
-        <button id="jt-min" aria-label="${prefs.collapsed ? "Expand panel" : "Minimise panel"}" aria-expanded="${!prefs.collapsed}" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "−"}</button></div>
-      </div>
-      <div class="body">
-        <div class="application-context"><span class="eyebrow">Current application</span><div class="application-title">${esc(matchedTitle() || submission?.title || document.title || "Application form")}</div><span class="muted">${esc(location.hostname)}${context ? (context.job ? " · on your board" : " · not on your board") : ""}</span></div>
-        ${previousApplicationNotice()}
-        <div id="jt-operation" role="status">${operationControls()}</div>
-        <div class="workspace">${html}</div>
-        <details class="settings"><summary>Autofill preferences</summary>
-          <label class="switch"><span><span class="setting-title">Draft unanswered text</span><span class="setting-description">Use AI for free-text questions too. Review before submitting.</span></span><input type="checkbox" role="switch" id="jt-ai-all" ${prefs.aiAll ? "checked" : ""}></label>
-          <label class="switch"><span><span class="setting-title">Continue between pages</span><span class="setting-description">Advance after filling. Always stop before Submit.</span></span><input type="checkbox" role="switch" id="jt-advance" ${prefs.autoAdvance ? "checked" : ""}></label>
-        </details>
-        <div class="panel-footer"><div id="jt-report"><button id="jt-report-btn">Report an issue</button></div></div>
-      </div>`, { theme: prefs.theme, collapsed: prefs.collapsed });
-  };
+  const { THEME_NEXT, themeLabel, render, operationControls } = createPanelShell({ prefs, surface, operation, esc, getPanelUp: () => panelUp, getSubmission: () => submission, getApplicationContext: () => applicationContext });
 
-  function operationControls() {
-    if (!operation.busy) return "";
-    if (operation.state === "stopped") return `<p>Stopping autofill…</p>`;
-    const paused = operation.state === "paused";
-    return `<div class="operation-controls"><span>${paused ? "Autofill paused" : "Autofill is running"}</span><button id="jt-pause" aria-label="${paused ? "Resume autofill" : "Pause autofill"}">${paused ? "Resume" : "Pause"}</button><button id="jt-stop" aria-label="Stop autofill">Stop</button></div>`;
-  }
   operation.subscribe(() => { surface.region("jt-operation", operationControls()); drawReview(); });
   on("click", "jt-pause", () => operation.state === "paused" ? operation.resume() : operation.pause());
   on("click", "jt-stop", () => operation.stop());
@@ -254,6 +181,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
   }
 
+  function reportForm() { return reportPanel.reportForm(); }
   on("click", "jt-report-btn", reportForm);
   on("change", "jt-ai-all", (values) => savePref("aiAll", (prefs.aiAll = !!values["jt-ai-all"])));
   on("change", "jt-advance", (values) => savePref("autoAdvance", (prefs.autoAdvance = !!values["jt-advance"])));
@@ -338,9 +266,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       }
       if (mountedFor === here && panelUp) return;
       mountedFor = here;
-      context = null;
-      contextState = "idle";
-      contextGeneration += 1;
+      applicationContext.reset();
       fields = [];
       fill = null;
       filled = new Map();
@@ -371,73 +297,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
   }
 
-  // What this person already has for this page. Read once when the panel
-  // appears and kept for the page: it opens no fill and writes nothing, so
-  // asking again on every repaint would be a request that changes no answer.
-  let context = null;
-  let contextState = "idle";
-  let contextGeneration = 0;
-  function previousApplicationNotice() {
-    const job = context?.job;
-    if (!job || !(job.status || job.date_applied || job.submitted_at)) return "";
-    const date = job.date_applied || job.submitted_at?.slice(0, 10);
-    return `<div class="notice warn" role="status" aria-label="Existing application"><strong>${job.submitted_at ? "You already submitted this application." : "Existing application record"}</strong><p>${esc(job.status || "Submission recorded")}${date ? ` · ${esc(date)}` : ""}</p><p>Filling again will keep your existing status and application date.</p></div>`;
-  }
-  async function loadContext() {
-    if (contextState !== "idle") return;
-    contextState = "loading";
-    const url = location.href;
-    const generation = contextGeneration;
-    const res = await api(`user/apply/context?url=${encodeURIComponent(url)}`);
-    if (url !== location.href || generation !== contextGeneration || lifecycle.isInvalid) return;
-    context = res.ok ? res.json : null;
-    contextState = res.ok ? "ready" : "error";
-    // Only if the offer is still what the person is looking at. They can
-    // click Autofill while this is in flight, and a repaint then would throw
-    // away the flow that click started.
-    if (showing === "offer") offer(offerLead);
-  }
-
-  // A fact the person set, in the words the form uses. A list fact (their
-  // education, their jobs) is a count: the rows are long and the question
-  // here is whether there is anything to fill from, not what it says.
-  const factRow = (key, value) => {
-    const said = Array.isArray(value) ? `${value.length} ${value.length === 1 ? "entry" : "entries"}` : String(value);
-    return `<li><div class="field-copy"><span class="field-label">${esc(humanKey(key))}</span><span class="field-value">${esc(said)}</span></div></li>`;
-  };
-  // Underscores to words, except the names that own their own capitals.
-  const KEY_LABEL = { linkedin: "LinkedIn", github: "GitHub", url: "Website", address_2: "Address line 2", address_3: "Address line 3" };
-  const humanKey = (key) => KEY_LABEL[key] || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-
-  // Each source says how much of it there is, and opens on what it holds.
-  // The counts are the state; nothing here sends the person to the website
-  // to find out what the extension is about to use.
-  function sources() {
-    if (contextState === "loading") return `<p class="muted">Reading your profile, answers and drafts…</p>`;
-    if (contextState === "error" || !context) {
-      return `<p class="muted">Could not read your profile, answers and drafts. Autofill still works; it reads them again as it fills.</p>`;
-    }
-    const facts = Object.entries(context.profile || {});
-    const answers = context.answers || [];
-    const drafts = context.drafts || [];
-    const section = (id, title, count, empty, body) => `
-      <details class="field-section" id="${id}"><summary>${title} <span class="count">${count}</span></summary>
-      ${count ? `<ul>${body}</ul>` : `<p class="muted">${empty}</p>`}</details>`;
-    return [
-      section("jt-src-profile", "Profile details", facts.length, "Nothing set yet.",
-        facts.map(([key, value]) => factRow(key, value)).join("")),
-      section("jt-src-answers", "Saved answers", answers.length, "Nothing kept from a submitted form yet.",
-        answers.map((a) => `<li><div class="field-copy"><span class="field-label">${esc(a.label)}</span><span class="field-value">${esc(a.value)}</span></div><span class="tag">${esc(a.times_used)} used</span></li>`).join("")),
-      section("jt-src-drafts", "Drafts", drafts.length,
-        context.job ? "No drafts written for this posting yet." : "This page is not a posting on your board, so there are no job drafts.",
-        drafts.map((d) => `<li><div class="field-copy"><span class="field-label">${esc(d.question)}</span><span class="field-value">${esc(d.draft)}</span></div></li>`).join("")),
-    ].join("");
-  }
-
-  // The posting this page is, when the board knows it. The panel's own
-  // heading says it, so nothing below has to repeat it.
-  const matchedTitle = () =>
-    context && context.job ? [context.job.title, context.job.company].filter(Boolean).join(" · ") : "";
+  const applicationContext = createApplicationContext(api, lifecycle, esc, () => { if (showing === "offer") offer(offerLead); });
 
   // Which view is painted, so a late answer cannot paint over a newer one.
   let showing = null;
@@ -448,10 +308,10 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     render(`
       ${lead ? `<p class="notice" role="status">${esc(lead)}</p>` : ""}
       <button id="jt-autofill" class="primary">Autofill this page <span aria-hidden="true">↗</span></button>
-      ${sources()}
+      ${applicationContext.sources()}
     `);
     on("click", "jt-autofill", run);
-    loadContext();
+    applicationContext.load();
   }
 
   // A reader's trace of a fill, kept by key: the fields are read again
@@ -487,141 +347,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     return execute(runPage);
   }
 
-  async function runPage() {
-    showing = "flow";
-    render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Checking autofill is on</h4><p>Reading the extension's configuration for this site…</p></div></div>`);
-    const pol = await operation.wait(send({ kind: "policy", adapter: reader.host || "unknown" }));
-    if (!pol.ok) {
-      // Nothing valid cached and nothing fresh: new automation pauses, the
-      // person keeps the page, manual Submit tracking and reporting.
-      policy = null;
-      render(`<div class="result-heading"><span class="eyebrow">Autofill paused</span><h4>Could not confirm autofill is enabled</h4><p>Job Tracker could not load the extension's configuration for this site${pol.reason ? ` (${esc(String(pol.reason))})` : ""}. Your application is still here to fill by hand; reporting and submission tracking still work.</p></div><button id="jt-autofill" class="primary">Try again</button>`);
-      on("click", "jt-autofill", run);
-      return;
-    }
-    policy = pol.config;
-    if (!allowed("autofill")) {
-      const why = policy.features.autofill.reason === "ADAPTER_DISABLED" ? "for this job site" : "for now";
-      render(`<div class="result-heading"><span class="eyebrow">Autofill switched off</span><h4>Autofill is turned off ${why}</h4><p>Job Tracker has paused automatic filling here. You can complete the form yourself; reporting and submission tracking still work.</p></div>`);
-      return;
-    }
-    // A config-driven reader runs from the table the API published for this
-    // adapter when there is one, pinned for this fill; otherwise, and on any
-    // failure, from the table bundled with the extension.
-    recipeRevision = "bundled";
-    if (reader.useConfig) {
-      const rec = await operation.wait(send({ kind: "recipe", adapter: reader.host }));
-      if (rec.ok && reader.useConfig(rec.config.recipe)) {
-        recipeRevision = rec.config.revision.slice(0, 12);
-      }
-    }
-    await readFields();
-    render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>Filling your application</h4><p>Matching ${fields.length} form items with your profile and saved answers…</p></div></div>`);
-    const res = await taskApi("user/apply/resolve", "POST", {
-      url: location.href,
-      fields: fields.map(plain),
-      step: step,
-      fill_id: fill?.fill_id || null,
-      resume_open: true,
-    });
-    if (!res.ok) {
-      lastError = res;
-      if (res.stale) {
-        render(`<p class="warn">Job Tracker Apply was updated. Reload this page to continue.</p>`);
-        return;
-      }
-      render(
-        res.signin
-          ? `<div class="result-heading"><span class="eyebrow">Sign-in needed</span><h4>Connect to Job Tracker</h4><p><a href="${esc(res.signin)}" target="_blank" rel="noopener noreferrer">Open Job Tracker</a> and sign in, then return here.</p></div><button id="jt-autofill" class="primary">Try again</button>`
-          : `<div class="result-heading"><span class="eyebrow">Could not fill this page</span><h4>Let's try that again</h4><p>Job Tracker could not load your answers. Your application is still here.</p></div><button id="jt-autofill" class="primary">Try again</button><details class="help"><summary>Error details</summary><p class="warn">${esc(res.status)}: ${esc(JSON.stringify(res.json || res.error))}</p></details>`,
-      );
-      on("click", "jt-autofill", run);
-      return;
-    }
-    fill = res.json;
-    filled = new Map();
-    reviewState = null;
-    reviewMessage = "";
-    for (const entry of fill.fields) {
-      const field = fieldByKey(entry.key);
-      const current = field && reader.current(field);
-      if (current) filled.set(entry.key, { ok: true, value: current, kept: true });
-    }
-    // A field the reader leaves to the person is never offered to the model.
-    for (const entry of fill.fields) if (fieldByKey(entry.key)?._person) entry.never_ai = true;
-    // Repeated groups are filled from the profile's rows, not a value.
-    adapterContext.profile = fill.profile || {};
-    let file = null;
-    if (fill.resume && fill.resume.has_pdf && allowed("resume_upload")) {
-      const got = await operation.wait(pdf(`user/resumes/${fill.resume.id}/pdf`));
-      if (got.ok) file = new File([new Uint8Array(got.bytes)], got.name, { type: "application/pdf" });
-    }
-    // Upload before filling text and reread controls after DOM activity.
-    // Never clear populated fields to force a save: an async form may save
-    // the blank and skip restoring a value it still considers persisted.
-    let attached = false;
-    for (const entry of fill.fields) {
-      if (entry.rung === "resume") attached = (await put(entry, null, file)) || attached;
-    }
-    if (attached) {
-      await settle();
-      await readFields();
-    }
-    for (const entry of fill.fields) {
-      if (entry.rung !== "resume" && entry.value != null && !filled.get(entry.key)?.kept) await put(entry, entry.value, null);
-    }
-    await revealed(file);
-    // A search-backed picker that showed options nothing matched: the
-    // model chooses among what was on offer, with the profile's value as
-    // the hint, and its pick goes back through the reader as an exact.
-    for (const entry of fill.fields) {
-      const f = fieldByKey(entry.key);
-      if (!isFilled(entry) && f && f._seen && f._seen.length) {
-        entry.options = f._seen;
-        entry.hint = entry.hint || entry.value || undefined;
-        if (entry.kind === "text") entry.kind = "select";
-      }
-    }
-    if (allowed("ai_suggestions")) await askModel(fill.fields.filter((e) => !isFilled(e) && askable(e)));
-    await verify();
-    if (fill.fields.some(isFilled)) await trackFilledJob();
-    show();
-    await autoReport(`filled page ${step + 1}`);
-    // A form that spans pages: when this page has a Continue and no Submit,
-    // go on to the next page and fill it too, until the page that submits.
-    // Continue is not Submit; the person still clicks that.
-    pageSig = pageSignature();
-    if (prefs.autoAdvance && allowed("auto_advance") && reader.nextButton && !reader.submitButton() && reader.nextButton() && step < 12) {
-      // Only a complete page is advanced: a required field still blank is
-      // the person's to fill first (Workday, 2026-09-08: Continue pressed
-      // with five required fields blank, and the page listed them).
-      const blank = fill.fields.filter((e) => e.required && !isFilled(e) && e.kind !== "group");
-      if (blank.length) {
-        fill.stopped = `This page still needs ${blank.length} required field${blank.length === 1 ? "" : "s"}; fill them and press Continue yourself, or Fill again.`;
-        show();
-        return;
-      }
-      const before = fingerprint();
-      clickThrough(reader.nextButton());
-      for (let i = 0; i < 40 && fingerprint() === before; i++) await sleep(250);
-      await settle();
-      // The page's own verdict: a reader that can read the validation
-      // scope lists the fields the form refused, and the loop stops there.
-      const errors = reader.errors ? reader.errors() : [];
-      if (errors.length) {
-        fill.stopped = `The form refused the page: ${errors.slice(0, 6).join("; ")}.`;
-        show();
-        await autoReport("page refused");
-        return;
-      }
-      if (reader.ready()) {
-        step += 1;
-        fields = await reader.read();
-        fill = null;
-        return runPage();
-      }
-    }
-  }
 
   // DOM quiet is only a rendering heuristic, not a server-save receipt.
   const fingerprint = () =>
@@ -724,303 +449,45 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       fill.job_id = result.json.job_id;
       fill.board_saved = true;
       fill.board_error = false;
-      contextState = "idle";
-      await loadContext();
+      applicationContext.markIdle();
+      await applicationContext.load();
     } else fill.board_error = true;
   }
 
-  function show() {
-    const unconfirmed = fill.fields.filter(entry => filled.get(entry.key)?.error);
-    render(`
-      ${fill.board_saved ? `<p class="muted">Saved to your board. Existing status and application date preserved.</p>` : ""}
-      ${fill.board_error ? `<p class="notice warn" role="alert">Your form was filled, but saving this job to your board failed.</p><button id="jt-track-retry">Retry saving to board</button>` : ""}
-      ${fill.ai_error ? `<p class="notice warn" role="alert">Could not prepare AI answers: ${esc(fill.ai_error)}.</p>` : ""}
-      ${fill.stopped ? `<p class="notice warn" role="alert">${esc(fill.stopped)}</p>` : ""}
-      ${unconfirmed.length ? `<div class="notice warn" role="alert"><p>Some fields could not be confirmed. Review these before submitting:</p><ul>${unconfirmed.map(entry => `<li>${esc(entry.label || entry.key)}: ${esc(filled.get(entry.key).error)}</li>`).join("")}</ul></div>` : ""}
-      <div id="jt-answer-review"></div>
-      <button id="jt-again">Fill remaining blanks</button>
-      <details class="help"><summary>What gets remembered?</summary><p>Drafts and suggestions are saved with this application. After submission, choices and short answers can be reused for the same question. The final submission record keeps the values actually on the form.</p></details>
-    `);
-    on("click", "jt-again", run);
-    on("click", "jt-track-retry", async () => { await trackFilledJob(); show(); });
-    drawReview();
-    if (!reviewState) loadReview();
-  }
+  const reviewController = createApplicationReview({ state: { get fill() { return fill; }, get filled() { return filled; }, get reviewState() { return reviewState; }, set reviewState(value) { reviewState = value; }, get reviewMessage() { return reviewMessage; }, set reviewMessage(value) { reviewMessage = value; }, get panelUp() { return panelUp; }, touched }, render, on, api, surface, operation, fieldByKey, reader, boxOf, allowed, askable, entryByKey, execute, taskApi, put, esc, trackFilledJob, run });
+  const { show, loadReview, drawReview, reviewAction } = reviewController;
 
-  async function loadReview() {
-    const fillId = fill?.fill_id;
-    if (!fillId) return;
-    const refreshing = reviewState?.id === fillId && reviewState.state === "ready";
-    // Refresh existing cards in place. Removing them collapses the scroll
-    // container and discards open editors and unsaved edits in other fields.
-    if (!refreshing) reviewState = { id: fillId, state: "loading", fields: [] };
-    drawReview();
-    const result = await api(`user/apply/fills/${fillId}`, "GET");
-    if (fill?.fill_id !== fillId) return;
-    if (result.ok) reviewState = { ...result.json, state: "ready" };
-    else if (!refreshing) reviewState = { id: fillId, state: "error", fields: [] };
-    if (!result.ok) reviewMessage = "Could not load saved answers. Check your connection and sign-in, then retry. Your form has not changed.";
-    drawReview();
-  }
+  const { capture, autoReport } = createApplicationReportCapture({ reader, boxOf, plain, traces, api, VERSION, BUILD, getFields: () => fields, getFill: () => fill, getReviewState: () => reviewState, getFilled: () => filled, getLastError: () => lastError, getPolicy: () => policy, getRecipeRevision: () => recipeRevision });
 
-  function drawReview() {
-    if (!fill || !panelUp) return;
-    const names = { profile: "Profile", bank: "Saved answer", draft: "Job draft", ai: "Generated", manual: "Your edit" };
-    surface.review({
-      fillId: fill.fill_id, state: reviewState?.state || "loading", message: reviewMessage,
-      busy: operation.busy || !!reviewState?.submitted_at,
-      fields: fill.fields.map(entry => {
-        const saved = reviewState?.fields.find(f => f.key === entry.key) || entry;
-        const field = fieldByKey(entry.key);
-        const current = String((field && reader.current(field)) || "");
-        const node = field && (field._el || field._ctl || field._box || boxOf(field));
-        return { key: entry.key, label: entry.label || entry.key, kind: entry.kind, current,
-          required: field?.required === true, present: !!node?.isConnected,
-          saveUnconfirmed: !!filled.get(entry.key)?.error,
-          value: saved.review_value ?? current ?? entry.value ?? "", feedback: saved.feedback || "",
-          source: filled.get(entry.key)?.error ? "Save unconfirmed" : touched.has(entry.key) || filled.get(entry.key)?.kept ? "Kept on form" : names[entry.rung] || "Filled",
-          editable: !field?._person && ["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind),
-          canGenerate: allowed("ai_suggestions") && !saved.never_ai && !field?._person && (entry.kind === "long" || askable(entry)), history: saved.answer_history || [] };
-      }),
-    });
-  }
+  const reportPanel = createReportPanel({ on, surface, reader, readFields, getFields: () => fields, api, capture, esc });
 
-  async function reviewAction({ action, key, value, feedback }) {
-    if (action === "reload") return loadReview();
-    if (!fill || operation.busy) return;
-    const entry = entryByKey(key);
-    const field = fieldByKey(key);
-    if (!entry || !field) return;
-    if (action === "locate") {
-      const node = field._el || field._ctl || field._box || boxOf(field);
-      if (node) {
-        node.scrollIntoView?.({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-        const selector = 'input:not([type="hidden"]):not([type="file"]):not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [contenteditable="true"]';
-        const target = node.matches(selector) ? node : [...node.querySelectorAll(selector)].find(el => el.getClientRects().length);
-        target?.focus({ preventScroll: true });
-      }
-      return;
-    }
-    if (reviewState?.state !== "ready") return;
-    if (field._person || !["text", "long", "number", "select", "yesno", "multiselect"].includes(entry.kind)) return;
-    const before = reader.current(field);
-    const originalFill = fill.fill_id;
-    return execute(async () => {
-      const saved = reviewState.fields.find(f => f.key === key);
-      if (!saved) throw new Error("The field is no longer part of this application.");
-      const answer = action === "refill" ? (saved.review_value ?? saved.value ?? "") : String(value ?? "");
-      const response = await taskApi(`user/apply/fills/${originalFill}/answer`, "PUT", {
-        key, revision: saved.answer_revision || 0, value: answer, feedback: String(feedback ?? ""),
-      });
-      if (!response.ok) {
-        reviewMessage = response.status === 409 ? "This answer changed elsewhere. Reload saved answers before trying again." : "Could not save your draft. The form has not changed.";
-        drawReview();
-        return;
-      }
-      reviewState = { ...response.json, state: "ready" };
-      if (action === "generate") {
-        if (!allowed("ai_suggestions") || saved.never_ai || !(entry.kind === "long" || askable(entry))) return;
-        const generated = await taskApi("user/apply/suggest", "POST", {
-          fill_id: originalFill, job_id: fill.job_id, review_only: true,
-          revision: reviewState.fields.find(f => f.key === key).answer_revision,
-          fields: [{ key, label: entry.label || key, kind: entry.kind, options: entry.options || [] }],
-        });
-        reviewMessage = generated.ok ? (generated.json.answers?.[key] ? "New draft ready. Review it, then choose Apply this answer." : "No draft was generated for this field. Your existing answer is unchanged.") : "Could not generate a new draft. Your saved suggestions and form answer are unchanged.";
-        await loadReview();
-      } else if (action === "apply" || action === "refill") {
-        if (fill.fill_id !== originalFill || reader.current(field) !== before) {
-          reviewMessage = "The form changed while saving. Your newer answer was kept. Review and apply again if needed.";
-        } else {
-          const ok = await put(entry, answer, null, true);
-          if (ok) touched.add(key);
-          reviewMessage = ok ? "Answer applied. Check the employer's form before submitting." : "The form did not accept this answer. Choose its value directly on the page.";
-        }
-      } else reviewMessage = "Draft and suggestions saved. The form was not changed.";
-      drawReview();
-    });
-  }
-
-  function finals() {
-    return fill.fields.map((entry) => {
-      const field = fieldByKey(entry.key);
-      const value = field ? reader.current(field) : null;
-      const typed = (value || "") !== (entry.value || "");
-      return {
-        key: entry.key,
-        final: value,
-        // What the person typed or picked, and a model answer they left in
-        // place. Never free text: that is per job, and the drafts cover it.
-        remember: !!value && (typed || entry.rung === "ai") && entry.kind !== "long" && entry.kind !== "file",
-      };
-    });
-  }
-
-  // Everything the extension saw, for triage: the fields as read with the
-  // markup around each, what the API resolved, what took, the person's note.
-  function capture() {
-    const clean = (html, cap) => html.replace(/<script[\s\S]*?<\/script>/gi, "").slice(0, cap);
-    const boxes = fields.map(boxOf).filter(Boolean);
-    let root = boxes[0] ? boxes[0].parentElement : document.body;
-    while (root && root !== document.body && !boxes.every((b) => root.contains(b))) root = root.parentElement;
-    return {
-      title: document.title,
-      host: reader.host,
-      version: chrome.runtime.getManifest().version,
-      build: BUILD,
-      userAgent: navigator.userAgent,
-      at: new Date().toISOString(),
-      fields: fields.map((f) => {
-        const box = boxOf(f);
-        const ctl = f._ctl || (box && box.querySelector("input:not([type=hidden]), textarea, select, button"));
-        return {
-          ...plain(f),
-          trace: traces.get(f.key) || f._trace || null,
-          current: reader.current(f),
-          control: ctl ? { tag: ctl.tagName, type: ctl.type || null, id: ctl.id || null, class: ctl.className } : null,
-          html: box ? clean(box.outerHTML, 4000) : null,
-        };
-      }),
-      resolved: fill,
-      answer_review: reviewState,
-      filled: Object.fromEntries(filled),
-      error: lastError,
-      html: clean((root || document.body).outerHTML, 400000),
-    };
-  }
-
-  // Every fill pass posts its own capture, tagged automatic, so a page can
-  // be read the way a report is without the person pressing anything
-  // (Kanishk, 2026-09-08: "stream all pages back with traces"). The button
-  // stays for a note in the person's words. Failures are silent: the
-  // capture is for triage, never in the person's way.
-  async function autoReport(reason) {
-    try {
-      const pinned = policy && policy.revision ? policy.revision.slice(0, 12) : "none";
-      await api("user/apply/reports", "POST", { url: location.href, note: `auto: ${reason} [ext ${VERSION} ${reader.host || "unknown"} schema 1 rev ${pinned} recipe ${recipeRevision}]`, page: capture() });
-    } catch (_) {
-      // Nothing to do; the next pass captures again.
-    }
-  }
-
-  const REPORT_BUTTON = `<button id="jt-report-btn">Report an issue</button>`;
-  async function reportForm() {
-    if (!fields.length && reader.ready()) await readFields();
-    surface.region("jt-report", `
-      <label for="jt-note" class="setting-title">What went wrong?</label><p class="muted">Includes a capture of this page and its form values.</p><textarea id="jt-note" rows="3" placeholder="Add a note (optional)"></textarea>
-      <button id="jt-send">Send report</button> <button id="jt-cancel">Cancel</button>`);
-  }
-  on("click", "jt-cancel", () => surface.region("jt-report", REPORT_BUTTON));
-  // The note travels with the click, so the panel is never read across a frame.
-  on("click", "jt-send", async (values) => {
-    surface.mark("jt-send", { disabled: true });
-    const res = await api("user/apply/reports", "POST", {
-      url: location.href,
-      note: values["jt-note"] || "",
-      page: capture(),
-    });
-    surface.region("jt-report", res.ok
-      ? `<p class="muted">Reported as #${res.json.id}. Thank you.</p>`
-      : `<p class="warn">Report failed (${esc(res.status)}): ${esc(JSON.stringify(res.json || res.error))}</p>`);
+  const runPage = createPageFill({
+    state: {
+      get showing() { return showing; }, set showing(value) { showing = value; },
+      get policy() { return policy; }, set policy(value) { policy = value; },
+      get recipeRevision() { return recipeRevision; }, set recipeRevision(value) { recipeRevision = value; },
+      get fields() { return fields; }, set fields(value) { fields = value; },
+      get step() { return step; }, set step(value) { step = value; },
+      get fill() { return fill; }, set fill(value) { fill = value; },
+      get lastError() { return lastError; }, set lastError(value) { lastError = value; },
+      get filled() { return filled; }, set filled(value) { filled = value; },
+      get reviewState() { return reviewState; }, set reviewState(value) { reviewState = value; },
+      get reviewMessage() { return reviewMessage; }, set reviewMessage(value) { reviewMessage = value; },
+      get pageSig() { return pageSig; }, set pageSig(value) { pageSig = value; },
+    },
+    render, operation, send, reader, allowed, readFields, taskApi, plain, esc,
+    on, run, fieldByKey, adapterContext, pdf, put, settle, revealed, isFilled,
+    askable, askModel, verify, trackFilledJob, show, autoReport, pageSignature,
+    prefs, fingerprint, clickThrough, sleep,
   });
 
-  const CONFIRMED = /thank you for (applying|your application)|application (has been )?(received|submitted)|we('ve| have) received your application|we got your application|successfully submitted/i;
-  const confirmationVisible = () => {
-    if (reader.submitted()) return true;
-    const pageText = document.body.innerText.replace(surface.text(), "");
-    return !reader.ready() && CONFIRMED.test(pageText);
-  };
-
-  function showSubmission() {
-    if (!submission) return;
-    showing = "submission";
-    panelUp = true;
-    surface.ensure();
-    // The earlier watcher stopped at 30 seconds. Keep watching after that
-    // point, but offer the person a way to confirm a missed success signal.
-    const overdue = Date.now() - submission.startedAt >= 30000;
-    const view = `${submission.status}:${overdue}:${submission.result?.status || ""}`;
-    if (view === submissionView) return;
-    submissionView = view;
-    if (submission.status === "recorded") {
-      render(`<div class="result-heading"><span class="eyebrow">Submission recorded</span><h4>${submission.result.json.job_id ? "Saved to your board" : "Application recorded"}</h4><p>${submission.result.json.job_id ? "Your job is marked Application Submitted." : "This submission is saved in your application history. No matching board job was found, so no board status changed."}</p></div>`);
-    } else if (submission.status === "confirmed") {
-      render(`<div class="result-heading"><span class="eyebrow">Submitted · not yet recorded</span><h4>Save your submission</h4><p>The application was confirmed, but Job Tracker has not saved it yet. Retrying will not submit the application again.</p></div><button id="jt-retry-record" class="primary">Retry saving</button>${submission.result?.signin ? `<p><a href="${esc(submission.result.signin)}" target="_blank" rel="noopener noreferrer">Sign in to Job Tracker</a>, then retry.</p>` : ""}`);
-      on("click", "jt-retry-record", () => confirmSubmission("retry"));
-    } else {
-      render(`<div class="working" role="status"><span class="spinner" aria-hidden="true"></span><div><h4>${overdue ? "Still awaiting confirmation" : "Checking your submission"}</h4><p>${overdue ? "If the form shows errors, correct them and submit again. If it succeeded, you can confirm it below." : "Waiting for the application site to confirm success. Your board has not changed yet."}</p></div></div><button id="jt-confirm-record" class="primary">I submitted this application</button><button id="jt-dismiss-attempt">Back to autofill</button>`);
-      on("click", "jt-confirm-record", () => confirmSubmission("confirm"));
-      on("click", "jt-dismiss-attempt", async () => {
-        const res = await send({ kind: "submission", action: "clear", fillId: submission.fillId });
-        if (!res.ok) return;
-        submission = null;
-        submissionView = null;
-        mountedFor = null;
-        mount();
-      });
-    }
-  }
-
-  async function confirmSubmission(action) {
-    if (!submission || submissionBusy) return;
-    submissionBusy = true;
-    for (const id of ["jt-retry-record", "jt-confirm-record"]) surface.mark(id, { disabled: true });
-    const res = await send({ kind: "submission", action, fillId: submission.fillId });
-    submissionBusy = false;
-    if (res.ok) submission = res.state;
-    else {
-      // The worker may have saved the receipt before its reply was lost.
-      const saved = await send({ kind: "submission", action: "get" });
-      if (saved.ok && saved.state) submission = saved.state;
-      else {
-        render(`<p class="warn">Could not reach the extension. Reload this page to recover the saved submission attempt.</p>`);
-        return;
-      }
-    }
-    submissionView = null;
-    showSubmission();
-  }
-
-  const armSubmission = async () => {
-    if (submissionBusy) return;
-    submissionBusy = true;
-    const res = await send({ kind: "submission", action: "arm", fillId: fill?.fill_id || null, url: location.href, title: document.title, fields: fill ? finals() : [] });
-    submissionBusy = false;
-    if (res.ok) {
-      submission = res.state;
-      submissionView = null;
-      showSubmission();
-    } else {
-      render(`<p class="warn">Could not start submission tracking. ${res.stale ? "Reload this page to reconnect the extension." : "Your application can still submit, but its board status may need updating manually."}</p>`);
-    }
-  };
-  lifecycle.addEventListener(document, "click", (ev) => {
-    const button = reader.submitButton();
-    if (button?.contains(ev.target)) armSubmission();
-  }, true);
-  lifecycle.addEventListener(document, "submit", (ev) => {
-    const button = reader.submitButton();
-    if (button && ev.target === button.form) armSubmission();
-  }, true);
-
-  // A single-page app changes the url and the page without a load, so the
-  // form is watched for rather than assumed at load time.
-  if (submission) {
-    showSubmission();
-    if (submission.status === "confirmed") confirmSubmission("retry");
-  } else mount();
-  lifecycle.setInterval(async () => {
-    if (submission && submission.status !== "confirmed" && reader.ready() && new URL(submission.url).pathname !== location.pathname) {
-      if (clearingSubmission || submissionBusy) return;
-      clearingSubmission = true;
-      await send({ kind: "submission", action: "clear", fillId: submission.fillId });
-      submission = null;
-      submissionView = null;
-      mountedFor = null;
-      clearingSubmission = false;
-    }
-    if (submission) {
-      if (submission.status === "watching" && confirmationVisible()) confirmSubmission("confirm");
-      else showSubmission();
-    } else mount();
-  }, 700);
+  const submissionTracker = createSubmissionTracker({
+    on, reader, surface, lifecycle, send, render, esc, mount, fieldByKey,
+    getFill: () => fill, getSubmission: () => submission,
+    setSubmission: (value) => { submission = value; },
+    setShowing: (value) => { showing = value; },
+    setPanelUp: (value) => { panelUp = value; },
+    setMountedFor: (value) => { mountedFor = value; },
+  });
+  submissionTracker.start();
 }
