@@ -22,6 +22,16 @@ Failure modes seen repeatedly here:
 A good pattern: supply input the code is expected to *reject*, so a broken
 filter produces output and fails the test.
 
+## Board format tests
+
+Keep each listing provider's feed excerpts, paging cases and incomplete-pull
+proofs in `tests/test_board_<provider>.py`. Put URL dispatch and shared posting
+construction cases in `tests/test_board_dispatch.py`; put Markdown table cases
+in `tests/test_board_markdown.py`. A reply object used by several provider
+tests lives in `tests/board_responses.py`, but provider-shaped payloads stay
+beside the test that interprets them. A test of one provider should not need
+another provider's fixture or patch its response.
+
 ## Fixtures and mocks
 
 **A fixture cannot falsify the assumption it was built from.** If you write
