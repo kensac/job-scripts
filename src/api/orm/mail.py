@@ -99,6 +99,22 @@ class EmailMessage(Base):
     )
 
 
+class GmailScanCursor(Base):
+    """The next full-mailbox page to finish for one person."""
+
+    __tablename__ = "gmail_scan_cursors"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    pending_ids: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    ranges: Mapped[Any] = mapped_column(JSONB, server_default=text("'[[null, null]]'::jsonb"))
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=_now
+    )
+
+
 class EmailEvent(Base):
     __tablename__ = "email_events"
     __table_args__ = (Index("idx_email_events_latest", "message_id", "kind", text("id DESC")),)

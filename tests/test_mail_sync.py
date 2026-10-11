@@ -148,16 +148,17 @@ def _gmail_stub(monkeypatch, messages: list[ImportedMessage]) -> dict[str, list]
     calls: dict[str, list] = {"listed": [], "fetched": []}
     by_id = {m.provider_message_id: m for m in messages}
 
-    def list_message_ids(user_id, *, after=None):
+    def list_message_page(user_id, *, page_token=None, after=None):
         calls["listed"].append(after)
-        return iter(list(by_id))
+        return list(by_id), None
 
     def fetch_message(user_id, message_id):
         calls["fetched"].append(message_id)
         return by_id[message_id]
 
-    monkeypatch.setattr(mail_sync.gmail, "list_message_ids", list_message_ids)
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", list_message_page)
     monkeypatch.setattr(mail_sync.gmail, "fetch_message", fetch_message)
+    monkeypatch.setattr(mail_sync, "_reconcile_one", lambda *_args: None)
     monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     return calls
@@ -257,7 +258,7 @@ async def test_sync_lets_needsreconnect_propagate(monkeypatch, f):
     def boom(user_id, message_id=None, **kw):
         raise oauth.NeedsReconnect("grant revoked")
 
-    monkeypatch.setattr(mail_sync.gmail, "list_message_ids", boom)
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", boom)
     monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     with pytest.raises(oauth.NeedsReconnect):
@@ -275,7 +276,7 @@ async def test_sync_lets_providererror_propagate_without_killing_the_grant(monke
     def boom(user_id, **kw):
         raise oauth.ProviderError("503 backend_error")
 
-    monkeypatch.setattr(mail_sync.gmail, "list_message_ids", boom)
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", boom)
     monkeypatch.setattr(mail_sync, "set_progress", lambda *a, **k: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *a, **k: None)
     with pytest.raises(oauth.ProviderError):
@@ -307,3 +308,230 @@ async def test_a_sync_that_stops_short_resumes_rather_than_skipping(set_config, 
         db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
         == 6
     ), "the next pass must pick up where the last one stopped"
+
+
+@pytest.mark.asyncio
+async def test_full_sweep_finds_mail_older_than_recent_window(monkeypatch, f, set_config):
+    uid = f.make_user()
+    _connect(uid)
+    set_config("mail_reconciliation_ranges_per_cycle", 1)
+    set_config("mail_reconciliation_messages_per_cycle", 3)
+    newest = _message("<newest@x>")
+    newest.sent_at = datetime.datetime(2026, 10, 10, tzinfo=datetime.UTC)
+    old_one = _message("<old-one@x>")
+    old_two = _message("<old-two@x>")
+    mail_store.store_messages(uid, [newest])
+    messages = {"newest": newest, "old-one": old_one, "old-two": old_two}
+    page_calls: list[tuple[int | None, int | None]] = []
+    fetched: list[str] = []
+
+    def page(_user_id, *, page_token=None, after=None, after_epoch=None, before_epoch=None):
+        if after is not None:
+            return ["newest"], None
+        page_calls.append((after_epoch, before_epoch))
+        if after_epoch is None and before_epoch is None:
+            return ["newest"], "more"
+        if before_epoch == 0:
+            return [], None
+        if before_epoch is None:
+            return [], None
+        if after_epoch is None:
+            return ["newest"], "more"
+        if after_epoch == 0:
+            return ["newest", "old-one", "old-two"], None
+        return [], None
+
+    def fetch(_user_id, message_id):
+        fetched.append(message_id)
+        return messages[message_id]
+
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", page)
+    monkeypatch.setattr(mail_sync.gmail, "fetch_message", fetch)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mail_sync, "enqueue", lambda *_args, **_kw: None)
+
+    for _ in range(5):
+        await mail_sync.handle_sync_gmail(1, {"user_id": uid})
+        cursor = db.query_one(
+            "SELECT completed_at FROM gmail_scan_cursors WHERE user_id = %s", (uid,)
+        )
+        if cursor and cursor["completed_at"] is not None:
+            break
+    assert len(page_calls) >= 4
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 3
+    )
+    assert cursor and cursor["completed_at"] is not None
+
+    await mail_sync.handle_sync_gmail(1, {"user_id": uid})
+    assert page_calls[-1] == (None, None)
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 3
+    )
+    assert fetched.count("old-one") == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_keeps_unfinished_page_after_fetch_failure(monkeypatch, f, set_config):
+    uid = f.make_user()
+    _connect(uid)
+    set_config("mail_reconciliation_ranges_per_cycle", 1)
+    set_config("mail_reconciliation_messages_per_cycle", 2)
+    newest = _message("<newest@x>")
+    newest.sent_at = datetime.datetime(2026, 10, 10, tzinfo=datetime.UTC)
+    mail_store.store_messages(uid, [newest])
+    older = _message("<older@x>")
+    attempts = 0
+    pages = 0
+
+    def page(_user_id, *, page_token=None, after=None, after_epoch=None, before_epoch=None):
+        if after is not None:
+            return [], None
+        nonlocal pages
+        pages += 1
+        return ["older"], None
+
+    def fetch(_user_id, _message_id):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise mail_sync.gmail.GmailError("temporary failure")
+        return older
+
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", page)
+    monkeypatch.setattr(mail_sync.gmail, "fetch_message", fetch)
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *_args, **_kw: None)
+    monkeypatch.setattr(mail_sync, "enqueue", lambda *_args, **_kw: None)
+
+    with pytest.raises(mail_sync.gmail.GmailError):
+        await mail_sync.handle_sync_gmail(1, {"user_id": uid})
+    pending = db.query_one("SELECT pending_ids FROM gmail_scan_cursors WHERE user_id = %s", (uid,))
+    assert pending and pending["pending_ids"] == ["older"]
+
+    await mail_sync.handle_sync_gmail(1, {"user_id": uid})
+    assert pages == 1
+    assert attempts == 2
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 2
+    )
+
+
+def test_reconciliation_search_ranges_overlap_exact_second_boundaries(monkeypatch):
+    params: list[dict] = []
+    monkeypatch.setattr(mail_sync.gmail.oauth, "get_access_token", lambda _user_id: "token")
+
+    def get(_path, _token, **query):
+        params.append(query)
+        return {"messages": []}
+
+    monkeypatch.setattr(mail_sync.gmail, "_get", get)
+    mail_sync.gmail.list_message_page(1, after_epoch=10, before_epoch=11)
+    assert params[0]["q"] == "after:9 before:11"
+    assert mail_sync._split_epoch(10, 11) is None
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_refuses_unsplittable_provider_page(monkeypatch, f, set_config):
+    uid = f.make_user()
+    _connect(uid)
+    set_config("mail_reconciliation_ranges_per_cycle", 1)
+    db.execute(
+        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
+        (uid, db.jsonb([[10, 11]])),
+    )
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", lambda *_args, **_kw: (["a"], "more"))
+    with pytest.raises(mail_sync.gmail.GmailError, match="cannot safely advance"):
+        mail_sync._reconcile_one(1, uid)
+    cursor = db.query_one(
+        "SELECT ranges, completed_at FROM gmail_scan_cursors WHERE user_id = %s", (uid,)
+    )
+    assert cursor == {"ranges": [[10, 11]], "completed_at": None}
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_keeps_unfetched_ids_after_cycle_budget(monkeypatch, f, set_config):
+    uid = f.make_user()
+    _connect(uid)
+    set_config("mail_reconciliation_ranges_per_cycle", 1)
+    set_config("mail_reconciliation_messages_per_cycle", 1)
+    db.execute(
+        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
+        (uid, db.jsonb([[0, 20]])),
+    )
+    pages = 0
+
+    def page(_user_id, **_kw):
+        nonlocal pages
+        pages += 1
+        return ["a", "b"], None
+
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", page)
+    monkeypatch.setattr(
+        mail_sync.gmail,
+        "fetch_message",
+        lambda _user_id, message_id: _message(f"<{message_id}@x>"),
+    )
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *_args, **_kw: None)
+    mail_sync._reconcile_one(1, uid)
+    cursor = db.query_one(
+        "SELECT pending_ids, completed_at FROM gmail_scan_cursors WHERE user_id = %s", (uid,)
+    )
+    assert cursor == {"pending_ids": ["b"], "completed_at": None}
+    mail_sync._reconcile_one(1, uid)
+    assert pages == 1
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 2
+    )
+
+
+def test_new_mail_in_completed_range_is_seen_on_next_sweep(monkeypatch, f, set_config):
+    uid = f.make_user()
+    set_config("mail_reconciliation_ranges_per_cycle", 1)
+    set_config("mail_reconciliation_messages_per_cycle", 3)
+    db.execute(
+        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
+        (uid, db.jsonb([[0, 20]])),
+    )
+    at = {"older": 5, "recent": 15}
+
+    def page(_user_id, *, after_epoch=None, before_epoch=None):
+        matches = [
+            name
+            for name, epoch in at.items()
+            if (after_epoch is None or epoch >= after_epoch)
+            and (before_epoch is None or epoch < before_epoch)
+        ]
+        return matches[:1], "more" if len(matches) > 1 else None
+
+    monkeypatch.setattr(mail_sync.gmail, "list_message_page", page)
+    monkeypatch.setattr(
+        mail_sync.gmail,
+        "fetch_message",
+        lambda _user_id, message_id: _message(f"<{message_id}@x>"),
+    )
+    monkeypatch.setattr(mail_sync, "set_progress", lambda *_args, **_kw: None)
+    mail_sync._reconcile_one(1, uid)  # Split [0,20].
+    mail_sync._reconcile_one(1, uid)  # Finish [10,20].
+    at["arrived-late"] = 16
+    mail_sync._reconcile_one(1, uid)  # Finish [0,10].
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 2
+    )
+
+    # The next full traversal repeats completed ranges and finds the new ID.
+    db.execute(
+        "UPDATE gmail_scan_cursors SET ranges = %s, completed_at = NULL WHERE user_id = %s",
+        (db.jsonb([[0, 20]]), uid),
+    )
+    set_config("mail_reconciliation_ranges_per_cycle", 10)
+    for _ in range(5):
+        mail_sync._reconcile_one(1, uid)
+    assert (
+        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+        == 3
+    )

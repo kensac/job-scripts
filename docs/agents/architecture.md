@@ -31,6 +31,16 @@ request and response schemas, owner checks, and submission transaction.
 
 Import → classify → match → derive.
 
+**Gmail sync must revisit the whole mailbox.** The recent search reads a
+bounded number of provider pages. `tasks.mail.sync` also keeps unfinished
+search ranges and pending message IDs in `gmail_scan_cursors`. A range with
+another provider page splits into smaller date ranges. Do not save Gmail page
+tokens across cycles. Store every fetched message before removing its ID from
+the pending list. A failed fetch retries that ID, and a completed sweep starts
+again so mail added to an earlier range is found later. If more than one page
+falls in a single second, fail visibly instead of marking the sweep complete.
+The per-cycle work budgets live in `app_config`; they never discard mail.
+
 - `email_messages`: the message as it arrived. Body text and body HTML are
   both retained; the text is derived from the HTML, so the HTML must be stored
   before anything re-derives the text. `provider_message_id` is the
