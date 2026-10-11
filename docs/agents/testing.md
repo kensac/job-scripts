@@ -54,6 +54,14 @@ Postgres creation in `tests/database_bootstrap.py`; it must not import `api.db`
 before the URL is set. Preserve the corpus-last collection hook so an unmarked
 test cannot empty the corpus after its final build.
 
+## Re-verification sweep tests
+
+Keep re-verification sweep candidate selection and chunking in
+`test_reverify_sweep_candidates.py`, and fetch, cancellation, submission, and
+verdict reuse behavior in `test_reverify_sweep_execution.py`. Share only the
+database-clock verdict aging helper in `reverify_sweep_support.py`, so each
+module owns its fixtures and exercises the production handler directly.
+
 ## Generated corpus ownership
 
 Keep measured column distributions in `tests/production_profile.json`; refresh

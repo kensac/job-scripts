@@ -1,31 +1,14 @@
-"""The re-verification sweep: which postings it takes, and what it does when
-the page will not come back.
-
-handle_reverify_open is the splitter, and it had no test of its own. Both
-defects found in this file were the same shape - a verdict written once and
-never revisited - and both live in the candidate query, which is the one part
-of the sweep that decides whether a posting is ever looked at again.
-
-Everything the splitter decides shows up in the rows it hands the sweep, so
-standing in for the sweep is what makes the decision observable without a
-provider. The gather loop is exercised through the real fetch path, with the
-submission boundary recorded rather than crossed: what a sweep is willing to
-pay for is the decision, and the provider is not part of it.
-"""
+"""Which postings the re-verification splitter selects and shards."""
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
-from api import db, fetching
+from api import db
 from core import catalog
-from core.fetching import ats as core_ats
 from tasks import reverification
-from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
-from tests.factories import make_batch_result
+from tests.reverify_sweep_support import age_closed_verdict
 
 
 @pytest.fixture
@@ -44,16 +27,6 @@ def _urls(calls) -> set[str]:
     return {r["url"] for call in calls for r in call["rows"]}
 
 
-def _age_closed_verdict(url: str, days: int) -> None:
-    """Move a verdict back on the DATABASE's clock. A verdict aged from Python
-    is compared against now() by the staleness predicate, which is two clocks."""
-    db.execute(
-        "UPDATE ai_queries SET created_at = now() - make_interval(days => %s) "
-        "WHERE url = %s AND check_type = 'closed'",
-        (days, url),
-    )
-
-
 def _machine_row(uid: int, job_id: int) -> None:
     """What materialize_passing writes for a passing posting: the
     working-set pair the sweep reads."""
@@ -67,11 +40,6 @@ def _relist(job_id: int, source: str) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# handle_reverify_open: which postings become candidates
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_the_sweep_takes_stale_board_rows_and_postings_a_feed_put_back(f, taken):
     """Two branches, and the second is the one that made a closure permanent:
@@ -82,20 +50,20 @@ async def test_the_sweep_takes_stale_board_rows_and_postings_a_feed_put_back(f, 
     f.subscribe(uid, source)
 
     stale_id, stale_url = f.make_ready_job(source=source)
-    _age_closed_verdict(stale_url, 30)
+    age_closed_verdict(stale_url, 30)
     _machine_row(uid, stale_id)
 
     fresh_id, fresh_url = f.make_ready_job(source=source)
     _machine_row(uid, fresh_id)
 
     touched_id, touched_url = f.make_ready_job(source=source)
-    _age_closed_verdict(touched_url, 30)
+    age_closed_verdict(touched_url, 30)
     _machine_row(uid, touched_id)
     f.make_board_row(uid, touched_id, status="Applied")
 
     # Closed, so it has no board row at all, and its feed has since listed it.
     relisted_id, relisted_url = f.make_ready_job(source=source, closed="rejected")
-    _age_closed_verdict(relisted_url, 2)
+    age_closed_verdict(relisted_url, 2)
     _relist(relisted_id, source)
 
     task_id = f.make_task("reverify_open", {}, status="running")
@@ -117,13 +85,13 @@ async def test_the_stale_branch_reads_the_working_set_not_legacy_rows(f, taken):
     f.subscribe(uid, source)
 
     picked_id, picked_url = f.make_ready_job(source=source)
-    _age_closed_verdict(picked_url, 30)
+    age_closed_verdict(picked_url, 30)
     db.execute(
         "INSERT INTO user_job_working_set (user_id, job_id) VALUES (%s, %s)", (uid, picked_id)
     )
 
     bare_id, bare_url = f.make_ready_job(source=source)
-    _age_closed_verdict(bare_url, 30)
+    age_closed_verdict(bare_url, 30)
     f.make_board_row(uid, bare_id, status=None)
 
     task_id = f.make_task("reverify_open", {}, status="running")
@@ -140,7 +108,7 @@ async def test_a_relisting_older_than_the_verdict_answering_it_is_not_a_candidat
     uid = f.make_user()
     f.subscribe(uid, source)
     job_id, url = f.make_ready_job(source=source, closed="rejected")
-    _age_closed_verdict(url, 2)
+    age_closed_verdict(url, 2)
     _relist(job_id, source)
 
     task_id = f.make_task("reverify_open", {}, status="running")
@@ -208,12 +176,12 @@ async def test_the_per_cycle_cap_bounds_the_stale_branch_and_not_the_relistings(
     stale_urls = set()
     for _ in range(3):
         job_id, url = f.make_ready_job(source=source)
-        _age_closed_verdict(url, 30)
+        age_closed_verdict(url, 30)
         _machine_row(uid, job_id)
         stale_urls.add(url)
 
     relisted_id, relisted_url = f.make_ready_job(source=source, closed="rejected")
-    _age_closed_verdict(relisted_url, 2)
+    age_closed_verdict(relisted_url, 2)
     _relist(relisted_id, source)
 
     task_id = f.make_task("reverify_open", {}, status="running")
@@ -256,7 +224,7 @@ async def test_more_candidates_than_a_chunk_are_sharded_without_loss(
     expected = set()
     for _ in range(5):
         job_id, url = f.make_ready_job(source=source)
-        _age_closed_verdict(url, 30)
+        age_closed_verdict(url, 30)
         _machine_row(uid, job_id)
         expected.add(url)
 
@@ -300,7 +268,7 @@ async def test_a_splitter_resuming_a_parked_batch_selects_no_new_candidates(f, t
     uid = f.make_user()
     f.subscribe(uid, source)
     job_id, url = f.make_ready_job(source=source)
-    _age_closed_verdict(url, 30)
+    age_closed_verdict(url, 30)
     _machine_row(uid, job_id)
 
     task_id = f.make_task("reverify_open", {"batch_ids": ["batch_parked"]}, status="running")
@@ -308,204 +276,3 @@ async def test_a_splitter_resuming_a_parked_batch_selects_no_new_candidates(f, t
 
     assert taken == [{"rows": [], "parent_id": None, "force": False}]
     assert _urls(taken) == set(), "the stale posting waits for the batch in flight"
-
-
-# ---------------------------------------------------------------------------
-# _reverify_jobs: what the sweep is willing to pay for
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def submitted(monkeypatch):
-    """The urls that crossed the submission boundary, per call."""
-    calls: list[list[str]] = []
-
-    async def fake_submit(task_id, specs, *args, **kwargs):
-        calls.append([spec.custom_id for spec in specs])
-        return []
-
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
-    monkeypatch.setattr(reverification, "submit_or_collect", fake_submit)
-    return calls
-
-
-@pytest.mark.asyncio
-async def test_a_page_that_will_not_come_back_keeps_its_verdict(f, submitted, monkeypatch):
-    """A fetch that fails says nothing about the job. Judging the posting on
-    an empty page would close a live one; paying for the call would buy the
-    same nothing. The failure is still recorded, as a failed content row: that
-    is the memory the next cycle waits on, and it is not a verdict."""
-
-    async def blank(url):
-        return "", False
-
-    monkeypatch.setattr(fetching, "fetch_page", blank)
-    _, url = f.make_ready_job(source=f.make_source("gone-src"))
-    _age_closed_verdict(url, 30)
-
-    task_id = f.make_task("reverify_chunk", {}, status="running")
-    await tasks_verify._reverify_jobs(task_id, [{"url": url, "company": "C", "title": "T"}])
-
-    assert submitted == [], "an empty page is not worth a call"
-    closed = db.query_one(
-        "SELECT status, config_name FROM ai_queries WHERE url = %s AND check_type = 'closed' "
-        "ORDER BY id DESC LIMIT 1",
-        (url,),
-    )
-    assert closed["status"] == "passed", "the prior verdict stands"
-    assert closed["config_name"] != "reverify", "and the sweep did not write over it"
-    failure = db.query_one(
-        "SELECT status, content AS input_content FROM page_fetches WHERE url = %s "
-        "ORDER BY id DESC LIMIT 1",
-        (url,),
-    )
-    assert (failure["status"], failure["input_content"]) == ("failed", None)
-
-
-@pytest.mark.asyncio
-async def test_one_posting_failing_to_fetch_does_not_take_the_sweep_with_it(
-    f, submitted, monkeypatch
-):
-    """A chunk is a hundred postings on one worker. One host refusing a
-    connection must cost its own posting and nothing else."""
-
-    async def fetch(url):
-        if "boom" in url:
-            raise RuntimeError("connection reset by peer")
-        return "a long job description " * 40, False
-
-    monkeypatch.setattr(fetching, "fetch_page", fetch)
-    src = f.make_source("mixed-src")
-    _, bad = f.make_ready_job(source=src, url="https://boom.test/1")
-    _, good = f.make_ready_job(source=src, url="https://fine.test/1")
-    for url in (bad, good):
-        _age_closed_verdict(url, 30)
-
-    task_id = f.make_task("reverify_chunk", {}, status="running")
-    await tasks_verify._reverify_jobs(
-        task_id,
-        [
-            {"url": bad, "company": "C", "title": "T"},
-            {"url": good, "company": "C", "title": "T"},
-        ],
-    )
-
-    assert submitted == [[good]]
-
-
-@pytest.mark.asyncio
-async def test_a_cancelled_sweep_stops_before_it_submits(f, submitted, monkeypatch):
-    """Cancelling is how a person stops a run that is spending. A sweep that
-    submitted anyway would bill the whole chunk after the stop."""
-    completed: list[str] = []
-
-    async def fetch(url):
-        if "slow" in url:
-            # Long enough to still be in flight when the stop is seen. A sweep
-            # that ignores the stop waits it out and then fails the assertions
-            # below, rather than hanging.
-            await asyncio.sleep(5)
-        completed.append(url)
-        return "a long job description " * 40, False
-
-    monkeypatch.setattr(fetching, "fetch_page", fetch)
-    src = f.make_source("cancel-src")
-    task_id = f.make_task("reverify_chunk", {}, status="running")
-    rows = []
-    for name in ("fast-1", "fast-2", "slow-1"):
-        _, url = f.make_ready_job(source=src, url=f"https://{name}.test/1")
-        _age_closed_verdict(url, 30)
-        rows.append({"url": url, "company": "C", "title": "T"})
-
-    db.execute("UPDATE tasks SET status = 'cancelled' WHERE id = %s", (task_id,))
-    await tasks_verify._reverify_jobs(task_id, rows)
-
-    assert tasks_runtime.cancelled(task_id)
-    assert submitted == [], "nothing gathered before the stop is paid for after it"
-    assert "slow" not in " ".join(completed), "the fetch in flight was cancelled, not awaited"
-
-
-@pytest.mark.asyncio
-async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_again(f, monkeypatch):
-    """The sweep exists to notice a page that changed. Asking the same model
-    the same question about the same text bought the answer already held in
-    5,776 of 5,780 such calls in a week of production. The question travels
-    from the paid verdict through the request snapshot to the reuse check, so
-    this walks the whole chain: legacy verdict, paid, reused, changed, forced."""
-    page = {"text": "a long job description " * 40}
-
-    async def fetch(url):
-        return page["text"], False
-
-    model = tasks_verify.resolve(tasks_verify.VERIFY_TASK).model
-    submitted: list[list[str]] = []
-
-    async def answer(task_id, specs, *args, **kwargs):
-        submitted.append([spec.custom_id for spec in specs])
-        return [
-            make_batch_result(
-                task_id,
-                spec,
-                text='{"is_closed": false, "closed_reason": "open", '
-                '"requires_clearance_or_restrictions": false, "clearance_reason": "none"}',
-                model=model,
-                usage={"input_tokens": 1000, "output_tokens": 50, "total_tokens": 1050},
-            )
-            for spec in specs
-        ]
-
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
-    monkeypatch.setattr(fetching, "fetch_page", fetch)
-    monkeypatch.setattr(reverification, "submit_or_collect", answer)
-    _, url = f.make_ready_job(source=f.make_source("unchanged-src"))
-    rows = [{"url": url, "company": "C", "title": "T"}]
-
-    async def sweep(force: bool = False) -> None:
-        _age_closed_verdict(url, 30)
-        task_id = f.make_task("reverify_chunk", {}, status="running")
-        await tasks_verify._reverify_jobs(task_id, rows, force=force)
-
-    await sweep()
-    assert submitted == [[url]], "a verdict that recorded no question is asked again"
-    fetch = db.query_one(
-        "SELECT id FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1", (url,)
-    )["id"]
-    answered = db.query(
-        "SELECT page_fetch_id, model_call_id FROM ai_queries "
-        "WHERE url = %s AND config_name = 'reverify'",
-        (url,),
-    )
-    assert len(answered) == 2 and {a["page_fetch_id"] for a in answered} == {fetch}
-    [call] = {a["model_call_id"] for a in answered}
-    assert call is not None, "both axes name the one call that answered them"
-    await sweep()
-    assert submitted == [[url]], "the same question is not bought twice"
-    reused = db.query(
-        "SELECT check_type, status, model, model_call_id, request_sha256 FROM ai_queries "
-        "WHERE url = %s AND config_name = 'reverify-unchanged' ORDER BY check_type",
-        (url,),
-    )
-    paid = db.query_one(
-        "SELECT request_sha256 FROM ai_queries WHERE url = %s AND config_name = 'reverify' "
-        "AND check_type = 'closed'",
-        (url,),
-    )
-    assert paid["request_sha256"], "the paid verdict records its question"
-    assert reused == [
-        {
-            "check_type": check,
-            "status": "passed",
-            "model": None,
-            "model_call_id": None,
-            "request_sha256": paid["request_sha256"],
-        }
-        for check in ("clearance", "closed")
-    ], "both axes carry the standing answer, and no call is booked for either"
-
-    page["text"] = "this position has been filled " * 40
-    await sweep()
-    assert submitted == [[url], [url]], "a changed page is a new question"
-    await sweep(force=True)
-    assert len(submitted) == 3, "a forced sweep doubts the answers and pays"
