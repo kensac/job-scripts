@@ -438,3 +438,15 @@ board once the extension can fill Ashby. The counts a select shows come
 from `with_facets=true` on the list, taken under every other filter the
 page has on, so they agree with what choosing one will show; the
 board-wide counts in the options describe the board, not the lens.
+
+## Administrative people route ownership
+
+`api.routers.admin.people` assembles the user, invitation and group budget
+routes in that order. `people_users` reads the user ledger and a single user's
+detail, with secret keys represented only by their presence. `people_invites`
+owns Authentik enrollment calls and reports creation separately from email
+delivery. `people_budgets` owns persisted group limits and model permissions.
+A null weekly budget means uncapped, and null allowed models means the whole
+catalog; keep those as explicit response values. Resolve a person's effective
+budget on the server before returning their detail, and scope their activity
+to that user's id.
