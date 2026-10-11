@@ -461,3 +461,14 @@ checks that the person can see the job before reading or changing its answers;
 resume reads and writes remain scoped to that person's id. Keep the form's
 unanswered questions visible alongside stored answers, and keep a concurrent
 refinement from overwriting a newer edit.
+
+## Filter route ownership
+
+`api.routers.filters` assembles the person's filter CRUD routes, run controls,
+shared presets and prompt assistance in that order. `filter_crud` owns the
+person-scoped filter rows and writes. `filter_run_routes` owns manual run
+permission, budget admission and in-flight task lookup. `filter_presets` owns
+current coverage and adoption. A preset is adopted through the same filter
+write rules as a hand-written filter. Keep permission to start a run separate
+from admission right now, so a person who cannot start one can still see a run
+already in flight. Keep every filter read and write scoped to the caller's id.
