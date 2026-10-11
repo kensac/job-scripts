@@ -14,7 +14,7 @@ import pytest
 from api import db, oauth
 from api.mail import store as mail_store
 from core.mail.importer import ImportedMessage
-from tasks import mail_sync
+from tasks.mail import sync as mail_sync
 from tests import mail_log
 
 

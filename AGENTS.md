@@ -54,7 +54,9 @@ These are instructions, not history. Follow them.
   Filter route implementations live in `src/api/routers/filtering/`; the
   `filters.py` and `filter_insights.py` modules register their routers. Keep
   related route handlers, request shapes, and domain queries together there.
-- `src/tasks/`: the handlers the worker runs, and the runtime they run inside.
+- `src/tasks/`: the handlers the worker runs, grouped by domain where a
+  workflow has several stages. `tasks.mail` owns sync, classification,
+  matching, and pointer backfill; `tasks.runtime` owns worker execution.
 - `src/core/`: provider datasheets, pricing, routing, task shapes, storage
   primitives.
 - `alembic/`: migrations. See migrations.md before adding one.

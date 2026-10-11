@@ -15,9 +15,9 @@ from api.ai.batch_results import progress_counts
 from api.mail import events as mail_events
 from api.task_config import configured_shape
 from core.shapes import BACKFILL_TASK, ONGOING_TASK
-from tasks.mail_classify_dates import is_appointment, parse_when
-from tasks.mail_classify_identity import _SELF_SENT, _heal_self_sent, identities_for
-from tasks.mail_classify_spec import (
+from tasks.mail.classification.dates import is_appointment, parse_when
+from tasks.mail.classification.identity import _SELF_SENT, _heal_self_sent, identities_for
+from tasks.mail.classification.spec import (
     CLASSIFICATION_INSTRUCTIONS,
     MailClassification,
     classification_request_text,

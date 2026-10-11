@@ -271,12 +271,13 @@ before checking current keys, resumes, or automatic-draft settings. Original
 filter input content is not retained in legacy task payloads, so resumed verdicts
 leave that field unknown rather than attributing today's page to an earlier call.
 
-**Mail classification task stages keep distinct owners.** `tasks.mail_classify`
-owns the resume-first gate, message claim, batch submission, receipt
-consumption and append-only event write. `mail_classify_identity` derives
-mailbox addresses and supersedes self-sent events without a model;
-`mail_classify_dates` resolves stated dates without guessing a time zone;
-`mail_classify_spec` owns the request text and output shape. Keep the
+**Mail classification task stages keep distinct owners.**
+`tasks.mail.classification.handler` owns the resume-first gate, message claim,
+batch submission, receipt consumption and append-only event write.
+`tasks.mail.classification.identity` derives mailbox addresses and supersedes
+self-sent events without a model; `tasks.mail.classification.dates` resolves
+stated dates without guessing a time zone; `tasks.mail.classification.spec` owns
+the request text and output shape. Keep the
 scheduler's persisted `mail_classification_enabled` switch paused until
 the product decision changes it. A module split must not turn it on or discard
 already submitted batch receipts. The prefilter orders the selection but

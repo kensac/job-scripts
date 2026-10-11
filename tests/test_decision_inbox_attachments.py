@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from api import db
 from api.mail import match as mail_match
-from tasks import mail_match as match_task
+from tasks.mail.matching import handler as match_task
 from tests.decision_inbox_support import _app, _attach, _choices, _items, _msg
 from tests.decision_inbox_support import me as me
 

@@ -12,7 +12,7 @@ from typing import Any
 
 from api import db
 from api.mail import match as mail_match
-from tasks.mail_match_derived import (
+from tasks.mail.matching.derived import (
     APPLIED_KINDS,
     CAP_FLOOR,
     DERIVED,
@@ -20,7 +20,7 @@ from tasks.mail_match_derived import (
     recompute_derived_floors,
     seed_from_mail,
 )
-from tasks.mail_match_sweep import PROGRESS_EVERY, detach_unattachable, match_pending
+from tasks.mail.matching.sweep import PROGRESS_EVERY, detach_unattachable, match_pending
 from tasks.runtime import set_progress
 
 logger = logging.getLogger(__name__)

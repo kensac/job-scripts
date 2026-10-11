@@ -99,11 +99,11 @@ row (the module docstring has the production measurements). Test fixtures
 that write a log directly go through `tests/mail_log.py`, which moves the
 pointer the way the writers do.
 
-**The mail matching task keeps its stages in order.** `tasks.mail_match`
-registers the handler and runs detachment, derived date-floor repair, pending
-message matching, then mail-derived application creation. `mail_match_sweep`
-owns pending decisions and detachment; `mail_match_derived` owns application
-creation and date floors. Do not derive before matching: an extra application
+**The mail matching task keeps its stages in order.**
+`tasks.mail.matching.handler` registers the handler and runs detachment, derived
+date-floor repair, pending message matching, then mail-derived application
+creation. `tasks.mail.matching.sweep` owns pending decisions and detachment;
+`tasks.mail.matching.derived` owns application creation and date floors. Do not derive before matching: an extra application
 at the same employer makes the matcher's company tier ambiguous. Creation
 keeps its conditional insert against the anchor message's current match, so
 two workers cannot both claim the same evidence. Keep current event and match

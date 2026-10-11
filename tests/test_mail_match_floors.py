@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 
 from api import db
-from tasks import mail_match as task
+from tasks.mail.matching import handler as task
 from tests.mail_match_support import _application, _event, _message
 
 

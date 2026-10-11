@@ -26,7 +26,7 @@ import pytest
 from api import db
 from api.mail import store as mail_store
 from api.mail.store import ImportedMessage
-from tasks import mail_classify
+from tasks.mail.classification import handler as mail_classify
 from tests import mail_log
 from tests.factories import finished
 

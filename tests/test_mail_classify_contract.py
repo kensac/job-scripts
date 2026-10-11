@@ -4,7 +4,8 @@ import pytest
 
 from core import pricing, providers, shapes
 from core.routing import resolve
-from tasks import HANDLERS, mail_classify
+from tasks import HANDLERS
+from tasks.mail.classification import handler as mail_classify
 from tests.mail_classify_support import _store
 
 # Probed against the live APIs. Each model REJECTS the other's cheapest value,

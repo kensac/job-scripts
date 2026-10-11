@@ -10,7 +10,7 @@ from api import db
 from api.health.mail import _detect_mail
 from api.mail import current, events
 from api.mail import match as mail_match
-from tasks import mail_pointers
+from tasks.mail import pointers as mail_pointers
 
 _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 
