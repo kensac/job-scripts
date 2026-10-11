@@ -15,8 +15,8 @@ from core import catalog
 
 _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
 _OWNERS = {
-    _SRC / "core" / "catalog_jobs.py",
-    _SRC / "core" / "catalog_observations.py",
+    _SRC / "core" / "catalog" / "jobs.py",
+    _SRC / "core" / "catalog" / "observations.py",
 }
 
 _RAW = re.compile(
