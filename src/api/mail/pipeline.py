@@ -1,784 +1,91 @@
-"""What an application's state IS, derived from the events about it.
+"""Mail pipeline derivations and correction answers.
 
-Nothing here stores a status. State is a read-time function of the event log,
-the same rule as job visibility, and for the same reason: every alternative
-requires repair when something arrives late, out of order, or reclassified.
-
-Because it is derived, all three of the awkward cases stop being special.
-Applied before the posting reached the board, an email misfiled and corrected
-later, a rejection that arrives before its own acknowledgement - each is just
-a different set of events, recomputed.
+The import surface remains stable while event stages, board proposals, action
+items, and sender evidence each have one owner.
 """
 
-from __future__ import annotations
-
-import datetime
-import logging
-from collections.abc import Sequence
-from typing import Any, Protocol
-
-from pydantic import BaseModel
-
-from api import db
-from api.mail.current import current_event, current_match
-from core.fetching import ats
-
-logger = logging.getLogger(__name__)
-
-
-class ApplicationEvent(BaseModel):
-    """One event reaching an application, through the message it was read from.
-
-    The row `events_for` and `events_by_application` both select, declared
-    once because a list and a detail view disagreeing about an application's
-    events is worse than either being wrong alone. `stage_for` reads `kind`
-    and `id`; everything else is what a reader needs to check the stage
-    against the mail that produced it.
-    """
-
-    id: int
-    kind: str
-    occurred_at: datetime.datetime | None
-    deadline_at: datetime.datetime | None
-    deadline_inferred: bool
-    message_id: int
-    sent_at: datetime.datetime | None
-    subject: str | None
-
-    @classmethod
-    def hypothetical(cls, kind: str, after: int) -> ApplicationEvent:
-        """An event that has NOT arrived, for asking what one would do.
-
-        `after` has to be newer than every real event: `stage_for` breaks ties
-        among terminal events by taking the newest, so a rejection already
-        present would otherwise win over the one being considered and the
-        answer would be "changes nothing" for the case that changes the most.
-
-        There is no message, because there is no event - message_id is 0 and
-        this never leaves the caller that built it.
-        """
-        return cls(
-            id=after,
-            kind=kind,
-            occurred_at=None,
-            deadline_at=None,
-            deadline_inferred=False,
-            message_id=0,
-            sent_at=None,
-            subject=None,
-        )
-
-
-class Staged(Protocol):
-    """What `stage_for` reads of an event, and nothing else.
-
-    The queue ranks thousands of rows by stage and needs only these two
-    fields, so it reads them without the message columns `ApplicationEvent`
-    carries for a person checking the stage.
-    """
-
-    @property
-    def id(self) -> int: ...
-
-    @property
-    def kind(self) -> str: ...
-
-
-class ApplicationState(BaseModel):
-    """What the events say about one application, and how much they say it
-    from. `last_event_at` is null when nothing has arrived, which is not the
-    same as nothing having been looked at."""
-
-    application_id: int
-    stage: str
-    event_count: int
-    last_event_at: datetime.datetime | None
-
-
-class SenderSignal(BaseModel):
-    """What an application's first sender says about whether this is an
-    employer relationship at all.
-
-    A possibility, never a verdict: nothing filters or hides on this.
-    `sender_company_count` is the evidence and `review_suggested` is only a
-    reading of it, so both travel and the reader can disagree."""
-
-    sender_domain: str | None
-    sender_is_ats: bool
-    sender_company_count: int
-    review_suggested: bool
-    why: str
-
-
-class ProposedFrom(BaseModel):
-    """The row `proposals_for` selects: an application, the latest event that
-    is evidence about it, and the message that event was read from.
-
-    `board_updatable` is the LEFT JOIN made explicit. 1,817 of 2,543
-    applications here have no board row, because mail predating the catalog is
-    the normal case, and answering a proposal on one of those moves nothing.
-    Declared so a caller can say that before the click rather than report a
-    status it did not write afterwards."""
-
-    application_id: int
-    company_name: str | None
-    title: str | None
-    job_id: int | None
-    board_status: str | None
-    date_applied: datetime.date | None
-    board_updatable: bool
-    event_id: int
-    kind: str
-    company: str | None
-    role_title: str | None
-    message_id: int
-    subject: str | None
-    from_email: str | None
-    sent_at: datetime.datetime | None
-
-
-class Proposal(ProposedFrom):
-    """A proposal as offered. `suggested_status` is what the event kind means
-    for the board; `board_reason` says why answering will move nothing, and is
-    null when it will."""
-
-    suggested_status: str
-    board_reason: str | None
-
-
-class ProposalAnswered(BaseModel):
-    """What answering actually wrote.
-
-    `board_status` is present only when a row moved. It used to carry the
-    proposed status whenever the answer was `accepted`, including for the
-    applications with no board row where the UPDATE matched nothing, so the
-    caller was told a status had moved that no SELECT could find."""
-
-    ok: bool
-    response: str
-    board_updated: bool
-    board_status: str | None
-    # Whole sentences, capitalised and stopped: the client renders this
-    # verbatim rather than composing its own line, so a lowercase fragment
-    # would land mid-paragraph looking like a bug. Null when a row moved and
-    # there is nothing to explain.
-    reason: str | None
-
-
-# Ordered by how far through a process they are. A later stage never regresses
-# to an earlier one on the strength of an older email: an acknowledgement that
-# arrives after a rejection is mail delivery being untidy, not the employer
-# changing their mind.
-STAGE_ORDER = (
-    "applied",
-    "acknowledged",
-    "assessment",
-    "interviewing",
-    "offer",
+from api.mail.pipeline_actions import (
+    _EVENT_TO_ACTION,
+    _RESOLVING_EVENTS,
+    ACTION_QUESTION,
+    DONE,
+    REOPENED,
+    STATUS_QUESTION,
+    ActionItem,
+    action_item,
+    action_items,
+    answer,
+    latest_answers,
+    settles_on,
+)
+from api.mail.pipeline_events import (
+    _EVENT_TO_STAGE,
+    STAGE_ORDER,
+    TERMINAL,
+    WITHDRAWN_STATUSES,
+    ApplicationEvent,
+    ApplicationState,
+    Staged,
+    events_by_application,
+    events_for,
+    stage_for,
+    state_of,
+)
+from api.mail.pipeline_proposals import (
+    ACCEPTED,
+    DISMISSED,
+    NOT_ON_BOARD,
+    STATUS_FROM_EVENT,
+    UNRESOLVED_BOARD_STATUSES,
+    Proposal,
+    ProposalAnswered,
+    ProposedFrom,
+    answer_proposal,
+    proposals_for,
+)
+from api.mail.pipeline_senders import (
+    INTERMEDIARY_COMPANY_NAMES,
+    SenderSignal,
+    intermediary_domains,
+    sender_signal,
 )
 
-TERMINAL = ("rejected", "withdrawn", "closed")
-
-_EVENT_TO_STAGE = {
-    "acknowledgement": "acknowledged",
-    "assessment_invite": "assessment",
-    "interview_invite": "interviewing",
-    "interview_scheduled": "interviewing",
-    "info_request": "interviewing",
-    "offer": "offer",
-    "rejection": "rejected",
-    "position_closed": "closed",
-}
-
-# Events that create something the user has to do, and what it is called.
-# An ask belongs to an application. A recruiter approach is attached to none
-# (match.UNATTACHABLE_KINDS), so it asks nothing here.
-_EVENT_TO_ACTION = {
-    "assessment_invite": "complete_assessment",
-    "interview_invite": "schedule_interview",
-    "info_request": "send_information",
-    "offer": "respond_to_offer",
-}
-
-# A later event that settles an earlier ask. This is what makes the system
-# no-touch: an assessment invite is closed by the acknowledgement that follows
-# it, not by the user remembering to tick something off.
-_RESOLVING_EVENTS = {
-    "complete_assessment": ("acknowledgement", "interview_invite", "rejection", "position_closed"),
-    "schedule_interview": ("interview_scheduled", "rejection", "position_closed"),
-    "send_information": ("acknowledgement", "interview_invite", "rejection", "position_closed"),
-    "respond_to_offer": ("rejection",),
-}
-
-
-# Board statuses that mean the user withdrew. `withdrawn` is terminal and has
-# no event that produces it, because no employer sends mail saying you pulled
-# out - it is the one stage only the person can assert. Without this it was
-# declared vocabulary with no producer: a state the API named, the frontend
-# rendered a column for, and nothing could ever reach.
-WITHDRAWN_STATUSES = ("No Longer Interested", "Withdrawn")
-
-
-# What the mail implies the board should say. Only kinds where the evidence is
-# unambiguous about the OUTCOME - an acknowledgement means the application is
-# alive, which the board already says, so it proposes nothing.
-STATUS_FROM_EVENT = {
-    "rejection": "Rejected",
-    "position_closed": "No Longer Available",
-    "offer": "Offer",
-    "interview_invite": "Interviewing",
-    "interview_scheduled": "Interviewing",
-}
-
-# Board statuses that mean "still waiting". A proposal is only worth making
-# against one of these: if the user has already moved it on, the mail is
-# confirming what they know rather than telling them something.
-UNRESOLVED_BOARD_STATUSES = ("Application Submitted", "Follow-up")
-
-# Why answering a proposal on an application with no board row moves nothing.
-NOT_ON_BOARD = "This application is not on your board, so there is no status to move."
-
-ACCEPTED = "accepted"
-DISMISSED = "dismissed"
-
-
-def settles_on(kind: str) -> list[str]:
-    """The event kinds that can close this ask, which is often none.
-
-    `resolved_at IS NULL` currently means two different things and the
-    difference is the whole product. An assessment invite from last week is
-    outstanding: something can still arrive to settle it. An offer from 2020 is
-    not outstanding - nothing was ever going to settle it, because no email
-    says "you accepted". Measured over the corpus: of 71 applications carrying
-    an offer event, only 11 have ANY later event at all, and no kind follows
-    one reliably.
-
-    So this is a property of the KIND, not of the item's age, and it is the
-    honest thing to expose. A caller that sees an empty list knows the item is
-    unresolved by construction rather than by neglect, and must not render it
-    as a live obligation.
-    """
-    return list(_RESOLVING_EVENTS.get(kind, ()))
-
-
-def proposals_for(user_id: int) -> list[Proposal]:
-    """Where the mail and the board disagree, as things to confirm.
-
-    Never an overwrite. `user_jobs.status` is what the user typed, and a system
-    that silently rewrites it stops being trustworthy at exactly the moment it
-    is most confident. So this says "we think you were rejected" and waits.
-
-    Derived at read time rather than stored, so a proposal disappears on its
-    own once the user acts on the board directly, or once a reclassification
-    retracts the evidence. Only their ANSWER is a fact worth keeping.
-
-    LEFT JOIN, not JOIN. The inner join asked "what does the board say" of
-    applications that have no board row, which is 1,817 of 2,543 here: mail
-    predating the catalog is the normal case and `applications.job_id` is
-    nullable by design. It silenced 947 of 1,159 proposals - not by deciding
-    they were wrong, but by never forming the question. The predicate that
-    survives is the one that was actually meant: there is no board row to
-    disagree with, or the board row still says the application is live.
-
-    `board_updatable` says whether answering can move anything, so the caller
-    states the consequence before the click rather than reporting a status it
-    did not write afterwards.
-    """
-    rows = db.query_as(
-        ProposedFrom,
-        f"""
-        WITH current_match AS (
-            {current_match("application_id")}
-        ),
-        current_event AS (
-            {current_event("id", "kind", "detail")}
-        )
-        SELECT DISTINCT ON (a.id, e.kind)
-               a.id AS application_id, a.company_name, a.title, a.job_id,
-               uj.status AS board_status,
-               (a.applied_at AT TIME ZONE 'UTC')::date AS date_applied,
-               uj.user_id IS NOT NULL AS board_updatable,
-               e.id AS event_id, e.kind,
-               e.detail->>'company' AS company, e.detail->>'role_title' AS role_title,
-               m.id AS message_id, m.subject, m.from_email, m.sent_at
-        FROM applications a
-        LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id
-        JOIN current_match cm ON cm.application_id = a.id
-        JOIN current_event e ON e.message_id = cm.message_id
-        JOIN email_messages m ON m.id = cm.message_id
-        WHERE a.user_id = %(user)s
-          AND a.dismissed_at IS NULL
-          AND (uj.user_id IS NULL OR uj.status = ANY(%(unresolved)s))
-          AND e.kind = ANY(%(kinds)s)
-          AND NOT EXISTS (
-              SELECT 1 FROM event_answers ea
-              WHERE ea.event_id = e.id AND ea.question = %(status)s
-          )
-        ORDER BY a.id, e.kind, e.id DESC
-        """,
-        {
-            "user": user_id,
-            "unresolved": list(UNRESOLVED_BOARD_STATUSES),
-            "kinds": sorted(STATUS_FROM_EVENT),
-            "status": STATUS_QUESTION,
-        },
-    )
-    return [
-        Proposal(
-            **row.model_dump(),
-            suggested_status=STATUS_FROM_EVENT[row.kind],
-            board_reason=None if row.board_updatable else NOT_ON_BOARD,
-        )
-        for row in rows
-    ]
-
-
-def answer_proposal(
-    user_id: int, application_id: int, event_id: int, response: str
-) -> ProposalAnswered | None:
-    """Record the answer, and move the board only where there is a board.
-
-    Returns None when the event is not currently evidence about this
-    application, which the caller renders as a 404. The event has to belong to
-    a message matched to THIS application - the same join the proposal list is
-    built from. Checking only that the application is owned left `event_id`
-    taken from the request and trusted, so another user's event could decide
-    which status this application moved to.
-
-    Both answers are recorded, against the EVENT, so a dismissal silences this
-    piece of evidence rather than the question. A later rejection from the same
-    company is new evidence and gets asked again - which is what makes
-    dismissing safe rather than a decision that can never be revisited. A
-    dismissal is also the signal that STATUS_FROM_EVENT is wrong for that case,
-    which is only readable because the decline is stored rather than dropped.
-
-    REPORTS WHAT IT TOUCHED, not what it would have touched. Accepting on an
-    application with no board row wrote nothing and said the status had moved,
-    so the caller was told about a change no SELECT could find.
-    """
-    app = db.query_one(
-        "SELECT id, job_id FROM applications WHERE id = %s AND user_id = %s",
-        (application_id, user_id),
-    )
-    if app is None:
-        return None
-    event = db.query_one(
-        f"""
-        WITH current_match AS (
-            {current_match("application_id")}
-        )
-        SELECT e.id, e.kind
-        FROM email_events e
-        JOIN current_match cm ON cm.message_id = e.message_id
-        WHERE e.id = %s AND cm.application_id = %s
-        """,
-        (event_id, application_id),
-    )
-    if event is None or event["kind"] not in STATUS_FROM_EVENT:
-        return None
-
-    status = STATUS_FROM_EVENT[event["kind"]]
-    answer(user_id, event_id, STATUS_QUESTION, response)
-    updated = 0
-    if response == ACCEPTED and app["job_id"] is not None:
-        # The COUNT, not the fact that the statement ran. `applications.job_id`
-        # survives the board row being deleted (ON DELETE SET NULL is on the
-        # job, not on user_jobs), so a non-null job_id is not proof there is a
-        # row to update - and an UPDATE that matched nothing exits cleanly.
-        updated = db.execute_count(
-            "UPDATE user_jobs SET status = %s, person_touched_at = now(), updated_at = now() "
-            "WHERE user_id = %s AND job_id = %s",
-            (status, user_id, app["job_id"]),
-        )
-    return ProposalAnswered(
-        ok=True,
-        response=response,
-        board_updated=bool(updated),
-        # Present only when a row actually moved. The proposed status is still
-        # readable from `suggested_status` on the item that offered it.
-        board_status=status if updated else None,
-        # WHOLE SENTENCES, capitalised and stopped. These are shown to a person
-        # verbatim - the client is told never to claim a move that did not
-        # happen, so it renders this instead of composing its own line, and a
-        # lowercase fragment lands mid-paragraph looking like a bug.
-        reason=None
-        if updated
-        else (
-            "Recorded. This application is not on your board, so no status moved."
-            if response == ACCEPTED
-            else "Recorded. Declining moves nothing, by design."
-        ),
-    )
-
-
-def stage_for(events: Sequence[Staged], board_status: str | None = None) -> str:
-    """Furthest stage reached, with terminal events winning outright.
-
-    Terminal beats progress regardless of order because a rejection is not
-    undone by a later automated acknowledgement, and those do arrive - ATS
-    systems send them on a schedule that has nothing to do with the decision.
-    """
-    # Withdrawal beats everything, including a later automated acknowledgement,
-    # because it is the only stage the person asserts directly rather than
-    # something inferred from what an employer sent.
-    if board_status in WITHDRAWN_STATUSES:
-        return "withdrawn"
-    terminal = [e for e in events if _EVENT_TO_STAGE.get(e.kind) in TERMINAL]
-    if terminal:
-        newest = max(terminal, key=lambda e: e.id)
-        return _EVENT_TO_STAGE[newest.kind]
-    best = "applied"
-    for event in events:
-        stage = _EVENT_TO_STAGE.get(event.kind)
-        if stage in STAGE_ORDER and STAGE_ORDER.index(stage) > STAGE_ORDER.index(best):
-            best = stage
-    return best
-
-
-def events_for(application_id: int) -> list[ApplicationEvent]:
-    """Events reaching this application through its matched messages.
-
-    Newest event per message, not per (message, kind). A message is ONE thing -
-    the classifier emits exactly one kind for it - so a correction from
-    "rejection" to "interview_invite" has to RETRACT the rejection, and keying
-    per kind would leave it live forever. Newest row per message wins.
-
-    Matches are append-only for the same reason, so only the newest match per
-    message counts as well: a message rematched to another application must
-    stop contributing to the old one.
-    """
-    return db.query_as(
-        ApplicationEvent,
-        f"""
-        WITH current_match AS (
-            {current_match("application_id")}
-        ),
-        current_event AS (
-            {current_event("kind", "id", "occurred_at", "deadline_at", "deadline_inferred")}
-        )
-        SELECT e.id, e.kind, e.occurred_at, e.deadline_at, e.deadline_inferred,
-               m.id AS message_id, m.sent_at, m.subject
-        FROM current_match cm
-        JOIN current_event e ON e.message_id = cm.message_id
-        JOIN email_messages m ON m.id = cm.message_id
-        WHERE cm.application_id = %s
-        ORDER BY e.id
-        """,
-        (application_id,),
-    )
-
-
-def events_by_application(user_id: int) -> dict[int, list[ApplicationEvent]]:
-    """Every application's events for one user, in one query.
-
-    The per-application version is two queries each, which is fine for a
-    detail view and ruinous for a list: 2,495 applications meant ~5,000
-    queries to render one page. Same predicates as `events_for` - the two
-    must agree, because a list and a detail disagreeing about an
-    application's stage is worse than either being wrong alone.
-
-    The application is the KEY rather than a field, so the events are the
-    same shape `events_for` returns and a caller cannot be handed one kind
-    here and another kind there.
-    """
-    rows = db.query(
-        f"""
-        WITH current_match AS (
-            {current_match("application_id")}
-        ),
-        current_event AS (
-            {current_event("kind", "id", "occurred_at", "deadline_at", "deadline_inferred")}
-        )
-        SELECT cm.application_id, e.id, e.kind, e.occurred_at, e.deadline_at,
-               e.deadline_inferred, m.id AS message_id, m.sent_at, m.subject
-        FROM current_match cm
-        JOIN current_event e ON e.message_id = cm.message_id
-        JOIN email_messages m ON m.id = cm.message_id
-        JOIN applications a ON a.id = cm.application_id
-        WHERE a.user_id = %s
-        ORDER BY cm.application_id, e.id
-        """,
-        (user_id,),
-    )
-    grouped: dict[int, list[ApplicationEvent]] = {}
-    for row in rows:
-        grouped.setdefault(row.pop("application_id"), []).append(ApplicationEvent(**row))
-    return grouped
-
-
-def state_of(application_id: int) -> ApplicationState:
-    events = events_for(application_id)
-    row = db.query_one(
-        "SELECT uj.status FROM applications a "
-        "LEFT JOIN user_jobs uj ON uj.job_id = a.job_id AND uj.user_id = a.user_id "
-        "WHERE a.id = %s",
-        (application_id,),
-    )
-    return ApplicationState(
-        application_id=application_id,
-        stage=stage_for(events, (row or {}).get("status")),
-        event_count=len(events),
-        last_event_at=max((e.sent_at for e in events if e.sent_at), default=None),
-    )
-
-
-# What a person answered about an event, in `event_answers`, which is
-# append-only: the newest answer to a question about an event is the one in
-# force, so reopening an ask is an answer, not an erasure.
-STATUS_QUESTION = "status"
-ACTION_QUESTION = "action"
-DONE = "done"
-REOPENED = "reopened"
-
-
-def answer(
-    user_id: int, event_id: int, question: str, response: str, note: str | None = None
-) -> None:
-    db.execute(
-        "INSERT INTO event_answers (event_id, question, answer, actor_user_id, note) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (event_id, question, response, user_id, note),
-    )
-
-
-def latest_answers(question: str, event_ids: list[int]) -> dict[int, dict[str, Any]]:
-    return {
-        row["event_id"]: row
-        for row in db.query(
-            "SELECT DISTINCT ON (event_id) event_id, answer, note, actor_user_id, created_at "
-            "FROM event_answers WHERE question = %s AND event_id = ANY(%s) "
-            "ORDER BY event_id, id DESC",
-            (question, event_ids),
-        )
-    }
-
-
-class ActionItem(BaseModel):
-    """An ask a message made, derived when read and never stored.
-
-    Its id is the event's id: one event asks one thing. Open until a later
-    event on the same application settles it or the person marks it done; a
-    reopen is a later answer. It used to be a table kept in step by a sweep
-    over every application, which left a row behind when its message moved
-    (217 of them, closed as "no longer part of this application"); an ask
-    read from the current rows moves with the message instead."""
-
-    id: int
-    user_id: int
-    application_id: int
-    event_id: int
-    kind: str
-    due_at: datetime.datetime | None
-    resolved_at: datetime.datetime | None
-    resolution: str | None
-    resolved_by_event_id: int | None
-    created_at: datetime.datetime
-    settles_on: list[str]
-    message_id: int
-    subject: str | None
-    from_email: str | None
-    sent_at: datetime.datetime | None
-
-
-def action_items(
-    user_id: int, application_id: int | None = None, *, open_only: bool = False
-) -> list[ActionItem]:
-    """The asks on a person's applications, or on one of them."""
-    rows = db.query(
-        f"""
-        WITH cm AS ({current_match("application_id")}),
-        ce AS ({current_event("id", "kind", "deadline_at", "created_at")})
-        SELECT cm.application_id, e.id, e.kind, e.deadline_at, e.created_at,
-               m.id AS message_id, m.subject, m.from_email, m.sent_at
-        FROM cm
-        JOIN ce e ON e.message_id = cm.message_id
-        JOIN email_messages m ON m.id = cm.message_id
-        JOIN applications a ON a.id = cm.application_id
-        WHERE a.user_id = %(user)s
-          AND (%(app)s::bigint IS NULL OR a.id = %(app)s)
-        ORDER BY cm.application_id, e.id
-        """,
-        {"user": user_id, "app": application_id},
-    )
-    asks = [r for r in rows if r["kind"] in _EVENT_TO_ACTION]
-    answers = latest_answers(ACTION_QUESTION, [r["id"] for r in asks])
-    by_app: dict[int, list[dict[str, Any]]] = {}
-    for row in rows:
-        by_app.setdefault(row["application_id"], []).append(row)
-    items = []
-    for ask in asks:
-        kind = _EVENT_TO_ACTION[ask["kind"]]
-        settling = _RESOLVING_EVENTS.get(kind, ())
-        later = [
-            e
-            for e in by_app[ask["application_id"]]
-            if e["kind"] in settling and e["id"] > ask["id"]
-        ]
-        settled = min(later, key=lambda e: e["id"]) if later else None
-        done = answers.get(ask["id"])
-        if done is not None and done["answer"] != DONE:
-            done = None
-        if settled is not None:
-            resolved_at, resolution = settled["created_at"], f"superseded by {settled['kind']}"
-        elif done is not None:
-            resolved_at, resolution = done["created_at"], done["note"] or "marked done"
-        else:
-            resolved_at, resolution = None, None
-        if open_only and resolved_at is not None:
-            continue
-        items.append(
-            ActionItem(
-                id=ask["id"],
-                user_id=user_id,
-                application_id=ask["application_id"],
-                event_id=ask["id"],
-                kind=kind,
-                due_at=ask["deadline_at"],
-                resolved_at=resolved_at,
-                resolution=resolution,
-                resolved_by_event_id=settled["id"] if settled else None,
-                created_at=ask["created_at"],
-                settles_on=list(settling),
-                message_id=ask["message_id"],
-                subject=ask["subject"],
-                from_email=ask["from_email"],
-                sent_at=ask["sent_at"],
-            )
-        )
-    items.sort(key=lambda i: (i.due_at is None, i.due_at or i.created_at, i.id))
-    return items
-
-
-def action_item(user_id: int, event_id: int) -> ActionItem | None:
-    """The ask an event makes, if it makes one on this person's application."""
-    row = db.query_one(
-        f"""
-        SELECT cm.application_id FROM email_events e
-        JOIN ({current_match("application_id")}) cm ON cm.message_id = e.message_id
-        WHERE e.id = %s
-        """,
-        (event_id,),
-    )
-    if row is None or row["application_id"] is None:
-        return None
-    return next((i for i in action_items(user_id, row["application_id"]) if i.id == event_id), None)
-
-
-# A non-ATS sender domain that has produced this many DISTINCT company names is
-# an intermediary rather than one employer's own mail server. Derived, not
-# picked: bucketing every mail-derived application by its sender's spread puts
-# the junk rate at 4% for domains naming one company and 9% for two - the base
-# rate - then 41% at three to four and 32% at five or more. The jump sits
-# between two and three.
-INTERMEDIARY_COMPANY_NAMES = 3
-
-
-def sender_signal(user_id: int) -> dict[int, SenderSignal]:
-    """Per application, what its FIRST message's sender says about whether this
-    is an employer relationship at all.
-
-    Computed at read time and deliberately not stored. The ATS half is a
-    property of the sender domain, so it has to move when core.fetching.ats learns a new
-    provider; the spread half is a function of the user's whole message
-    history, so a domain that becomes an intermediary after a match was made
-    has to change the answer for matches already written. Freezing either at
-    match time would preserve the wrong one.
-
-    A POSSIBILITY, NEVER A VERDICT. Nothing here drops or hides an application.
-    The strongest thing it says is "worth a look", because the failure this
-    exists to catch - an organisation the user has a relationship with that is
-    not an employer he applied to - is also the shape of a perfectly real
-    application through a job board.
-
-    What it does NOT do is guess from the company name. Blocking universities
-    breaks applying to a university for a job, which is normal; the three
-    organisations that motivated this were caught by three different special
-    cases, and a fourth would have needed a fifth.
-    """
-    rows = db.query(
-        f"""
-        WITH first_message AS (
-            SELECT DISTINCT ON (am.application_id) am.application_id, m.from_email
-            FROM ({current_match("application_id")}) am
-            JOIN email_messages m ON m.id = am.message_id
-            JOIN applications a ON a.id = am.application_id
-            WHERE am.application_id IS NOT NULL AND a.user_id = %(user_id)s
-            ORDER BY am.application_id, m.sent_at ASC
-        ),
-        with_domain AS (
-            SELECT f.application_id,
-                   lower(COALESCE(NULLIF(split_part(f.from_email, '@', 2), ''), '')) AS domain,
-                   COALESCE(a.company_name, '') AS company
-            FROM first_message f
-            JOIN applications a ON a.id = f.application_id
-        ),
-        spread AS (
-            SELECT domain, count(DISTINCT company) AS companies
-            FROM with_domain WHERE domain <> '' GROUP BY domain
-        )
-        SELECT w.application_id, w.domain, COALESCE(s.companies, 0) AS companies
-        FROM with_domain w LEFT JOIN spread s ON s.domain = w.domain
-        """,
-        {"user_id": user_id},
-    )
-    out: dict[int, SenderSignal] = {}
-    for row in rows:
-        domain = row["domain"] or None
-        companies = int(row["companies"] or 0)
-        is_ats = ats.is_ats_email_domain(domain)
-        shared = bool(domain) and not is_ats and companies >= INTERMEDIARY_COMPANY_NAMES
-        if is_ats:
-            why = "sent by an applicant-tracking system, which is near-proof of a real application"
-        elif shared:
-            why = (
-                f"{domain} is the first sender for {companies} different companies, so it is a "
-                "platform or an organisation you have a standing relationship with rather than "
-                "one employer's own mail - worth confirming you applied here"
-            )
-        else:
-            why = "sent from the employer's own domain"
-        out[row["application_id"]] = SenderSignal(
-            sender_domain=domain,
-            sender_is_ats=is_ats,
-            # How many distinct companies this user has derived from that
-            # sender. Exposed rather than reduced to a flag, because it is the
-            # evidence and the flag is only a reading of it.
-            sender_company_count=companies,
-            review_suggested=shared,
-            why=why,
-        )
-    return out
-
-
-def intermediary_domains() -> list[str]:
-    """Sender domains that are platforms rather than one employer's own mail.
-
-    The same rule as sender_signal, across every user rather than one, for the
-    aggregate surfaces that have no user in scope. Defined once here so the
-    threshold and the ATS exemption cannot drift between the per-application
-    reading and the per-company one.
-    """
-    rows = db.query(
-        f"""
-        WITH first_message AS (
-            SELECT DISTINCT ON (am.application_id) am.application_id, m.from_email
-            FROM ({current_match("application_id")}) am
-            JOIN email_messages m ON m.id = am.message_id
-            WHERE am.application_id IS NOT NULL
-            ORDER BY am.application_id, m.sent_at ASC
-        )
-        SELECT lower(COALESCE(NULLIF(split_part(f.from_email, '@', 2), ''), '')) AS domain,
-               count(DISTINCT COALESCE(a.company_name, '')) AS companies
-        FROM first_message f
-        JOIN applications a ON a.id = f.application_id
-        WHERE a.dismissed_at IS NULL
-        GROUP BY 1
-        """
-    )
-    return [
-        r["domain"]
-        for r in rows
-        if r["domain"]
-        and not ats.is_ats_email_domain(r["domain"])
-        and int(r["companies"]) >= INTERMEDIARY_COMPANY_NAMES
-    ]
+__all__ = [
+    "ACCEPTED",
+    "ACTION_QUESTION",
+    "DISMISSED",
+    "DONE",
+    "INTERMEDIARY_COMPANY_NAMES",
+    "NOT_ON_BOARD",
+    "REOPENED",
+    "STAGE_ORDER",
+    "STATUS_FROM_EVENT",
+    "STATUS_QUESTION",
+    "TERMINAL",
+    "UNRESOLVED_BOARD_STATUSES",
+    "WITHDRAWN_STATUSES",
+    "_EVENT_TO_ACTION",
+    "_EVENT_TO_STAGE",
+    "_RESOLVING_EVENTS",
+    "ActionItem",
+    "ApplicationEvent",
+    "ApplicationState",
+    "Proposal",
+    "ProposalAnswered",
+    "ProposedFrom",
+    "SenderSignal",
+    "Staged",
+    "action_item",
+    "action_items",
+    "answer",
+    "answer_proposal",
+    "events_by_application",
+    "events_for",
+    "intermediary_domains",
+    "latest_answers",
+    "proposals_for",
+    "sender_signal",
+    "settles_on",
+    "stage_for",
+    "state_of",
+]
