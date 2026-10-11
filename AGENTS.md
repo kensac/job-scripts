@@ -60,8 +60,11 @@ These are instructions, not history. Follow them.
   stored run records, and projection writes. Import public operations from
   `api.managed_boards`; keep transaction boundaries in the owning module.
 - `src/tasks/`: the handlers the worker runs, grouped by domain where a
-  workflow has several stages. `tasks.mail` owns sync, classification,
-  matching, and pointer backfill. `tasks.verification` owns new-posting
+  workflow has several stages. `tasks.derivations` owns the shared model
+  derivation sweep and its compensation, requirements, job profile, embedding,
+  and location registrations. Register them in `tasks.DERIVATIONS`; keep
+  candidate selection and storage with each registration. `tasks.mail` owns
+  sync, classification, matching, and pointer backfill. `tasks.verification` owns new-posting
   verification, re-verification, and their shared question construction;
   `tasks.verify` keeps the worker-facing handler exports. `tasks.runtime` owns
   worker execution.

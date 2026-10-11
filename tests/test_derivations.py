@@ -2,8 +2,9 @@
 schedules and dispatches, switched-off ones included."""
 
 from api import db
-from tasks import DERIVATIONS, HANDLERS, derive
-from tasks.requirements import REQUIREMENTS
+from tasks import DERIVATIONS, HANDLERS
+from tasks.derivations import sweep as derive
+from tasks.derivations.requirements import REQUIREMENTS
 
 
 def _kinds() -> list[str]:

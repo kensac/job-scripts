@@ -4,7 +4,8 @@ import pytest
 
 from api import db
 from core.batch import BatchSpec
-from tasks import locations, verify
+from tasks import verify
+from tasks.derivations import locations
 from tasks.verification import new_postings
 from tests.factories import make_batch_result
 
@@ -35,7 +36,7 @@ async def test_location_resume_uses_original_text_when_no_candidates_remain(monk
         assert specs == []
         return [result], SimpleNamespace(model="original-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", collect)
     await locations.LOCATIONS.handle(task, {})
     row = db.query_one("SELECT country, model FROM locations WHERE text = 'Oslo, Norway'")
     assert row == {"country": "NO", "model": "original-model"}

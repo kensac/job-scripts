@@ -312,7 +312,7 @@ recorded membership distinct from stages evaluated under today's rules.
 
 Every distinct location string a board writes is one row of `locations`,
 classified once by a model into the places it names (country, region, city, as
-many as it lists) and remote (`tasks.locations`).
+many as it lists) and remote (`tasks.derivations.locations`).
 
 A user's excluded and included locations are rows of the same table. A country
 criterion takes every city in it, a city criterion that city, a bare Remote

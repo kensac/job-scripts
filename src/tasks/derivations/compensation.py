@@ -17,7 +17,7 @@ from core.comp import (
 )
 from core.shapes import COMP_TASK
 from core.store import CONTENT_LATERAL
-from tasks.derive import Derivation, Row
+from tasks.derivations.sweep import Derivation, Row
 
 
 def _annualize(value: float | None, period: str) -> int | None:

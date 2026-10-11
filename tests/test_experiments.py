@@ -15,8 +15,8 @@ from api import experiments as exp
 from core import answers
 from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
-from tasks import comp as task_comp
 from tasks import verify as task_verify
+from tasks.derivations import compensation as task_comp
 from tasks.verification import new_postings
 
 
@@ -75,7 +75,7 @@ async def test_task_and_experiment_inputs_share_the_derivation_cap(f, monkeypatc
 
     if family == "comp":
         f.make_ready_job(content=content)
-        monkeypatch.setattr("tasks.derive.run_batched", capture)
+        monkeypatch.setattr("tasks.derivations.sweep.run_batched", capture)
         await task_comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     else:
         f.make_ready_job(content=content, closed="", clearance="")

@@ -6,7 +6,7 @@ import pytest
 
 from api import db
 from core.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL, JobProfileAnswer
-from tasks import job_profiles
+from tasks.derivations import job_profiles
 from tests.factories import make_batch_result
 
 
@@ -59,7 +59,7 @@ async def test_shadow_task_uses_exact_content_and_is_idempotent(f, monkeypatch):
             SimpleNamespace(model=JOB_PROFILE_MODEL),
         )
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake_run)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake_run)
     await job_profiles.PROFILES.handle(task_id, {})
     assert len(asked) == 1
     content_id = int(asked[0].custom_id)
@@ -92,7 +92,7 @@ async def test_superseded_content_receipt_is_not_written(f, monkeypatch):
             SimpleNamespace(model=JOB_PROFILE_MODEL),
         )
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake_run)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake_run)
     await job_profiles.PROFILES.handle(task_id, {})
     assert db.query_one("SELECT count(*) AS n FROM job_profiles")["n"] == 0
     assert db.query_one("SELECT outcome FROM batch_result_receipts")["outcome"] == "superseded"
@@ -183,7 +183,7 @@ async def test_disabled_profile_collection_stops_already_queued_unpaid_task(f, m
     async def no_submit(*args, **kwargs):
         pytest.fail("paused profile collection must not submit unpaid work")
 
-    monkeypatch.setattr("tasks.derive.run_batched", no_submit)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", no_submit)
     await job_profiles.PROFILES.handle(task_id, {})
     assert (
         db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]["label"]
@@ -238,5 +238,5 @@ async def test_pause_during_selection_prevents_submission(f, monkeypatch):
         pytest.fail("a pause during preparation must prevent submission")
 
     monkeypatch.setattr(job_profiles.job_profile_derivation, "candidates", select_then_pause)
-    monkeypatch.setattr("tasks.derive.run_batched", no_submit)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", no_submit)
     await job_profiles.PROFILES.handle(task_id, {})

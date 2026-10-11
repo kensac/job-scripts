@@ -145,7 +145,7 @@ def test_an_amount_with_no_captured_currency_says_so(client, user_headers, f):
 
 
 def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_headers):
-    """comp.py writes comp_period and comp_basis so an annualised figure can say
+    """compensation.py writes comp_period and comp_basis so an annualised figure can say
     what it was annualised FROM - its own comment is that a yearly number with
     no period beside it cannot be audited. Both were written and neither was
     selected, so an hourly rate and a salary rendered identically: a $45/hr

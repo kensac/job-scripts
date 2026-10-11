@@ -63,7 +63,7 @@ class JobRequirements(Base):
 
 class JobComp(Base):
     """The pay a posting's page states, read by the comp derivation
-    (tasks.comp). A row means the page was read; NULL amounts mean it states
+    (tasks.derivations.compensation). A row means the page was read; NULL amounts mean it states
     none. Keyed by url with no foreign key, like the other derived tables: a
     cache of paid work outlives the job row.
 

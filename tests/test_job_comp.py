@@ -10,7 +10,7 @@ import pytest
 
 from api import db
 from core.comp import COMP_INPUT_CHARS
-from tasks import comp
+from tasks.derivations import compensation as comp
 
 # Multibyte text past the cut, so a hash of bytes or of the whole page would
 # differ from the hash of the characters the model read.
@@ -44,7 +44,7 @@ async def _run(f) -> None:
 async def test_the_sweep_records_the_hash_of_what_was_read(f, monkeypatch):
     _, url = f.make_ready_job(content=CONTENT)
     asked: list = []
-    monkeypatch.setattr("tasks.derive.run_batched", _answering(f, asked))
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", _answering(f, asked))
     await _run(f)
 
     row = db.query_one(
@@ -62,7 +62,7 @@ async def test_the_sweep_records_the_hash_of_what_was_read(f, monkeypatch):
 async def test_an_unchanged_refetch_is_restamped_and_a_changed_one_is_read_again(f, monkeypatch):
     _, url = f.make_ready_job(content=CONTENT)
     asked: list = []
-    monkeypatch.setattr("tasks.derive.run_batched", _answering(f, asked))
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", _answering(f, asked))
     await _run(f)
     assert len(asked) == 1
 

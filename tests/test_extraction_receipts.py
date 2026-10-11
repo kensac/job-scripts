@@ -6,7 +6,9 @@ import pytest
 
 from api import db
 from core.batch import BatchSpec
-from tasks import comp, requirements, runtime
+from tasks import runtime
+from tasks.derivations import compensation as comp
+from tasks.derivations import requirements
 
 
 def test_requirements_and_skills_rollback_with_the_consuming_transaction(f):
@@ -64,7 +66,7 @@ async def test_saved_extraction_result_collects_without_new_candidates(
         called.append(tid)
         return [result], SimpleNamespace(model="submitted-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", collect)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", collect)
     await module.handle(task_id, {})
     assert called == [task_id]
     if family == "comp":
@@ -81,7 +83,7 @@ async def test_saved_extraction_result_collects_without_new_candidates(
         )
         assert row == expected
 
-    monkeypatch.setattr("tasks.derive.run_batched", runtime.run_batched)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", runtime.run_batched)
     await module.handle(task_id, {})
     progress = db.query_one("SELECT progress FROM tasks WHERE id=%s", (task_id,))["progress"]
     assert progress["done"] == (0 if changed else 1)

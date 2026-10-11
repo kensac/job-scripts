@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from tasks import locations
+from tasks.derivations import locations
 from tests.factories import make_batch_result
 from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
 
@@ -152,7 +152,7 @@ async def test_the_sweep_classifies_every_unseen_string_once(
             SimpleNamespace(model="gpt-5-nano"),
         )
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake_run_batched)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake_run_batched)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('classify_locations', '{}', 'running') RETURNING id"
     )
@@ -280,7 +280,7 @@ async def test_a_reclassify_cycle_re_asks_every_model_row_and_keeps_hand_correct
             SimpleNamespace(model="gpt-5-nano"),
         )
 
-    monkeypatch.setattr("tasks.derive.run_batched", fake_run_batched)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", fake_run_batched)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('classify_locations', '{}', 'running') RETURNING id"
     )

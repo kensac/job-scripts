@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
-from tasks import comp, rescrape
+from tasks import rescrape
+from tasks.derivations import compensation as comp
 
 
 @pytest.mark.asyncio
@@ -37,7 +38,7 @@ async def test_content_committed_after_guard_does_not_leave_stale_comp_complete(
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", answer)
     monkeypatch.setattr(rescrape, "content_is_current", guard_then_concurrent_scrape)
     await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     assert db.query_one("SELECT comp_min FROM job_comp WHERE url = %s", (url,)) is None
@@ -68,7 +69,7 @@ async def test_known_compensation_source_changes_are_selected_again(f, monkeypat
             for spec in specs
         ], SimpleNamespace(model="test-model")
 
-    monkeypatch.setattr("tasks.derive.run_batched", answer)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", answer)
     await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     assert len(requested) == 1
     f.make_fetch(url, content="Salary USD 200000 yearly. " * 20)
@@ -92,5 +93,5 @@ async def test_unknown_legacy_source_does_not_trigger_bulk_reextraction(f, monke
     async def unexpected(*args):
         pytest.fail("Unknown legacy source must not trigger extraction")
 
-    monkeypatch.setattr("tasks.derive.run_batched", unexpected)
+    monkeypatch.setattr("tasks.derivations.sweep.run_batched", unexpected)
     await comp.PAY.handle(f.make_task("extract_comp", status="running"), {})

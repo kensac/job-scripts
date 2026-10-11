@@ -40,7 +40,7 @@ async def test_membership_is_computed_by_the_task_and_read_as_a_lookup(client, u
 
     # A preference write asks for a recompute (one task) and, until it runs,
     # the board is what was computed.
-    from tasks import locations
+    from tasks.derivations import locations
 
     locations.store("Singapore", locations.LocationExtract(country="SG", city="Singapore"), "t")
     locations.store("Austin, TX", locations.LocationExtract(country="US", region="TX"), "t")

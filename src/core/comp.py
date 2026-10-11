@@ -1,7 +1,7 @@
 """The closed vocabularies compensation is recorded in, and the multipliers
 that make one number comparable to another.
 
-Here rather than in `tasks/comp.py`, which extracts it, because the API
+Here rather than in `tasks/derivations/compensation.py`, which extracts it, because the API
 declares these in the shapes it returns and the services may not import the
 handlers. A vocabulary is not a task.
 

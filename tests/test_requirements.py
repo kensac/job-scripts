@@ -7,7 +7,7 @@ import pytest
 from api import db
 from core import skills
 from core.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE
-from tasks.requirements import (
+from tasks.derivations.requirements import (
     _CANDIDATES,
     REQUIREMENTS_INPUT_CHARS,
     RequirementsExtract,

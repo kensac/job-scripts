@@ -200,7 +200,7 @@ each by its own code:
 | `ai_batches` token totals and `est_cost_usd` | one row per provider batch | `batch_event_hook` | fleet and task model screens |
 | `batch_result_receipts.response.usage` | one row per batch item | `batch_results.checkpoint` | nothing reads it as money |
 | `review_gate_outcomes.recorded_cost_usd`, `usage` | copied from `ai_queries` | nothing since 2026-10 (title screens write no rows); the table is dropped | nothing |
-| `job_embeddings.input_tokens`, `cost_usd` | a packed request split per posting | `tasks.embeddings` | nothing |
+| `job_embeddings.input_tokens`, `cost_usd` | a packed request split per posting | `tasks.derivations.embeddings` | nothing |
 
 The same verify call was a fleet row in `api_usage` with the batch's totals,
 the same totals on `ai_batches`, a receipt, and a `closed` verdict holding
@@ -437,10 +437,10 @@ a measurement asks for it.
 
 **A derived fact is one registration.** `tasks.DERIVATIONS` lists every
 answer a model derives from data we already hold (pay, requirements, job
-profiles, embeddings, locations), each a `tasks.derive.Derivation` naming its
+profiles, embeddings, locations), each a `tasks.derivations.sweep.Derivation` naming its
 table, its input (page text cut to `input_chars`, or not page text), its
 recipe version, its model routing, its staleness rule (`select`) and its
-store. `tasks.derive.sweep` is the one skeleton: switch, one pass in flight,
+store. `tasks.derivations.sweep` owns one execution path: switch, one pass in flight,
 selection, the unchanged-page skip, batch submit and collect through
 `tasks.runtime`, the page-currency check, parse, store. The worker schedules
 and dispatches every entry from the list, so a new derivation touches neither.
@@ -681,7 +681,7 @@ files listed there:
 |---|---|---|
 | `core/catalog/jobs.py` and `core/catalog/observations.py` (historical catalog writers) | feed state, written and compared | historical; `jobs.active` is now frozen |
 | `api/analytics/queries.py` source inventory | the owning feed's own flag, per source | stays |
-| `tasks/comp.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
+| `tasks/derivations/compensation.py`, `tasks/content.py`, `tasks/verify.py` (three sweeps), `tasks/derivations/locations.py`, `tasks/application.py` (three), `api/experiments.py` | which postings get work | moved |
 | `api/board/eligibility.py` `STRUCTURAL` (board recompute, materialize, managed board runs), `tasks/board.py` `demote_closed` | which postings a board may show | moved |
 | `api/routers/filters.py` preset coverage gates | how many postings a preset would show | moved, once availability was stored |
 | `api/routers/job_board.py`, `job_detail.py`, `public_job_lists.py` (`active` in the response), `api/board/column_filters.py` ("Listed by source"), `api/posting_path.py` | what a person is told | moved |
@@ -1054,7 +1054,7 @@ would change if it did, so it has not been done for a line in a config file.
 The location edge is closed. `api/locations.py` owns the place inputs,
 normalisation and write, including the rule that a model result cannot replace
 an administrator's correction. The admin route and classification task both
-call that service. `tasks/locations.py` owns only candidate selection, request
+call that service. `tasks/derivations/locations.py` owns only candidate selection, request
 construction, batch lifecycle and result consumption.
 
 The experiment edge is closed. Request construction, arm validation, sampling

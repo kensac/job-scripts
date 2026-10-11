@@ -48,7 +48,7 @@ SKILL_KINDS = ("required", "preferred")
 
 # A full working life, 18 to 68. Nothing above this can be a number of years of
 # professional experience, so a larger value is the model having read a salary,
-# a requisition number or a calendar year off the page. comp.py bounds its
+# a requisition number or a calendar year off the page. compensation.py bounds its
 # annual figure for the same reason: a wrong number in a sortable column is
 # worse than a missing one, because it silently reorders every answer built on
 # it, and nobody can see that it did.

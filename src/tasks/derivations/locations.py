@@ -12,7 +12,7 @@ from api.locations import LocationExtract, Place, store
 from core import catalog
 from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.shapes import LOCATIONS_TASK
-from tasks.derive import Derivation, Row
+from tasks.derivations.sweep import Derivation, Row
 
 
 class LocationAnswer(BaseModel):

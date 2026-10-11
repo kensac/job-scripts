@@ -22,7 +22,7 @@ from core.requirements import (
 )
 from core.shapes import REQUIREMENTS_TASK
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
-from tasks.derive import Derivation, Row
+from tasks.derivations.sweep import Derivation, Row
 
 # Postings never extracted, plus postings whose page has been scraped again
 # since they were.
