@@ -90,7 +90,7 @@ def apply_context(
         answers=db.query_as(
             RememberedAnswer,
             f"SELECT {_BANK_COLS} FROM application_answer_bank WHERE user_id = %s "
-            "ORDER BY times_used DESC, updated_at DESC LIMIT 200",
+            "ORDER BY times_used DESC, updated_at DESC, id DESC",
             (user.id,),
         ),
         drafts=db.query_as(

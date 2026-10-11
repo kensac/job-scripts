@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from api import apply
+from api import apply, db
 from tests.apply_support import ada_profile
+from tests.job_board_support import _uid
 
 
 def test_the_ladder_rungs():
@@ -97,6 +98,23 @@ def test_the_profile_and_bank_are_the_persons_own(client, user_headers, other_us
         ).status_code
         == 404
     )
+
+
+def test_apply_context_includes_every_saved_answer(client, user_headers):
+    uid = _uid(user_headers)
+    for number in range(201):
+        db.execute(
+            "INSERT INTO application_answer_bank "
+            "(user_id, label, label_norm, kind, value) VALUES (%s, %s, %s, 'text', %s)",
+            (uid, f"Question {number}", f"question {number}", f"Answer {number}"),
+        )
+    response = client.get(
+        "/v1/user/apply/context",
+        params={"url": "https://example.test/apply"},
+        headers=user_headers,
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()["answers"]) == 201
 
 
 def test_a_yes_no_question_about_a_place_is_not_answered_with_the_place(client, user_headers):
