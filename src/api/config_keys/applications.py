@@ -19,14 +19,6 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Application forms the hourly sweep reads per person per cycle, newest postings "
         "first, one request each to the ATS under the host budget.",
     ),
-    "resumes_per_user": ConfigKey(
-        section="Applications",
-        default=10,
-        value_type=PositiveInt,
-        help="Resumes one person may keep. Each holds its PDF (5 MB at most) in the database, "
-        "and the database is dumped and archived daily, so this bounds four copies of "
-        "every upload.",
-    ),
     # Empty means the built-in text in the code; see the admin registry.
     "application_draft_instructions": ConfigKey(
         section="Applications",

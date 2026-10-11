@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import uuid
 from typing import Any
 
 from sqlalchemy import (
@@ -18,6 +19,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import BYTEA, JSONB, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -38,8 +40,83 @@ class UserResume(Base):
     # The file itself, kept only so the extension can attach it to a form;
     # NULL for a resume that was pasted.
     pdf: Mapped[bytes | None] = mapped_column(BYTEA)
+    pdf_upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id", name="fk_user_resumes_pdf_upload")
+    )
+    text_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("resume_text_versions.id", name="fk_user_resumes_text_version"),
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ResumeUpload(Base):
+    __tablename__ = "resume_uploads"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(BigInteger)
+    received_size: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    next_part: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'receiving'"))
+    error: Mapped[str | None] = mapped_column(Text)
+    completed_resume_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ResumeUploadPart(Base):
+    __tablename__ = "resume_upload_parts"
+
+    upload_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id", ondelete="CASCADE"), primary_key=True
+    )
+    part_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sha256: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(Integer)
+    verified: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+
+
+class ResumeTextVersion(Base):
+    __tablename__ = "resume_text_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    chars: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    part_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    ready: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class ResumeTextPart(Base):
+    __tablename__ = "resume_text_parts"
+
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("resume_text_versions.id"), primary_key=True
+    )
+    part_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(Text)
+
+
+class UserResumeRevision(Base):
+    __tablename__ = "user_resume_revisions"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    resume_id: Mapped[int] = mapped_column(BigInteger)
+    name: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str | None] = mapped_column(Text)
+    pdf: Mapped[bytes | None] = mapped_column(BYTEA)
+    pdf_upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("resume_uploads.id")
+    )
+    text_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("resume_text_versions.id")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class ApplicationForm(Base):

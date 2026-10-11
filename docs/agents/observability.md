@@ -13,6 +13,14 @@ chunk does nothing. The last task publishes the revision only if the whole
 recipe is valid. Invalid uploads remain stored and never become current. The
 completion route can retry a failed task from the last saved chunk.
 
+**Resume PDF extraction runs after durable transfer.** The API verifies each
+object part before recording it as received. Completion enqueues
+`process_resume_upload`. The worker reads parts into a disk-backed file and
+writes extracted text as ordered parts. Only a complete text version becomes
+the current resume. A failure leaves the PDF and any partial text version
+stored; the upload status shows the error. Retrying completion starts a new
+text version. Replacing a resume saves its prior text and PDF in revisions.
+
 Tasks are claimed with row-level locking and skip-locked selection. A worker
 heartbeats while it holds a task.
 

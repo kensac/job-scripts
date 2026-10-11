@@ -131,6 +131,21 @@ set NOT NULL and drop the CHECK in a short transaction.
 
 ## Long-running work
 
+**Move legacy resumes to versioned storage on Hetzner.** New text writes store
+complete text in `resume_text_parts`; new PDF writes store verified object
+parts. Older `user_resumes` rows and archived revisions keep their old text
+and PDF bytes readable during the fleet rollout. After every writer uses the
+new path, backfill each old text value in a small transaction on a Hetzner
+host. Compare exact reconstructed text before setting its version pointer.
+Copy each old PDF to object parts, compare byte count and checksum with the
+source, then set its upload pointer. Cover both current rows and
+`user_resume_revisions`. Resume partial runs by selecting rows without a
+pointer. Never run this backfill from a laptop. Verify every old value has a
+matching new copy before a release removes old-column readers. After every
+host runs that release, a later merged migration checks that no old value is
+the sole copy and drops the old text and PDF columns. Do not clear old values
+before that guarded migration.
+
 **Retire an old data column in two releases.** First verify that every old
 value has moved and that current writers use the new storage. Remove all reads
 of the old column in one release. After every fleet reader runs that release,

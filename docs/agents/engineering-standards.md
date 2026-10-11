@@ -84,6 +84,11 @@ durable receipt before marking an upload complete.
 size.** No row ages out, no table keeps its last N rows, no text is cut to N
 characters before it is saved, no payload is dropped after a while. The scale
 here does not call for retention, and data that is gone cannot be measured.
+Do not limit the number of resumes a person can keep. Bound each upload request
+and worker read, while storing every part of the file.
+Store complete extracted resume text as immutable parts. Keep the prior resume
+revision before replacement or deletion. Read only the existing model context
+window for drafting; the full text stays available to the person in parts.
 
 An extracted skill keeps its raw text and canonical spelling regardless of
 length. Reject known non-skill categories by meaning, not by a character count.

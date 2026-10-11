@@ -11,6 +11,11 @@ what the whole thing is, not just the endpoint.
 
 ## Components
 
+**Resume text loads when the editor opens.** Read its ordered parts, then show
+the complete text. Send edits and new pasted text in bounded UTF-8 parts, and
+mark a version complete only after every part succeeds. Keep the current text
+visible if a part fails so the person can retry.
+
 **Use the shared component kit. Do not hand-roll what it already provides.**
 If a pattern recurs and the kit has nothing for it, add it to the kit and
 convert the call sites, then delete the hand-rolled versions. Leaving both is
@@ -57,6 +62,15 @@ Wide content scrolls inside its own container. The page body never scrolls
 sideways.
 
 ## Talking to the API
+
+**Resume PDF transfer is resumable.** Start a transfer with
+`POST /user/resume-uploads`, send the file in numbered byte parts, then call
+`POST /user/resume-uploads/{id}/complete`. The status route reports the next
+part and processing result. Re-selecting the same file resumes at that part.
+The proxy streams request and response bodies; it never converts a PDF to
+text or holds the whole file. A resume appears in the library only after the
+worker extracts its text. Keep the uploaded parts if extraction fails so the
+person can retry processing.
 
 The personal board's `GET /user/jobs` accepts `column_filters`, a JSON array of
 at most 32 AND conditions. Render available fields and operators from its
