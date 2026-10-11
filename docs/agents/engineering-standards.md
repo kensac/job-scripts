@@ -2,6 +2,11 @@
 
 ## Correctness
 
+Use the repository `.venv` for Pyright and editor diagnostics. Keep the
+interpreter selection in `pyrightconfig.json` and verify it with `pyright`.
+Keep Alembic's path separator explicit in `alembic.ini` so path parsing does
+not rely on its deprecated fallback.
+
 Keep OAuth consent state and authorization URL construction in
 `api.oauth_authorization`, provider settings and typed errors in
 `api.oauth_provider`, and grant storage, refresh, and revocation in
