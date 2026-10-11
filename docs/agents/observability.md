@@ -76,18 +76,28 @@ A handler that never yields holds its worker until it finishes. Long handlers
 should hold progress in the database so an interruption resumes rather than
 restarts.
 
-A worker runs one task at a time unless `worker_task_slots` names it, and
+A worker runs one task at a time unless `JOBTRACKER_TASK_SLOTS` or
+`worker_task_slots` gives it more, and
 its housekeeping (reaping, scheduling, gauges) runs only between the tasks it
 runs on its main loop. A long task on the main loop therefore starves
 scheduling on that worker; keep tasks short and let the queue carry the
 volume.
 
-**A worker named in `worker_task_slots` runs several tasks at once, and only
-an audited kind leaves the main loop.** The number is a ceiling, capped at
-half the connection pool because each task can hold a connection and its
-heartbeat another. Under it an `AdaptiveLimiter` sets the live limit: it
-starts at one, grows by one while a window of completions comes faster than
-the last, and halves when a task fails on the host running out of memory or
+**A worker given more than one slot runs several tasks at once, and only
+an audited kind leaves the main loop.** The ceiling comes from two places.
+`JOBTRACKER_TASK_SLOTS` in the host's environment is the host's own value,
+sized for its memory by whoever sizes the host. A `worker_task_slots` entry
+for the worker is the administrator's override. With both set the smaller
+wins, so the admin page can lower a host without a deploy but cannot raise it
+past what the host was sized for; with neither, the worker runs one task at a
+time. Either way the ceiling is capped at half the connection pool because
+each task can hold a connection and its heartbeat another
+(`api.worker._task_ceiling`). Under it an `AdaptiveLimiter` sets the live
+limit. It starts at the ceiling when `JOBTRACKER_TASK_SLOTS` is set, because
+the host's value is known at start and climbing from one after every deploy
+cost each worker a window of completions per step; with only the
+`worker_task_slots` entry it starts at one. It grows by one while a window
+of completions comes faster than the last, and halves when a task fails on the host running out of memory or
 threads (`_TRANSIENT_MARKERS`, `MemoryError`) or when free memory, the
 tighter of the cgroup's headroom and the host's `MemAvailable`, falls under
 `worker_memory_reserve_mb`. A task costs its kind's `worker_task_weights`

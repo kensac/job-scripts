@@ -108,6 +108,14 @@ EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
 # compose; the container hostname fallback is a random hex id.
 WORKER_NAME = os.environ.get("JOBTRACKER_WORKER_NAME") or socket.gethostname()
 
+# This host's own task slots, set by the host's config beside its name. Unlike
+# a worker_task_slots entry it is known before the database is read, so the
+# limit starts there rather than at one: from one, every deploy restarted each
+# worker at one task and it climbed back a window of completions at a time.
+# Unset, the worker reads worker_task_slots alone, as it did before this.
+_TASK_SLOTS_ENV = os.environ.get("JOBTRACKER_TASK_SLOTS")
+TASK_SLOTS = int(_TASK_SLOTS_ENV) if _TASK_SLOTS_ENV else None
+
 _managed_board_schedule_attempts: set[tuple[str, int]] = set()
 
 
@@ -817,8 +825,9 @@ class _Slots:
     Only the main thread touches this; a task's thread reports its end on
     the queue."""
 
-    def __init__(self) -> None:
-        self.limiter = AdaptiveLimiter(max_c=1, gauge=None)
+    def __init__(self, start: int = 1) -> None:
+        self.limiter = AdaptiveLimiter(max_c=start, gauge=None)
+        self.limiter.limit = start
         self.weights: dict[str, int] = {}
         self.reserve_mb = 0
         self.held: dict[int, int] = {}
@@ -878,10 +887,31 @@ class _Slots:
 
 
 def _task_ceiling() -> int:
-    """This worker's worker_task_slots, bounded by its connection pool: each
-    running task can hold a connection and its heartbeat another."""
-    slots = db.get_config("worker_task_slots") or {}
-    return max(1, min(int(slots.get(WORKER_NAME.lower(), 1)), pool.MAX_SIZE // 2))
+    """This worker's ceiling, bounded by its connection pool: each running task
+    can hold a connection and its heartbeat another. JOBTRACKER_TASK_SLOTS is
+    the host's own value; a worker_task_slots entry for this worker is the
+    administrator's override, and the smaller of the two wins, so the admin
+    page can lower a host without a deploy but cannot raise it past what the
+    host was sized for."""
+    named = (db.get_config("worker_task_slots") or {}).get(WORKER_NAME.lower())
+    given = [int(v) for v in (TASK_SLOTS, named) if v is not None]
+    return max(1, min(min(given, default=1), pool.MAX_SIZE // 2))
+
+
+def _refresh_slots(slots: _Slots | None) -> tuple[int, _Slots | None]:
+    """Read the ceiling and the slot settings; make the slots the first time
+    the ceiling is above one. With JOBTRACKER_TASK_SLOTS set they start at the
+    ceiling, and the memory guard halves them from there."""
+    ceiling = _task_ceiling()
+    if slots is None and ceiling > 1:
+        slots = _Slots(ceiling if TASK_SLOTS is not None else 1)
+    if slots is not None:
+        slots.configure(
+            ceiling,
+            db.get_config("worker_task_weights") or {},
+            int(db.get_config("worker_memory_reserve_mb")),
+        )
+    return ceiling, slots
 
 
 def _seed_gauges() -> None:
@@ -942,18 +972,12 @@ def main() -> None:
                 except Exception:
                     logger.exception("housekeeping failed")
                 try:
-                    ceiling = _task_ceiling()
-                    if slots is not None or ceiling > 1:
-                        slots = slots or _Slots()
-                        slots.configure(
-                            ceiling,
-                            db.get_config("worker_task_weights") or {},
-                            int(db.get_config("worker_memory_reserve_mb")),
-                        )
+                    ceiling, slots = _refresh_slots(slots)
                 except Exception:
                     logger.exception("reading task slots failed")
-            # One at a time, the loop as it was, unless worker_task_slots names
-            # this worker; switched back, it drains what it holds first.
+            # One at a time, the loop as it was, unless JOBTRACKER_TASK_SLOTS or
+            # worker_task_slots gives this worker more; switched back, it
+            # drains what it holds first.
             if slots is None or (ceiling <= 1 and not slots.held):
                 slots, _task_limit = None, None
                 if not runner.run(run_once()):
