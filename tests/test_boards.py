@@ -13,7 +13,15 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from core.fetching import boards, client
+from core.fetching import (
+    board_avature,
+    board_bytedance,
+    board_common,
+    board_goldman,
+    board_ibm,
+    boards,
+    client,
+)
 
 NOW = datetime.datetime(2026, 9, 4, 12, tzinfo=datetime.UTC)
 
@@ -583,7 +591,7 @@ def test_workable_paces_its_requests(monkeypatch):
 
 
 def test_a_nul_byte_in_a_posting_is_dropped_before_it_reaches_jsonb():
-    p = boards._posting(
+    p = board_common.posting_from_listing(
         "Northwell",
         "Nurse\x00",
         ["NY"],
@@ -987,7 +995,7 @@ def test_one_fetcher_reads_both_bytedance_boards_by_their_website_path(monkeypat
     asked: list = []
     api = {"tiktok": _TIKTOK_ROWS, "en": _BYTEDANCE_ROWS}
     monkeypatch.setattr(boards._session, "post", _bytedance_api(api, 10_000, asked=asked))
-    monkeypatch.setattr(boards, "_BYTEDANCE_PAGE", 2)
+    monkeypatch.setattr(board_bytedance, "_BYTEDANCE_PAGE", 2)
 
     tiktok = boards.fetch_listings(_TIKTOK, "TikTok")
     assert len(tiktok) == len(_TIKTOK_ROWS)
@@ -1030,8 +1038,8 @@ def test_a_bytedance_board_past_the_search_window_is_a_partial_pull(monkeypatch,
         "post",
         _bytedance_api({"tiktok": _TIKTOK_ROWS}, window=4, capped_count=capped_count),
     )
-    monkeypatch.setattr(boards, "_BYTEDANCE_PAGE", 3)
-    monkeypatch.setattr(boards, "_BYTEDANCE_WINDOW", 4)
+    monkeypatch.setattr(board_bytedance, "_BYTEDANCE_PAGE", 3)
+    monkeypatch.setattr(board_bytedance, "_BYTEDANCE_WINDOW", 4)
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings(_TIKTOK, "TikTok")
     assert [p.title for p in raised.value.postings] == [r["title"] for r in _TIKTOK_ROWS[:4]]
@@ -1050,7 +1058,7 @@ def test_a_bytedance_board_that_shifts_mid_pull_is_a_partial_pull(monkeypatch):
         return reply
 
     monkeypatch.setattr(boards._session, "post", post)
-    monkeypatch.setattr(boards, "_BYTEDANCE_PAGE", 2)
+    monkeypatch.setattr(board_bytedance, "_BYTEDANCE_PAGE", 2)
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings(_TIKTOK, "TikTok")
     assert len(raised.value.postings) == len(_TIKTOK_ROWS) - 1
@@ -1379,7 +1387,7 @@ def _ibm_search(hits, stated, asked):
 
 def test_ibm_walks_the_index_by_cursor_and_links_the_public_posting(monkeypatch):
     asked = []
-    monkeypatch.setattr(boards, "_IBM_PAGE", 1)
+    monkeypatch.setattr(board_ibm, "_IBM_PAGE", 1)
     monkeypatch.setattr(boards._session, "post", _ibm_search(IBM_HITS, 3, asked))
     out = boards.fetch_listings("https://www-api.ibm.com/search/api/v2", "IBM")
     assert [(p.title, p.locations) for p in out] == [
@@ -1405,7 +1413,7 @@ def test_ibm_walks_the_index_by_cursor_and_links_the_public_posting(monkeypatch)
 
 
 def test_an_ibm_cursor_that_ends_short_of_the_stated_count_is_a_partial_pull(monkeypatch):
-    monkeypatch.setattr(boards, "_IBM_PAGE", 1)
+    monkeypatch.setattr(board_ibm, "_IBM_PAGE", 1)
     monkeypatch.setattr(boards._session, "post", _ibm_search(IBM_HITS, 4, []))
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings("https://www-api.ibm.com/search/api/v2", "IBM")
@@ -1491,7 +1499,7 @@ def _goldman_search(roles, stated, asked):
 
 def test_goldman_pages_from_zero_across_every_public_experience(monkeypatch):
     asked = []
-    monkeypatch.setattr(boards, "_GOLDMAN_PAGE", 1)
+    monkeypatch.setattr(board_goldman, "_GOLDMAN_PAGE", 1)
     monkeypatch.setattr(boards._session, "post", _goldman_search(GOLDMAN_ROLES, 3, asked))
     out = boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
     assert [(p.url, p.locations) for p in out] == [
@@ -1519,7 +1527,7 @@ def test_goldman_pages_from_zero_across_every_public_experience(monkeypatch):
 
 
 def test_a_refused_goldman_search_fails_the_pull(monkeypatch):
-    monkeypatch.setattr(boards, "_GOLDMAN_PAGE", 251)
+    monkeypatch.setattr(board_goldman, "_GOLDMAN_PAGE", 251)
     monkeypatch.setattr(boards._session, "post", _goldman_search(GOLDMAN_ROLES, 3, []))
     with pytest.raises(RuntimeError, match="roleSearch refused"):
         boards.fetch_listings("https://api-higher.gs.com/gateway/api/v1/graphql", "Goldman Sachs")
@@ -2196,7 +2204,7 @@ def test_an_avature_next_link_back_to_a_page_already_read_is_partial(monkeypatch
 def test_an_avature_walk_into_the_window_is_partial(monkeypatch):
     """Koch states no count and answers 406 from offset 2,000; Siemens answers
     an empty page there. Either way the rows past it are unseen."""
-    monkeypatch.setattr(boards, "_AVATURE_WINDOW", 2)
+    monkeypatch.setattr(board_avature, "_AVATURE_WINDOW", 2)
     search = "https://koch.avature.net/en_US/careers/SearchJobs"
 
     def koch(url):
