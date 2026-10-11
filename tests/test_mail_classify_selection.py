@@ -7,7 +7,7 @@ import pytest
 from api import db
 from api.mail import store as mail_store
 from core.mail.importer import ImportedMessage
-from tasks import mail_classify
+from tasks.mail.classification import handler as mail_classify
 from tests import mail_log
 from tests.mail_classify_support import _events, _Res, _run, _store
 

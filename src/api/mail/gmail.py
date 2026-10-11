@@ -5,7 +5,7 @@ deliberately no send, no modify, and no delete path - not as policy but as
 absence, so no future edit can quietly acquire one.
 
 Incremental sync is a date window, `after:` some days before the newest
-message held (tasks/mail_sync._since), not Gmail's historyId cursor. The
+message held (tasks.mail.sync._since), not Gmail's historyId cursor. The
 overlap re-reads a few messages, which dedupe on write.
 """
 

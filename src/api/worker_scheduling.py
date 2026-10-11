@@ -101,7 +101,7 @@ def schedule_ingest_cycle() -> None:
     # nothing once the catalog agrees (catalog.reconcile_available).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
     # Messages whose current event or match pointer lags its log
-    # (tasks.mail_pointers). Counting them is a pass over every message,
+    # (tasks.mail.pointers). Counting them is a pass over every message,
     # 0.9 s on production on 2026-10-10, so the task counts once a cycle
     # rather than every worker on every poll; a run with none to fill only
     # reads. One at a time.

@@ -9,8 +9,8 @@ declared capabilities in core/providers/ and answers all four, or refuses.
 WHAT THIS DELIBERATELY DOES NOT DO IS PICK A MODEL ON PRICE.
 
 Model choice in this codebase is an evidence-based quality judgment, not an
-optimisation. mail_classify.py excludes gpt-5-nano in a comment that records
-why: measured on extraction-shaped work it fabricates, inventing 12 clearances
+optimisation. `tasks.mail.classification.handler` excludes gpt-5-nano in a
+comment that records why: measured on extraction-shaped work it fabricates, inventing 12 clearances
 across 55 postings that never mention clearance and filling "none" wherever the
 honest answer is "unstated". Nothing in a datasheet says that. A router that
 minimised cost subject to declared capabilities would have routed that work

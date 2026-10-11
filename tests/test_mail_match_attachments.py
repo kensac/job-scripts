@@ -4,7 +4,7 @@ import datetime
 
 from api import db
 from api.board.person_state import write_board_row
-from tasks import mail_match as task
+from tasks.mail.matching import handler as task
 from tests import mail_log
 from tests.mail_match_support import _application, _event, _message
 

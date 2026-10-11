@@ -6,7 +6,7 @@ from api import db
 from api.mail import store as mail_store
 from core.mail.importer import ImportedMessage
 from core.routing import resolve
-from tasks import mail_classify
+from tasks.mail.classification import handler as mail_classify
 from tests.factories import make_task
 
 

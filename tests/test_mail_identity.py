@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from api import db
 from core.identity import MAX_IDENTITIES, AddressCount, derive_identities
-from tasks.mail_classify import _SELF_SENT, _heal_self_sent, identities_for
+from tasks.mail.classification.handler import _SELF_SENT, _heal_self_sent, identities_for
 from tests import mail_log
 
 

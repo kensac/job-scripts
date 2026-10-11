@@ -1,4 +1,4 @@
-"""Task handlers, one module per family.
+"""Task handlers grouped by domain workflow.
 
 HANDLERS is the only thing the worker loop needs from this package. Importing
 them here keeps the loop from knowing which module any given kind lives in,
@@ -30,10 +30,10 @@ from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
 from tasks.job_profiles import PROFILES
 from tasks.locations import LOCATIONS
-from tasks.mail_classify import handle_classify_mail
-from tasks.mail_match import handle_match_mail
-from tasks.mail_pointers import handle_backfill_mail_pointers
-from tasks.mail_sync import (
+from tasks.mail.classification.handler import handle_classify_mail
+from tasks.mail.matching.handler import handle_match_mail
+from tasks.mail.pointers import handle_backfill_mail_pointers
+from tasks.mail.sync import (
     handle_import_archive,
     handle_probe_credentials,
     handle_sync_gmail,

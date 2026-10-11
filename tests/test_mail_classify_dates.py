@@ -4,7 +4,7 @@ import datetime
 
 import pytest
 
-from tasks import mail_classify
+from tasks.mail.classification import handler as mail_classify
 
 SENT = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)
 

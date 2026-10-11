@@ -3,7 +3,7 @@
 Three writers, one per provenance: the board (`tracker`, when a row moves
 into an applied status), the extension's submit (`apply`, for a form whose
 posting is not on the board), and the mail matcher (`email`, in
-tasks/mail_match.seed_from_mail). The board and the submit write it in the
+`tasks.mail.matching.derived.seed_from_mail`). The board and the submit write it in the
 transaction that records the act, so there is no sweep that catches up.
 """
 

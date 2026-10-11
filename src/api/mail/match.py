@@ -59,7 +59,7 @@ HUMAN_METHODS = frozenset({MANUAL, DETACHED})
 
 # Kinds that describe the user rather than an application, and so must never
 # be attached to one. Already excluded from creating applications
-# (tasks/mail_match.APPLIED_KINDS); this is the same rule on the matching side,
+# (tasks.mail.matching.derived.APPLIED_KINDS); this is the same rule on the matching side,
 # which had drifted.
 UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
