@@ -22,6 +22,7 @@ import pytest
 from api import db, fetching
 from core import catalog
 from core.fetching import ats as core_ats
+from tasks import reverification
 from tasks import runtime as tasks_runtime
 from tasks import verify as tasks_verify
 from tests.factories import make_batch_result
@@ -35,7 +36,7 @@ def taken(monkeypatch):
     async def fake_reverify(task_id, rows, parent_id=None, force=False):
         calls.append({"rows": list(rows), "parent_id": parent_id, "force": force})
 
-    monkeypatch.setattr(tasks_verify, "_reverify_jobs", fake_reverify)
+    monkeypatch.setattr(reverification, "_reverify_jobs", fake_reverify)
     return calls
 
 
@@ -325,7 +326,7 @@ def submitted(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
-    monkeypatch.setattr(tasks_verify, "submit_or_collect", fake_submit)
+    monkeypatch.setattr(reverification, "submit_or_collect", fake_submit)
     return calls
 
 
@@ -457,7 +458,7 @@ async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_aga
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
     monkeypatch.setattr(fetching, "fetch_page", fetch)
-    monkeypatch.setattr(tasks_verify, "submit_or_collect", answer)
+    monkeypatch.setattr(reverification, "submit_or_collect", answer)
     _, url = f.make_ready_job(source=f.make_source("unchanged-src"))
     rows = [{"url": url, "company": "C", "title": "T"}]
 

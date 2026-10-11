@@ -6,6 +6,7 @@ import pytest
 
 from api import db
 from core.near_copy import key
+from tasks import new_posting_verification
 from tasks import verify as tasks_verify
 from tests.test_verify_board_questions import _board
 
@@ -35,7 +36,7 @@ def submitted(monkeypatch):
         specs.extend(batch)
         return [], None
 
-    monkeypatch.setattr(tasks_verify, "run_batched", fake_run_batched)
+    monkeypatch.setattr(new_posting_verification, "run_batched", fake_run_batched)
     return specs
 
 
