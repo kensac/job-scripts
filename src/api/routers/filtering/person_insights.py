@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 
 from api import db
 from api.auth import AuthedUser, require_user
-from api.routers.filter_insights_domain import (
+from api.routers.filtering.insight_breakdowns import (
     DECISION_WINDOW_SQL,
     DEFAULT_MIN_DECISIONS,
     UNGROUPED_REASON_KEY,

@@ -1,6 +1,6 @@
 """Administrative and owner filter insights routers."""
 
-from api.routers import filter_insights_admin, filter_insights_user
+from api.routers.filtering import admin_insights, person_insights
 
-router = filter_insights_admin.router
-user_router = filter_insights_user.user_router
+router = admin_insights.router
+user_router = person_insights.user_router

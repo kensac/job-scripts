@@ -11,7 +11,7 @@ from api import db, scoping
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
-from api.routers.filter_insights_domain import (
+from api.routers.filtering.insight_breakdowns import (
     DECISION_WINDOW_SQL,
     DEFAULT_MIN_DECISIONS,
     UNGROUPED_REASON_KEY,
