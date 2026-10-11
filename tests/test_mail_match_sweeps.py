@@ -120,7 +120,7 @@ async def test_one_users_sweep_advances_progress_as_it_goes(f, monkeypatch):
 def test_a_finished_sweep_is_not_repeated_when_nothing_changed(f):
     """`record` keeps an unchanged verdict's timestamp where it was, so any
     application newer than the verdict re-selected the message on every sweep:
-    245 runs and 200.5 worker-hours in 14 days on production, 244 of them
+    245 runs and 200.5 worker-hours in the 14 days ending 2026-10-10, 244 of them
     writing nothing. The last finished sweep's start is the cutoff now."""
     uid = f.make_user()
     mid = _message(uid, sent_at=datetime.datetime(2026, 3, 2, tzinfo=datetime.UTC))

@@ -93,8 +93,11 @@ def test_a_message_arrives_as_sanitised_markup_with_its_trackers_withheld(client
 
 
 def test_confidence_is_a_string_and_not_every_event_is_high(client, dev_headers):
-    """It is 'high' / 'medium' / 'low' in production - 81,788 / 138 / 22. A
-    client typing it as a number breaks on the first medium."""
+    """Confidence is a string, including the medium and low seed cases.
+
+    The 2026-09-03 seed rationale recorded 81,788 high, 138 medium, and 22 low
+    production events. A client typing confidence as a number fails on them.
+    """
     rows = db.query("SELECT DISTINCT confidence FROM email_events")
     values = {r["confidence"] for r in rows}
     assert values >= {"high", "medium", "low"}
@@ -102,8 +105,12 @@ def test_confidence_is_a_string_and_not_every_event_is_high(client, dev_headers)
 
 
 def test_role_title_is_a_key_that_exists_and_is_null(client, dev_headers):
-    """Present as a key on 81,000 rows and NULL as a value on 73,892 of them.
-    A client that checks `'role_title' in detail` reads it as present."""
+    """Keep a present but null role_title distinct from an absent key.
+
+    The 2026-09-03 seed rationale recorded 73,892 null values among roughly
+    81,000 events with this key. A key-presence check alone cannot tell them
+    apart.
+    """
     rows = db.query("SELECT detail FROM email_events WHERE detail ? 'role_title'")
     assert rows
     assert any(r["detail"]["role_title"] is None for r in rows)
@@ -111,8 +118,10 @@ def test_role_title_is_a_key_that_exists_and_is_null(client, dev_headers):
 
 
 def test_two_filters_share_one_prompt_hash(client, dev_headers):
-    """ "default" and "general" are one prompt in production. A row per name
-    double counts the same decisions."""
+    """The seed assigns default and general to one prompt version.
+
+    A row per filter name would double-count their shared decisions.
+    """
     body = client.get(
         "/v1/user/filter-insights/rejection-reasons?min_decisions=1", headers=dev_headers
     ).json()

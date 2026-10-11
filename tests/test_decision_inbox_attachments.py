@@ -220,9 +220,12 @@ def test_confirm_then_reject_leaves_three_rows(client, me):
 
 
 def test_a_detach_from_the_pipeline_records_who_did_it(client, me):
-    """Three endpoints wrote this table with a raw INSERT and none set the
-    actor, which is why 37 `manual` rows in production carry none and why
-    "has a person looked at this" was unanswerable by query."""
+    """Record the person who detached this match.
+
+    A 2026-10-11 audit found 37 manual rows without an actor after three
+    endpoints wrote directly. Without the actor, a reader cannot tell whether
+    someone reviewed the match.
+    """
     headers, uid = me
     app = _app(uid)
     mid = _msg(uid, "<pipe@x>", "rejection", "Acme")

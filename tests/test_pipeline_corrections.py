@@ -80,8 +80,8 @@ def test_the_whole_thread_can_be_declined(client, user_headers):
 def test_assigning_a_reply_takes_the_message_that_started_the_thread(client, user_headers):
     """provider_thread_id is the first References entry - the Message-ID of the
     message that STARTED the thread. So replies carry it and the root does not,
-    because a first message has no References. 1,113 messages in production are
-    the origin of a thread that exists without being part of it, so assigning a
+    because a first message has no References. A 2026-10-11 production audit found
+    1,113 messages that originated a thread without belonging to it. Assigning a
     reply moved its siblings and silently left the original behind."""
     uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
     app_id = insert_application(uid, company="Acme", title="Engineer")

@@ -236,8 +236,9 @@ class TestCustomVerdictCostCliff:
         Model appears in no resolution key, so the board is unaffected. But
         the filter evaluator skips a check by calling decided_custom_urls WITH
         the model, so the first cycle answered by a different model sees no
-        cached verdicts and re-runs the whole candidate set at full price - about
-        $1.32 for the one enabled filter today, $6.19 if all ten were live.
+        cached verdicts and re-runs the whole candidate set at full price.
+        The estimate recorded when this test was added on 2026-09-02 was $1.32
+        for its enabled filter, or $6.19 if all ten configured filters ran.
 
         Pinned here so that widening a call site to two models cannot be done
         without meeting this first. It fails if the model scoping is removed,

@@ -1,19 +1,12 @@
-"""The things that go wrong at 3am.
+"""Monitor stalled tasks and batches, and check the visibility projection.
 
-The other files check data shapes. This one checks that the moving parts are
-still moving: nothing wedged, nothing parked forever, and the two independent
-spellings of the visibility predicate still agree.
+The task and batch checks need a running fleet and use synced production data.
+The projection comparison runs on the generated corpus in every pull request.
 
-The wedged/parked checks are monitors of a running fleet, so they stay on real
-data. The predicate comparison is a test of code, and now runs on every pull
-request against the corpus - which materialises its boards with the
-application's own write-time predicate, so the comparison stays able to fail.
-
-Deliberately not asserted here, because they are known backlogs rather than
-invariants and would fail today: 14,196 verdicts whose url matches no job (a
-pre-normalisation artefact) and 10,342 active jobs still awaiting a first
-closed verdict (verify_new is working through them). Asserting a number that
-is legitimately non-zero would train us to ignore the file.
+The original test rationale recorded 14,196 verdicts with no matching job and
+10,342 active jobs awaiting a first closed verdict on 2026-09-01. Those were
+backlogs, not zero-count invariants. The counts are historical and are not
+asserted by this module.
 """
 
 from __future__ import annotations

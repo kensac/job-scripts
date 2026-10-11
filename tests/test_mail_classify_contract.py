@@ -76,10 +76,9 @@ def test_effort_follows_the_model_rather_than_a_shared_constant():
     backfill worked. A batch submits whole and fails whole, so a rejected
     parameter costs the entire run.
 
-    The models happen to agree today because both paths are luna. The property
-    that matters is that each shape's effort is DERIVED from its own model's
-    declared set, so pointing a path at a different model moves its effort
-    with it rather than sending a value that model refuses."""
+    The two task shapes have separate model overrides, even though their
+    defaults agree. Each shape derives its effort from its selected model's
+    declared set, so changing one model also changes the effort it sends."""
     for shape in (shapes.BACKFILL_TASK, shapes.ONGOING_TASK):
         model = resolve(shape).model
         declared = providers.model(model)

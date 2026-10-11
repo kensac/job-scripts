@@ -47,8 +47,7 @@ def _app(uid: int, company: str = "Acme", job_id: int | None = None) -> int:
 
 
 def _attach(message_id: int, application_id: int, method: str = "ats_company") -> int:
-    """An attachment as the MATCHER writes one: no actor, which is the state
-    every one of the 4,674 in production is in."""
+    """Create a matcher attachment with no human actor."""
     row = mail_log.query_one(
         "INSERT INTO application_matches (message_id, application_id, method, confidence, "
         "rationale) VALUES (%s, %s, %s, 'medium', 'single application at Acme') RETURNING id",
