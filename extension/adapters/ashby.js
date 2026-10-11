@@ -2,26 +2,14 @@ import { commitControl, setNative } from "./dom";
 import { confirmAshbySave } from "./ashby-save";
 // Ashby's hosted application form (jobs.ashbyhq.com/<org>/<id>/application).
 //
-// Three shapes of field, measured on live forms 2026-09-07. A wrapper
-// (.ashby-application-form-field-entry) carries a label and one control:
-// text, email, tel, url, number, textarea, file, a date picker, a row of
-// choice buttons (the yes/no pair, or more), or a combobox: the location
-// search box, a country list, a school search. A choice question with a
-// few options is a fieldset of radios, the options' text in the radio
-// labels. A choice question with many options is a fieldset holding a
-// searchable dropdown: ArrowDown opens the full list, whose results are
-// .ashby-application-form-input-autocomplete-popup-result elements on
-// one rendering and div[role=option] in a floating-ui portal on the
-// other; a pointer sequence on one of them picks it. The location search
-// box is the same widget with an unbounded list, filled by typing and
-// taking the first result. In wrappers, the control's id is the key the
-// API's form reader stores drafts under; a radio group's key is its
-// radios' shared name, which is unique per question (the prefix is not).
+// Field shapes observed on live forms on 2026-09-07: a labelled wrapper
+// contains one control or a row of choice buttons. Small choice sets use
+// radios; larger sets use searchable dropdowns. Dropdown results appear
+// under RESULT or PORTAL_RESULT below and require a pointer sequence.
+// Wrapper control ids identify drafts; a radio group's shared name is its key.
 //
-// Education is a repeated widget of its own: one repeatableEducationEntry
-// per school with a school search, a degree list, a field of study and
-// month/year selects for the dates, and an add button for the next. The
-// reader offers it as one group field filled from the profile's rows.
+// Education has one repeatable entry per school. The reader exposes the
+// entries as one group and fills them from the profile's education rows.
 /** @param {import("./types").AdapterContext} context */
 export function createAdapter(context) {
   const WRAP = ".ashby-application-form-field-entry";
