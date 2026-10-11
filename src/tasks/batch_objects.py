@@ -1,28 +1,20 @@
-"""Moves each bundle's fields off its member rows onto one batch_objects row.
+"""Move repeated bundle fields from batch_requests to batch_objects.
 
-Every batch_requests row repeated its bundle's bucket, key, sha256, size and
-version: 1,613,017 rows named 6,392 objects on 2026-10-11, 378 MB of
-snapshot_ref's 703 MB. Readers compose the reference from both
-(request_snapshots.REF), so every row reads the same before, during and after
-this task. It runs in phases, kept in the payload and carried from one run to
-the next, and the worker offers it until a run reports `done`:
+On 2026-10-11, 1,613,017 request rows named 6,392 objects. Repeated fields
+used 378 MB of the 703 MB snapshot_ref data. Readers combine the row and
+object through request_snapshots.REF throughout this task.
 
-- backfill: point every row at its object. A row is pointed only where its
-  own fields equal the object row's.
-- gate: wait until every running worker reads through the pointer
-  (api.data_level). An older image reads the fields from the row itself.
-- clear: point what the backfill missed (rows older images wrote meanwhile),
-  then remove the bundle's fields from each row whose object row holds the
-  same values. A row that differs, or has no object, keeps its fields and is
-  counted, never cleared. Nothing else is removed: the fields removed are
-  held by the object row the row points at.
-- done: a whole clear pass cleared nothing, skipped nothing and left no row
-  holding fields or without a pointer.
+The payload tracks four phases:
 
-Every chunk is one transaction over a range of the primary key, rows another
-transaction holds are skipped (SKIP LOCKED) and counted, so a writer never
-waits on this. A run cut short resumes from its last checkpointed chunk; the
-predicates make a repeated chunk a no-op.
+- backfill: link rows only to objects with equal fields.
+- gate: wait until all running workers can read through the link.
+- clear: link rows missed during backfill, then remove fields only when the
+  linked object preserves their values. Count and retain other rows.
+- done: a clear pass changed and skipped nothing, and all rows have links
+  with no repeated fields.
+
+Each primary-key range is one transaction. SKIP LOCKED leaves busy rows for
+another pass. Checkpoints resume interrupted runs; repeated ranges are safe.
 """
 
 from __future__ import annotations

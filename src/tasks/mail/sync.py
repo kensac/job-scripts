@@ -1,18 +1,10 @@
-"""Getting mail into the database: live Gmail, and one-off archive imports.
+"""Sync live Gmail, import archives and probe credentials.
 
-Three handlers, deliberately separate because they fail differently:
-
-- sync_gmail        recurring, small, needs a live credential
-- import_archive    one-off, enormous, needs a file and no credential
-- probe_credentials recurring, tiny, exists ONLY to notice a dead token
-
-The last one is not a convenience. Dead-credential detection is
-discovery-on-use: `invalid_at` is written when a refresh is refused, and
-nothing refuses a refresh unless something asks for a token. If that only
-happened inside the sync, then a sync that stops running also stops noticing
-that it cannot run - the alarm wired to the thing it is alarming about, which
-is exactly how a worker fleet sat dead for 28 minutes behind green
-healthchecks. So the probe has its own kind and its own schedule.
+`sync_gmail` needs a live credential. `import_archive` reads a file without
+one. `probe_credentials` has its own schedule because revocation is discovered
+only when a token refresh is attempted. A stalled sync cannot detect its own
+revoked credential. A worker fleet once remained idle for 28 minutes while
+health checks stayed green.
 """
 
 from __future__ import annotations

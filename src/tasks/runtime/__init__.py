@@ -1,28 +1,13 @@
-"""What a handler may call while it runs.
+"""Runtime operations shared by task handlers.
 
-Sits below the handlers so a handler can import it without pulling in the
-worker loop, while the loop imports handlers for its registry. That ordering
-is what keeps the two from forming a cycle.
+Handlers import this package without importing the worker loop. The worker
+imports handlers for its registry, so this dependency order avoids a cycle.
 
-It was one 775-line module doing four jobs at once. It is now three, by job,
-and the fourth left the package: `configured_model` is `api.task_config` and
-`load_config` is `api.budget`, both of which read the database on behalf of the
-services rather than running anything.
+`limits` controls concurrency and chunk sizes. `lifecycle` handles claims,
+progress and completion. `batching` submits and collects provider batches.
+The public operations are re-exported here for handler imports.
 
-- `limits` - how much runs at once, and how a sweep is cut into chunks.
-- `lifecycle` - the claim, progress, the end of a task, and the parent a chunk
-  reports to.
-- `batching` - submitting a provider batch, parking on it, collecting it, and
-  recording what it cost and what it asked.
-
-The names are re-exported here because that is how they are used: a handler
-wants a progress call, a chunk size and a batch submission in one import, and
-which of the three modules it came from is not the handler's concern.
-
-They are public because they are used that way. Eleven of them crossed a module
-boundary while spelled with a leading underscore, so the underscore was a claim
-about the interface that the callers falsified. What is still private is
-private to one of the three modules and is reached through that module.
+Database-backed configuration lives in `api.task_config` and `api.budget`.
 """
 
 from __future__ import annotations

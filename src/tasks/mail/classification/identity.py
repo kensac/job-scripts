@@ -6,37 +6,16 @@ from api import db
 from api.mail import events as mail_events
 from api.mail.current import current_event
 
-# Mail the candidate SENT is not an inbound event about the candidate. The
-# instruction asks the model what "the SENDER is communicating", and when the
-# sender is the candidate every kind comes out backwards - his own reply to a
-# professor saying he had started work and was enjoying it was classified as an
-# offer. 942 messages are self-sent and 137 of them carried inbound events,
-# inflating the interviewing and offer counts directly.
+# Sent mail is not an inbound event. A historical corpus audit found 942
+# self-sent messages; 137 had been classified as inbound events. Keep these
+# messages because they can still provide application evidence.
 #
-# Direction is knowable from the header, so it is read rather than inferred.
-# Handing it to a model turns a fact into a probability.
+# Check all mailbox identities, not only users.email. The second address in
+# the audited mailbox sent 1,840 messages. core.identity derives the set.
 #
-# THE MESSAGES ARE KEPT, only their classification as inbound events is
-# skipped. Sent mail is the best record that exists of WHEN the candidate
-# applied - better than applications.applied_at, which currently infers it from
-# the first inbound reply - and that is a different signal with a different
-# shape, to be built deliberately rather than fall out of a misread event kind.
-# Tested against every address the mailbox owns, not just users.email. That
-# column holds one address; this person has two, and the second is the sender
-# of 1,840 messages the guard never saw. core.identity derives the set from the
-# corpus rather than taking a configured list - see there for why.
-#
-# The second clause is the OLM export's sent items. 252 messages carry no
-# from_email at all, every one of them from that source. A message with no
-# sender that IS addressed to someone else is one you sent: if it had arrived,
-# you would be on it.
-#
-# It must have recipients, though, and that is not a detail. 184 of those 252
-# have no recipients either - they are parse failures, and a message with
-# neither end recorded says nothing about its direction. An earlier version of
-# this clause claimed all 241 non-owner-addressed ones and was caught by
-# another session's fixtures, which are exactly that shape. Requiring
-# recipients leaves 57, which is the sent-items population.
+# OLM sent items can lack from_email. Of 252 such messages, 184 also lack
+# recipients and give no direction evidence. Require a recipient before
+# treating a message with no sender as sent; 57 met that condition in the audit.
 _SELF_SENT = """(
         (COALESCE(m.from_email, '') <> '' AND EXISTS (
             SELECT 1 FROM unnest(%(identities)s::text[]) ident
@@ -51,18 +30,11 @@ _SELF_SENT = """(
 def identities_for(user_id: int) -> list[str]:
     """Every address this mailbox owns, derived from the mailbox.
 
-    Falls back to the user's configured address when the corpus is too small
-    to have the property core.identity relies on - a mailbox of forty messages
-    says nothing about who owns it, and an empty set there would switch the
-    guard off entirely rather than merely leaving it as narrow as it was.
+    When the mailbox is too small for core.identity to infer ownership, use
+    the user's configured address. This keeps the sent-mail guard active.
 
-    There was a confirmed set that overrode this, written by a settings screen
-    asking the user which addresses were theirs. Both are gone (#301): the
-    columns were NULL in production, so the override branch had never once been
-    taken and every correction this guard has ever made - 1,028 of them - came
-    from the derivation below. A screen that has produced no data is not a
-    safety net, and keeping the branch implied a fallback that was in fact the
-    only path.
+    A former settings override had no production values when audited for
+    #301. All 1,028 recorded corrections used derived identities.
     """
     from core.identity import AddressCount, derive_identities
 
@@ -93,21 +65,13 @@ def identities_for(user_id: int) -> list[str]:
 def _heal_self_sent(identities: list[str]) -> int:
     """Supersede events already booked on mail the owner sent.
 
-    The sweep only ever looks at messages with no events, so widening the
-    identity set stops NEW errors and leaves the existing ones standing - 1,239
-    consumed events on this corpus, including 440 interviews the owner
-    scheduled for other people while hiring for HackPSU.
+    The ordinary sweep selects messages with no events. An earlier corpus
+    audit found 1,239 existing self-sent events, including 440 interviews the
+    owner scheduled for others. New identity evidence must correct those too.
 
-    Written as a correction rather than a deletion, for the reason the whole
-    events table is append-only: latest-wins means one INSERT supersedes the
-    old answer and the old answer stays readable, so what was retracted and why
-    is still there to review.
-
-    Self-healing rather than a one-off backfill, because the identity set is
-    derived and can change - a new address appearing in the mailbox should
-    correct its own history on the next sweep without anyone running anything.
-    Costs nothing: no model is called, and a message already carrying the
-    correction is excluded so this converges instead of rewriting forever.
+    Append a correction so the prior event remains reviewable. Repeat this
+    check on each sweep because derived identities can change. Already
+    corrected messages are excluded, and no model is called.
     """
     rows = db.query(
         f"""

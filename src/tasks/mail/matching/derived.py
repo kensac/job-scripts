@@ -111,26 +111,16 @@ def derived_cap(user_id: int) -> int:
 
 
 def seed_from_mail(user_id: int) -> tuple[int, int]:
-    """Applications that only the mail knows about, matched as they are created.
+    """Create applications from unmatched mail at untracked employers.
 
-    Only where the user has NO application at that company. A failed match at
-    a company that IS tracked means the window or the title disagreed, and the
-    answer to that is adjudication, not a second application - inventing one
-    would split one real application's history across two rows and leave both
-    permanently ambiguous to `_by_company`.
+    A failed match at a tracked employer needs adjudication. Creating another
+    application there could split one history and make `_by_company` ambiguous.
 
-    Grouping is by thread where the provider gave us one, falling back to
-    company and role.
-
-    That 99% Outlook "thread coverage" this once claimed was not threading. The
-    .olm importer filled provider_thread_id from ThreadTopic, a normalised
-    SUBJECT, so every ATS autoresponder sharing a subject line grouped as one
-    conversation and derived a single application - "Nittany Lion Careers
-    Application Confirmation" alone was 56 messages across 32 employers. Outlook
-    mail now carries no thread id at all and its topic lives in thread_topic,
-    so the (company, role) fallback is the path for it, as it always should
-    have been. Real thread ids remain on Takeout (first References entry) and
-    Gmail (its own threadId).
+    Group by a real provider thread ID when present, otherwise by company and
+    role. Outlook ThreadTopic is a normalized subject, not a thread ID. An
+    earlier import grouped 56 messages from 32 employers under one shared
+    subject. Outlook now uses the company and role fallback; Gmail and Takeout
+    retain their real thread identifiers.
     """
     known = _existing_companies(user_id)
     cap = derived_cap(user_id)
