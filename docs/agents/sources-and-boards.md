@@ -88,6 +88,17 @@ The list shape (`GET /admin/sources`) carries everything but `title_pattern`;
 one row (`GET /admin/sources/{name}`) carries it. At 1,732 sources the pattern
 was more than half of a 1.8 MB body, and only the edit form reads it.
 
+`api.routers.source_admin` assembles source listing, catalog writes, bulk
+switches and title screening routes in that order. `source_admin_listing`
+owns the names, counts and full ledger shapes. `source_admin_catalog` owns
+single-source validation and writes, including the dependency check and
+managed-board revision when deleting. `source_admin_switch` selects rows by
+format, bundle and explicit name, then writes the source rows themselves.
+`source_admin_patterns` previews a candidate against current catalog and
+screened listings and reads screened rows. Keep source format derived from the
+listings URL, not stored as another source field. Keep the title pattern out
+of the full ledger, and include it on the single-source edit read.
+
 **A paged listing stops on the count its first page states.** Workday sends
 `total` on the first page only and 0 on every later one; a fetcher that re-read
 it per page stopped after two pages, and because the pull is authoritative,
