@@ -10,6 +10,7 @@ from core.fetching import forms
 from tasks import application as drafts
 from tests.application_support import GREENHOUSE, _job_for, _owner_config, _user_id
 from tests.application_support import _available_owner_key as _available_owner_key
+from tests.resume_support import create_text_resume
 
 
 @pytest.mark.asyncio
@@ -19,8 +20,8 @@ class TestDrafting:
     ):
         uid = _user_id()
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/1")
-        client.post(
-            "/v1/user/resumes",
+        create_text_resume(
+            client,
             json={"name": "master", "text": "Alice. Python."},
             headers=user_headers,
         )
@@ -79,9 +80,7 @@ class TestDrafting:
     ):
         uid = _user_id()
         job_id = _job_for(f, uid, "https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/y")
-        client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        )
+        create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         r = client.post(
             f"/v1/user/jobs/{job_id}/application/questions",
             json={"question": "Why NVIDIA?"},
@@ -129,9 +128,7 @@ class TestDrafting:
 
         uid = _user_id()
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/2")
-        client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        )
+        create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         monkeypatch.setattr(forms, "_get", lambda url: GREENHOUSE)
         cfg = ai.AIConfig(provider="openai", api_key="k", key_source="byo", model="gpt-5-mini")
         monkeypatch.setattr(drafts, "load_config", lambda u: (SimpleNamespace(), cfg))

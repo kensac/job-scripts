@@ -8,6 +8,7 @@ import uuid
 
 from api import db
 from tests.job_board_support import _insert_job, _uid
+from tests.resume_support import create_text_resume
 
 
 def test_a_report_keeps_the_page_whole_for_triage(client, user_headers, other_user_headers):
@@ -120,10 +121,10 @@ def test_chunked_report_refuses_oversized_part_without_losing_upload(client, use
 def test_resume_library_has_no_count_limit(client, user_headers):
     names = {f"resume {index}" for index in range(11)}
     for name in sorted(names):
-        made = client.post(
-            "/v1/user/resumes", json={"name": name, "text": "a resume"}, headers=user_headers
+        made = create_text_resume(
+            client, json={"name": name, "text": "a resume"}, headers=user_headers
         )
-        assert made.status_code == 201, made.text
+        assert made.status_code == 200, made.text
     listed = client.get("/v1/user/resumes", headers=user_headers).json()["resumes"]
     assert {resume["name"] for resume in listed} == names
 

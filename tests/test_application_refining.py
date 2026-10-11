@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tests.application_support import _available_owner_key as _available_owner_key
 from tests.application_support import _job_for, _user_id
+from tests.resume_support import create_text_resume
 
 
 class TestRefining:
@@ -12,9 +13,7 @@ class TestRefining:
 
         uid = _user_id()
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/4")
-        client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        )
+        create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         key = client.post(
             f"/v1/user/jobs/{job_id}/application/questions",
             json={"question": "Why us?"},
@@ -68,9 +67,7 @@ class TestRefining:
 
         uid = _user_id()
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/5")
-        client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        )
+        create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         key = client.post(
             f"/v1/user/jobs/{job_id}/application/questions",
             json={"question": "Why us?"},

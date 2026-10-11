@@ -67,6 +67,10 @@ sideways.
 `POST /user/resume-uploads`, send the file in numbered byte parts, then call
 `POST /user/resume-uploads/{id}/complete`. The status route reports the next
 part and processing result. Re-selecting the same file resumes at that part.
+Send pasted or edited text through resume text versions and their numbered
+parts. The old `POST /user/resumes` JSON/base64 write returns 410.
+`PATCH /user/resumes/{id}` changes only the name; text or PDF fields return
+410.
 The proxy streams request and response bodies; it never converts a PDF to
 text or holds the whole file. A resume appears in the library only after the
 worker extracts its text. Keep the uploaded parts if extraction fails so the

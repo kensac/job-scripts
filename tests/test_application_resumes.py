@@ -1,42 +1,105 @@
 from __future__ import annotations
 
-import base64
-
+from api import db
 from core.answers import DEFAULT_STYLE
 from tests.application_support import _available_owner_key as _available_owner_key
+from tests.job_board_support import _uid
+from tests.resume_support import create_text_resume
 
 
 class TestResumes:
     def test_pasted_text_is_kept_and_same_name_replaces_it(self, client, user_headers):
-        r = client.post(
-            "/v1/user/resumes",
+        r = create_text_resume(
+            client,
             json={"name": "master", "text": "Alice. Python."},
             headers=user_headers,
         )
-        assert r.status_code == 201, r.text
-        r = client.post(
-            "/v1/user/resumes",
+        assert r.status_code == 200, r.text
+        r = create_text_resume(
+            client,
             json={"name": "master", "text": "Alice. Rust."},
             headers=user_headers,
         )
-        assert r.status_code == 201
+        assert r.status_code == 200
         rows = client.get("/v1/user/resumes", headers=user_headers).json()["resumes"]
-        assert [(x["name"], x["text"]) for x in rows] == [("master", "Alice. Rust.")]
+        assert [(x["name"], x["chars"]) for x in rows] == [("master", 12)]
+        resume_id = r.json()["resume_id"]
+        assert (
+            client.get(f"/v1/user/resumes/{resume_id}/text/parts/0", headers=user_headers).json()[
+                "text"
+            ]
+            == "Alice. Rust."
+        )
+        assert db.query_one(
+            "SELECT count(*) AS n FROM user_resume_revisions WHERE resume_id = %s",
+            (resume_id,),
+        ) == {"n": 1}
 
-    def test_a_pdf_is_read_at_upload_and_a_bad_one_is_refused(self, client, user_headers):
+    def test_old_json_and_base64_writes_are_retired(self, client, user_headers):
         r = client.post(
             "/v1/user/resumes",
-            json={"name": "pdf", "pdf_base64": base64.b64encode(b"not a pdf").decode()},
+            json={"name": "pdf", "pdf_base64": "bm90IGEgcGRm"},
             headers=user_headers,
         )
-        assert r.status_code == 400 and r.json()["detail"]["code"] == "INVALID_PDF"
-        r = client.post("/v1/user/resumes", json={"name": "empty"}, headers=user_headers)
-        assert r.status_code == 400 and r.json()["detail"]["code"] == "NO_TEXT"
+        assert r.status_code == 410 and r.json()["detail"]["code"] == "USE_RESUME_PARTS"
+        r = client.post(
+            "/v1/user/resumes",
+            json={"name": "master", "text": "old text"},
+            headers=user_headers,
+        )
+        assert r.status_code == 410 and r.json()["detail"]["code"] == "USE_RESUME_PARTS"
+        assert client.get("/v1/user/resumes", headers=user_headers).json()["resumes"] == []
+
+    def test_legacy_resume_remains_readable_and_rename_keeps_its_bytes(self, client, user_headers):
+        row = db.query_one(
+            "INSERT INTO user_resumes (user_id, name, text, filename, pdf) "
+            "VALUES (%s, 'old', 'Original text', 'old.pdf', %s) RETURNING id",
+            (_uid(user_headers), b"original PDF bytes"),
+        )
+        assert row is not None
+        resume_id = row["id"]
+        text_change = client.patch(
+            f"/v1/user/resumes/{resume_id}",
+            json={"text": "replacement"},
+            headers=user_headers,
+        )
+        assert text_change.status_code == 410
+        assert text_change.json()["detail"]["code"] == "USE_RESUME_PARTS"
+        renamed = client.patch(
+            f"/v1/user/resumes/{resume_id}", json={"name": "renamed"}, headers=user_headers
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["name"] == "renamed"
+        assert (
+            client.get(f"/v1/user/resumes/{resume_id}/text/parts/0", headers=user_headers).json()[
+                "text"
+            ]
+            == "Original text"
+        )
+        assert (
+            client.get(f"/v1/user/resumes/{resume_id}/pdf", headers=user_headers).content
+            == b"original PDF bytes"
+        )
+        assert db.query_one(
+            "SELECT text, pdf FROM user_resume_revisions WHERE resume_id = %s",
+            (resume_id,),
+        ) == {"text": "Original text", "pdf": b"original PDF bytes"}
+        create_text_resume(
+            client, json={"name": "taken", "text": "Other text"}, headers=user_headers
+        )
+        conflict = client.patch(
+            f"/v1/user/resumes/{resume_id}", json={"name": "taken"}, headers=user_headers
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"]["code"] == "NAME_EXISTS"
+        assert db.query_one("SELECT name FROM user_resumes WHERE id = %s", (resume_id,)) == {
+            "name": "renamed"
+        }
 
     def test_another_person_cannot_see_or_delete_it(self, client, user_headers, other_user_headers):
-        rid = client.post(
-            "/v1/user/resumes", json={"name": "master", "text": "Alice."}, headers=user_headers
-        ).json()["id"]
+        rid = create_text_resume(
+            client, json={"name": "master", "text": "Alice."}, headers=user_headers
+        ).json()["resume_id"]
         assert client.get("/v1/user/resumes", headers=other_user_headers).json()["resumes"] == []
         assert (
             client.delete(f"/v1/user/resumes/{rid}", headers=other_user_headers).status_code == 404

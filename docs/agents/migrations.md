@@ -138,8 +138,9 @@ and PDF bytes readable during the fleet rollout. Deploy the additive backend
 first with PDF uploads paused. Verify the live bucket has no expiry rule and
 enough capacity, then turn on `resume_pdf_uploads_enabled` in admin config.
 Deploy the frontend that sends parts. After that frontend is live,
-retire the legacy JSON/base64 resume write routes in a follow-up release;
-their request shape cannot process unlimited input in bounded memory. After
+retire legacy JSON/base64 resume writes. Keep the rename operation and
+read-only access to old text and PDF values. The retired request shape cannot
+process unlimited input in bounded memory. After
 every writer uses the new path, backfill each old text value in a small
 transaction on a Hetzner host. Compare exact reconstructed text before
 setting its version pointer.

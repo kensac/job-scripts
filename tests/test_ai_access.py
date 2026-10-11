@@ -1,4 +1,5 @@
 from api import crypto, db
+from tests.resume_support import create_text_resume
 
 
 def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(
@@ -54,12 +55,12 @@ def test_missing_model_refuses_draft_before_any_task_is_queued(client, user_head
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     job_id = f.make_job()
     f.make_board_row(uid, job_id, status="Saved")
-    resume = client.post(
-        "/v1/user/resumes",
+    resume = create_text_resume(
+        client,
         json={"name": "main", "text": "Python experience."},
         headers=user_headers,
     )
-    assert resume.status_code == 201
+    assert resume.status_code == 200
     db.execute(
         "UPDATE user_settings SET api_key_enc = %s, ai_provider = 'openai_compatible', "
         "ai_model = NULL WHERE user_id = %s",

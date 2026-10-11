@@ -8,17 +8,13 @@ from tests.job_board_support import _uid
 
 
 def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_user_headers):
-    first = client.post(
-        "/v1/user/resumes",
-        json={"name": "main", "text": "First complete text"},
-        headers=user_headers,
+    first = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, text, pdf, filename) "
+        "VALUES (%s, 'main', 'First complete text', %s, 'first.pdf') RETURNING id",
+        (_uid(user_headers), b"original PDF"),
     )
-    assert first.status_code == 201, first.text
-    resume_id = first.json()["id"]
-    db.execute(
-        "UPDATE user_resumes SET pdf = %s, filename = %s WHERE id = %s",
-        (b"original PDF", "first.pdf", resume_id),
-    )
+    assert first is not None
+    resume_id = first["id"]
 
     started = client.post("/v1/user/resume-text-versions", headers=user_headers)
     assert started.status_code == 201, started.text
