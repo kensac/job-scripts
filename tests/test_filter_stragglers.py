@@ -118,7 +118,8 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
     _entitle(uid)
     url = "https://jobs.example.com/job-1"
     db.execute(
-        "INSERT INTO jobs (url, company, title, source) VALUES (%s, 'co', 'SWE', 'internships')",
+        "INSERT INTO jobs (url, company, title, source, available) "
+        "VALUES (%s, 'co', 'SWE', 'internships', true)",
         (url,),
     )
     page_fetches.record(url, "passed", "scraped", "great job")

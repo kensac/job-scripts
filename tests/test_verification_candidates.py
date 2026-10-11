@@ -397,7 +397,7 @@ def test_the_restructured_sweep_selects_exactly_what_the_old_one_did():
     _posting(subscribed, "both answered", 4, us, closed="passed", clearance="passed")
     _, in_flight = _posting(subscribed, "in flight", 5, us)
     inactive, _ = _posting(subscribed, "inactive", 6, us)
-    db.execute("UPDATE jobs SET active = false WHERE id = %s", (inactive,))
+    db.execute("UPDATE jobs SET available = false WHERE id = %s", (inactive,))
     no_text = f.make_job(source=subscribed, title="no page text")
     db.execute("UPDATE jobs SET date_posted = current_date - 7 WHERE id = %s", (no_text,))
     _posting(board_source, "Software Engineering Intern", 8)

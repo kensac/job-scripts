@@ -638,15 +638,17 @@ fallback shrinks as each source's first pull after the dual write lands. On
 2026-10-10, against `jobs.active` over the whole catalog, it differed on
 4,472 rows (all `sheet_import`, now unavailable) and 124 the other way (a
 JSON feed's inactive record against another source that lists the posting).
-A later change drops the fallback once the shadow's `projected=None` cells
-for active rows hold only explained classes.
+The fallback is gone. Once the reconcile had stored a value on every row
+(`_STORED`: `AVAILABLE` where an observation decides, the posting's last known
+feed state otherwise), `IS_AVAILABLE` became `COALESCE(j.available, false)`.
+A new row is stored as it is inserted, so a NULL is a row nothing has stored
+yet.
 
 **Availability is stored, in `jobs.available`.** Computed per row,
 `AVAILABLE` cost every reader that moved: the AI-eligible count went from
 2.0 s to 6.5 s and a board recompute from 27 s to 38 s, at 992 recomputes a
 day, about three hours of database time a day (production, 2026-10-10).
-`IS_AVAILABLE` now reads `COALESCE(j.available, j.active)`, which costs
-what `j.active` did. Measured on production after the first reconcile
+`IS_AVAILABLE` reads the stored column, which costs what `j.active` did. Measured on production after the first reconcile
 (2026-10-10, 21:00 UTC): user 1's board recompute ran in 25.7 and 28.0 s
 against 26.0 and 26.8 s on the flag, and the preset eligible count in 1.9 s
 either way. `AVAILABLE` stays the one definition. Where no observation

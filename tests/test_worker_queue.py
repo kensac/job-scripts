@@ -585,7 +585,8 @@ async def test_chunked_run_all_filters_lifecycle(set_config, monkeypatch, user_h
     rejected_urls = set(urls[:4])
     for i, url in enumerate(urls):
         db.execute(
-            "INSERT INTO jobs (url, company, title, source) VALUES (%s, %s, 'SWE', 'internships')",
+            "INSERT INTO jobs (url, company, title, source, available) "
+            "VALUES (%s, %s, 'SWE', 'internships', true)",
             (url, f"co{i}"),
         )
         content = "REJECT_ME content" if url in rejected_urls else "great job content"
@@ -787,7 +788,8 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
     from core import batch as core_batch
 
     db.execute(
-        "INSERT INTO jobs (url, source, company, title) VALUES ('https://v.test/1', 's', 'Acme', 'SWE')"
+        "INSERT INTO jobs (url, source, company, title, available) "
+        "VALUES ('https://v.test/1', 's', 'Acme', 'SWE', true)"
     )
     page_fetches.record("https://v.test/1", "passed", "scraped", "J" * 500)
 
@@ -833,7 +835,8 @@ async def test_batched_verdicts_record_their_reason(monkeypatch):
     from core import batch as core_batch
 
     db.execute(
-        "INSERT INTO jobs (url, source, company, title) VALUES ('https://r.test/1', 's', 'Acme', 'SWE')"
+        "INSERT INTO jobs (url, source, company, title, available) "
+        "VALUES ('https://r.test/1', 's', 'Acme', 'SWE', true)"
     )
     page_fetches.record("https://r.test/1", "passed", "scraped", "J" * 500)
 
@@ -966,9 +969,9 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
         (uid,),
     )
     db.execute(
-        "INSERT INTO jobs (url, source, company, title) VALUES "
-        "('https://bf.test/needs', 'bf', 'A', 'T'), ('https://bf.test/has', 'bf', 'B', 'T'), "
-        "('https://bf.test/gone', 'bf', 'C', 'T')"
+        "INSERT INTO jobs (url, source, company, title, available) VALUES "
+        "('https://bf.test/needs', 'bf', 'A', 'T', true), ('https://bf.test/has', 'bf', 'B', 'T', true), "
+        "('https://bf.test/gone', 'bf', 'C', 'T', true)"
     )
     # A posting its board reported gone has a closed verdict and no content
     # row; it was re-fetched every hour for two days before this line.
@@ -1236,7 +1239,9 @@ async def test_verify_new_defers_to_a_verdict_settled_after_it_submitted(monkeyp
 
     url = "https://settled.test/1"
     db.execute(
-        "INSERT INTO jobs (url, source, company, title) VALUES (%s, 's', 'Acme', 'SWE')", (url,)
+        "INSERT INTO jobs (url, source, company, title, available) "
+        "VALUES (%s, 's', 'Acme', 'SWE', true)",
+        (url,),
     )
     page_fetches.record(url, "passed", "scraped", "J" * 500)
 

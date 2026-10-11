@@ -15,7 +15,8 @@ def _make_passing_job(user_id: int, url: str, source: str = "internships") -> in
     to its source, it's active, its latest closed check passed, and it passed
     the user's one enabled filter."""
     job = db.query_one(
-        "INSERT INTO jobs (url, company, title, source) VALUES (%s, 'Acme', 'SWE', %s) RETURNING id",
+        "INSERT INTO jobs (url, company, title, source, available) "
+        "VALUES (%s, 'Acme', 'SWE', %s, true) RETURNING id",
         (url, source),
     )
     db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, %s)", (user_id, source))
@@ -143,11 +144,11 @@ def test_demote_closed_removes_and_counts_a_working_set_only_pair(user_headers):
     assert _working_set_row(user_id, job_id) is None
 
 
-def test_demote_closed_removes_both_relations_when_source_marks_inactive(user_headers):
+def test_demote_closed_removes_both_relations_when_no_longer_available(user_headers):
     user_id = _user_id()
     job_id = _make_passing_job(user_id, "https://jobs.example.com/board-inactive")
     _picked(user_id, job_id)
-    db.execute("UPDATE jobs SET active = false WHERE id = %s", (job_id,))
+    db.execute("UPDATE jobs SET available = false WHERE id = %s", (job_id,))
 
     assert tasks_board.demote_closed() == 1
     assert _board_row(user_id, job_id) is None

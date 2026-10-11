@@ -30,8 +30,9 @@ def _insert_job(
 ) -> int:
     row = db.query_one(
         """
-        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active, date_posted)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO jobs (url, raw_url, company, title, locations, terms, source, active,
+                          available, date_posted)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
@@ -43,6 +44,7 @@ def _insert_job(
             terms or [],
             source,
             active,
+            active,  # stored availability, as a source listing it leaves it
             date_posted,
         ),
     )
