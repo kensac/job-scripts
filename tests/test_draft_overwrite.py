@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import ai, budget, db
-from api.routers import application as routes
+from api.routers import application_answers as routes
 from tasks import application
 
 
@@ -22,7 +22,7 @@ async def test_parked_sweep_cannot_overwrite_newer_answer(f, monkeypatch, interv
         "load_config",
         lambda *args: (budget.Entitlement(True, None, 0, False, []), cfg),
     )
-    monkeypatch.setattr(routes, "_job", lambda *args: job)
+    monkeypatch.setattr(routes, "_visible_job", lambda *args: job)
     expected = None if intervening == "user_clear" else "Newer answer"
 
     async def provider_returns_after_newer_write(*args, **kwargs):
@@ -161,7 +161,7 @@ async def test_refinement_preserves_concurrent_edit_and_cached_usage(f, monkeypa
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
     user = SimpleNamespace(id=uid)
-    monkeypatch.setattr(routes, "_job", lambda *args: job)
+    monkeypatch.setattr(routes, "_visible_job", lambda *args: job)
     monkeypatch.setattr(routes.ai_access, "require_config", lambda *args: cfg)
 
     async def parsed(*args):
@@ -219,7 +219,7 @@ def test_sweep_never_reserves_over_pending_manual_request_or_explicit_clear(f, m
     sweep = f.make_task("application_sweep", {"user_id": uid}, status="running")
     assert application_writes.reserve_task(sweep, uid, [{"job_id": jid, "key": "why"}]) == {}
     db.execute("UPDATE tasks SET status='done' WHERE kind='application_draft'")
-    monkeypatch.setattr(routes, "_job", lambda *args: {"id": jid})
+    monkeypatch.setattr(routes, "_visible_job", lambda *args: {"id": jid})
     routes.put_answer(jid, "why", routes.AnswerPut(draft=""), SimpleNamespace(id=uid))
     assert application_writes.reserve_task(sweep, uid, [{"job_id": jid, "key": "why"}]) == {}
 
@@ -234,7 +234,7 @@ async def test_sweep_cannot_supersede_pending_refinement(f, monkeypatch):
     db.execute("INSERT INTO user_resumes(user_id,name,text) VALUES (%s,'main','Python')", (uid,))
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why us?"}])
     cfg = ai.AIConfig(provider="openai", api_key="test", key_source="owner", model="gpt-5-mini")
-    monkeypatch.setattr(routes, "_job", lambda *args: job)
+    monkeypatch.setattr(routes, "_visible_job", lambda *args: job)
     monkeypatch.setattr(routes.ai_access, "require_config", lambda *args: cfg)
 
     async def parsed(*args):
