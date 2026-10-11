@@ -7,7 +7,7 @@ import datetime
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 def _jibe_job(slug: str, description: str = "<p>Overview</p>") -> dict:

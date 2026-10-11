@@ -6,7 +6,7 @@ import pytest
 
 from core.fetching import boards
 from core.fetching.boards import goldman as board_goldman
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 GOLDMAN_ROLES = [
     (

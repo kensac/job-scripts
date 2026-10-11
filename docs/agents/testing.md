@@ -25,12 +25,13 @@ filter produces output and fails the test.
 ## Board format tests
 
 Keep each listing provider's feed excerpts, paging cases and incomplete-pull
-proofs in `tests/test_board_<provider>.py`. Put URL dispatch and shared posting
-construction cases in `tests/test_board_dispatch.py`; put Markdown table cases
-in `tests/test_board_markdown.py`. A reply object used by several provider
-tests lives in `tests/board_responses.py`, but provider-shaped payloads stay
-beside the test that interprets them. A test of one provider should not need
-another provider's fixture or patch its response.
+proofs in `tests/fetching/boards/test_<provider>.py`. Keep ATS resolver tests
+in `tests/fetching/ats/`. Put URL dispatch and shared posting construction
+cases in `tests/fetching/boards/test_dispatch.py`; put Markdown table cases in
+`tests/fetching/boards/test_markdown.py`. A reply object used by several
+provider tests lives in `tests/fetching/boards/responses.py`, but
+provider-shaped payloads stay beside the test that interprets them. A test of
+one provider should not need another provider's fixture or patch its response.
 
 ## Organizing behavior tests
 

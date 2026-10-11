@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(monkeypatch):

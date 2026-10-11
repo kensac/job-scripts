@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from core.fetching import boards
-from tests.board_responses import BoardResponse as _Resp
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 # SuccessFactors Career Site Builder, as jobs.ulalaunch.com, jobs.l3harris.com
 # and jobs.deere.com answered on 2026-10-05. The first three items are verbatim
