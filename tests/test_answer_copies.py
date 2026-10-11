@@ -126,3 +126,33 @@ def test_the_worker_stops_queueing_once_a_run_cleared_nothing(f):
     )
     worker.schedule_ingest_cycle()
     assert queued() == 0
+
+
+def test_a_number_only_the_answer_kept_moves_to_its_call_before_it_is_emptied(f):
+    """A live call the old usage ledger booked kept no reasoning tokens; its
+    verdict did (one explain call on 2026-10-10). Emptying the copy must not
+    lose them."""
+    call = _call(batched=False, reasoning_tokens=None)
+    answer = legacy_answer(
+        "https://copies.test/r",
+        "passed",
+        check_type="custom",
+        model="gpt-5-nano",
+        prompt_tokens=1000,
+        completion_tokens=100,
+        total_tokens=1100,
+        cached_tokens=0,
+        reasoning_tokens=150,
+        duration_ms=900,
+        cost_usd=0.0001,
+    )
+    db.execute("UPDATE ai_queries SET model_call_id = %s WHERE id = %s", (call, answer))
+
+    _run(f)
+
+    assert db.query_one(
+        "SELECT reasoning_tokens, duration_ms FROM model_calls WHERE id = %s", (call,)
+    ) == {"reasoning_tokens": 150, "duration_ms": 900}
+    assert _ledger([answer])[0]["reasoning_tokens"] == 150
+    held = db.query_one("SELECT reasoning_tokens FROM ai_queries WHERE id = %s", (answer,))
+    assert held["reasoning_tokens"] is None, "emptied once the call holds it"

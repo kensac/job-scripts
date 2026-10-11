@@ -20,8 +20,9 @@ A pointer is set only where it is exact:
 - call: a batched answer's item, `(batch_id, url) = (provider_batch_id,
   custom_id)`; a live one copied from its verdict (`source_id`); or a live
   call booked apart from its verdict, matched on model, tokens and the minute
-  after it, only where each has exactly one candidate. Its duration_ms, which
-  only the verdict held, is copied onto the call.
+  after it, only where each has exactly one candidate. Its duration_ms and
+  reasoning tokens, where only the verdict held them, are copied onto the
+  call.
 
 One id range per transaction, idempotent by predicate: a rerun only reads
 what is already linked. The worker queues a run each cycle until one links
@@ -122,6 +123,15 @@ _COPY_DURATIONS = f"""
       AND m.duration_ms IS NULL AND m.provider_batch_id IS NULL
 """
 
+# A live call copied from the old usage ledger kept no reasoning tokens where
+# its verdict did (1 call on 2026-10-10, an explain). The verdict's number
+# moves to the call, so emptying the verdict's copy loses nothing.
+_COPY_REASONING = f"""
+    UPDATE model_calls m SET reasoning_tokens = q.reasoning_tokens FROM ai_queries q
+    WHERE {_RANGE} AND q.model_call_id = m.id AND q.reasoning_tokens IS NOT NULL
+      AND m.reasoning_tokens IS NULL AND m.provider_batch_id IS NULL
+"""
+
 _STEPS = {
     "fetches_stored": _STORE_UNHELD,
     "pages_linked": _LINK_PAGES,
@@ -129,6 +139,7 @@ _STEPS = {
     "copied_calls_linked": _LINK_COPIED,
     "booked_calls_linked": _LINK_BOOKED,
     "durations_copied": _COPY_DURATIONS,
+    "reasoning_copied": _COPY_REASONING,
 }
 
 
