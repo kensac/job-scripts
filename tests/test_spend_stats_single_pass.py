@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 
 from api import db, model_calls
-from api.routers.admin import queries
-from api.routers.admin.queries import (
+from api.routers.admin import ledger_stats
+from api.routers.admin.ledger_stats import (
     CheckTypeTotals,
     DayTotals,
     LedgerStats,
@@ -342,7 +342,7 @@ def test_stats_single_pass_matches_the_per_cut_scans(verdict_log, zone):
     with db.transaction():
         db.execute(f"SET LOCAL timezone = '{zone}'")
         old = _old_stats()
-        new = queries._compute_stats()
+        new = ledger_stats._compute_stats()
     assert new.model_dump_json() == old.model_dump_json()
     assert [r.cost_usd for r in new.by_model if r.model == "claude-x"] == [None]
     assert None in [r.status for r in new.by_status]
@@ -350,7 +350,7 @@ def test_stats_single_pass_matches_the_per_cut_scans(verdict_log, zone):
 
 def test_stats_and_spend_on_an_empty_table():
     params = {"days": 30, "interactive": list(INTERACTIVE_CONTEXTS)}
-    assert queries._compute_stats().model_dump_json() == _old_stats().model_dump_json()
+    assert ledger_stats._compute_stats().model_dump_json() == _old_stats().model_dump_json()
     old, new = _old_spend(params), _verdict_breakdowns(params)
     assert [_dump(v) for v in new] == [_dump(v) for v in old]
     assert new[2:] == ([], [], [])

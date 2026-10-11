@@ -241,12 +241,13 @@ def test_sort_keys_the_frontend_depends_on_still_exist():
     If you are removing a key on purpose: update this list and tell whoever
     owns app/job-scripts, because a column needs to change with it.
     """
-    from api.routers.admin.queries import _JOBS_SORTABLE, _SORTABLE
+    from api.routers.admin.posting_inspection import _POSTING_SORT_EXPRESSIONS
+    from api.routers.admin.query_ledger import _QUERY_SORT_COLUMNS
 
     # /admin/jobs - the catalog table's columns.
-    assert {"company", "failed", "total_tokens", "last_seen"} <= set(_JOBS_SORTABLE)
+    assert {"company", "failed", "total_tokens", "last_seen"} <= set(_POSTING_SORT_EXPRESSIONS)
     # /admin/queries - the responses table's columns.
-    assert {"created_at", "total_tokens", "duration_ms"} <= _SORTABLE
+    assert {"created_at", "total_tokens", "duration_ms"} <= _QUERY_SORT_COLUMNS
 
 
 def test_verdicts_take_their_timestamp_from_the_database():

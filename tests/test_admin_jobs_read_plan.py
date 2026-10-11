@@ -1,5 +1,5 @@
 from api import db
-from api.routers.admin import queries
+from api.routers.admin import posting_inspection
 
 
 def _nodes(plan):
@@ -25,7 +25,7 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
         return original(sql, params)
 
     monkeypatch.setattr(db, "query", record)
-    page = queries.list_jobs(page_size=5, user=None)
+    page = posting_inspection.list_jobs(page_size=5, user=None)
     assert page.total == 10000
     assert [row.url for row in page.rows] == [
         f"https://history.test/{i}" for i in range(10000, 9995, -1)

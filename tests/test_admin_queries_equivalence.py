@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from api import db, sorting
-from api.routers.admin import queries
+from api.routers.admin import query_ledger
 
 _OLD_OPTIONS = {
     "check_types": "SELECT DISTINCT check_type AS v FROM ai_queries "
@@ -109,7 +109,7 @@ def test_options_match_the_distinct_queries_they_replaced(client, admin_headers,
 def test_list_orders_exactly_as_with_nulls_last_everywhere(client, admin_headers, filled):
     if filled:
         _fill()
-    for key in sorted(queries._SORTABLE):
+    for key in sorted(query_ledger._QUERY_SORT_COLUMNS):
         for direction in ("asc", "desc"):
             expected = [
                 r["id"]
@@ -132,10 +132,10 @@ def test_list_orders_exactly_as_with_nulls_last_everywhere(client, admin_headers
 def test_not_null_keys_lose_only_their_nulls_clause():
     # Derived from the model: id and created_at are NOT NULL, nothing else
     # sortable on ai_queries is.
-    assert {"id", "created_at"} == queries._NOT_NULL
+    assert {"id", "created_at"} == query_ledger._QUERY_NON_NULL_SORT_COLUMNS
     table = {"id": "id", "created_at": "created_at", "total_tokens": "total_tokens"}
     sorts = sorting.parse("id,created_at,total_tokens", "desc,asc,desc", table, "id")
-    assert sorting.clause(sorts, table, queries._NOT_NULL) == (
+    assert sorting.clause(sorts, table, query_ledger._QUERY_NON_NULL_SORT_COLUMNS) == (
         "id DESC, created_at ASC, total_tokens DESC NULLS LAST"
     )
     # Every other caller passes nothing and keeps its exact clause.

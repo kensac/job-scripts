@@ -3,26 +3,26 @@ worker event. It answers from a cache for admin_stats_cache_seconds."""
 
 from __future__ import annotations
 
-from api.routers.admin import queries
+from api.routers.admin import ledger_stats
 
 
 def test_stats_are_served_from_cache_within_the_window(client, admin_headers, monkeypatch):
-    queries._stats_cache = None
+    ledger_stats._stats_cache = None
     scans: list[int] = []
-    real = queries._compute_stats
+    real = ledger_stats._compute_stats
 
     def counted():
         scans.append(1)
         return real()
 
-    monkeypatch.setattr(queries, "_compute_stats", counted)
+    monkeypatch.setattr(ledger_stats, "_compute_stats", counted)
 
     first = client.get("/v1/admin/stats", headers=admin_headers)
     second = client.get("/v1/admin/stats", headers=admin_headers)
     assert first.status_code == 200 and first.json() == second.json()
     assert len(scans) == 1
 
-    queries._stats_cache = None
+    ledger_stats._stats_cache = None
     client.get("/v1/admin/stats", headers=admin_headers)
     assert len(scans) == 2
     assert (
