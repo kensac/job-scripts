@@ -7,6 +7,11 @@ interpreter selection in `pyrightconfig.json` and verify it with `pyright`.
 Keep Alembic's path separator explicit in `alembic.ini` so path parsing does
 not rely on its deprecated fallback.
 
+Keep `pyproject.toml` and `uv.lock` resolvable together. Do not pin
+`pydantic-core` separately from Pydantic; Pydantic requires a matching core
+version. After changing dependency pins, run `uv lock`, `uv sync --locked`,
+and the tests that exercise the affected runtime behavior.
+
 Keep OAuth consent state and authorization URL construction in
 `api.oauth_authorization`, provider settings and typed errors in
 `api.oauth_provider`, and grant storage, refresh, and revocation in
