@@ -1,33 +1,40 @@
+"""Public batch orchestration with provider calls and durable collection."""
+
 from __future__ import annotations
 
 import asyncio
-import io
-import json
 import logging
 import os
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Literal, TypedDict
 
 from openai import AsyncOpenAI
-from openai.lib._pydantic import to_strict_json_schema
-from openai.types import Batch
-from pydantic import BaseModel
 
-from core import batch_capabilities, providers, store
-
-
-class BatchEventCounts(TypedDict, total=False):
-    requests: int
-    completed: int
-    failed: int
-    est_tokens: int
-
-
-BatchEventHook = Callable[[str, str, BatchEventCounts], None] | None
+from core import batch_capabilities
+from core.batch_collection import _collect_batch
+from core.batch_progress import TERMINAL_STATES, BatchProgress, is_terminal, read_batch_progress
+from core.batch_specs import (
+    BATCH_CHARS_PER_TOKEN,
+    BATCH_ENDPOINT,
+    BATCH_MAX_REQUESTS,
+    BATCH_TOKEN_BUDGET,
+    BatchEndpoint,
+    BatchResult,
+    BatchSpec,
+    _build_line,
+    _estimate_tokens,
+    prompt_cache_key,
+    structured_response_spec,
+)
+from core.batch_transport import (
+    BATCH_COMPLETION_WINDOW,
+    BATCH_POLL_INTERVAL,
+    BatchEventCounts,
+    BatchEventHook,
+    _emit,
+    _submit_chunk,
+    _wait_for_batch,
+)
 
 logger = logging.getLogger(__name__)
-
 _batch_client: AsyncOpenAI | None = None
 
 
@@ -40,20 +47,11 @@ def _client() -> AsyncOpenAI | None:
     return _batch_client
 
 
-BatchEndpoint = Literal["/v1/responses", "/v1/embeddings"]
-BATCH_ENDPOINT: BatchEndpoint = "/v1/responses"
-# https://developers.openai.com/api/reference/resources/batches
-BATCH_MAX_REQUESTS = 50_000
-BATCH_COMPLETION_WINDOW = "24h"
-BATCH_TOKEN_BUDGET = 1_800_000
-
 # How many batch waves may be in flight at once. Each wave is an independent
 # OpenAI batch, and a batch spends nearly all its time queued rather than
 # consuming local resources, so this bounds provider-side enqueued work rather
 # than anything on our side.
 BATCH_WAVE_CONCURRENCY = int(os.environ.get("JOBTRACKER_BATCH_WAVE_CONCURRENCY", "4"))
-BATCH_CHARS_PER_TOKEN = 4
-BATCH_POLL_INTERVAL = 30.0
 
 
 def completion_window_seconds() -> int:
@@ -70,62 +68,6 @@ def completion_window_seconds() -> int:
     if window.endswith("m"):
         return int(float(window[:-1]) * 60)
     raise ValueError(f"unrecognised completion window: {BATCH_COMPLETION_WINDOW!r}")
-
-
-_TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}
-
-
-@dataclass
-class BatchSpec:
-    custom_id: str
-    instructions: str = ""
-    input: str = ""
-    schema_name: str = ""
-    schema: dict = field(default_factory=dict)
-    context: dict | None = None
-    endpoint: BatchEndpoint = BATCH_ENDPOINT
-    inputs: list[str] | None = None
-
-
-def structured_response_spec(
-    custom_id: str,
-    instructions: str,
-    input: str,
-    response_model: type[BaseModel],
-    *,
-    context: dict | None = None,
-) -> BatchSpec:
-    """A Responses spec whose schema name and schema come from one model."""
-    return BatchSpec(
-        custom_id,
-        instructions,
-        input,
-        response_model.__name__,
-        to_strict_json_schema(response_model),
-        context=context,
-    )
-
-
-@dataclass
-class BatchResult:
-    custom_id: str
-    text: str | None = None
-    usage: dict | None = None
-    error: str | None = None
-    batch_id: str | None = None
-    model: str | None = None
-    finish_reason: str | None = None
-    request: BatchSpec | None = None
-    embedding_vectors: list[list[float]] | None = None
-
-
-def _estimate_tokens(spec: BatchSpec, max_output_tokens: int) -> int:
-    chars = len(spec.instructions) + (
-        sum(map(len, spec.inputs)) if spec.inputs is not None else len(spec.input)
-    )
-    return chars // BATCH_CHARS_PER_TOKEN + (
-        max_output_tokens if spec.endpoint == "/v1/responses" else 0
-    )
 
 
 def _chunk_specs(specs: list[BatchSpec], max_output_tokens: int) -> list[list[BatchSpec]]:
@@ -151,271 +93,6 @@ def _chunk_specs(specs: list[BatchSpec], max_output_tokens: int) -> list[list[Ba
     if current:
         chunks.append(current)
     return chunks
-
-
-def prompt_cache_key(instructions: str) -> str:
-    """One key per distinct instruction text, so every request sharing a
-    prefix asks the provider for the same cache. The provider caps the key's
-    length, and the hash prefix is more than enough to keep prompts apart."""
-    import hashlib
-
-    return "jt-" + hashlib.sha256(instructions.encode()).hexdigest()[:32]
-
-
-def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int) -> dict:
-    if spec.endpoint == "/v1/embeddings":
-        return {
-            "custom_id": spec.custom_id,
-            "method": "POST",
-            "url": spec.endpoint,
-            "body": {
-                "model": model,
-                "input": spec.inputs if spec.inputs is not None else spec.input,
-                "encoding_format": "float",
-            },
-        }
-    if spec.endpoint != "/v1/responses":
-        raise ValueError(f"unsupported batch endpoint: {spec.endpoint}")
-    cache_options = {}
-    cache_policy = (spec.context or {}).get("prompt_cache_policy")
-    if cache_policy is not None:
-        known = providers.model(model)
-        if cache_policy != "no_cache" or not known or not known.supports_explicit_prompt_cache:
-            raise ValueError("unsupported prompt cache policy for this model")
-        # No explicit breakpoints means no cache reads or writes. The policy
-        # rides the immutable request context so legacy receipt readers still
-        # accept its snapshot during a rolling deployment.
-        cache_options = {"prompt_cache_options": {"mode": "explicit"}}
-    return {
-        "custom_id": spec.custom_id,
-        "method": "POST",
-        "url": spec.endpoint,
-        "body": {
-            "model": model,
-            "instructions": spec.instructions,
-            **cache_options,
-            "input": spec.input,
-            "reasoning": {"effort": reasoning_effort},
-            "max_output_tokens": max_output_tokens,
-            "store": False,
-            # Routes every request carrying the same instructions to the
-            # same prompt cache, so the shared prefix is served at the
-            # cached rate more often. Measured over 2026-08-07 to 09-06
-            # without it: a quarter of batched input tokens were cached
-            # against a ceiling of about half on the filter step.
-            "prompt_cache_key": prompt_cache_key(spec.instructions),
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": spec.schema_name,
-                    "strict": True,
-                    "schema": spec.schema,
-                }
-            },
-        },
-    }
-
-
-def _extract_output_text(body: dict) -> str | None:
-    for item in body.get("output", []):
-        if item.get("type") == "message":
-            for content in item.get("content", []):
-                if content.get("type") == "output_text":
-                    return content.get("text")
-    return None
-
-
-def _emit(on_event: BatchEventHook, batch: Batch) -> None:
-    if on_event is None:
-        return
-    counts = getattr(batch, "request_counts", None)
-    try:
-        on_event(
-            batch.id,
-            batch.status,
-            {
-                "requests": getattr(counts, "total", 0) or 0,
-                "completed": getattr(counts, "completed", 0) or 0,
-                "failed": getattr(counts, "failed", 0) or 0,
-            },
-        )
-    except Exception:
-        logger.exception("batch event hook failed")
-
-
-async def _wait_for_batch(
-    client: AsyncOpenAI, batch_id: str, on_event: BatchEventHook = None
-) -> Batch:
-    while True:
-        batch = await client.batches.retrieve(batch_id)
-        counts = getattr(batch, "request_counts", None)
-        logger.info(
-            f"Batch {batch_id}: status={batch.status} "
-            f"({getattr(counts, 'completed', '?')}/{getattr(counts, 'total', '?')} done, "
-            f"{getattr(counts, 'failed', '?')} failed)"
-        )
-        _emit(on_event, batch)
-        if batch.status in _TERMINAL_STATES:
-            return batch
-        await asyncio.sleep(BATCH_POLL_INTERVAL)
-
-
-async def _collect_batch(
-    client: AsyncOpenAI,
-    batch: Batch,
-    results: dict[str, BatchResult],
-    create_missing: bool = False,
-) -> dict[str, BatchResult]:
-    if batch.status != "completed":
-        for result in results.values():
-            if result.text is None and result.embedding_vectors is None and result.error is None:
-                result.error = f"batch {batch.status}"
-        if not batch.output_file_id:
-            for result in results.values():
-                if result.batch_id is None:
-                    result.batch_id = batch.id
-            _record_errors(batch, results)
-            return results
-
-    if batch.output_file_id:
-        content = await client.files.content(batch.output_file_id)
-        for line in content.text.splitlines():
-            if not line.strip():
-                continue
-            obj = json.loads(line)
-            custom_id = obj.get("custom_id")
-            result = results.get(custom_id)
-            if result is None:
-                if not create_missing or not custom_id:
-                    continue
-                result = results.setdefault(custom_id, BatchResult(custom_id))
-            err = obj.get("error")
-            resp = obj.get("response")
-            if err or not resp or resp.get("status_code") != 200:
-                result.error = str(err or (resp or {}).get("status_code") or "unknown")
-                continue
-            body = resp.get("body", {})
-            result.usage = body.get("usage")
-            if getattr(batch, "endpoint", BATCH_ENDPOINT) == "/v1/embeddings":
-                if result.usage is not None:
-                    result.usage = {
-                        "input_tokens": result.usage.get("prompt_tokens", 0),
-                        "output_tokens": 0,
-                        "total_tokens": result.usage.get("total_tokens", 0),
-                    }
-                data = body.get("data") or []
-                if (
-                    isinstance(data, list)
-                    and data
-                    and all(
-                        isinstance(item, dict) and type(item.get("index")) is int for item in data
-                    )
-                    and {item["index"] for item in data} == set(range(len(data)))
-                ):
-                    vectors = [
-                        item.get("embedding")
-                        for item in sorted(data, key=lambda item: item["index"])
-                    ]
-                    if all(isinstance(vector, list) for vector in vectors):
-                        result.embedding_vectors = vectors
-                if result.embedding_vectors is None:
-                    result.error = "invalid embedding vector indices"
-            else:
-                result.text = _extract_output_text(body)
-                incomplete = body.get("incomplete_details") or {}
-                result.finish_reason = incomplete.get("reason") or body.get("status")
-                if result.text is None:
-                    result.error = "no output text"
-
-    if batch.error_file_id:
-        try:
-            err_content = await client.files.content(batch.error_file_id)
-            for line in err_content.text.splitlines():
-                if not line.strip():
-                    continue
-                obj = json.loads(line)
-                custom_id = obj.get("custom_id")
-                result = results.get(custom_id)
-                if result is None and create_missing and custom_id:
-                    result = results.setdefault(custom_id, BatchResult(custom_id))
-                if result is not None and result.text is None and result.embedding_vectors is None:
-                    result.error = str(obj.get("error") or "batch error")
-        except Exception as exc:
-            logger.warning(f"Failed to read batch error file: {exc}")
-
-    for result in results.values():
-        if result.batch_id is None:
-            result.batch_id = batch.id
-
-    _record_errors(batch, results)
-    return results
-
-
-def _record_errors(batch: Batch, results: dict[str, BatchResult]) -> None:
-    """Every error this batch returned, stored as the provider wrote it.
-
-    Per-request errors come from the error file. A batch-level rejection
-    (validation failed before any request ran) arrives on the batch object
-    with no error file at all, and is the reason for a batch that failed
-    whole; it is written onto every result and stored once under an empty
-    custom_id, so the whole failure keeps its reason.
-    """
-    batch_errors = getattr(getattr(batch, "errors", None), "data", None) or []
-    messages = [getattr(e, "message", None) or str(e) for e in batch_errors]
-    placeholder = f"batch {batch.status}"
-    for result in results.values():
-        if (
-            result.text is None
-            and result.embedding_vectors is None
-            and messages
-            and result.error in (None, "", placeholder)
-        ):
-            result.error = "; ".join(messages)
-    errors = {cid: r.error for cid, r in results.items() if r.error and r.batch_id == batch.id}
-    if messages and not errors:
-        errors = {"": "; ".join(messages)}
-    if not errors:
-        return
-    try:
-        store.record_batch_errors(batch.id, errors)
-    except Exception as exc:
-        logger.warning(f"Failed to record batch errors for {batch.id}: {exc}")
-
-
-async def _submit_chunk(
-    client: AsyncOpenAI,
-    specs: list[BatchSpec],
-    model: str,
-    reasoning_effort: str,
-    max_output_tokens: int,
-    on_event: BatchEventHook = None,
-) -> str:
-    """Uploads one wave and returns its provider batch id."""
-    endpoints = {spec.endpoint for spec in specs}
-    if len(endpoints) != 1:
-        raise ValueError("a provider batch must contain exactly one endpoint")
-    endpoint = specs[0].endpoint
-    payload = "\n".join(
-        json.dumps(_build_line(spec, model, reasoning_effort, max_output_tokens)) for spec in specs
-    ).encode("utf-8")
-
-    upload = await client.files.create(
-        file=("batch_input.jsonl", io.BytesIO(payload)), purpose="batch"
-    )
-    batch = await client.batches.create(
-        input_file_id=upload.id,
-        endpoint=endpoint,
-        completion_window=BATCH_COMPLETION_WINDOW,
-    )
-    logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
-    _emit(on_event, batch)
-    if on_event is not None:
-        est = sum(_estimate_tokens(spec, max_output_tokens) for spec in specs)
-        try:
-            on_event(batch.id, batch.status, {"est_tokens": est, "requests": len(specs)})
-        except Exception:
-            logger.exception("batch event hook failed")
-    return batch.id
 
 
 async def _run_chunk(
@@ -479,46 +156,11 @@ async def submit_batches(
     return ids
 
 
-@dataclass
-class BatchProgress:
-    """What the provider says about a batch right now.
-
-    The counts ride along with the status because the retrieve call already
-    returns them. Fetching a status and discarding the progress is what left
-    ai_batches.completed at 0 for the whole life of every batch, so the only
-    way to answer "is this moving or stuck" was to curl the provider by hand.
-    """
-
-    status: str
-    total: int = 0
-    completed: int = 0
-    failed: int = 0
-
-
 async def batch_progress(batch_ids: list[str]) -> dict[str, BatchProgress]:
-    """Provider status and counts per batch id. A status call only - it never
-    downloads output - so polling many batches costs about as much as one."""
     client = _client()
     if not client:
         return {}
-    out: dict[str, BatchProgress] = {}
-    for batch_id in batch_ids:
-        try:
-            batch = await client.batches.retrieve(batch_id)
-            counts = getattr(batch, "request_counts", None)
-            out[batch_id] = BatchProgress(
-                status=batch.status,
-                total=getattr(counts, "total", 0) or 0,
-                completed=getattr(counts, "completed", 0) or 0,
-                failed=getattr(counts, "failed", 0) or 0,
-            )
-        except Exception as exc:
-            logger.warning(f"Batch {batch_id} status check failed: {exc}")
-    return out
-
-
-def is_terminal(state: str) -> bool:
-    return state in _TERMINAL_STATES
+    return await read_batch_progress(client, batch_ids)
 
 
 async def run_responses_batch(
@@ -605,7 +247,7 @@ async def collect_finished_batches(
             unfinished.append(batch_id)
             continue
         _emit(on_event, batch)
-        if batch.status not in _TERMINAL_STATES:
+        if batch.status not in TERMINAL_STATES:
             unfinished.append(batch_id)
             continue
         collected: dict[str, BatchResult] = {}
@@ -616,3 +258,36 @@ async def collect_finished_batches(
 
 # Existing response callers and integrations retain their public entry point.
 submit_responses_batches = submit_batches
+
+__all__ = [
+    "BATCH_CHARS_PER_TOKEN",
+    "BATCH_COMPLETION_WINDOW",
+    "BATCH_ENDPOINT",
+    "BATCH_MAX_REQUESTS",
+    "BATCH_POLL_INTERVAL",
+    "BATCH_TOKEN_BUDGET",
+    "BATCH_WAVE_CONCURRENCY",
+    "BatchEndpoint",
+    "BatchEventCounts",
+    "BatchEventHook",
+    "BatchProgress",
+    "BatchResult",
+    "BatchSpec",
+    "_build_line",
+    "_chunk_specs",
+    "_client",
+    "_collect_batch",
+    "_emit",
+    "_estimate_tokens",
+    "_submit_chunk",
+    "_wait_for_batch",
+    "batch_progress",
+    "collect_finished_batches",
+    "completion_window_seconds",
+    "is_terminal",
+    "prompt_cache_key",
+    "run_responses_batch",
+    "structured_response_spec",
+    "submit_batches",
+    "submit_responses_batches",
+]
