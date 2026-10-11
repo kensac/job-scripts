@@ -169,10 +169,10 @@ def test_large_recipe_upload_is_chunked_and_published(client, admin_headers, use
         recovered.extend(base64.b64decode(part.json()["payload"]))
     assert bytes(recovered) == raw
     assert (
-        db.query_one("SELECT body FROM extension_recipes WHERE upload_id = %s", (upload_id,))[
-            "body"
+        db.query_one("SELECT revision FROM extension_recipes WHERE upload_id = %s", (upload_id,))[
+            "revision"
         ]
-        is None
+        == manifest["revision"]
     )
 
 
