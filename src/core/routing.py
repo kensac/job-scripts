@@ -1,54 +1,13 @@
-"""Which model answers a given piece of work, and why.
+"""Resolve a task's model from declared capability, quality, and price.
 
-Every call site used to name a model as a bare string. That made four things
-invisible: whether the model can do what the task needs, whether a key for it
-exists, what it costs at the moment it runs, and on what grounds it was chosen
-over the alternatives. This resolves a task's declared needs against the
-declared capabilities in core/providers/ and answers all four, or refuses.
+Callers name models judged fit for their task. This module checks their
+capabilities and chooses the least costly eligible model. One named model
+either qualifies or raises; a failed call never silently switches providers.
 
-WHAT THIS DELIBERATELY DOES NOT DO IS PICK A MODEL ON PRICE.
-
-Model choice in this codebase is an evidence-based quality judgment, not an
-optimisation. `tasks.mail.classification.handler` excludes gpt-5-nano in a
-comment that records why: measured on extraction-shaped work it fabricates, inventing 12 clearances
-across 55 postings that never mention clearance and filling "none" wherever the
-honest answer is "unstated". Nothing in a datasheet says that. A router that
-minimised cost subject to declared capabilities would have routed that work
-straight back to nano and undone the finding, silently, on a schedule.
-
-So the caller supplies the models it has JUDGED FIT for its task, and this
-chooses among only those - cheapest at the moment of the call, once every
-declared constraint is satisfied. Where a caller names one model the result is
-that model or an error, never a substitute. Quality stays a human judgment
-recorded at the call site; capability, availability and price become checks.
-
-There is no fallback chain, by design: two providers do not answer the same
-prompt the same way, so a silent retry elsewhere makes a verdict whose author
-depends on which call happened to fail. A call that cannot be satisfied raises.
-
-WHAT A MODEL SWITCH ACTUALLY COSTS, since the obvious guess is wrong. It does
-NOT fork the verdict log: model appears in no resolution key - jobs.py resolves
-DISTINCT ON (url, check_type) and custom on (url, prompt_hash) - so the newest
-row wins whatever produced it, and the board stays correct. The damage is a
-bill. core/store.py's decided_custom_urls takes an optional `model` and
-tasks/filters.py passes cfg.model to it as its skip-check, so the moment a
-check is answered by a different model than last cycle, every verdict already
-decided becomes invisible to that check and the sweep re-runs its whole
-candidate set at full price - about $1.32 for the one enabled filter today,
-$6.19 if all ten were live. Silent, on a schedule, with nothing in the log
-saying why.
-
-That is why candidates are the caller's to declare and why every call site
-here names exactly one. A multi-model list is not free the moment it picks
-differently twice, and the cost lands in the filter sweep rather than anywhere
-near this file.
-
-Key availability is deliberately NOT a resolution input - see server_key. What
-a model can do is declared; whether this host holds a key for it is not, and a
-resolver that needed one could not answer a question without spending money.
-
-core does not import api. server_key reads the env var each provider declares,
-and every caller, in api or not, reads it here.
+Model switches can re-run paid work when a task's candidate query scopes its
+skip check by model. Callers own that choice and its evidence. Provider key
+availability is checked before spending, not during resolution. ``core``
+cannot import ``api``, so ``server_key`` reads the provider's declared env var.
 """
 
 from __future__ import annotations

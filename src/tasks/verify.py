@@ -1,4 +1,4 @@
-"""Compatibility entry points for posting verification task handlers."""
+"""Public posting verification handlers and shared task helpers."""
 
 from core.routing import resolve as resolve
 from core.shapes import VERIFY_TASK as VERIFY_TASK

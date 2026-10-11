@@ -15,12 +15,9 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
-# Multipliers to a yearly figure. The old version knew only hourly and
-# monthly, so a weekly wage was either stored raw ($5,000/week became
-# $5,000/yr) or multiplied by 2080 ($2,000/week became $4,160,000/yr). Both
-# shapes are in production data today, which is what makes the comp column
-# unsortable. "one_time" is deliberately absent: a stipend or signing bonus
-# has no annual equivalent and must not be invented.
+# Convert recurring pay to a yearly figure. One-time pay has no annual
+# equivalent. Earlier weekly-pay conversions made some stored values wrong;
+# the period must be explicit before computing a sortable amount.
 PERIOD_TO_YEARLY: dict[str, float] = {
     "hourly": 2080.0,
     "daily": 260.0,

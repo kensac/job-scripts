@@ -55,6 +55,20 @@ catalog owner modules must each still contain a job write.
 When the same logic exists in several places and one has drifted, delete the
 duplication. Do not fix the copy.
 
+## Comments and deprecations
+
+Write comments and docstrings as short statements of the current rule and its
+reason. Check the code that implements the claim before changing it. Keep a
+measurement when it explains a non-obvious bound or choice, with its date and
+scope. Remove historical narration that no longer helps a reader decide what
+the code must do.
+
+Call a path deprecated only when it is still supported and has a named
+replacement. State the condition for removing it, including the stored-data
+check when old rows may still use it. An active second format is not legacy
+merely because it was introduced first. A public re-export is a supported
+entry point until its callers move.
+
 ## Always retain all data
 
 **Stored data is never deleted, truncated or capped because of age, count or

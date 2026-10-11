@@ -142,9 +142,10 @@ def batch_event_hook(
                     %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s,
                     %(payer)s, %(payer_id)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
-                -- A batch submitted before payers were recorded takes the
-                -- payer of the task collecting it, which is the task that
-                -- submitted it.
+                -- Deprecated shape: older batch rows have no payer. Use the
+                -- submitting task's payer on collection. Remove this branch
+                -- after all retained batch rows have a payer and every
+                -- submitter writes one.
                 payer = COALESCE(ai_batches.payer, EXCLUDED.payer),
                 payer_id = CASE WHEN ai_batches.payer IS NULL THEN EXCLUDED.payer_id
                                 ELSE ai_batches.payer_id END,
