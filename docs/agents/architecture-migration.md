@@ -649,8 +649,13 @@ day, about three hours of database time a day (production, 2026-10-10).
 what `j.active` did. Measured on production after the first reconcile
 (2026-10-10, 21:00 UTC): user 1's board recompute ran in 25.7 and 28.0 s
 against 26.0 and 26.8 s on the flag, and the preset eligible count in 1.9 s
-either way. `AVAILABLE` stays the one definition, and three writers
-store it:
+either way. `AVAILABLE` stays the one definition. Where no observation
+decides (a board not pulled since observations began, or the rows past a
+partial pull's cap, which never get one), the column stores the posting's
+last known feed state, `jobs.active`, rather than cannot tell (`_STORED`).
+On 2026-10-11 at 04:10 UTC that was 102,662 active postings, 81,644 on boards
+not yet pulled and 14,693 behind a partial pull; re-verification closes what
+a partial pull cannot see. Three writers store it:
 
 - `catalog.observe` refreshes the rows its observations changed, after they
   commit, in batches of 500.
