@@ -8,6 +8,7 @@ from typing import Any
 from api import db
 from api.mail import match as mail_match
 from api.mail.current import current_event, current_match
+from api.mail.match_decision import DERIVED
 
 logger = logging.getLogger("tasks.mail.matching.handler")
 
@@ -32,7 +33,6 @@ APPLIED_KINDS = frozenset(
     }
 )
 
-DERIVED = "derived"
 
 # A derived application needs a role. An application is a (company, role) pair,
 # and mail that names an employer but no role is half an entity - a careers
@@ -239,7 +239,9 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
         for msg in messages:
             mail_match.record(
                 msg["id"],
-                mail_match.Match(row["id"], DERIVED, "high", "application derived from this mail"),
+                mail_match.MatchDecision(
+                    row["id"], DERIVED, "high", "application derived from this mail"
+                ),
             )
             matched_message_count += 1
     return created_count, matched_message_count

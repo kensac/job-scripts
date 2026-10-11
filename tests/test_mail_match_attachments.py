@@ -190,7 +190,9 @@ def test_a_human_verdict_is_recorded_even_when_it_repeats_the_matcher(f):
     standing = mail_match.latest(mid)
     mail_match.record(
         mid,
-        mail_match.Match(standing.application_id, standing.method, standing.confidence, "affirmed"),
+        mail_match.MatchDecision(
+            standing.application_id, standing.method, standing.confidence, "affirmed"
+        ),
         actor_user_id=uid,
     )
     rows = db.query(

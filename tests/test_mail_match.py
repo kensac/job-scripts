@@ -128,10 +128,12 @@ def test_matches_are_append_only(f):
     mid = row["id"]
     app = _application(uid, company="Acme", title="Engineer")
 
-    mail_match.record(mid, mail_match.Match(None, mail_match.UNMATCHED, "none", "nothing yet"))
+    mail_match.record(
+        mid, mail_match.MatchDecision(None, mail_match.UNMATCHED, "none", "nothing yet")
+    )
     assert mail_match.latest(mid).application_id is None
 
-    mail_match.record(mid, mail_match.Match(app, mail_match.ATS_COMPANY, "medium", "later"))
+    mail_match.record(mid, mail_match.MatchDecision(app, mail_match.ATS_COMPANY, "medium", "later"))
     current = mail_match.latest(mid)
     assert current.application_id == app
     # The earlier non-match is still there: it is evidence about when we knew

@@ -21,41 +21,39 @@ from __future__ import annotations
 import datetime
 import logging
 import re
-from dataclasses import dataclass
 
 from pydantic import BaseModel
 
 from api import db
+from api.mail.match_decision import (
+    ADJUDICATED as ADJUDICATED,
+)
+from api.mail.match_decision import (
+    ATS_COMPANY,
+    COMPANY_TITLE,
+    EXACT_LINK,
+    MatchDecision,
+)
+from api.mail.match_decision import (
+    DETACHED as DETACHED,
+)
+from api.mail.match_decision import (
+    HUMAN_METHODS as HUMAN_METHODS,
+)
+from api.mail.match_decision import (
+    MANUAL as MANUAL,
+)
+from api.mail.match_decision import (
+    NOT_AN_APPLICATION as NOT_AN_APPLICATION,
+)
+from api.mail.match_decision import (
+    UNMATCHED as UNMATCHED,
+)
 from api.mail.match_sweeps import changed_since as changed_since
 from api.mail.match_sweeps import last_sweep_start as last_sweep_start
 from core.fetching.ats import canonicalize
 
 logger = logging.getLogger(__name__)
-
-# Tiers, most certain first. Stored on the row so the debug view can show
-# which one fired - a matcher nobody can audit is a matcher nobody can fix.
-EXACT_LINK = "exact_link"
-ATS_COMPANY = "ats_company"
-COMPANY_TITLE = "company_title"
-ADJUDICATED = "adjudicated"
-UNMATCHED = "unmatched"
-# Deliberately attached to nothing, which is not the same as "we looked and
-# found nothing". A recruiter approach is an event about the PERSON, not about
-# an application - it routinely arrives from companies they have no
-# relationship with, and attaching it to one because the names agree turns a
-# cold approach into evidence about a real application.
-NOT_AN_APPLICATION = "not_an_application"
-
-# Methods only a person writes, spelled here beside the matcher's own tiers so
-# the two vocabularies cannot drift apart in two modules. MANUAL is an
-# attachment a person chose; DETACHED is a person saying this message does not
-# belong to the application it is on. `application_matches` has no `model`
-# column, so the method is what separates a human row from a machine one - and
-# `actor_user_id` is what says WHICH human, which is the distinction these
-# methods alone cannot make.
-MANUAL = "manual"
-DETACHED = "detached"
-HUMAN_METHODS = frozenset({MANUAL, DETACHED})
 
 # Kinds that describe the user rather than an application, and so must never
 # be attached to one. Already excluded from creating applications
@@ -64,14 +62,6 @@ HUMAN_METHODS = frozenset({MANUAL, DETACHED})
 UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
 _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class Match:
-    application_id: int | None
-    method: str
-    confidence: str
-    rationale: str
 
 
 class CurrentMatch(BaseModel):
@@ -115,7 +105,7 @@ def canonical_urls(body: str | None) -> set[str]:
     return found
 
 
-def _by_exact_link(user_id: int, body: str | None) -> Match | None:
+def _by_exact_link(user_id: int, body: str | None) -> MatchDecision | None:
     canon = canonical_urls(body)
     if not canon:
         return None
@@ -130,7 +120,7 @@ def _by_exact_link(user_id: int, body: str | None) -> Match | None:
     for row in rows:
         job_canonical = canonicalize(row["url"]) or row["url"]
         if job_canonical in canon:
-            return Match(
+            return MatchDecision(
                 row["id"],
                 EXACT_LINK,
                 "high",
@@ -187,7 +177,7 @@ def _employment_type_contradicts(mail_title: str | None, app_title: str | None) 
 
 def _by_company(
     user_id: int, company: str | None, sent_at, title: str | None = None
-) -> Match | None:
+) -> MatchDecision | None:
     """One application at that company inside the window, or nothing.
 
     Ambiguity is not resolved here on purpose. Two open applications at the
@@ -244,7 +234,7 @@ def _by_company(
         # neither.
         return None
     if len(candidates) == 1:
-        return Match(
+        return MatchDecision(
             candidates[0]["id"],
             ATS_COMPANY,
             "medium",
@@ -257,7 +247,7 @@ def _by_company(
 
 def _by_company_and_title(
     user_id: int, company: str | None, title: str | None, sent_at=None
-) -> Match | None:
+) -> MatchDecision | None:
     """Company and title, INSIDE THE SAME WINDOW tier 2 uses.
 
     It had no date bound at all, which is how a rejection from 2025 attached
@@ -286,7 +276,7 @@ def _by_company_and_title(
         if norm_company(r["company_name"]) == key and norm_company(r["title"]) == role
     ]
     if len(candidates) == 1:
-        return Match(
+        return MatchDecision(
             candidates[0]["id"],
             COMPANY_TITLE,
             "medium",
@@ -302,7 +292,7 @@ def match_message(
     company: str | None,
     title: str | None,
     sent_at=None,
-) -> Match:
+) -> MatchDecision:
     """Best available match, or an explicit non-match.
 
     Never returns a guess. UNMATCHED with a NULL application_id is a real
@@ -317,10 +307,10 @@ def match_message(
         found = finder()
         if found is not None:
             return found
-    return Match(None, UNMATCHED, "none", "no candidate matched")
+    return MatchDecision.unmatched("no candidate matched")
 
 
-def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -> None:
+def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None = None) -> None:
     """Append a match. `actor_user_id` is the HUMAN who decided it, if any.
 
     NULL means the matcher wrote it. Whether that human was the message's owner
@@ -365,11 +355,8 @@ def record(message_id: int, match: Match, *, actor_user_id: int | None = None) -
         if current is not None and current.actor_user_id is not None:
             logger.debug(f"message {message_id}: a person decided this; matcher stands down")
             return
-        if (
-            current is not None
-            and current.application_id == match.application_id
-            and current.method == match.method
-            and current.confidence == match.confidence
+        if current is not None and match.repeats(
+            current.application_id, current.method, current.confidence
         ):
             return
     # The append and the pointer in one statement, as `events.append` does,
@@ -425,7 +412,7 @@ def confirm(message_id: int, current: dict, *, actor_user_id: int, note: str | N
     """
     record(
         message_id,
-        Match(
+        MatchDecision(
             current["application_id"],
             current["method"],
             current["confidence"],
@@ -450,6 +437,6 @@ def reject(message_id: int, *, actor_user_id: int, note: str | None = None) -> N
     """
     record(
         message_id,
-        Match(None, DETACHED, "none", note or "rejected by a person"),
+        MatchDecision.detached(note or "rejected by a person"),
         actor_user_id=actor_user_id,
     )

@@ -52,7 +52,7 @@ def _resolve_message(
             )
         mail_match.record(
             message_id,
-            mail_match.Match(
+            mail_match.MatchDecision(
                 body.target, mail_match.MANUAL, "high", body.note or "resolved by hand"
             ),
             actor_user_id=actor_user_id,
@@ -64,8 +64,8 @@ def _resolve_message(
         # tells a refusal from a failure sees it without learning a new value.
         mail_match.record(
             message_id,
-            mail_match.Match(
-                None, mail_match.NOT_AN_APPLICATION, "high", body.note or "refused by hand"
+            mail_match.MatchDecision.not_an_application(
+                body.note or "refused by hand", confidence="high"
             ),
             actor_user_id=actor_user_id,
         )
@@ -83,7 +83,7 @@ def _resolve_message(
     )
     mail_match.record(
         message_id,
-        mail_match.Match(None, mail_match.NOT_AN_APPLICATION, "high", "retracted: not job mail"),
+        mail_match.MatchDecision.not_an_application("retracted: not job mail", confidence="high"),
         actor_user_id=actor_user_id,
     )
     return ResolveResult(ok=True, choice=body.choice)

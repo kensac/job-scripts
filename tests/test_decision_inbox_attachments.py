@@ -92,7 +92,9 @@ def test_the_matcher_does_not_overturn_a_person(client, me):
 
     # The verdict a sweep computed against the world as it was before the
     # rejection, arriving after it.
-    mail_match.record(mid, mail_match.Match(app, "ats_company", "medium", "single application"))
+    mail_match.record(
+        mid, mail_match.MatchDecision(app, "ats_company", "medium", "single application")
+    )
 
     current = mail_match.latest(mid)
     assert current is not None

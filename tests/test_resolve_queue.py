@@ -429,7 +429,7 @@ def test_one_user_cannot_resolve_anothers_action(client, me, f):
     mid = _msg(other, "<other-action@x>", "offer", "Acme")
     app_id = _app(other, "Acme")
     event_id = _event(mid, "offer")
-    mail_match.record(mid, mail_match.Match(app_id, mail_match.ATS_COMPANY, "high", "test"))
+    mail_match.record(mid, mail_match.MatchDecision(app_id, mail_match.ATS_COMPANY, "high", "test"))
     # The ask exists, for its owner: the refusal below is about the caller.
     assert mail_pipeline.action_item(other, event_id) is not None
 
