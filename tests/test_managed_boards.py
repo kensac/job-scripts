@@ -301,7 +301,7 @@ def test_a_board_that_bypasses_the_clearance_gate_admits_restricted_postings(
     """Aerospace postings are mostly citizenship, clearance or ITAR bound: 94 of
     117 decided in a week of production. A board for that field opts out of
     the clearance gate the way a person does, and the closed gate still holds."""
-    from api import managed_board_runs
+    from api import managed_boards
 
     _source("source-a")
     _source("source-b")
@@ -311,9 +311,9 @@ def test_a_board_that_bypasses_the_clearance_gate_admits_restricted_postings(
     board = _create(client, admin_headers).json()
 
     def candidate_urls() -> set[str]:
-        loaded = managed_board_runs._board(board["id"])
+        loaded = managed_boards._board(board["id"])
         assert loaded is not None
-        return {c.url for c in managed_board_runs._candidates(loaded)}
+        return {c.url for c in managed_boards._candidates(loaded)}
 
     assert candidate_urls() == {open_url}
     response = client.patch(

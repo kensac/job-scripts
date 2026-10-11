@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel, ConfigDict, Field
 
-from api import db, managed_board_runs, source_selection
+from api import db, managed_boards, source_selection
 from api.auth import AuthedUser
 from api.models import Criteria
 from api.problem import refuse
@@ -98,7 +98,7 @@ class ManagedBoards(BaseModel):
 
 
 class ManagedBoardLatestRun(BaseModel):
-    run: managed_board_runs.ManagedBoardRun | None
+    run: managed_boards.ManagedBoardRun | None
 
 
 class _Name(BaseModel):
@@ -292,10 +292,10 @@ def get_managed_board(board_id: int, user: AuthedUser = Depends(require_admin)) 
 @router.post("/managed-boards/{board_id}/run")
 def run_managed_board(
     board_id: int, user: AuthedUser = Depends(require_admin)
-) -> managed_board_runs.ManagedBoardRunQueued:
+) -> managed_boards.ManagedBoardRunQueued:
     try:
-        return managed_board_runs.admit(board_id)
-    except managed_board_runs.RunRefusal as exc:
+        return managed_boards.admit(board_id)
+    except managed_boards.RunRefusal as exc:
         status = {"NOT_FOUND": 404, "STORAGE_UNAVAILABLE": 503}.get(exc.code, 409)
         raise refuse(status, exc.code, exc.message, task_id=exc.task_id) from exc
 
@@ -306,16 +306,16 @@ def latest_managed_board_run(
 ) -> ManagedBoardLatestRun:
     if _get(board_id) is None:
         raise refuse(404, "NOT_FOUND", "unknown managed board")
-    return ManagedBoardLatestRun(run=managed_board_runs.latest(board_id))
+    return ManagedBoardLatestRun(run=managed_boards.latest(board_id))
 
 
 @router.get("/managed-boards/{board_id}/cost")
 def managed_board_cost(
     board_id: int, user: AuthedUser = Depends(require_admin)
-) -> managed_board_runs.ManagedBoardCost:
+) -> managed_boards.ManagedBoardCost:
     if _get(board_id) is None:
         raise refuse(404, "NOT_FOUND", "unknown managed board")
-    return managed_board_runs.cost(board_id)
+    return managed_boards.cost(board_id)
 
 
 @router.post("/managed-boards")

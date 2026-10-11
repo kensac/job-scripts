@@ -56,6 +56,9 @@ These are instructions, not history. Follow them.
   related route handlers, request shapes, and domain queries together there.
   Source administration implementations live in
   `src/api/routers/source_management/`; `source_admin.py` registers them.
+- `src/api/managed_boards/`: managed-board candidate selection, run admission,
+  stored run records, and projection writes. Import public operations from
+  `api.managed_boards`; keep transaction boundaries in the owning module.
 - `src/tasks/`: the handlers the worker runs, grouped by domain where a
   workflow has several stages. `tasks.mail` owns sync, classification,
   matching, and pointer backfill. `tasks.verification` owns new-posting

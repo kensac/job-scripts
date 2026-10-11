@@ -1038,7 +1038,7 @@ rows from either shape. Do not add a SQL reader of `payload->'jobs'`.
 
 **Managed admission writes the list as a verified object before the task row
 exists, and the payload holds only the reference.** Never write it inline
-again. `managed_board_runs.admit` plans without holding a lock, uploads with
+again. `managed_boards.admit` plans without holding a lock, uploads with
 `PayloadStore.put_verified` outside any transaction, then locks the board and
 checks again what a concurrent writer can change (the board row, an active
 run, the sponsor's reservations) before inserting. Storage that is

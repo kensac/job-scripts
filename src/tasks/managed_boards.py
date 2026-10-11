@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api import ai, db, run_configs
-from api import managed_board_runs as runs
+from api import managed_boards as runs
 from api.model_calls import Payer
 from core import providers, routing
 from core.filters import compute_filter_hash

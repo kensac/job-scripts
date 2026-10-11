@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import budget, db, events, run_configs, task_jobs
-from api.managed_board_selection import (
+from api.managed_boards.selection import (
     MANAGED_FILTER_EXECUTION_VERSION,
     MANAGED_FILTER_TRANSPORT,
     _batch_shape,

@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from api import db, managed_board_runs
+from api import db, managed_boards
 from api.db import pool
 from tests.test_public_job_lists import _published_board
 
@@ -194,7 +194,7 @@ def test_the_diff_write_ends_with_the_rows_the_full_rewrite_wrote(f, mode, fail_
 
     _seed(seed)
     before = _physical()
-    n = managed_board_runs.replace_projection(payload)
+    n = managed_boards.replace_projection(payload)
 
     assert _rows() == expected
     assert n == len([row for row in expected if row[0] == board])
@@ -209,11 +209,11 @@ def test_the_diff_write_ends_with_the_rows_the_full_rewrite_wrote(f, mode, fail_
 def test_an_unchanged_board_writes_no_rows(f):
     board, _other, jobs = _fixture(f)
     payload = _payload(board, jobs, "managed_filter", False)
-    managed_board_runs.replace_projection(payload)
+    managed_boards.replace_projection(payload)
     before = _physical()
     projected = db.query("SELECT job_id, projected_at FROM managed_board_jobs ORDER BY job_id")
 
-    managed_board_runs.replace_projection(payload)
+    managed_boards.replace_projection(payload)
 
     assert before and _physical() == before
     # projected_at is when the posting joined, so it holds still too.
@@ -243,7 +243,7 @@ def test_a_public_reader_sees_the_old_board_until_the_rebuild_commits(f, client,
 
     def run() -> None:
         try:
-            managed_board_runs.replace_projection(payload)
+            managed_boards.replace_projection(payload)
         except BaseException as e:
             errors.append(e)
 

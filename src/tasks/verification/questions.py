@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any
 
-from api import managed_board_runs
+from api import managed_boards
 from api.task_config import configured_model, configured_shape
 from core.answers import VERIFICATION_REQUEST, joint_verification
 from core.batch import BatchSpec, structured_response_spec
@@ -37,7 +37,7 @@ def _submission_model() -> tuple[str, str]:
 
 def _joint_spec(
     row: dict[str, Any],
-    questions: list[managed_board_runs.BoardQuestion],
+    questions: list[managed_boards.BoardQuestion],
     model: str,
     effort: str,
 ) -> BatchSpec:

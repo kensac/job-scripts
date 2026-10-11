@@ -34,7 +34,7 @@ _INSERT_OWNERS = {
     "api/queue.py": "enqueue",
     "api/task_admission.py": "drafts, uploads and source pulls, under the subject lock",
     "api/filter_runs.py": "filter runs, under the user lock",
-    "api/managed_board_admission.py": "managed-board runs, after the budget reservation",
+    "api/managed_boards/admission.py": "managed-board runs, after the budget reservation",
     "api/routers/admin/job_profiles.py": "one classify run, after locking any active one",
 }
 

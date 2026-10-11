@@ -1,4 +1,4 @@
-from api import db, managed_board_runs, worker
+from api import db, managed_boards, worker
 
 
 def _board(f, slug: str, *, published: bool) -> int:
@@ -21,9 +21,9 @@ def test_scheduler_admits_every_published_board_and_isolates_refusals(f, monkeyp
     def admit(board_id, *, dedupe_key=None):
         calls.append((board_id, dedupe_key))
         if board_id == first:
-            raise managed_board_runs.RunRefusal("IN_PROGRESS", "active")
+            raise managed_boards.RunRefusal("IN_PROGRESS", "active")
 
-    monkeypatch.setattr(managed_board_runs, "admit", admit)
+    monkeypatch.setattr(managed_boards, "admit", admit)
     worker._managed_board_schedule_attempts.clear()
     worker.schedule_ingest_cycle()
     worker.schedule_ingest_cycle()
@@ -36,7 +36,7 @@ def test_scheduler_admits_every_published_board_and_isolates_refusals(f, monkeyp
 def test_scheduler_with_no_published_boards_never_calls_admission(f, monkeypatch):
     _board(f, "draft", published=False)
     monkeypatch.setattr(
-        managed_board_runs,
+        managed_boards,
         "admit",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected admission")),
     )
