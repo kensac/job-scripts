@@ -1,4 +1,4 @@
-"""The jobs table has one writer: core.catalog.
+"""The jobs table has one catalog owner across its job and observation modules.
 
 Writes were spread over nine files, each with its own statement and none
 bound by the lock order multi-row writers keep (core.catalog._LOCK_ORDER).
@@ -14,7 +14,10 @@ import pytest
 from core import catalog
 
 _SRC = pathlib.Path(__file__).resolve().parent.parent / "src"
-_OWNER = _SRC / "core" / "catalog.py"
+_OWNERS = {
+    _SRC / "core" / "catalog_jobs.py",
+    _SRC / "core" / "catalog_observations.py",
+}
 
 _RAW = re.compile(
     r"\b(?:INSERT\s+INTO|DELETE\s+FROM|UPDATE|MERGE\s+INTO)\s+(?:public\.)?jobs\b",
@@ -32,7 +35,7 @@ _ALLOWED = {
 def _writers() -> dict[str, list[int]]:
     found: dict[str, list[int]] = {}
     for path in sorted(_SRC.rglob("*.py")):
-        if path == _OWNER:
+        if path in _OWNERS:
             continue
         text = path.read_text()
         for m in _RAW.finditer(text):
@@ -49,6 +52,10 @@ def test_no_jobs_write_outside_the_catalog():
 
 def test_allowed_writers_still_write():
     assert not set(_ALLOWED) - set(_writers()), "Remove these from _ALLOWED"
+
+
+def test_catalog_owner_modules_still_write():
+    assert all(_RAW.search(path.read_text()) for path in _OWNERS)
 
 
 def test_correct_posting_routes_active_and_refuses_other_columns(f):
