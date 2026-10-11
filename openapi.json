@@ -4142,7 +4142,7 @@
       },
       "post": {
         "summary": "Create Resume",
-        "description": "Pasted text or a PDF, base64 in the body. The PDF's text is what is\nkept; the file itself is not stored. Same name replaces the text.",
+        "description": "Save pasted text or a legacy base64 PDF under a resume name.",
         "operationId": "create_resume_v1_user_resumes_post",
         "parameters": [
           {
