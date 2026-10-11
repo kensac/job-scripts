@@ -17,7 +17,7 @@ from core.answers import VERIFY_INPUT_CHARS
 from core.comp import COMP_INPUT_CHARS
 from tasks import comp as task_comp
 from tasks import verify as task_verify
-from tasks.verification import new_postings as new_posting_verification
+from tasks.verification import new_postings
 
 
 def _verdict(url: str, rejected: bool) -> str:
@@ -79,7 +79,7 @@ async def test_task_and_experiment_inputs_share_the_derivation_cap(f, monkeypatc
         await task_comp.PAY.handle(f.make_task("extract_comp", status="running"), {})
     else:
         f.make_ready_job(content=content, closed="", clearance="")
-        monkeypatch.setattr(new_posting_verification, "run_batched", capture)
+        monkeypatch.setattr(new_postings, "run_batched", capture)
         await task_verify.handle_verify_new(f.make_task("verify_new", status="running"), {})
 
     assert len(captured) == 1

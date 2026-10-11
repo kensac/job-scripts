@@ -7,7 +7,7 @@ import pytest
 from api import db
 from core.near_copy import key
 from tasks import verify as tasks_verify
-from tasks.verification import new_postings as new_posting_verification
+from tasks.verification import new_postings
 from tests.test_verify_board_questions import _board
 
 BODY = "We are hiring a store associate.\nYou will stock shelves and help customers.\n" * 5
@@ -36,7 +36,7 @@ def submitted(monkeypatch):
         specs.extend(batch)
         return [], None
 
-    monkeypatch.setattr(new_posting_verification, "run_batched", fake_run_batched)
+    monkeypatch.setattr(new_postings, "run_batched", fake_run_batched)
     return specs
 
 

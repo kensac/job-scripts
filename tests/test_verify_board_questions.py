@@ -17,7 +17,7 @@ from core.answers import joint_question_key
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
 from tasks import verify
-from tasks.verification import new_postings as new_posting_verification
+from tasks.verification import new_postings
 from tests.factories import make_batch_result
 
 PROMPT = "Entry-level software engineering roles."
@@ -59,7 +59,7 @@ def submitted(monkeypatch):
         specs.extend(batch)
         return [], None
 
-    monkeypatch.setattr(new_posting_verification, "run_batched", fake_run_batched)
+    monkeypatch.setattr(new_postings, "run_batched", fake_run_batched)
     return specs
 
 
@@ -166,7 +166,7 @@ async def _collect(f, monkeypatch, spec, *, model: str):
     async def collect(*args):
         return [result], SimpleNamespace(model=model)
 
-    monkeypatch.setattr(new_posting_verification, "run_batched", collect)
+    monkeypatch.setattr(new_postings, "run_batched", collect)
     await verify.handle_verify_new(task, {})
 
 
