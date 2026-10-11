@@ -12,7 +12,7 @@ anything that builds an index or holds the archive in memory is unusable on
 these files, which is why python's own `mailbox.mbox` is not used - it indexes
 the whole file before yielding anything.
 
-clean_text, html_to_text and parse_sent_at are public because api/gmail.py
+clean_text, html_to_text and parse_sent_at are public because api/mail/gmail.py
 calls them: a live mail arriving through the API and an imported one have to
 normalise identically, or the same message reads two ways depending on which
 path stored it. The other helpers here stay private.

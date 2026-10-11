@@ -20,7 +20,7 @@ def _smartrecruiters(url: str, company: str) -> list[JobPosting]:
     """GET https://api.smartrecruiters.com/v1/companies/{id}/postings
 
     Names the company on every row. The posting's text is one more call per
-    row, which the resolver in core/ats.py makes when the text is needed.
+    row, which the resolver in core/fetching/ats/ makes when text is needed.
     """
     out: list[JobPosting] = []
     offset = 0
