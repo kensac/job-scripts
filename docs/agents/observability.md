@@ -564,7 +564,12 @@ on the person's own model settings booked to the `application` purpose:
 the fields with their options, the profile's answer as a hint where the
 option wording was not recognised ("South Asian | Asian" against
 "Asian/Pacific Islander"), the profile and the resume. An answer for a
-choice field must be one of the options. The person still sees every
+choice field must be one of the options, through the same `pick_option` the
+rules use. A multiselect answer is several options joined by " | ": the
+request always says so (`MULTI_CHOICE`, appended whatever the configured
+wording), and `pick_options` matches each item on its own, keeping the ones
+that land. An answer that normalizes to nothing, such as "[]", matches no
+option. The person still sees every
 answer in the form before submitting, and an answer they leave in place
 goes into the bank on submit, so the same question never costs a call
 twice. A profile value may list alternatives in order, "South Asian |
