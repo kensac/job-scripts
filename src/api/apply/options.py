@@ -27,8 +27,23 @@ def pick_option(value: str, options: list[str]) -> str | None:
     return None
 
 
+def pick_options(value: str, options: list[str]) -> str | None:
+    """The options a multi-choice answer names, "Python | React", each item
+    landed on its own option and kept in order; an item that lands nowhere
+    is dropped. None when no item lands. Unlike pick_option, the items are
+    all chosen, not alternatives tried in turn."""
+    picked: list[str] = []
+    for item in (value or "").split("|"):
+        opt = _pick_one(item.strip(), options) if options else None
+        if opt is not None and opt not in picked:
+            picked.append(opt)
+    return " | ".join(picked) or None
+
+
 def _pick_one(value: str, options: list[str]) -> str | None:
-    if not value:
+    # Punctuation alone, a model's "[]", normalizes to nothing, and an empty
+    # whole-word pattern would match the first option.
+    if not normalize(value):
         return None
     low = value.lower()
     for opt in options:

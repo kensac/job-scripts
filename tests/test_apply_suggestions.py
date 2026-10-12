@@ -80,6 +80,53 @@ def test_the_model_fills_what_the_rules_could_not_in_one_call(client, user_heade
     assert "South Asian | Asian" in seen["input"] and "Ada" in seen["input"]
 
 
+def test_a_multiselect_answer_keeps_each_offered_item(client, user_headers, monkeypatch):
+    """The model is told to join several picks with ' | '; each item is
+    matched on its own, so one unoffered item no longer blanks the field,
+    and an empty answer ticks nothing."""
+    from api import ai
+
+    seen = {}
+
+    async def fake_parse(cfg, instructions, input_text, model, timeout=120.0):
+        seen["instructions"] = instructions
+        return model(
+            answers=[
+                {"key": "stack", "answer": "Python | Typescript | React | C++"},
+                {"key": "student", "answer": "[]"},
+            ]
+        ), {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+
+    monkeypatch.setattr(ai, "parse", fake_parse)
+    monkeypatch.setattr(
+        "api.budget.resolve_ai_config",
+        lambda uid, ent: type("Cfg", (), {"model": "m", "key_source": "owner"})(),
+    )
+    res = client.post(
+        "/v1/user/apply/suggest",
+        json={
+            "fields": [
+                {
+                    "key": "stack",
+                    "label": "Stacks you have used",
+                    "kind": "multiselect",
+                    "options": ["Python", "Go", "Typescript", "React"],
+                },
+                {
+                    "key": "student",
+                    "label": "Education History",
+                    "kind": "multiselect",
+                    "options": ["Still Student?"],
+                },
+            ]
+        },
+        headers=user_headers,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["answers"] == {"stack": "Python | Typescript | React"}
+    assert "joined by ' | '" in seen["instructions"]
+
+
 def test_the_admin_list_keeps_the_model_off_a_field(client, user_headers, monkeypatch):
     """The model never fills what the admin list names (location by default,
     matched as a whole word in label or key); the call goes out without

@@ -52,6 +52,17 @@ def test_the_ladder_rungs():
     assert apply.pick_option("South Asian | Asian", ["Asian", "White"]) == "Asian"
     assert apply.pick_option("South Asian | Asian", ["Caucasian", "South Asian"]) == "South Asian"
     assert apply.pick_option("Asian", ["Caucasian", "Black"]) is None
+    # A model's empty "[]" names nothing; it once ticked the only box.
+    assert apply.pick_option("[]", ["Still Student?"]) is None
+    # A multi-choice answer keeps every item that lands and drops the rest.
+    stack = ["Python", "Go", "Typescript", "React"]
+    assert apply.pick_options("Python | typescript | React | C++", stack) == (
+        "Python | Typescript | React"
+    )
+    assert apply.pick_options(
+        "New York, NY | San Francisco, CA", ["New York, NY", "Austin, TX"]
+    ) == ("New York, NY")
+    assert apply.pick_options("C++ | []", stack) is None
     # No, phrased as a negation.
     assert apply.pick_option(
         "no", ["I am a protected veteran", "I am not a protected veteran"]

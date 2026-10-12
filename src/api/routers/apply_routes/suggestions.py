@@ -65,6 +65,15 @@ DEFAULT_SUGGEST = (
 )
 
 
+# The answers are split on this separator before each item is matched, so it
+# is part of the parsing contract and is appended whatever the configured
+# wording says.
+MULTI_CHOICE = (
+    " A multiselect field's answer names every chosen option, each exactly as "
+    "written, joined by ' | '."
+)
+
+
 def never_filled(fields: list[SuggestField]) -> list[str]:
     """The keys of the fields the admin list keeps from the model."""
     raw = db.get_config("application_ai_never_fills") or ""
@@ -150,7 +159,7 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     if resume:
         parts.append("Resume:\n" + resume)
     rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
-    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id))
+    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id)) + MULTI_CHOICE
     with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
         parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
     budget.record_tokens(
@@ -172,7 +181,8 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
             continue
         raw[a.key] = text
         if field.options:
-            text = apply.pick_option(text, field.options) or ""
+            pick = apply.pick_options if field.kind == "multiselect" else apply.pick_option
+            text = pick(text, field.options) or ""
         if text:
             answers[a.key] = text
     _finish_suggestions(user.id, body, token, answers, raw, skipped)
