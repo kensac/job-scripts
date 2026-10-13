@@ -42,3 +42,33 @@ reads its window's answers once into the temporary table `spend_window`
 than rebuilding the answer-to-call join per cut. The review-gate report runs
 the title screen once per distinct (recipe, title, source), materialized
 before the screen so the planner cannot push the regex back into the join.
+
+## The answer ledger's hourly sums
+
+Reads that add up a month or a lifetime of answers (/admin/stats, the spend
+breakdowns) group `api.ledger_rollup.groups()` instead of the answers: the
+answer and fetch ledger summed per UTC hour and per dimension (arm, model,
+check type, status, config, prompt hash, batched) in `answer_usage_hourly`.
+A read is exact by construction. It takes an hour from the table only when
+the hour lies wholly inside the window, is older than
+`ledger_rollup_state.computed_until`, and has no row in `ledger_dirty_hours`.
+It aggregates everything else (the partial first hour, everything from the
+watermark on, each dirty hour) from the source tables in the same statement.
+Triggers on `ai_queries`, `model_calls` and `page_fetches` append the hour of
+every row a write touches, and the hours of every answer sharing a call whose
+first answer may have changed. The `ledger_rollup` task recomputes the dirty
+hours and advances the watermark, two days per transaction, hourly. Missing a
+refresh makes a read slower, never wrong.
+
+This is the one exception to "Derived state is not schema" (migrations.md).
+It is allowed because no read can return a stale hour: a write that changes an
+hour also logs it, in the same transaction. A write path that bypasses row
+triggers (TRUNCATE, `session_replication_role = replica`, disabled triggers)
+must refresh the rollup or clear it. `tests/test_ledger_rollup.py` fails if
+the triggers stop covering a late write.
+
+A new cut adds its dimension to `DIMENSIONS`, `aggregate()` and the table, and
+then clears the table and `ledger_rollup_state` so the next refresh re-sums
+history. Measured on production (2026-10-13): the live part of a read covers
+the last hour or two (about 1 s), and a two-day chunk of history takes about
+10 s to sum.

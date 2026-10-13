@@ -217,6 +217,10 @@ def schedule_ingest_cycle() -> None:
         derivation.schedule(cycle)
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
+    # The answer ledger's hourly sums (api.ledger_rollup): the hours writes
+    # dirtied and the hour just completed. Reads are exact without it; it
+    # decides how much of a month's read is already added up.
+    enqueue("ledger_rollup", {"cycle": cycle}, dedupe_key=f"ledger-rollup:{cycle}")
     # Polling gets its OWN bucket, far finer than the ingest cycle. Sharing the
     # hourly one meant a parked task could sit up to an hour after its batch
     # had actually finished, and in a multi-round backfill that latency is the

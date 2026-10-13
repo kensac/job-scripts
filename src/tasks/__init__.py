@@ -32,6 +32,7 @@ from tasks.filtering.personal_runs import (
 )
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
+from tasks.ledger_rollup import handle_ledger_rollup
 from tasks.mail.classification.handler import handle_classify_mail
 from tasks.mail.matching.handler import handle_match_mail
 from tasks.mail.pointers import handle_backfill_mail_pointers
@@ -73,6 +74,7 @@ HANDLERS = {
     "recompute_board": handle_recompute_board,
     "send_digests": handle_send_digests,
     "data_health": handle_data_health,
+    "ledger_rollup": handle_ledger_rollup,
     "poll_batches": handle_poll_batches,
     "verify_new": handle_verify_new,
     "fetch_missing_content": handle_fetch_missing_content,

@@ -120,9 +120,7 @@ def _spend(days: int) -> Spend:
     params = {"days": days, "interactive": list(INTERACTIVE_CONTEXTS)}
 
     with window_table(params):
-        totals, batching, by_check_type, by_model, by_day = read_verdict_breakdowns(
-            params, WINDOW_ANSWERS
-        )
+        totals, batching, by_check_type, by_model, by_day = read_verdict_breakdowns(params)
         waste = verdict_waste(params, WINDOW_ANSWERS, later="spend_window")
         by_reach, by_source_reach = verdict_reach(params, WINDOW_ANSWERS)
 

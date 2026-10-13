@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db, grouped, model_calls
+from api import db, grouped, ledger_rollup
 from api.auth import AuthedUser
 from api.routers.admin.query_ledger import _distinct_query_values
 from api.routers.admin.shared import require_admin
@@ -144,36 +144,28 @@ def _compute_stats() -> LedgerStats:
     a real calendar day in the session timezone rather than the first ten
     characters of whatever string the writer produced.
 
-    Answers are read through model_calls.answers_with_usage, not ledger_rows:
-    the view's per-row usage lookups suit a page, and a lifetime sum through
-    them took 116 s at p90 on production (PostHog, 2026-10-13). Fetches are
-    the view's other arm, counted straight off page_fetches.
+    Read from the hourly sums (api.ledger_rollup), exact by construction:
+    the lifetime scan through model_calls.answers_with_usage took 15 to 33 s
+    on production (2026-10-13), and through ledger_rows 116 s at p90. A day
+    is `hour::date`, the answer's own `created_at::date` in any timezone
+    whose offset is whole hours.
     """
     groups = db.query(
         f"""
-        SELECT created_at::date AS day, model, check_type, status,
-               COUNT(*) AS queries,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
+        SELECT hour::date AS day, model, check_type, status,
+               SUM(answers) AS queries,
+               SUM(unpriced) AS unpriced_queries,
                SUM(prompt_tokens) AS prompt_tokens,
                SUM(completion_tokens) AS completion_tokens,
                SUM(cached_tokens) AS cached_tokens,
                SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_queries,
+               SUM(cache_write_unknown) AS cache_write_unknown_queries,
                SUM(reasoning_tokens) AS reasoning_tokens,
-               SUM(prompt_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_prompt_tokens,
-               SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_completion_tokens,
-               SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_cached_tokens,
+               SUM(prompt_tokens) FILTER (WHERE batched) AS batched_prompt_tokens,
+               SUM(completion_tokens) FILTER (WHERE batched) AS batched_completion_tokens,
+               SUM(cached_tokens) FILTER (WHERE batched) AS batched_cached_tokens,
                SUM(cost_usd) AS cost_usd
-        FROM (
-            SELECT created_at, model, check_type, status, batch_id, prompt_tokens,
-                   completion_tokens, cached_tokens, cache_write_tokens,
-                   reasoning_tokens, cost_usd
-            FROM {model_calls.answers_with_usage("TRUE")} a
-            UNION ALL
-            SELECT created_at, NULL, 'content', status, NULL, NULL::bigint,
-                   NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::numeric
-            FROM page_fetches WHERE method <> 'verification'
-        ) ledger
+        FROM {ledger_rollup.groups()} ledger
         GROUP BY 1, 2, 3, 4
         """
     )

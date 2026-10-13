@@ -10,8 +10,11 @@ from api.orm.ai import (
     AiBatchError,
     AiInstructionText,
     AiQuery,
+    AnswerUsageHourly,
     BatchRequest,
     BatchResultReceipt,
+    LedgerDirtyHour,
+    LedgerRollupState,
     ModelCall,
 )
 from api.orm.apply import (
@@ -82,6 +85,7 @@ __all__ = [
     "AiBatchError",
     "AiInstructionText",
     "AiQuery",
+    "AnswerUsageHourly",
     "AppConfig",
     "AppConfigChange",
     "Application",
@@ -112,6 +116,8 @@ __all__ = [
     "JobProfile",
     "JobRequirements",
     "JobSkill",
+    "LedgerDirtyHour",
+    "LedgerRollupState",
     "Listing",
     "Location",
     "ManagedBoard",

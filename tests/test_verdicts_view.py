@@ -19,9 +19,11 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 
 # Readers that keep the predicate on purpose, because they read calls rather
 # than answers: spend prices every call in a window and counts the decided
-# ones as a share of it. The ORM's index predicates describe ai_queries itself.
+# ones as a share of it; the ledger rollup sums that count per hour for it.
+# The ORM's index predicates describe ai_queries itself.
 _CALL_READERS = {
     "api/spend/verdicts.py",
+    "api/ledger_rollup.py",
     "api/orm/ai.py",
 }
 _DECIDED = re.compile(r"status IN \('passed', ?'rejected'\)")
