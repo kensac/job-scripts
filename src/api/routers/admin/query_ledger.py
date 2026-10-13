@@ -13,6 +13,7 @@ from api.auth import AuthedUser
 from api.orm.ai import AiQuery
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
+from api.stale_cache import Stale
 from core import query_instructions, reason_taxonomy
 
 router = APIRouter()
@@ -180,7 +181,13 @@ def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
 @router.get("/queries/options")
 def query_options(user: AuthedUser = Depends(require_admin)) -> QueryFilterOptions:
     """Filter vocabularies generated from live data, so the admin dropdowns
-    can never drift from what actually exists."""
+    can never drift from what actually exists. Served stale for
+    admin_stats_cache_seconds: the skip scans through ledger_rows took 30 s
+    on production (2026-10-13), and a new value appears a few times a month."""
+    return _options.get()
+
+
+def _compute_options() -> QueryFilterOptions:
     # An empty string is no option here; GET /options has always listed it.
     sources = [r["name"] for r in db.query("SELECT name FROM sources WHERE active ORDER BY name")]
     return QueryFilterOptions(
@@ -192,6 +199,9 @@ def query_options(user: AuthedUser = Depends(require_admin)) -> QueryFilterOptio
         contexts=[v for v in _distinct_query_values("config_name", recent=True) if v],
         workers=[v for v in _distinct_query_values("worker", recent=True) if v],
     )
+
+
+_options = Stale(_compute_options, lambda: int(db.get_config("admin_stats_cache_seconds")))
 
 
 class QueryListing(BaseModel):

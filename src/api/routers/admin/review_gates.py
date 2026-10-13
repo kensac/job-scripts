@@ -9,6 +9,7 @@ repeating one already stored, and the derived skip set matched every stored one.
 from __future__ import annotations
 
 import datetime
+import json
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, JsonValue
@@ -16,6 +17,7 @@ from pydantic import BaseModel, JsonValue
 from api import db, model_calls, scoping
 from api.auth import AuthedUser
 from api.routers.admin.shared import require_admin
+from api.stale_cache import StaleByKey
 from core import screening
 
 router = APIRouter()
@@ -142,6 +144,28 @@ def report(
     managed_board_id: int | None = Query(None, ge=1),
     filter_id: int | None = Query(None, ge=1),
     admin: AuthedUser = Depends(require_admin),
+) -> GateReport:
+    """Served stale for admin_stats_cache_seconds per query: the skip count
+    replays every screen over the window's postings, 36 s on production
+    (2026-10-13)."""
+    args = (days, prompt_hash, user, managed_board_id, filter_id)
+    # Keyed on today's screens too: the report is derived from them, and a
+    # changed screen must not be answered with the old funnel.
+    screens = json.dumps(db.get_config("title_screens"), sort_keys=True)
+    return _reports.get((*args, screens), lambda: _report(*args))
+
+
+_reports: StaleByKey[tuple, GateReport] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+def _report(
+    days: int,
+    prompt_hash: str | None,
+    user: str | None,
+    managed_board_id: int | None,
+    filter_id: int | None,
 ) -> GateReport:
     end = datetime.datetime.now(datetime.UTC)
     start = end - datetime.timedelta(days=days)

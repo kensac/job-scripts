@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -52,8 +53,26 @@ async def _lifespan(app: FastAPI):
         visibility.request_refresh(u["id"])
     metrics.serve()
     telemetry.init("jobtracker-api")
+    _warm_admin_pages()
     yield
     telemetry.shutdown()
+
+
+def _warm_admin_pages() -> None:
+    """The admin pages whose default view takes 15 to 70 s to compute start
+    computing now, in the background, so the first visit after a roll does not
+    wait for them (api.stale_cache)."""
+    from api.routers.admin import ledger_stats, posting_inspection, query_ledger, review_gates
+
+    ledger_stats._stats.warm()
+    query_ledger._options.warm()
+    posting_inspection._checked_urls.warm()
+    spend._spend_pages.warm(30, lambda: spend._spend(30))
+    default_report = (7, None, None, None, None)
+    screens = json.dumps(db.get_config("title_screens"), sort_keys=True)
+    review_gates._reports.warm(
+        (*default_report, screens), lambda: review_gates._report(*default_report)
+    )
 
 
 app = FastAPI(
