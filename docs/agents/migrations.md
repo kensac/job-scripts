@@ -201,3 +201,7 @@ views, and the test corpus and sync tools read base tables only.
 Do not add a column for something derivable from rows you already have. A
 stored derivation desyncs; a derived one cannot. Store the person's answer,
 derive the system's inference.
+
+The answer ledger's hourly sums (`answer_usage_hourly`) are the one stored
+derivation. They are allowed because a read never returns a stale hour;
+admin-query-reads.md says how.

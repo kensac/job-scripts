@@ -363,10 +363,28 @@ def test_spend_cuts_from_the_window_table_equal_the_direct_reads(verdict_log):
     direct = (read_verdict_breakdowns(params), verdict_waste(params), verdict_reach(params))
     with window_table(params):
         windowed = (
-            read_verdict_breakdowns(params, WINDOW_ANSWERS),
+            read_verdict_breakdowns(params),
             verdict_waste(params, WINDOW_ANSWERS, later="spend_window"),
             verdict_reach(params, WINDOW_ANSWERS),
         )
     assert [_dump(v) for v in windowed[0]] == [_dump(v) for v in direct[0]]
     assert windowed[1] == direct[1]
     assert windowed[2] == direct[2]
+
+
+@pytest.mark.parametrize("zone", ["UTC", "America/Los_Angeles", "Pacific/Kiritimati"])
+def test_stats_and_spend_from_stored_hours_match_the_per_cut_scans(verdict_log, zone):
+    """The same comparisons once api.ledger_rollup has summed the hours, so
+    the pages read stored groups rather than aggregating the rows."""
+    from api import ledger_rollup
+
+    while not ledger_rollup.refresh()["caught_up"]:
+        pass
+    assert db.query_one("SELECT count(*) AS n FROM answer_usage_hourly")["n"] > 0
+    params = {"days": 30, "interactive": list(INTERACTIVE_CONTEXTS)}
+    with db.transaction():
+        db.execute(f"SET LOCAL timezone = '{zone}'")
+        assert ledger_stats._compute_stats().model_dump_json() == _old_stats().model_dump_json()
+        old, new = _old_spend(params), read_verdict_breakdowns(params)
+    for before, after in zip(old, new, strict=True):
+        assert _dump(after) == _dump(before)

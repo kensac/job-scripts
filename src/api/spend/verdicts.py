@@ -7,8 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import db, grouped, model_calls
-from api.spend.window import _ANSWERS, _WINDOW
+from api import db, grouped, ledger_rollup, model_calls
+from api.spend.window import _ANSWERS, _WINDOW, _WINDOW_START
 from core.store import AI_ELIGIBLE_JOB
 
 
@@ -142,7 +142,6 @@ _VERDICT_COUNTS = (
 
 def read_verdict_breakdowns(
     params: dict,
-    answers: str = _ANSWERS,
 ) -> tuple[
     VerdictTotals,
     BatchingDiagnostics,
@@ -159,44 +158,41 @@ def read_verdict_breakdowns(
     2026-10-04. One pass grouped by a superset of these keys measured
     3.2-4.0 s there (327 groups); the rows returned are the window's distinct
     (day, model, check_type), not its calls. Batching splits are FILTERs
-    inside each group rather than keys. Day stays `created_at::date`, so its
-    boundary is still the session timezone. Costs fold as the Decimals
+    inside each group rather than keys. The groups come from the hourly sums
+    (api.ledger_rollup), exact by construction: the same pass over the
+    window's answers took 15 s on production (2026-10-13). Day is
+    `hour::date`, an answer's `created_at::date` in any whole-hour timezone. Costs fold as the Decimals
     Postgres returned, so a sum of group sums is the number one SUM gave.
     """
     groups = db.query(
         f"""
-        SELECT created_at::date AS day, model, check_type,
-               COUNT(*) AS calls,
-               COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_calls,
+        SELECT hour::date AS day, model, check_type,
+               SUM(answers) AS calls,
+               SUM(unpriced) AS unpriced_calls,
                SUM(cost_usd) AS cost_usd,
                SUM(prompt_tokens) AS prompt_tokens,
                SUM(completion_tokens) AS completion_tokens,
                SUM(total_tokens) AS total_tokens,
                SUM(cached_tokens) AS cached_tokens,
                SUM(cache_write_tokens) AS cache_write_tokens,
-               COUNT(*) FILTER (WHERE cache_write_tokens IS NULL) AS cache_write_unknown_calls,
+               SUM(cache_write_unknown) AS cache_write_unknown_calls,
                SUM(reasoning_tokens) AS reasoning_tokens,
-               MIN(created_at) AS first_call,
-               MAX(created_at) AS last_call,
-               COUNT(*) FILTER (WHERE batch_id IS NOT NULL) AS batched_calls,
-               COUNT(*) FILTER (WHERE batch_id IS NULL) AS sync_calls,
-               SUM(cost_usd) FILTER (WHERE batch_id IS NOT NULL) AS batched_cost_usd,
-               SUM(cost_usd) FILTER (WHERE batch_id IS NULL) AS sync_cost_usd,
-               COUNT(*) FILTER (
-                   WHERE batch_id IS NULL
-                     AND COALESCE(config_name, '') <> ALL(%(interactive)s)
-               ) AS batchable_sync_calls,
+               MIN(first_at) AS first_call,
+               MAX(last_at) AS last_call,
+               COALESCE(SUM(answers) FILTER (WHERE batched), 0) AS batched_calls,
+               COALESCE(SUM(answers) FILTER (WHERE NOT batched), 0) AS sync_calls,
+               SUM(cost_usd) FILTER (WHERE batched) AS batched_cost_usd,
+               SUM(cost_usd) FILTER (WHERE NOT batched) AS sync_cost_usd,
+               COALESCE(SUM(answers) FILTER (
+                   WHERE NOT batched AND COALESCE(config_name, '') <> ALL(%(interactive)s)
+               ), 0) AS batchable_sync_calls,
                SUM(cost_usd / 2) FILTER (
-                   WHERE batch_id IS NULL
-                     AND COALESCE(config_name, '') <> ALL(%(interactive)s)
+                   WHERE NOT batched AND COALESCE(config_name, '') <> ALL(%(interactive)s)
                ) AS unrealized_savings_usd,
                -- Decided verdicts carrying no tokens: the answer came from a
                -- sibling row's call, so their cost lives there.
-               COUNT(*) FILTER (
-                   WHERE COALESCE(total_tokens, 0) = 0
-                     AND status IN ('passed', 'rejected')
-               ) AS joint_call_rows
-        FROM {answers} a
+               SUM(joint_call_rows) AS joint_call_rows
+        FROM {ledger_rollup.groups(_WINDOW_START, where="arm = 'answer' AND model IS NOT NULL")} a
         GROUP BY 1, 2, 3
         """,
         params,

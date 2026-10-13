@@ -345,3 +345,69 @@ class ModelCall(Base):
     # totals, or a row of the old usage ledger; source_id is that row's id.
     source: Mapped[str] = mapped_column(Text, server_default=text("'call'"))
     source_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class AnswerUsageHourly(Base):
+    """The answer ledger summed per UTC hour and dimension: what reads of a
+    month or a lifetime add up instead of aggregating every answer.
+
+    A cache with exact reads, not a stored derivation that can drift:
+    api.ledger_rollup reads an hour from here only when it is older than
+    ledger_rollup_state.computed_until and no write since its computation has
+    logged it in ledger_dirty_hours; every other hour is aggregated from
+    ai_queries and page_fetches when read. docs/agents/admin-query-reads.md.
+    """
+
+    __tablename__ = "answer_usage_hourly"
+    __table_args__ = (
+        CheckConstraint("arm IN ('answer', 'fetch')", name="ck_answer_usage_hourly_arm"),
+        Index("idx_answer_usage_hourly_hour", "hour"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    hour: Mapped[datetime.datetime]
+    # 'answer': a row of ai_queries; 'fetch': a page fetch (ledger_rows' arms).
+    arm: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    check_type: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    config_name: Mapped[str | None] = mapped_column(Text)
+    prompt_hash: Mapped[str | None] = mapped_column(Text)
+    batched: Mapped[bool] = mapped_column(Boolean)
+    answers: Mapped[int] = mapped_column(BigInteger)
+    unpriced: Mapped[int] = mapped_column(BigInteger)
+    cache_write_unknown: Mapped[int] = mapped_column(BigInteger)
+    joint_call_rows: Mapped[int] = mapped_column(BigInteger)
+    # Sums keep NULL when no row in the group carried a value, as SUM does.
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric)
+    prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    completion_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    total_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cached_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cache_write_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    first_at: Mapped[datetime.datetime]
+    last_at: Mapped[datetime.datetime]
+
+
+class LedgerDirtyHour(Base):
+    """An hour a write to ai_queries, model_calls or page_fetches touched,
+    appended by trigger. Append-only, so writers never wait on each other;
+    the rollup refresh deletes the rows it has recomputed."""
+
+    __tablename__ = "ledger_dirty_hours"
+    __table_args__ = (Index("idx_ledger_dirty_hours_hour", "hour"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    hour: Mapped[datetime.datetime]
+
+
+class LedgerRollupState(Base):
+    """One row: every hour before computed_until has been summed into
+    answer_usage_hourly (an hour with no rows has no groups)."""
+
+    __tablename__ = "ledger_rollup_state"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_ledger_rollup_state_single"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    computed_until: Mapped[datetime.datetime]
