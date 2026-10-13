@@ -1,12 +1,14 @@
 """Posting-verdict cost diagnostics, separate from model-call spend."""
 
 import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from pydantic import BaseModel
 
-from api import db, grouped
-from api.spend.window import _ANSWERS
+from api import db, grouped, model_calls
+from api.spend.window import _ANSWERS, _WINDOW
 from core.store import AI_ELIGIBLE_JOB
 
 
@@ -140,6 +142,7 @@ _VERDICT_COUNTS = (
 
 def read_verdict_breakdowns(
     params: dict,
+    answers: str = _ANSWERS,
 ) -> tuple[
     VerdictTotals,
     BatchingDiagnostics,
@@ -193,7 +196,7 @@ def read_verdict_breakdowns(
                    WHERE COALESCE(total_tokens, 0) = 0
                      AND status IN ('passed', 'rejected')
                ) AS joint_call_rows
-        FROM {_ANSWERS} a
+        FROM {answers} a
         GROUP BY 1, 2, 3
         """,
         params,
@@ -230,19 +233,23 @@ def read_verdict_breakdowns(
     )
 
 
-def verdict_waste(params: dict) -> Waste:
+def verdict_waste(params: dict, answers: str = _ANSWERS, later: str = "ai_queries") -> Waste:
+    """Failed calls, and decided verdicts a later decided verdict on the same
+    url and check replaced. `later` is where the replacing verdicts are
+    looked for: every answer, or (from spend_window) the window's answers,
+    which holds every answer newer than the window's start."""
     waste = db.query_one_as(
         Waste,
         f"""
         WITH scoped AS (
             SELECT id, url, check_type, status, cost_usd
-            FROM {_ANSWERS} a
+            FROM {answers} a
         ),
         superseded AS (
             SELECT s.id, s.cost_usd FROM scoped s
             WHERE s.status IN ('passed', 'rejected')
               AND EXISTS (
-                  SELECT 1 FROM ai_queries later
+                  SELECT 1 FROM {later} later
                   WHERE later.url = s.url AND later.check_type = s.check_type
                     AND later.status IN ('passed', 'rejected') AND later.id > s.id
               )
@@ -260,7 +267,9 @@ def verdict_waste(params: dict) -> Waste:
     return waste
 
 
-def verdict_reach(params: dict) -> tuple[list[VerdictReachSpend], list[VerdictSourceReachSpend]]:
+def verdict_reach(
+    params: dict, answers: str = _ANSWERS
+) -> tuple[list[VerdictReachSpend], list[VerdictSourceReachSpend]]:
     # Why source reach has its own breakdown (historical measurement):
     #
     # The sweeps that spend tokens selected postings with no reference to who
@@ -300,7 +309,7 @@ def verdict_reach(params: dict) -> tuple[list[VerdictReachSpend], list[VerdictSo
                COUNT(*) FILTER (WHERE a.cost_usd IS NULL) AS unpriced_calls,
                COALESCE(SUM(a.cost_usd), 0) AS cost_usd,
                COALESCE(SUM(a.total_tokens), 0) AS total_tokens
-        FROM {_ANSWERS} a
+        FROM {answers} a
         LEFT JOIN jobs j ON j.url = a.url
         GROUP BY 1, 2 ORDER BY 6 DESC
         """,
@@ -325,3 +334,26 @@ def verdict_reach(params: dict) -> tuple[list[VerdictReachSpend], list[VerdictSo
         (VerdictReachSpend(**acc) for acc in rolled.values()), key=lambda r: r.calls, reverse=True
     )
     return by_reach, by_source_reach
+
+
+# The window's answers with their usage, read once into a temporary table so
+# the cuts above aggregate a narrow table instead of each rebuilding the join
+# over ai_queries' wide rows. Each rebuilt it from scratch: 15 s, 19 s and
+# 33 s for the 30-day window on production (2026-10-13), and the replaced-
+# verdict check scanned every answer again. The model filter is applied when
+# read, not here: a verdict with no model still replaces an older one.
+_WINDOW_TABLE = f"""
+    CREATE TEMP TABLE spend_window ON COMMIT DROP AS
+    SELECT * FROM {model_calls.answers_with_usage(f"q.{_WINDOW}")} a
+"""
+WINDOW_ANSWERS = "(SELECT * FROM spend_window WHERE model IS NOT NULL)"
+
+
+@contextmanager
+def window_table(params: dict) -> Iterator[None]:
+    """Inside: spend_window holds the window's answers, for
+    WINDOW_ANSWERS and verdict_waste's `later`."""
+    with db.transaction():
+        db.execute(_WINDOW_TABLE, params)
+        db.execute("ANALYZE spend_window")
+        yield
