@@ -15,9 +15,21 @@ from api.problem import refuse
 from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord
 from api.routers.admin.review_gates import ReviewDecisions
 from api.routers.admin.shared import require_admin
+from api.stale_cache import Stale
 from core import query_instructions
 
 router = APIRouter()
+
+# Every url the ledger has checked, for the unfiltered page's total: a
+# distinct count over both arms of ledger_rows, ~40 s on production under load
+# (2026-10-13), and it moves by a few hundred an hour.
+_checked_urls = Stale(
+    lambda: (
+        db.query_one("SELECT COUNT(DISTINCT url) AS c FROM ledger_rows WHERE url IS NOT NULL")
+        or {"c": 0}
+    )["c"],
+    lambda: int(db.get_config("admin_stats_cache_seconds")),
+)
 
 
 # Sortable columns for the job aggregate. Values are looked up here, never
@@ -92,24 +104,45 @@ _POSTING_TOTALS = """
 """
 
 
+# The newest postings, as urls in order. Walking the view newest first and
+# keeping a row only when it is its url's newest made each candidate a
+# correlated lookup, and the fetch arm ran it on all 955k fetches before it
+# could sort: 2.5 min and more on production (2026-10-13). Rows newest first
+# are cheap (each arm walks its created_at index), so read a window of them,
+# keep each url's first appearance, and widen the window until the page is
+# full or the ledger runs out. The two arms of ledger_rows are named here
+# because the view's fetch arm is not flattened, so through the view it is a
+# sort of every fetch (4.3 s) rather than a walk of its index.
+_NEWEST_ROWS = """
+    (SELECT url, created_at FROM ai_queries WHERE url IS NOT NULL
+     ORDER BY created_at DESC LIMIT %(n)s)
+    UNION ALL
+    (SELECT url, created_at FROM page_fetches
+     WHERE url IS NOT NULL AND method <> 'verification'
+     ORDER BY created_at DESC LIMIT %(n)s)
+    ORDER BY created_at DESC, url LIMIT %(n)s
+"""
+
+
+def _newest_urls(offset: int, limit: int) -> list[str]:
+    want = offset + limit
+    n = max(want * 4, 200)
+    while True:
+        rows = db.query(_NEWEST_ROWS, {"n": n})
+        urls = list(dict.fromkeys(r["url"] for r in rows))
+        if len(urls) >= want or len(rows) < n:
+            return urls[offset:want]
+        n *= 4
+
+
 _RECENT_POSTINGS = f"""
-    WITH selected AS MATERIALIZED (
-        SELECT q.url, q.created_at
-        FROM ledger_rows q
-        WHERE q.url IS NOT NULL AND q.id = (
-            SELECT n.id FROM ledger_rows n WHERE n.url = q.url
-            ORDER BY n.created_at DESC, n.id DESC LIMIT 1
-        )
-        ORDER BY q.created_at DESC, q.url
-        LIMIT %(limit)s OFFSET %(offset)s
-    )
     SELECT selected.url, totals.*, streak.failures AS content_failures
-    FROM selected
+    FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS selected(url, position)
     CROSS JOIN LATERAL (
         SELECT {_POSTING_TOTALS} FROM ledger_rows WHERE url = selected.url
     ) totals
     CROSS JOIN LATERAL ({verdicts.FETCH_STREAK.format(url="selected.url")}) streak
-    ORDER BY selected.created_at DESC, selected.url
+    ORDER BY selected.position
 """
 
 
@@ -172,10 +205,9 @@ def list_jobs(
         # as DESC NULLS LAST and can use the existing index backwards.
         # The id tiebreaker selects one row when a URL has equal timestamps;
         # every check still contributes to that URL's reported totals.
-        total_row = db.query_one(
-            "SELECT COUNT(DISTINCT url) AS c FROM ledger_rows WHERE url IS NOT NULL"
-        )
-        rows = db.query(_RECENT_POSTINGS, page_params)
+        total_row = {"c": _checked_urls.get()}
+        urls = _newest_urls(paging.offset, paging.size)
+        rows = db.query(_RECENT_POSTINGS, {"urls": urls}) if urls else []
     else:
         total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
         rows = db.query(

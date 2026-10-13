@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import datetime
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db, grouped
+from api import db, grouped, model_calls
 from api.auth import AuthedUser
 from api.routers.admin.query_ledger import _distinct_query_values
 from api.routers.admin.shared import require_admin
+from api.stale_cache import Stale
 
 router = APIRouter()
 
@@ -113,23 +113,12 @@ class LedgerStats(BaseModel):
     by_model: list[ModelTotals]
 
 
-_stats_cache: tuple[float, LedgerStats] | None = None
-
-
 @router.get("/stats")
 def stats(user: AuthedUser = Depends(require_admin)) -> LedgerStats:
-    """Lifetime totals over ai_queries, served from a per-process cache for
-    admin_stats_cache_seconds. Every call is a full scan of the largest
-    table, and the dashboard asks on every worker event; the totals move by
-    a few rows an hour. ponytail: per-process cache, so each api replica
-    scans once per window; shared cache if replicas multiply."""
-    global _stats_cache
-    ttl = int(db.get_config("admin_stats_cache_seconds"))
-    if _stats_cache and time.monotonic() - _stats_cache[0] < ttl:
-        return _stats_cache[1]
-    result = _compute_stats()
-    _stats_cache = (time.monotonic(), result)
-    return result
+    """Lifetime totals over every answer, served stale for
+    admin_stats_cache_seconds (api.stale_cache). The dashboard asks on every
+    worker event; the totals move by a few rows an hour."""
+    return _stats.get()
 
 
 _STATS_SUMS = (
@@ -154,9 +143,14 @@ def _compute_stats() -> LedgerStats:
     created_at is timestamptz since a7c1e9d40b22, and ::date makes the bucket
     a real calendar day in the session timezone rather than the first ten
     characters of whatever string the writer produced.
+
+    Answers are read through model_calls.answers_with_usage, not ledger_rows:
+    the view's per-row usage lookups suit a page, and a lifetime sum through
+    them took 116 s at p90 on production (PostHog, 2026-10-13). Fetches are
+    the view's other arm, counted straight off page_fetches.
     """
     groups = db.query(
-        """
+        f"""
         SELECT created_at::date AS day, model, check_type, status,
                COUNT(*) AS queries,
                COUNT(*) FILTER (WHERE cost_usd IS NULL) AS unpriced_queries,
@@ -170,7 +164,17 @@ def _compute_stats() -> LedgerStats:
                SUM(completion_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_completion_tokens,
                SUM(cached_tokens) FILTER (WHERE batch_id IS NOT NULL) AS batched_cached_tokens,
                SUM(cost_usd) AS cost_usd
-        FROM ledger_rows GROUP BY 1, 2, 3, 4
+        FROM (
+            SELECT created_at, model, check_type, status, batch_id, prompt_tokens,
+                   completion_tokens, cached_tokens, cache_write_tokens,
+                   reasoning_tokens, cost_usd
+            FROM {model_calls.answers_with_usage("TRUE")} a
+            UNION ALL
+            SELECT created_at, NULL, 'content', status, NULL, NULL::bigint,
+                   NULL::bigint, NULL::bigint, NULL::bigint, NULL::bigint, NULL::numeric
+            FROM page_fetches WHERE method <> 'verification'
+        ) ledger
+        GROUP BY 1, 2, 3, 4
         """
     )
 
@@ -234,3 +238,10 @@ def _compute_stats() -> LedgerStats:
         by_day=by_day,
         by_model=by_model,
     )
+
+
+# The lambda reads _compute_stats at call time, so a test can replace it.
+_stats = Stale(
+    lambda: _compute_stats(),  # noqa: PLW0108
+    lambda: int(db.get_config("admin_stats_cache_seconds")),
+)

@@ -36,6 +36,7 @@ from api.spend.verdicts import (
     verdict_waste,
 )
 from api.spend.window import INTERACTIVE_CONTEXTS
+from api.stale_cache import StaleByKey
 
 router = APIRouter()
 
@@ -103,6 +104,17 @@ def spend(
     days: int = Query(30, ge=1, le=365),
     user: AuthedUser = Depends(require_admin),
 ) -> Spend:
+    """Served stale for admin_stats_cache_seconds per window: the cuts read
+    every answer in it and took 69 s on production (2026-10-13)."""
+    return _spend_pages.get(days, lambda: _spend(days))
+
+
+_spend_pages: StaleByKey[int, Spend] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+def _spend(days: int) -> Spend:
     params = {"days": days, "interactive": list(INTERACTIVE_CONTEXTS)}
 
     totals, batching, by_check_type, by_model, by_day = read_verdict_breakdowns(params)

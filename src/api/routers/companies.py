@@ -45,6 +45,7 @@ from api.companies.queries import (
 from api.mail import pipeline as mail_pipeline
 from api.problem import refuse
 from api.routers.admin import require_admin
+from api.stale_cache import StaleByKey
 
 router = APIRouter(prefix="/admin")
 
@@ -86,6 +87,30 @@ def list_companies(
     cursor: str | None = None,
     min_sample: int = Query(default=rates.DEFAULT_MIN_SAMPLE, ge=1),
     user: AuthedUser = Depends(require_admin),
+) -> CompanyList:
+    """Served stale for admin_stats_cache_seconds per query and admin: the
+    page groups the whole catalog and took 30 s on production (2026-10-13)."""
+    args = (q, applied, has_comp, repost, sort, dir, limit, cursor, min_sample)
+    return _pages.get((*args, user.id), lambda: _list_companies(*args, user=user))
+
+
+_pages: StaleByKey[tuple, CompanyList] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+def _list_companies(
+    q: str | None,
+    applied: bool,
+    has_comp: bool,
+    repost: bool,
+    sort: str,
+    dir: str,
+    limit: int,
+    cursor: str | None,
+    min_sample: int,
+    *,
+    user: AuthedUser,
 ) -> CompanyList:
     limit = max(1, min(limit, _MAX_LIMIT))
     offset = _offset_from(cursor)
