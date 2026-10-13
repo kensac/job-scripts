@@ -21470,7 +21470,7 @@
     "/v1/admin/queries/options": {
       "get": {
         "summary": "Query Options",
-        "description": "Filter vocabularies generated from live data, so the admin dropdowns\ncan never drift from what actually exists.",
+        "description": "Filter vocabularies generated from live data, so the admin dropdowns\ncan never drift from what actually exists. Served stale for\nadmin_stats_cache_seconds: the skip scans through ledger_rows took 30 s\non production (2026-10-13), and a new value appears a few times a month.",
         "operationId": "query_options_v1_admin_queries_options_get",
         "parameters": [
           {
@@ -23127,6 +23127,7 @@
     "/v1/admin/review-gates/report": {
       "get": {
         "summary": "Report",
+        "description": "Served stale for admin_stats_cache_seconds per query: the skip count\nreplays every screen over the window's postings, 36 s on production\n(2026-10-13).",
         "operationId": "report_v1_admin_review_gates_report_get",
         "parameters": [
           {
@@ -26201,6 +26202,7 @@
     "/v1/admin/companies": {
       "get": {
         "summary": "List Companies",
+        "description": "Served stale for admin_stats_cache_seconds per query and admin: the\npage groups the whole catalog and took 30 s on production (2026-10-13).",
         "operationId": "list_companies_v1_admin_companies_get",
         "parameters": [
           {
@@ -26434,6 +26436,7 @@
     "/v1/admin/spend": {
       "get": {
         "summary": "Spend",
+        "description": "Served stale for admin_stats_cache_seconds per window: the cuts read\nevery answer in it and took 69 s on production (2026-10-13).",
         "operationId": "spend_v1_admin_spend_get",
         "parameters": [
           {
