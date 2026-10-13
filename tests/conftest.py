@@ -210,6 +210,15 @@ def _in_memory_object_storage(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _cold_stale_caches():
+    """Admin totals are cached per process (api.stale_cache); each test reads
+    its own rows, not the previous test's totals."""
+    from api import stale_cache
+
+    stale_cache.clear_all()
+
+
+@pytest.fixture(autouse=True)
 def _no_browser(monkeypatch):
     """Fail if a test unexpectedly launches the browser tier.
 
