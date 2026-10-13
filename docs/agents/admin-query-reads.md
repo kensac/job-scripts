@@ -34,3 +34,11 @@ the view's per-row lookups took 116 s at p90 for /admin/stats. A newest-first
 page of urls reads each table's `created_at` index directly, because the
 view's fetch arm is not flattened and sorts every fetch (4.3 s) instead of
 walking its index.
+
+The filter vocabularies skip-scan `ai_queries` and `page_fetches` separately
+for the same reason (30 s through the view, 1.1 s per table). /admin/spend
+reads its window's answers once into the temporary table `spend_window`
+(`api.spend.verdicts.window_table`) and computes every cut from it, rather
+than rebuilding the answer-to-call join per cut. The review-gate report runs
+the title screen once per distinct (recipe, title, source), materialized
+before the screen so the planner cannot push the regex back into the join.

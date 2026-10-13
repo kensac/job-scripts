@@ -22,6 +22,7 @@ from api.spend.ledger import (
     read_ledger_breakdowns,
 )
 from api.spend.verdicts import (
+    WINDOW_ANSWERS,
     BatchingDiagnostics,
     VerdictCheckTypeSpend,
     VerdictDaySpend,
@@ -34,6 +35,7 @@ from api.spend.verdicts import (
     read_verdict_breakdowns,
     verdict_reach,
     verdict_waste,
+    window_table,
 )
 from api.spend.window import INTERACTIVE_CONTEXTS
 from api.stale_cache import StaleByKey
@@ -117,10 +119,12 @@ _spend_pages: StaleByKey[int, Spend] = StaleByKey(
 def _spend(days: int) -> Spend:
     params = {"days": days, "interactive": list(INTERACTIVE_CONTEXTS)}
 
-    totals, batching, by_check_type, by_model, by_day = read_verdict_breakdowns(params)
-
-    waste = verdict_waste(params)
-    by_reach, by_source_reach = verdict_reach(params)
+    with window_table(params):
+        totals, batching, by_check_type, by_model, by_day = read_verdict_breakdowns(
+            params, WINDOW_ANSWERS
+        )
+        waste = verdict_waste(params, WINDOW_ANSWERS, later="spend_window")
+        by_reach, by_source_reach = verdict_reach(params, WINDOW_ANSWERS)
 
     # Why the usage ledger must be separate from the verdict log:
     # ai_queries is URL-keyed and cannot represent non-posting work. The

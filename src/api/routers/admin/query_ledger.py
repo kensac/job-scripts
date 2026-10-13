@@ -142,37 +142,70 @@ class QueryFilterOptions(BaseModel):
     workers: list[str]
 
 
-def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
-    """`SELECT DISTINCT col ... WHERE col IS NOT NULL ORDER BY col`, as a skip
-    scan: each step asks the index for the next value above the last, so the
-    cost is one descent per distinct value instead of a read of every row.
-    `recent` keeps a value only if a row in the last 30 days has it, which on
-    an index over (col, created_at) is an equality plus a range, one more
-    descent. Every column passed here needs an index that leads with it.
+# What each vocabulary column is in ledger_rows' fetch arm: a column of
+# page_fetches, or the constant the view puts there.
+_FETCH_ARM = {
+    "check_type": "'content'",
+    "config_name": "'content-cache'",
+    "status": "status",
+    "worker": "worker",
+}
 
-    Measured against production (2.07M rows, 2026-10-04, warm): DISTINCT
-    check_type 2.0 s became 66 ms, status 0.3 s became 3 ms. `col` is a
-    literal in this module, never request input. Values come back in the
-    column's collation either way, because min() and `>` compare as the
-    btree does; the final ORDER BY does not lean on recursion order.
+
+def _skip_scan(table: str, col: str) -> str:
+    """The distinct non-null values of `col`, one index descent each."""
+    return f"""
+        SELECT x FROM (
+            WITH RECURSIVE v(x) AS (
+                SELECT min({col}) FROM {table}
+                UNION ALL
+                SELECT (SELECT min({col}) FROM {table} WHERE {col} > v.x)
+                FROM v WHERE v.x IS NOT NULL
+            )
+            SELECT x FROM v
+        ) {table}_values WHERE x IS NOT NULL
     """
-    window = (
-        f"AND EXISTS (SELECT 1 FROM ledger_rows r WHERE r.{col} = v.x "
-        "AND r.created_at > now() - interval '30 days')"
-        if recent
-        else ""
-    )
+
+
+def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
+    """`SELECT DISTINCT col FROM ledger_rows WHERE col IS NOT NULL ORDER BY
+    col`, as a skip scan: each step asks the index for the next value above the
+    last, so the cost is one descent per distinct value instead of a read of
+    every row. `recent` keeps a value only if a row in the last 30 days has
+    it, which on an index over (col, created_at) is an equality plus a range,
+    one more descent. Every column passed here needs an index that leads with
+    it on ai_queries, and on page_fetches when the fetch arm reads a column.
+
+    The two arms of ledger_rows are scanned on their own tables: through the
+    view the fetch arm is not flattened, so each step sorted every fetch and
+    the four vocabularies took 30 s on production (2026-10-13). A fetch value
+    counts only if a fetch other than a verification copy carries it, as in
+    the view. Measured before that, against 2.07M rows (2026-10-04, warm):
+    DISTINCT check_type 2.0 s became 66 ms, status 0.3 s became 3 ms. `col` is
+    a literal in this module, never request input.
+    """
+    window = "AND r.created_at > now() - interval '30 days'" if recent else ""
+    fetch = _FETCH_ARM[col]
+    if fetch == col:
+        fetch_values = f"""
+            SELECT x FROM ({_skip_scan("page_fetches", col)}) f
+            WHERE EXISTS (SELECT 1 FROM page_fetches r WHERE r.{col} = f.x
+                          AND r.method <> 'verification' {window})
+        """
+    else:
+        fetch_values = f"""
+            SELECT {fetch} WHERE EXISTS (
+                SELECT 1 FROM page_fetches r WHERE r.method <> 'verification' {window})
+        """
     return [
         r["x"]
         for r in db.query(
             f"""
-            WITH RECURSIVE v(x) AS (
-                SELECT min({col}) FROM ledger_rows
-                UNION ALL
-                SELECT (SELECT min({col}) FROM ledger_rows WHERE {col} > v.x)
-                FROM v WHERE v.x IS NOT NULL
-            )
-            SELECT x FROM v WHERE x IS NOT NULL {window} ORDER BY x
+            SELECT x FROM ({_skip_scan("ai_queries", col)}) a
+            WHERE EXISTS (SELECT 1 FROM ai_queries r WHERE r.{col} = a.x {window})
+            UNION
+            {fetch_values}
+            ORDER BY x
             """
         )
     ]

@@ -73,3 +73,39 @@ def test_batch_jobs_drilldown_reports_per_job_cost(client, admin_headers):
     assert row["url"] == "https://b.test/1" and row["prompt_tokens"] == 1000
     assert row["est_cost_usd"] is not None and row["est_cost_usd"] > 0
     assert client.get("/v1/admin/batches/nope/jobs", headers=admin_headers).status_code == 404
+
+
+def test_query_options_read_both_ledger_arms_like_the_view(client, admin_headers):
+    """The vocabularies scan ai_queries and page_fetches separately; they must
+    list what ledger_rows lists, verification copies excluded."""
+    db.execute(
+        "INSERT INTO ai_queries (url, check_type, status, config_name, worker, created_at) "
+        "VALUES ('https://o.test/1', 'closed', 'passed', 'verify-batch', 'w-answer', now()), "
+        "('https://o.test/2', 'custom', 'rejected', 'old-config', 'w-old', now() - interval '90 days')"
+    )
+    db.execute(
+        "INSERT INTO page_fetches (url, status, method, worker, created_at) VALUES "
+        "('https://o.test/1', 'failed', 'scraped', 'w-fetch', now()), "
+        "('https://o.test/3', 'passed', 'verification', 'w-copy', now())"
+    )
+    got = client.get("/v1/admin/queries/options", headers=admin_headers).json()
+    view = {
+        col: [
+            r["x"]
+            for r in db.query(
+                f"SELECT DISTINCT {col} AS x FROM ledger_rows WHERE {col} IS NOT NULL "
+                + ("AND created_at > now() - interval '30 days' " if recent else "")
+                + "ORDER BY 1"
+            )
+        ]
+        for col, recent in (
+            ("check_type", False),
+            ("status", False),
+            ("config_name", True),
+            ("worker", True),
+        )
+    }
+    assert got["check_types"] == view["check_type"] == ["closed", "content", "custom"]
+    assert got["statuses"] == view["status"] == ["failed", "passed", "rejected"]
+    assert got["contexts"] == view["config_name"] == ["content-cache", "verify-batch"]
+    assert got["workers"] == view["worker"] == ["w-answer", "w-fetch"]

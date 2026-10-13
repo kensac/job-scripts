@@ -201,12 +201,28 @@ def _report(
           WHERE %(board)s::bigint IS NULL
             AND (%(filter)s::bigint IS NULL OR f.id = %(filter)s)
             AND (cardinality(%(users)s::bigint[]) = 0 OR f.user_id = ANY(%(users)s))
-        ), skips AS (
-          SELECT t.prompt_hash, j.id
-          FROM jobs j JOIN targets t ON t.source = j.source
+        ), window_jobs AS MATERIALIZED (
+          SELECT j.id, COALESCE(j.title, '') AS title, j.source FROM jobs j
           WHERE j.created_at >= %(start)s AND j.created_at < %(end)s
-            AND {screening.skips_sql("t.recipe")}
-          GROUP BY t.prompt_hash, j.id
+            AND j.source IN (SELECT source FROM targets)
+        ), distinct_titles AS MATERIALIZED (
+          SELECT DISTINCT t.recipe, w.title, w.source
+          FROM window_jobs w JOIN targets t ON t.source = w.source
+        ), judged AS (
+          -- The screen is a regex over the title, so it runs once per distinct
+          -- (recipe, title, source), not once per posting and board: the
+          -- boards and filters share one recipe, and the per-pair form spent
+          -- 25 s of a 35 s report on it (production, 2026-10-13).
+          SELECT x.recipe, x.title, x.source
+          FROM distinct_titles x
+          WHERE {screening.skips_sql("x.recipe", title="x.title", source="x.source")}
+        ), skips AS (
+          SELECT t.prompt_hash, w.id
+          FROM window_jobs w
+          JOIN targets t ON t.source = w.source
+          JOIN judged s ON s.recipe = t.recipe AND s.source = w.source
+                       AND s.title = w.title
+          GROUP BY t.prompt_hash, w.id
         ), reviews AS (
           -- Every paid review, failed ones included: a failure was paid for.
           SELECT r.prompt_hash, r.url, r.cost_usd FROM {_REVIEWS} r

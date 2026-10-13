@@ -354,3 +354,19 @@ def test_stats_and_spend_on_an_empty_table():
     old, new = _old_spend(params), read_verdict_breakdowns(params)
     assert [_dump(v) for v in new] == [_dump(v) for v in old]
     assert new[2:] == ([], [], [])
+
+
+def test_spend_cuts_from_the_window_table_equal_the_direct_reads(verdict_log):
+    from api.spend.verdicts import WINDOW_ANSWERS, verdict_reach, verdict_waste, window_table
+
+    params = {"days": 30, "interactive": list(INTERACTIVE_CONTEXTS)}
+    direct = (read_verdict_breakdowns(params), verdict_waste(params), verdict_reach(params))
+    with window_table(params):
+        windowed = (
+            read_verdict_breakdowns(params, WINDOW_ANSWERS),
+            verdict_waste(params, WINDOW_ANSWERS, later="spend_window"),
+            verdict_reach(params, WINDOW_ANSWERS),
+        )
+    assert [_dump(v) for v in windowed[0]] == [_dump(v) for v in direct[0]]
+    assert windowed[1] == direct[1]
+    assert windowed[2] == direct[2]
