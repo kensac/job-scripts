@@ -237,6 +237,32 @@ def candidates_sql() -> str:
     """
 
 
+def listed_sql() -> str:
+    """The named postings still missing a closed or clearance verdict. Binds
+    `urls` and `in_flight`.
+
+    For a backfill an administrator asks for by url: the postings the sweep's
+    gate (verification_candidates.reachable) and cap held back still have no
+    verdict, so nothing records what happened to them. The availability,
+    missing-verdict, in-flight and page-text conditions are the sweep's own."""
+    return f"""
+    SELECT j.url, j.source, j.company, j.title, q.input_content,
+           q.id AS page_fetch_id,
+           NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
+           NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
+    FROM jobs j
+    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+    WHERE j.url = ANY(%(urls)s::text[])
+      AND {catalog.IS_AVAILABLE.format(job="j")}
+      AND NOT (j.url = ANY(%(in_flight)s::text[]))
+      AND (
+        NOT {verdict_reads.has_verdict("j.url", "closed")}
+        OR NOT {verdict_reads.has_verdict("j.url", "clearance")}
+      )
+    ORDER BY j.date_posted DESC NULLS LAST
+    """
+
+
 async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     """Batched replacement for ingest-time closed/clearance checks: one
     half-price call per job yields both verdicts. Idempotent by re-sweep.
@@ -246,18 +272,24 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     if not has_batch_work(task_id):
         from api import verification_candidates
 
-        candidate_params = {
-            **verification_candidates.params(),
-            "cap": int(db.get_config("verify_new_per_cycle")),
-            "in_flight": _in_flight(task_id),
-        }
-        # Without JIT. Its cost estimate is in the millions, so JIT compiles
-        # the whole plan, and on production (2026-10-10) the same plan took
-        # 78 s with it and 24 s without: 38 s went to hashing the
-        # 16,000 targets.
-        with db.transaction():
-            db.execute("SET LOCAL jit = off")
-            rows = db.query(candidates_sql(), candidate_params)
+        if "urls" in payload:
+            # A requested backfill: the named postings, past the gate and cap.
+            rows = db.query(
+                listed_sql(), {"urls": payload["urls"], "in_flight": _in_flight(task_id)}
+            )
+        else:
+            candidate_params = {
+                **verification_candidates.params(),
+                "cap": int(db.get_config("verify_new_per_cycle")),
+                "in_flight": _in_flight(task_id),
+            }
+            # Without JIT. Its cost estimate is in the millions, so JIT compiles
+            # the whole plan, and on production (2026-10-10) the same plan took
+            # 78 s with it and 24 s without: 38 s went to hashing the
+            # 16,000 targets.
+            with db.transaction():
+                db.execute("SET LOCAL jit = off")
+                rows = db.query(candidates_sql(), candidate_params)
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return

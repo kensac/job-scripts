@@ -211,6 +211,14 @@ per filter, `managed_boards.admission._plan` per board run (the run payload reco
 `title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
+**A backfill names its postings and passes the screens.** A screened posting
+has no verdict, so its path records nothing. To buy one, name the postings:
+`verify_new` with a `urls` payload verifies them past the reachability gate
+and the per-cycle cap (`new_postings.listed_sql`). A `run_filter_batch_chunk`
+built from an explicit job list never meets the filter's title screen. Every
+other condition still applies: available, a verdict missing, not in flight,
+page text present.
+
 **A board's title gate is the cheap rung before the model.** A gate that is
 set is enforced; there is no shadow mode. A recipe's recall is measured
 before a board names it, as a query: run `skips_sql` over the postings the
