@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import PositiveInt
+from typing import Annotated
+
+from pydantic import Field, PositiveInt
 
 from api.config_types import ConfigKey
 
@@ -47,6 +49,19 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # its own in the 30 days to 2026-10-04 (502s, 403s) ended within 53 hours,
     # so a three-day cap still pulls a board that came back within three days
     # of its return.
+    # The hour a daily board is pulled. An age check alone set it to wherever a
+    # board's first pull landed and could only drift later: in the two days to
+    # 2026-10-13, 7,740 of the 3,987 daily boards' pulls were queued in the 8 pm
+    # Eastern hour, so their batched verdicts landed the next morning. Eastern rather
+    # than UTC so the pull stays at the same wall-clock hour across DST.
+    "daily_ingest_hour_eastern": ConfigKey(
+        section="Fetching",
+        default=17,
+        value_type=Annotated[int, Field(ge=0, le=23)],
+        help="Hour of the day, US Eastern time, at which boards pulled once a day (or every "
+        "few days) are pulled. Boards pulled hourly or every few hours are unaffected. A change "
+        "applies from the next occurrence of the new hour.",
+    ),
     "ingest_retry_max_hours": ConfigKey(
         section="Fetching",
         default=72,
