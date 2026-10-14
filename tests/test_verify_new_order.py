@@ -88,3 +88,34 @@ async def test_a_new_sweep_skips_what_a_parked_sweep_already_submitted(f, submit
     await tasks_verify.handle_verify_new(task_id, {})
 
     assert fresh_url in submitted and parked_url not in submitted
+
+
+@pytest.mark.asyncio
+async def test_a_listed_backfill_verifies_the_named_postings_past_the_gate(f, submitted):
+    """A posting the gate holds back never gets a verdict, so its path records
+    nothing. Named in the payload, it is verified; one already verified, one
+    with no page text and one not named are not."""
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('verify_near_copy_reuse', 'false') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
+    # Nobody subscribes to this source, so the sweep's gate admits nothing in it.
+    source = f.make_source("verify-listed-src")
+    _, gated = f.make_ready_job(source=source, closed="", clearance="")
+    _, verified = f.make_ready_job(source=source)
+    _, unnamed = f.make_ready_job(source=source, closed="", clearance="")
+    row = db.query_one("SELECT url FROM jobs WHERE id = %s", (f.make_job(source=source),))
+    assert row is not None
+    no_text = row["url"]
+
+    swept = f.make_task("verify_new", {}, status="running")
+    await tasks_verify.handle_verify_new(swept, {})
+    assert gated not in submitted, "the gate holds an unsubscribed source back"
+
+    payload = {"urls": [gated, verified, no_text]}
+    listed = f.make_task("verify_new", payload, status="running")
+    await tasks_verify.handle_verify_new(listed, payload)
+
+    assert gated in submitted
+    assert verified not in submitted and no_text not in submitted
+    assert unnamed not in submitted
