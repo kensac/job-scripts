@@ -65,7 +65,10 @@ def schedule_ingest_cycle() -> None:
     # A source on a longer interval than the cycle is skipped while its last
     # successful or in-flight ingest is younger than that interval. Hourly
     # sources (interval 1) are governed by the per-cycle dedupe alone, which
-    # is exact where an age check drifts.
+    # is exact where an age check drifts. An interval of whole days is counted
+    # back from daily_ingest_hour_eastern instead (queue.daily_pull_anchor), so
+    # those boards are pulled at that hour, not 24 hours after a first pull that
+    # landed wherever it did.
     #
     # A failed pull counts toward the interval too, and a run of them backs
     # off (queue.backing_off). It used to retry next cycle: twelve boards,
@@ -83,8 +86,11 @@ def schedule_ingest_cycle() -> None:
             SELECT 1 FROM tasks t WHERE t.kind = 'ingest_source'
               AND t.status IN ('running', 'done')
               AND t.payload->>'source' = s.name
-              AND t.created_at > now() - make_interval(hours => s.ingest_interval_hours)))
-        """
+              AND t.created_at > CASE WHEN s.ingest_interval_hours %% 24 = 0
+                THEN %(anchor)s - make_interval(hours => s.ingest_interval_hours - 24)
+                ELSE now() - make_interval(hours => s.ingest_interval_hours) END))
+        """,
+        {"anchor": queue.daily_pull_anchor(now)},
     )
     waiting = queue.backing_off([s["name"] for s in due])
     for s in due:

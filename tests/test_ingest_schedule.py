@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from api import db
+import datetime
+
+from api import db, queue
 
 
 def _pending(source: str) -> int:
@@ -13,6 +15,26 @@ def _pending(source: str) -> int:
     )
     assert row is not None
     return row["n"]
+
+
+def _anchor_hours_ago(hours: int) -> None:
+    """Put daily_ingest_hour_eastern `hours` (to `hours` + 1) before now, so a
+    test does not depend on the time of day the suite runs."""
+    now = datetime.datetime.now(queue.DAILY_PULL_ZONE)
+    hour = (now - datetime.timedelta(hours=hours)).hour
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('daily_ingest_hour_eastern', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb(hour),),
+    )
+
+
+def _pulled(source: str, status: str, hours_ago: float) -> None:
+    db.execute(
+        "INSERT INTO tasks (kind, payload, status, created_at) "
+        "VALUES ('ingest_source', %s, %s, now() - make_interval(secs => %s))",
+        (db.jsonb({"source": source}), status, hours_ago * 3600),
+    )
 
 
 def test_a_source_still_queued_from_the_last_cycle_is_not_queued_again(monkeypatch, f):
@@ -51,6 +73,7 @@ def test_a_daily_source_is_pulled_once_a_day_and_a_failure_counts_too(f):
     for name in ("done_recently", "done_long_ago", "failed_recently", "running_now"):
         f.make_source(name)
     db.execute("UPDATE sources SET ingest_interval_hours = 24")
+    _anchor_hours_ago(5)
     db.execute(
         """
         INSERT INTO tasks (kind, payload, status, created_at) VALUES
@@ -73,6 +96,59 @@ def test_a_daily_source_is_pulled_once_a_day_and_a_failure_counts_too(f):
     assert _pending("running_now") == 0
     assert _pending("done_long_ago") == 1
     assert _pending("failed_recently") == 0
+
+
+def test_a_daily_source_is_pulled_at_the_configured_hour_not_a_day_after_its_last_pull(f):
+    """An age check alone kept every daily board at the hour its first pull
+    landed: 7,740 of their pulls in two days were queued in the 8 pm Eastern
+    hour, so batched verdicts arrived the next morning. A board pulled before
+    today's hour is due at that hour even though less than a day has passed;
+    one pulled since is not. Whole-day intervals count back from the hour;
+    other intervals keep the age check."""
+    from api import worker
+
+    _anchor_hours_ago(5)
+    for name, interval, status, hours_ago in (
+        ("daily_before_hour", 24, "done", 7),
+        ("daily_since_hour", 24, "done", 3),
+        ("weekly_recent", 168, "done", 72),
+        ("weekly_stale", 168, "done", 8 * 24),
+        ("four_hourly_recent", 4, "done", 3),
+        ("four_hourly_stale", 4, "done", 5),
+    ):
+        f.make_source(name)
+        db.execute(
+            "UPDATE sources SET ingest_interval_hours = %s WHERE name = %s", (interval, name)
+        )
+        _pulled(name, status, hours_ago)
+
+    worker.schedule_ingest_cycle()
+
+    assert _pending("daily_before_hour") == 1
+    assert _pending("daily_since_hour") == 0
+    assert _pending("weekly_recent") == 0
+    assert _pending("weekly_stale") == 1
+    assert _pending("four_hourly_recent") == 0
+    assert _pending("four_hourly_stale") == 1
+
+
+def test_the_daily_anchor_keeps_its_wall_clock_hour_across_dst(f):
+    """5 pm Eastern is 21:00 UTC in October and 22:00 UTC in November. The
+    anchor before the hour is yesterday's, at yesterday's offset."""
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('daily_ingest_hour_eastern', '17') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
+    utc = datetime.UTC
+
+    def anchor(*when: int) -> datetime.datetime:
+        return queue.daily_pull_anchor(datetime.datetime(*when, tzinfo=utc)).astimezone(utc)
+
+    # DST ends 2026-11-01 02:00 Eastern.
+    assert anchor(2026, 10, 14, 21, 30) == datetime.datetime(2026, 10, 14, 21, tzinfo=utc)
+    assert anchor(2026, 10, 14, 20, 59) == datetime.datetime(2026, 10, 13, 21, tzinfo=utc)
+    assert anchor(2026, 11, 1, 15, 0) == datetime.datetime(2026, 10, 31, 21, tzinfo=utc)
+    assert anchor(2026, 11, 2, 12, 0) == datetime.datetime(2026, 11, 1, 22, tzinfo=utc)
 
 
 def test_requirements_extraction_runs_only_when_switched_on(f):

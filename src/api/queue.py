@@ -9,6 +9,7 @@ the write boundaries.
 from __future__ import annotations
 
 import datetime
+import zoneinfo
 from collections.abc import Sequence
 from typing import Any, LiteralString
 
@@ -121,6 +122,24 @@ def failure_runs(sources: list[str] | None = None, at_least: int = 1) -> dict[st
         {"names": sources, "at_least": at_least},
     )
     return {r["name"]: r for r in rows}
+
+
+DAILY_PULL_ZONE = zoneinfo.ZoneInfo("America/New_York")
+
+
+def daily_pull_anchor(now: datetime.datetime) -> datetime.datetime:
+    """The latest daily_ingest_hour_eastern at or before `now`. A board whose
+    interval is a whole number of days is due once no pull has started since
+    this, less the days beyond the first, so it is pulled at that hour rather
+    than whenever its first pull happened to land."""
+    local = now.astimezone(DAILY_PULL_ZONE)
+    anchor = local.replace(
+        hour=int(db.get_config("daily_ingest_hour_eastern")), minute=0, second=0, microsecond=0
+    )
+    if anchor > local:
+        # Aware arithmetic in one zone keeps the wall-clock hour across DST.
+        anchor -= datetime.timedelta(days=1)
+    return anchor
 
 
 def pull_wait_hours(interval_hours: int, failures: int) -> int:

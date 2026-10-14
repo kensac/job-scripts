@@ -802,6 +802,14 @@ ingest blocks the next cycle's for that source; a running one does not. A
 source on a longer interval than the cycle waits while its last successful or
 in-flight pull is younger than the interval.
 
+**A board pulled every whole number of days is pulled at a fixed hour.** Its
+interval is counted back from the latest `daily_ingest_hour_eastern`
+(`queue.daily_pull_anchor`), not from its last pull, so it is due at that hour
+once no pull has started since it. An age check alone kept each board at the
+hour its first pull happened to land and could only drift later. The hour is
+Eastern so it holds across DST. Intervals that are not whole days keep the
+age check.
+
 ## A board that keeps failing is pulled less often, then switched off
 
 A failed pull counts toward the interval, and a run of them backs off. After
