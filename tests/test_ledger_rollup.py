@@ -69,8 +69,15 @@ def _direct(start: str = "-infinity", end: str = "infinity") -> list[dict]:
 
 
 def _until_caught_up() -> None:
-    for _ in range(50):
-        if ledger_rollup.refresh(max_span=datetime.timedelta(hours=7))["caught_up"]:
+    # The refresh walks from the fixtures' first hour to now, so the number of
+    # 7-hour spans grows with the calendar. A fixed 50 (350 hours) stopped
+    # reaching now on 2026-10-16 and failed every run from then on.
+    span = datetime.timedelta(hours=7)
+    elapsed = datetime.datetime.now(datetime.UTC) - datetime.datetime(
+        2026, 10, 1, tzinfo=datetime.UTC
+    )
+    for _ in range(int(elapsed / span) + 10):
+        if ledger_rollup.refresh(max_span=span)["caught_up"]:
             return
     raise AssertionError("refresh never caught up")
 
