@@ -41,6 +41,7 @@ AtsName = Literal[
     "jobvite",
     "bamboohr",
     "rippling",
+    "gem",
     "other",
 ]
 
@@ -70,6 +71,7 @@ _ATS_PATTERNS: dict[AtsName, str] = {
     "jobvite": "%%jobvite.com/%%",
     "bamboohr": "%%bamboohr.com/%%",
     "rippling": "%%rippling.com/%%",
+    "gem": "https://jobs.gem.com/%%",
 }
 
 ATS_SQL = (
