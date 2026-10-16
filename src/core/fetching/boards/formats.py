@@ -12,6 +12,7 @@ from core.fetching.boards.ashby import _ashby
 from core.fetching.boards.avature import _avature
 from core.fetching.boards.bytedance import _BYTEDANCE_HOSTS, _BYTEDANCE_SEARCH, _bytedance
 from core.fetching.boards.eightfold import _eightfold
+from core.fetching.boards.gem import _gem
 from core.fetching.boards.goldman import _goldman
 from core.fetching.boards.greenhouse import _greenhouse
 from core.fetching.boards.ibm import _ibm
@@ -20,6 +21,7 @@ from core.fetching.boards.jibe import _jibe
 from core.fetching.boards.lever import _lever
 from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
+from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
 from core.fetching.boards.successfactors import _successfactors
 from core.fetching.boards.taleo import _TALEO_SECTION, _taleo
@@ -105,6 +107,20 @@ FORMATS = (
         "workable",
         lambda a: a.host == "apply.workable.com" and a.path.startswith("/api/"),
         _workable,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "gem",
+        lambda a: a.host == "api.gem.com" and a.path.startswith("/job_board/v0/"),
+        _gem,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "rippling",
+        lambda a: a.host == "ats.rippling.com" and bool(_RIPPLING_BOARD.fullmatch(a.path)),
+        _rippling,
         needs_company=True,
         authoritative=True,
     ),

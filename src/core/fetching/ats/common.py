@@ -170,6 +170,18 @@ def workable_text(data: dict) -> str:
     )
 
 
+def rippling_text(data: dict) -> str:
+    """One posting as Rippling's detail call returns it: the employer's
+    paragraph, then the role's."""
+    description = data.get("description") or {}
+    return join_posting_sections(
+        data.get("name"),
+        "; ".join(data.get("workLocations") or []),
+        clean_html(description.get("company") or ""),
+        clean_html(description.get("role") or ""),
+    )
+
+
 class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]

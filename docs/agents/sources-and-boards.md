@@ -142,6 +142,24 @@ request with HTTP 200, `errors` and no data; Goldman's roleSearch does so for a
 `pageSize` above 250. Read as a page, that is an empty board. `_goldman`
 raises on `errors`.
 
+**A board that lists a posting once per place is held to its rows, then
+folded.** Rippling's board API
+(`https://ats.rippling.com/api/v2/board/<board>/jobs`) returns one row per
+posting and location, and its `totalItems` counts rows: Loop listed 44 rows
+for 24 postings on 2026-10-16. `_rippling` reads pages of 1,000 (1,001 is a
+400) until it holds `totalItems` rows, raises `PartialPull` short of it, and
+folds rows by id into one posting with every place. Rows carry no company,
+text or date; the resolver reads the text and `createdOn` from
+`/api/v2/board/<board>/jobs/<id>`.
+
+**A board with no count is checked against its page before it is trusted.**
+Gem's board API (`https://api.gem.com/job_board/v0/<board>/job_posts/`)
+answers every published posting in one reply with no count and no paging,
+each with its text and no company. Its urls matched the board page's links
+one for one on Function Health (29) and Bilt (19) on 2026-10-16, so a pull is
+authoritative. The posting page is a 7 KB script shell, so a re-check reads
+`/job_posts/<id>` through the Gem resolver.
+
 ## A posting has one URL, whichever feed spelled it
 
 `jobs.url` is the posting's identity, and every row, verdict and link keys on
@@ -153,7 +171,9 @@ postings arrive under several spellings gets a canonical form there, chosen
 as the one spelling every form reduces to without a request. amazon.jobs is
 the worked case: the board lists `/en/jobs/<id>/<slug>`, the aggregators link
 `/jobs/<id>/apply`, every form redirects to the slug page, and the slug
-cannot be derived from the id, so the canonical URL is `/en/jobs/<id>`. A
+cannot be derived from the id, so the canonical URL is `/en/jobs/<id>`.
+A Rippling posting drops a locale (`en-GB/`) or `embed/` prefix, which the
+aggregators carry and the board's own urls do not. A
 host that is not an applicant-tracking system gets a function, not a
 resolver, because a resolver's markers also make its host an ATS mail domain.
 Rows stored before a host's rule existed keep their old spelling; nothing
@@ -199,7 +219,7 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 
 Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
-minus that text. Greenhouse (with `content=true`), Lever and Ashby carry the
+minus that text. Greenhouse (with `content=true`), Lever, Ashby and Gem carry the
 text; it is assembled by the same `core/fetching/ats/__init__.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
 it too, as a description and a requirement, and Jibe carries it; neither has a
@@ -207,7 +227,7 @@ resolver. Amazon carries it too (the description and both qualification
 lists); it has no resolver, so a re-check fetches the posting page. Goldman
 carries it (`ats.goldman_text`), and its resolver reads the same text back
 from the site's GraphQL `role`. Workday,
-SmartRecruiters, Oracle Recruiting, Workable and Apple list without the text,
+SmartRecruiters, Oracle Recruiting, Workable, Rippling and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
@@ -261,6 +281,13 @@ posting the search index still listed and IBM's own page called closed, so
 the `Ibm` resolver reports that closure, and a closed posting can stay in an
 authoritative pull until it does. An open IBM posting is UNSUPPORTED there,
 and its text comes from the browser.
+
+Rippling answers a posting its board no longer lists with 404 and
+`{"ok": false}` (20 of 20 delisted, 9 of 9 listed answered 200, 2026-10-16),
+and a board that does not exist with 404 and `RESOURCE_NOT_FOUND`; only the
+first is GONE. Gem's 404 ("Job post with ID ... not found") was seen only on
+made-up ids, with no delisted id on record, so the `Gem` resolver never says
+GONE and its closures come from the board pull.
 
 Every resolver asks through `AtsResolver.get` or `post`, so a request that got
 no answer is ERROR the same way everywhere. `from_response` (404 and 410 are

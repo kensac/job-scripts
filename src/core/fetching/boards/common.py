@@ -31,6 +31,7 @@ def _post(url: str, **kwargs: Any) -> requests.Response:
 _TEXT_FIELDS = frozenset(
     {
         "content",
+        "content_plain",
         "description",
         "descriptionPlain",
         "descriptionHtml",

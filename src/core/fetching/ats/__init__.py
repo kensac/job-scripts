@@ -32,12 +32,14 @@ from core.fetching.ats.common import (
     parse_posted_date as _iso_date,
 )
 from core.fetching.ats.eightfold import EIGHTFOLD, Eightfold
+from core.fetching.ats.gem import Gem
 from core.fetching.ats.goldman import Goldman
 from core.fetching.ats.greenhouse import Greenhouse
 from core.fetching.ats.ibm import Ibm
 from core.fetching.ats.icims import ICims
 from core.fetching.ats.lever import Lever
 from core.fetching.ats.oracle import Oracle
+from core.fetching.ats.rippling import Rippling
 from core.fetching.ats.smartrecruiters import SmartRecruiters
 from core.fetching.ats.workable import Workable
 from core.fetching.ats.workday import Workday
@@ -52,12 +54,14 @@ __all__ = [
     "AtsResolver",
     "AtsResult",
     "Eightfold",
+    "Gem",
     "Goldman",
     "Greenhouse",
     "ICims",
     "Ibm",
     "Lever",
     "Oracle",
+    "Rippling",
     "SmartRecruiters",
     "Status",
     "Workable",
@@ -92,6 +96,8 @@ RESOLVERS: list[AtsResolver] = [
     Workday(),
     Oracle(),
     Workable(),
+    Gem(),
+    Rippling(),
     ICims(),
     Apple(),
     Goldman(),
@@ -135,7 +141,6 @@ _MAIL_ONLY_DOMAINS = (
     "successfactors.com",
     "jobvite.com",  # 100% lifecycle, n=35
     "candidates.workablemail.com",  # 100%, n=17
-    "ats.rippling.com",  # 100%, n=31
     "appreview.gem.com",  # 100%, n=8
     "applytojob.com",  # 100%, n=10
     "workflow.mail.us2.cloud.oracle.com",  # 100%, n=38
