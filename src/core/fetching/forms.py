@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from html import unescape
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
-from core.fetching.ats import amazon_canonical
+from core.fetching.ats import employer_canonical
 from core.fetching.client import session
 from core.fetching.hosts import hostname
 
@@ -184,9 +184,9 @@ def posting_urls(url: str) -> list[str]:
     boards.greenhouse.io/embed/job_app?for=<board>&token=<id>, and a
     Greenhouse posting is stored under whichever of its two hosts the
     board listed it from. The query string is otherwise tracking."""
-    amazon = amazon_canonical(url)
-    if amazon:
-        return [amazon]
+    employer = employer_canonical(url)
+    if employer:
+        return [employer]
     parts = urlsplit(url)
     if parts.netloc.endswith("greenhouse.io"):
         q = dict(parse_qsl(parts.query))

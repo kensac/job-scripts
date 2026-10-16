@@ -68,11 +68,11 @@ __all__ = [
     "Workday",
     "_iso_date",
     "_session",
-    "amazon_canonical",
     "ashby_text",
     "canonicalize",
     "clean_html",
     "eightfold_listing_prefixes",
+    "employer_canonical",
     "goldman_place",
     "goldman_text",
     "greenhouse_text",
@@ -184,20 +184,36 @@ def is_ats_email_domain(domain: str | None) -> bool:
 _AMAZON_JOB = re.compile(r"^/(?:[A-Za-z-]+/)*jobs/(\d+)(?:/|$)")
 
 
-def amazon_canonical(url: str) -> str | None:
+# Google's careers feed links careers.google.com/jobs/results/<id>-<slug>/,
+# which redirects to www.google.com/about/careers/applications/jobs/results/
+# with the same tail, and the aggregators link that path with the bare id (111
+# of the 121 Google rows in production on 2026-10-16). The bare id answers the
+# posting too, so it is the one spelling every form reduces to.
+_GOOGLE_JOB = re.compile(r"^/(?:about/careers/applications/)?jobs/results/(\d+)(?:-[^/]*)?/?$")
+
+
+def employer_canonical(url: str) -> str | None:
+    """The one spelling of a posting on an employer's own careers site."""
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
-    if host != "amazon.jobs" and not host.endswith(".amazon.jobs"):
-        return None
-    match = _AMAZON_JOB.match(parsed.path)
-    return f"https://www.amazon.jobs/en/jobs/{match.group(1)}" if match else None
+    if host == "amazon.jobs" or host.endswith(".amazon.jobs"):
+        match = _AMAZON_JOB.match(parsed.path)
+        return f"https://www.amazon.jobs/en/jobs/{match.group(1)}" if match else None
+    if host in ("www.google.com", "google.com", "careers.google.com"):
+        match = _GOOGLE_JOB.match(parsed.path)
+        return (
+            f"https://www.google.com/about/careers/applications/jobs/results/{match.group(1)}"
+            if match
+            else None
+        )
+    return None
 
 
 def canonicalize(url: str) -> str | None:
     """Canonical clickable URL for a posting."""
-    amazon = amazon_canonical(url)
-    if amazon:
-        return amazon
+    employer = employer_canonical(url)
+    if employer:
+        return employer
     for resolver in RESOLVERS:
         if not resolver.matches(url):
             continue
