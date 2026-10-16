@@ -176,6 +176,13 @@ A Rippling posting drops a locale (`en-GB/`) or `embed/` prefix, which the
 aggregators carry and the board's own urls do not. A
 host that is not an applicant-tracking system gets a function, not a
 resolver, because a resolver's markers also make its host an ATS mail domain.
+Google is the second: its feed links
+`careers.google.com/jobs/results/<id>-<slug>/`, which redirects to
+`www.google.com/about/careers/applications/jobs/results/` with the same tail,
+and the aggregators link that path with the bare id, which answers the posting
+too. So the canonical URL is the bare id on www.google.com (111 of the 121
+Google rows in production were already spelled so on 2026-10-16). Both live in
+`ats.employer_canonical`.
 Rows stored before a host's rule existed keep their old spelling; nothing
 rewrites `jobs.url`.
 
@@ -226,7 +233,10 @@ it too, as a description and a requirement, and Jibe carries it; neither has a
 resolver. Amazon carries it too (the description and both qualification
 lists); it has no resolver, so a re-check fetches the posting page. Goldman
 carries it (`ats.goldman_text`), and its resolver reads the same text back
-from the site's GraphQL `role`. Workday,
+from the site's GraphQL `role`. Google's feed carries it, and has no resolver:
+the static tier reads an open posting's page whole (10,388 characters with
+every section, 2026-10-16), and a closed id answers the same 200 search page
+as a made-up one, so no answer means GONE. Workday,
 SmartRecruiters, Oracle Recruiting, Workable, Rippling and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
@@ -656,6 +666,24 @@ closes the heading.
 The legacy `career<N>.successfactors.com/career?company=` site has no
 unauthenticated list call (its search is a session-bound DWR call), so it is
 not a board format.
+
+**A board that publishes every posting in one document is read from that
+document, never from its search.** Google's careers feed
+(`https://www.google.com/about/careers/applications/jobs/feed.xml`, kind
+`google`) is one GET of about 22 MB holding every open posting with its whole
+text. It states no count and needs none, because nothing is paged: a
+truncated download never closes its root and fails to parse, and a document
+whose root is not `jobs` fails the pull. On 2026-10-16 it held 3,758 postings,
+every one the sitemap listed and every one a full walk of the site's search
+returned, apart from five evergreen "Open career opportunities" pages (Waymo,
+Wing, CapitalG) that are not postings. The search is no listing source:
+robots.txt disallows it, it counts English postings only (its 3,633 was the
+feed's 3,628 en-US postings plus those five pages), and a walk by page
+returned 3,498 distinct postings of 3,633 rows, because consecutive pages come
+from replicas that disagree. Its rows name Google, YouTube or DeepMind, all
+hired through Google's site, so the source names the company. Before writing a
+paged reader for a big employer, look for a feed the site publishes for job
+search engines.
 
 **A board that builds its own next link is followed, never paged by hand.**
 Avature has no listings API: a tenant's search page is server-rendered HTML in

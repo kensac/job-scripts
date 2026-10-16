@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -14,6 +12,7 @@ from core.fetching.ats import (
 from core.fetching.boards.common import (
     PartialPull,
     _get,
+    _xml,
     posting_from_listing,
     with_query_parameters,
 )
@@ -48,23 +47,6 @@ def _successfactors_heading(heading: str) -> tuple[str, str]:
                 return text[:i].strip(), text[i + 1 : -1].strip()
             break
     return text, ""
-
-
-_ROOT_TAG = re.compile(rb"<[A-Za-z]")
-
-
-def _xml(raw: bytes) -> ET.Element:
-    """Parse a document a board serves, refusing one that declares a DOCTYPE.
-
-    ElementTree expands internal entities, so a DOCTYPE is how a billion-laughs
-    document hangs a worker. Neither the sitemap nor the feed declares one (six
-    boards, 2026-10-05). A DOCTYPE can only stand before the root element, so
-    the prolog is all that needs reading; the same rule as the mail importer's.
-    """
-    root = _ROOT_TAG.search(raw)
-    if b"<!DOCTYPE" in raw[: root.start() if root else len(raw)].upper():
-        raise ValueError("refusing an XML document with a DOCTYPE")
-    return ET.fromstring(raw)  # noqa: S314 - DOCTYPE refused above
 
 
 def _successfactors_id(link: str) -> str:

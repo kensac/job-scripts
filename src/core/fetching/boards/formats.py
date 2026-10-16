@@ -14,6 +14,7 @@ from core.fetching.boards.bytedance import _BYTEDANCE_HOSTS, _BYTEDANCE_SEARCH, 
 from core.fetching.boards.eightfold import _eightfold
 from core.fetching.boards.gem import _gem
 from core.fetching.boards.goldman import _goldman
+from core.fetching.boards.google import _google
 from core.fetching.boards.greenhouse import _greenhouse
 from core.fetching.boards.ibm import _ibm
 from core.fetching.boards.icims import _icims
@@ -180,6 +181,17 @@ FORMATS = (
         "amazon",
         lambda a: a.host == "www.amazon.jobs" and a.path.endswith("/search.json"),
         _amazon,
+        needs_company=True,
+        authoritative=True,
+    ),
+    # One feed of every posting. Its rows name Google, YouTube or DeepMind,
+    # all hired through Google's careers site, so the source names the company.
+    BoardFormat(
+        "google",
+        lambda a: (
+            a.host == "www.google.com" and a.path == "/about/careers/applications/jobs/feed.xml"
+        ),
+        _google,
         needs_company=True,
         authoritative=True,
     ),

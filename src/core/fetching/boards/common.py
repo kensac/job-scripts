@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import re
+import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -111,3 +113,20 @@ def iso_posted_timestamp(value: str | None) -> int:
 def location_label(loc: dict) -> str:
     """City, region, country as the ATS spells them, skipping what is unset."""
     return ", ".join(str(loc[k]) for k in ("city", "region", "country") if loc.get(k))
+
+
+_ROOT_TAG = re.compile(rb"<[A-Za-z]")
+
+
+def _xml(raw: bytes) -> ET.Element:
+    """Parse a document a board serves, refusing one that declares a DOCTYPE.
+
+    ElementTree expands internal entities, so a DOCTYPE is how a billion-laughs
+    document hangs a worker. Neither the sitemap nor the feed declares one (six
+    boards, 2026-10-05). A DOCTYPE can only stand before the root element, so
+    the prolog is all that needs reading; the same rule as the mail importer's.
+    """
+    root = _ROOT_TAG.search(raw)
+    if b"<!DOCTYPE" in raw[: root.start() if root else len(raw)].upper():
+        raise ValueError("refusing an XML document with a DOCTYPE")
+    return ET.fromstring(raw)  # noqa: S314 - DOCTYPE refused above
