@@ -302,7 +302,8 @@ membership. A step is `recorded` when a row says what happened and
 `evaluated_now` when the rule leaves no row (criteria, title gates, the volume
 gate, reachability decide by leaving a posting out of a SELECT) and is run
 again for this posting today. GET /admin/jobs/path?url= covers every published
-board and enabled filter; GET /user/jobs/{id}/path covers the caller's own
+board and enabled filter, and with `board_user` gives that person's own view,
+personal board included; GET /user/jobs/{id}/path covers the caller's own
 filters and board, gated like every per-job route. Both job drawers render it;
 a new rule that reads, skips, judges or shows a posting adds its stage here, or
 the drawer goes back to having no answer for it.

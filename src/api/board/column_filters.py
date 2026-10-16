@@ -37,7 +37,10 @@ _OPERATORS = {
     "boolean": ["equals"],
 }
 _FIELDS: dict[str, tuple[str, FilterKind, str]] = {
-    "company": ("Company", "text", "j.company"),
+    # Trimmed so `equals` reads lower(btrim(company)), which idx_jobs_company_key
+    # serves: untrimmed, an exact company on the 1.1M-row catalog walked the
+    # primary key for 5 s; trimmed, 0.4 s (2026-10-15).
+    "company": ("Company", "text", "btrim(j.company)"),
     "title": ("Role", "text", "j.title"),
     "locations": ("Location text", "text", "array_to_string(j.locations, ', ')"),
     "terms": ("Employment terms", "text", "array_to_string(j.terms, ', ')"),
@@ -60,14 +63,27 @@ _FIELDS: dict[str, tuple[str, FilterKind, str]] = {
 }
 
 
-def fields() -> list[FilterField]:
+# The person's own row (`uj`), which only exists on a board read. The admin
+# catalog has no person, so it offers everything else.
+_BOARD_ONLY = frozenset(
+    {"notes", "recruiter", "connection1", "connection2", "documents", "size", "date_applied"}
+)
+
+
+def _offered(catalog_only: bool) -> dict[str, tuple[str, FilterKind, str]]:
+    return {k: v for k, v in _FIELDS.items() if not (catalog_only and k in _BOARD_ONLY)}
+
+
+def fields(catalog_only: bool) -> list[FilterField]:
     return [
         FilterField(key=key, label=label, kind=kind, operators=_OPERATORS[kind])
-        for key, (label, kind, _) in _FIELDS.items()
+        for key, (label, kind, _) in _offered(catalog_only).items()
     ]
 
 
-def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dict]:
+def compile_filters(
+    raw: str | None, catalog_only: bool
+) -> tuple[list[ColumnFilter], list[str], dict]:
     if not raw:
         return [], [], {}
     try:
@@ -76,11 +92,12 @@ def compile_filters(raw: str | None) -> tuple[list[ColumnFilter], list[str], dic
         if not isinstance(values, list) or len(values) > 32:
             raise ValueError("Supply at most 32 column filters")
         rules = [ColumnFilter.model_validate(value) for value in values]
+        offered = _offered(catalog_only)
         clauses, params = [], {}
         for index, rule in enumerate(rules):
-            if rule.field not in _FIELDS:
+            if rule.field not in offered:
                 raise ValueError(f"Unknown filter field: {rule.field}")
-            _, kind, expression = _FIELDS[rule.field]
+            _, kind, expression = offered[rule.field]
             if rule.operator not in _OPERATORS[kind]:
                 raise ValueError(f"Unsupported operator for {rule.field}")
             if rule.operator in ("is_empty", "is_not_empty"):

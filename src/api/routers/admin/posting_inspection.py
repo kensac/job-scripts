@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from api import db, pagination, posting_path, sorting
 from api import params as params_
 from api.ai import verdicts
 from api.auth import AuthedUser
+from api.board import column_filters as column_filters_
 from api.problem import refuse
 from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord
 from api.routers.admin.review_gates import ReviewDecisions
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale
-from core import query_instructions
+from core import catalog, query_instructions, verdict_reads
 
 router = APIRouter()
 
@@ -242,6 +243,122 @@ def list_jobs(
     )
 
 
+# Catalog order. `added_at` is the id: ids are handed out as postings are first
+# seen, so the order is the same and the primary key serves it on 1.1M rows.
+_CATALOG_SORT_EXPRESSIONS = {
+    "added_at": "j.id",
+    "date_posted": "j.date_posted",
+    "company": "lower(j.company)",
+    "title": "lower(j.title)",
+    "source": "j.source",
+}
+
+
+class CatalogPosting(BaseModel):
+    """One catalog posting, whether or not any check has run on it. `closed` is
+    what the latest page verification shows: 'open', 'closed', or null when
+    nothing has looked. `on_board` is set only when the read
+    names a person, and is that person's materialized board."""
+
+    job_id: int
+    url: str
+    company: str | None
+    title: str | None
+    source: str | None
+    locations: list[str]
+    date_posted: datetime.datetime | None
+    added_at: datetime.datetime
+    available: bool
+    closed: str | None
+    on_board: bool | None
+
+
+class CatalogPostings(BaseModel):
+    rows: list[CatalogPosting]
+    has_more: bool
+    offset: int
+    total: int | None
+    column_filters: list[column_filters_.ColumnFilter]
+    filter_fields: list[column_filters_.FilterField]
+    sorts: list[dict[str, str]]
+    sortable: list[str]
+
+
+@router.get("/jobs/catalog")
+def list_catalog_jobs(
+    q: str | None = None,
+    sources: str | None = None,
+    column_filters: str | None = Query(default=None, max_length=12000),
+    board_user: int | None = None,
+    on_board: bool | None = None,
+    sort: str = "added_at",
+    dir: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+    with_total: bool = False,
+    user: AuthedUser = Depends(require_admin),
+) -> CatalogPostings:
+    """Every posting in the catalog, checked or not, under the board's typed
+    column filters. `/jobs` is the verdict ledger's view and never shows a
+    posting nothing has checked; this is the catalog's."""
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    rules, extra, params = column_filters_.compile_filters(column_filters, catalog_only=True)
+    params.update({"limit": limit + 1, "offset": offset, "board_user": board_user})
+    if q:
+        extra.append("AND (j.company ILIKE %(q)s OR j.title ILIKE %(q)s OR j.url ILIKE %(q)s)")
+        params["q"] = f"%{q}%"
+    wanted_sources = params_.csv(sources)
+    if wanted_sources:
+        extra.append("AND j.source = ANY(%(sources)s)")
+        params["sources"] = wanted_sources
+    if on_board is not None:
+        if board_user is None:
+            raise refuse(422, "BOARD_USER_REQUIRED", "on_board needs board_user")
+        extra.append(
+            f"AND {'' if on_board else 'NOT '}EXISTS (SELECT 1 FROM board_visible bv "
+            "WHERE bv.user_id = %(board_user)s AND bv.job_id = j.id)"
+        )
+    sorts = sorting.parse(sort, dir, _CATALOG_SORT_EXPRESSIONS, "added_at")
+    where = "\n".join(extra)
+    rows = db.query(
+        f"""
+        SELECT j.id AS job_id, j.url, j.company, j.title, j.source,
+               COALESCE(j.locations, '{{}}') AS locations, j.date_posted,
+               j.created_at AS added_at, {catalog.IS_AVAILABLE.format(job="j")} AS available,
+               {verdict_reads.closed_verdict("j.url")} AS closed,
+               CASE WHEN %(board_user)s::int IS NULL THEN NULL
+                    ELSE EXISTS (SELECT 1 FROM board_visible bv
+                                 WHERE bv.user_id = %(board_user)s AND bv.job_id = j.id) END
+                 AS on_board
+        FROM jobs j LEFT JOIN job_comp pay ON pay.url = j.url
+        WHERE TRUE {where}
+        ORDER BY {sorting.clause(sorts, _CATALOG_SORT_EXPRESSIONS, not_null={"added_at"})}, j.id DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+        """,
+        params,
+    )
+    total = None
+    if with_total:
+        # ponytail: exact count, ~1.3 s unfiltered on 1.1M rows (2026-10-15); opt-in for that reason.
+        row = db.query_one(
+            f"SELECT COUNT(*) AS c FROM jobs j LEFT JOIN job_comp pay ON pay.url = j.url "
+            f"WHERE TRUE {where}",
+            params,
+        )
+        total = row["c"] if row else 0
+    return CatalogPostings(
+        rows=[CatalogPosting(**r) for r in rows[:limit]],
+        has_more=len(rows) > limit,
+        offset=offset,
+        total=total,
+        column_filters=rules,
+        filter_fields=column_filters_.fields(catalog_only=True),
+        sorts=sorts,
+        sortable=sorted(_CATALOG_SORT_EXPRESSIONS),
+    )
+
+
 class QueryResponses(BaseModel):
     """Every model call against one url, whole rows, oldest first. This is the
     drawer that shows what was asked and what came back, so it carries the
@@ -309,9 +426,17 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
 
 
 @router.get("/jobs/path")
-def job_path(url: str, user: AuthedUser = Depends(require_admin)) -> posting_path.PostingPath:
-    """Every published board's and every enabled filter's path for one posting."""
-    path = posting_path.for_admin(url)
+def job_path(
+    url: str, board_user: int | None = None, user: AuthedUser = Depends(require_admin)
+) -> posting_path.PostingPath:
+    """Every published board's and every enabled filter's path for one posting,
+    or, with `board_user`, that person's filters and personal board: the view
+    they get, including why the posting is or is not on their board."""
+    if board_user is not None:
+        row = db.query_one("SELECT id FROM jobs WHERE url = %s", (url,))
+        path = posting_path.for_user(row["id"], board_user) if row else None
+    else:
+        path = posting_path.for_admin(url)
     if path is None:
         raise refuse(404, "NOT_FOUND", "unknown job")
     return path

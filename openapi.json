@@ -22445,6 +22445,268 @@
         }
       }
     },
+    "/v1/admin/jobs/catalog": {
+      "get": {
+        "summary": "List Catalog Jobs",
+        "description": "Every posting in the catalog, checked or not, under the board's typed\ncolumn filters. `/jobs` is the verdict ledger's view and never shows a\nposting nothing has checked; this is the catalog's.",
+        "operationId": "list_catalog_jobs_v1_admin_jobs_catalog_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "sources",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sources"
+            }
+          },
+          {
+            "name": "column_filters",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 12000
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Column Filters"
+            }
+          },
+          {
+            "name": "board_user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Board User"
+            }
+          },
+          {
+            "name": "on_board",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "On Board"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "added_at",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "desc",
+              "title": "Dir"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "with_total",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "With Total"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPostings"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/jobs/responses": {
       "get": {
         "summary": "Job Responses",
@@ -22726,7 +22988,7 @@
     "/v1/admin/jobs/path": {
       "get": {
         "summary": "Job Path",
-        "description": "Every published board's and every enabled filter's path for one posting.",
+        "description": "Every published board's and every enabled filter's path for one posting,\nor, with `board_user`, that person's filters and personal board: the view\nthey get, including why the posting is or is not on their board.",
         "operationId": "job_path_v1_admin_jobs_path_get",
         "parameters": [
           {
@@ -22736,6 +22998,22 @@
             "schema": {
               "type": "string",
               "title": "Url"
+            }
+          },
+          {
+            "name": "board_user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Board User"
             }
           },
           {
@@ -37327,6 +37605,190 @@
         ],
         "title": "CatalogCounts",
         "description": "What a dashboard tile needs. `by_kind` counts active sources per board\nformat; `last_ingest` counts sources by how their most recent pull ended."
+      },
+      "CatalogPosting": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "date_posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Posted"
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Added At"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "closed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed"
+          },
+          "on_board": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Board"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "company",
+          "title",
+          "source",
+          "locations",
+          "date_posted",
+          "added_at",
+          "available",
+          "closed",
+          "on_board"
+        ],
+        "title": "CatalogPosting",
+        "description": "One catalog posting, whether or not any check has run on it. `closed` is\nwhat the latest page verification shows: 'open', 'closed', or null when\nnothing has looked. `on_board` is set only when the read\nnames a person, and is that person's materialized board."
+      },
+      "CatalogPostings": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogPosting"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "column_filters": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnFilter"
+            },
+            "type": "array",
+            "title": "Column Filters"
+          },
+          "filter_fields": {
+            "items": {
+              "$ref": "#/components/schemas/FilterField"
+            },
+            "type": "array",
+            "title": "Filter Fields"
+          },
+          "sorts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Sorts"
+          },
+          "sortable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sortable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "has_more",
+          "offset",
+          "total",
+          "column_filters",
+          "filter_fields",
+          "sorts",
+          "sortable"
+        ],
+        "title": "CatalogPostings"
       },
       "CatalogSource": {
         "properties": {
