@@ -158,3 +158,26 @@ def test_a_board_that_never_listed_anything_is_surfaced_once_for_the_set(f):
     found = [a for a in health._detect_boards() if a["kind"] == "sources_never_produced"]
     assert len(found) == 1
     assert found[0]["detail"]["sources"] == ["empty_a", "empty_b"]
+
+
+def test_a_board_that_reaches_nobody_is_surfaced(f):
+    from api import source_selection
+
+    for name in ("held", "bundled", "managed", "nobody", "switched_off", "just_added"):
+        f.make_source(name, active=name != "switched_off")
+    db.execute(
+        "UPDATE sources SET created_at = now() - interval '2 days' WHERE name <> 'just_added'"
+    )
+    user = f.make_user()
+    source_selection.change(user, ["held"], [])
+    source_selection.save_group("g", ["bundled"], None, True)
+    source_selection.join_group(user, "g", only=False)
+    board = db.query_one(
+        "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
+        "requested_model) VALUES ('b', 'B', %s, 'p', 'h', 'm') RETURNING id",
+        (user,),
+    )["id"]
+    source_selection.set_board_sources(board, ["managed"])
+
+    found = [a for a in health._detect_boards() if a["kind"] == "sources_unreached"]
+    assert [a["detail"]["sources"] for a in found] == [["nobody"]]
