@@ -341,4 +341,37 @@ def _detect_boards() -> list[dict[str, Any]]:
                 }
             )
 
+    # A switched-on board that reaches nobody: no person holds it (picked or
+    # through a bundle) and no managed board reads it. Adding a board puts it
+    # in no bundle, so it is pulled every cycle for no one. On 2026-10-15 that
+    # was all 199 boards added on 2026-10-05 (Amazon, Apple, Microsoft among
+    # them), unnoticed for ten days. A day's grace lets the person adding it
+    # place it first.
+    unreached = [
+        r["name"]
+        for r in db.query(
+            """
+            SELECT s.name FROM sources s
+            WHERE s.active AND s.created_at < now() - interval '1 day'
+              AND NOT EXISTS (SELECT 1 FROM user_source_set u WHERE u.source = s.name)
+              AND NOT EXISTS (SELECT 1 FROM managed_board_sources m WHERE m.source = s.name)
+            ORDER BY s.name
+            """
+        )
+    ]
+    if unreached:
+        found.append(
+            {
+                "kind": "sources_unreached",
+                "subject": "boards",
+                "severity": "warning",
+                "message": (
+                    f"{len(unreached)} switched-on boards reach no person and no managed "
+                    f"board: {', '.join(unreached[:10])}{', ...' if len(unreached) > 10 else ''}. "
+                    "Add each to a bundle, or switch it off."
+                ),
+                "detail": {"sources": unreached},
+            }
+        )
+
     return found

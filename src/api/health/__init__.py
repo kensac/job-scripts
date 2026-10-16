@@ -119,6 +119,7 @@ _OWNERS = {
     "ingest_failing": "_detect_boards",
     "source_switched_off": "_detect_boards",
     "sources_never_produced": "_detect_boards",
+    "sources_unreached": "_detect_boards",
     "ingest_host_failing": "_detect_boards",
     "source_feed_empty": "_detect_boards",
     "source_pattern_admits_all": "_detect_boards",

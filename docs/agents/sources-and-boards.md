@@ -840,6 +840,12 @@ day. Switching it off would miss the day it posts a role. Instead, one
 existed for over a week, listed nothing in 8 days, and never had a posting or
 a listing. There were 105 on 2026-10-04.
 
+**A switched-on board must reach someone.** Adding a board puts it in no
+bundle. Until a person picks it, a bundle they follow carries it, or a managed
+board reads it, it is pulled for nobody. The `sources_unreached` warning lists
+every switched-on board older than a day that reaches no one. On 2026-10-15
+that was all 199 boards added on 2026-10-05, Amazon and Apple among them.
+
 **Every ingest leaves its counts on its task** (`fetched`, `kept`, `cached`,
 `fetch_failed`, `gone`, `already_cached`, `skipped_recent_failure`). They are
 the only record of what one pull saw, and they are what the board detectors in
