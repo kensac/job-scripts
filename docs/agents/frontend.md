@@ -85,6 +85,15 @@ Persist the JSON expression intact in saved views, including commas inside
 values. If an older API omits capabilities while conditions are requested,
 show an error instead of silently dropping them.
 
+The admin catalog, `GET /admin/jobs/catalog`, takes the same `column_filters`
+over every posting, checked or not, minus the person's own fields (notes,
+recruiter, applied date and the rest of `user_jobs`), which it refuses with the
+same 422. Its `filter_fields` says which. `GET /admin/jobs` is the verdict
+ledger's view and never lists a posting nothing has checked; do not build a
+catalog browser on it. With `board_user`, each row says whether it is on that
+person's board and `on_board` filters by it. Totals are opt-in
+(`with_total`) because an exact count over the catalog takes over a second.
+
 Date conditions use UTC calendar dates for posting and ingestion timestamps.
 Numeric pay comparisons require explicit currency and period equality
 conditions and perform no conversion. Empty text includes whitespace-only

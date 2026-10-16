@@ -346,7 +346,9 @@ def list_jobs(
     sorts = sorting.parse(sort, dir, _SORTABLE, "added_at") if sort else default_sort()
     extra = []
     params: dict = {"uid": user.id, "limit": limit + 1, "offset": offset}
-    column_rules, column_clauses, column_params = column_filters_.compile_filters(column_filters)
+    column_rules, column_clauses, column_params = column_filters_.compile_filters(
+        column_filters, catalog_only=False
+    )
     extra.extend(column_clauses)
     params.update(column_params)
     if not include_hidden:
@@ -417,7 +419,7 @@ def list_jobs(
         rows=rows,
         filters=params_.applied(status=wanted, source=wanted_sources, ats=wanted_ats),
         column_filters=column_rules,
-        filter_fields=column_filters_.fields(),
+        filter_fields=column_filters_.fields(catalog_only=False),
         has_more=has_more,
         offset=offset,
         total=total,
