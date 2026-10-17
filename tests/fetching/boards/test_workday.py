@@ -142,3 +142,40 @@ def test_a_workday_tenant_under_the_window_is_one_complete_pull(monkeypatch):
     monkeypatch.setattr(boards._session, "post", post)
     out = boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
     assert [p.title for p in out] == ["t"]
+
+
+def _paged(total, rows, wrap_at=None):
+    """A tenant stating `total` that lists `rows` postings, 20 a page; past
+    `wrap_at` a page repeats the first."""
+
+    def post(url, json, **kw):
+        offset = json["offset"]
+        start = offset if wrap_at is None or offset < wrap_at else 0
+        page = [
+            {"title": f"t{i}", "externalPath": f"/job/x/t{i}_JR"}
+            for i in range(start, min(start + boards._WORKDAY_PAGE, rows))
+        ]
+        return _Resp({"total": total if offset == 0 else 0, "facets": [], "jobPostings": page})
+
+    return post
+
+
+def test_a_workday_tenant_stating_more_than_the_window_is_read_to_its_total(monkeypatch):
+    """CVS and O'Reilly page straight past 2,000. Stopping there called the
+    first 2,000 complete and retired every posting after them."""
+    monkeypatch.setattr(boards._session, "post", _paged(2100, 2100))
+    out = boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
+    assert len({p.url for p in out}) == 2100
+
+
+def test_a_workday_tenant_that_wraps_past_the_window_is_a_partial_pull(monkeypatch):
+    monkeypatch.setattr(boards._session, "post", _paged(2100, 2100, wrap_at=2000))
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
+    assert len(raised.value.postings) == 2000
+
+
+def test_a_workday_tenant_that_ends_short_of_a_total_past_the_window_is_partial(monkeypatch):
+    monkeypatch.setattr(boards._session, "post", _paged(2100, 2050))
+    with pytest.raises(boards.PartialPull):
+        boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")

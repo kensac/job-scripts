@@ -20,7 +20,10 @@ _WORKDAY_PAGE = 20
 # Some tenants stop a search at 2,000 results: the first page says total=2000
 # and every page past offset 2,000 wraps back to the first. Measured on
 # 2026-10-05 on 19 of 355 tenants (Airbus, NVIDIA, Walmart); others page
-# straight past it (CVS, 18,841).
+# straight past it (CVS, 18,841). A tenant stating more than the window is
+# read to its total. Stopping it at 2,000 called the first 2,000 complete and
+# retired the rest: 15 boards, about 16,000 postings, in the 10 days to
+# 2026-10-16 (CVS 5,285).
 _WORKDAY_WINDOW = 2000
 
 
@@ -74,22 +77,26 @@ def _workday(url: str, company: str) -> list[JobPosting]:
     endpoint = urlunparse(parsed._replace(query="", fragment=""))
     site = parsed.path.split("/wday/cxs/", 1)[1].split("/")[1]
     base = f"https://{parsed.netloc}/{site}"
-    postings, total, facets = _workday_slice(endpoint, base, company, search, {})
+    postings, total, facets, whole = _workday_slice(endpoint, base, company, search, {})
     if total != _WORKDAY_WINDOW:
+        if total > _WORKDAY_WINDOW and not whole:
+            raise PartialPull(postings)
         return postings
     seen = {p.url: p for p in postings}
     for parameter, values in _workday_slicing_facets(facets):
         for value in values:
-            part, _, _ = _workday_slice(endpoint, base, company, search, {parameter: [value]})
+            part, *_ = _workday_slice(endpoint, base, company, search, {parameter: [value]})
             seen.update((p.url, p) for p in part)
     raise PartialPull(list(seen.values()))
 
 
 def _workday_slice(
     endpoint: str, base: str, company: str, search: str, facets: dict[str, list[str]]
-) -> tuple[list[JobPosting], int, list[dict]]:
-    """Every posting one search returns, its stated total and its facets."""
+) -> tuple[list[JobPosting], int, list[dict], bool]:
+    """Every posting one search returns, its stated total, its facets, and
+    whether the search was read to its total without wrapping."""
     out: list[JobPosting] = []
+    paths: set[str] = set()
     offset = 0
     # Only the first page carries the count; later pages say total=0. Read
     # per page, that stopped every tenant after two pages: on 2026-10-05, 130
@@ -110,6 +117,11 @@ def _workday_slice(
         resp.raise_for_status()
         data = resp.json()
         page = data.get("jobPostings") or []
+        page_paths = {j.get("externalPath") for j in page}
+        if page_paths & paths:
+            # A page that repeats one already read: the tenant wrapped.
+            return out, total or 0, available, False
+        paths |= page_paths
         for j in page:
             p = posting_from_listing(
                 company,
@@ -124,10 +136,11 @@ def _workday_slice(
             total = int(data.get("total") or 0)
             available = data.get("facets") or []
         offset += len(page)
-        # Past the window a capped tenant wraps to its first page, so the
-        # window bounds the loop even where the total does not.
-        if not page or offset >= min(total, _WORKDAY_WINDOW):
-            return out, total, available
+        # A tenant capped at the window wraps past it, so the window bounds
+        # the loop there; a tenant stating more is read to its total.
+        bound = total if total > _WORKDAY_WINDOW else min(total, _WORKDAY_WINDOW)
+        if not page or offset >= bound:
+            return out, total, available, offset >= bound
 
 
 def _workday_slicing_facets(facets: list[dict]) -> list[tuple[str, list[str]]]:
