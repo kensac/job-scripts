@@ -101,7 +101,6 @@ def _candidates(board: _Board) -> list[_Candidate]:
     return db.query_as(
         _Candidate,
         f"""
-        WITH {eligibility.LATEST_CHECK}
         SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
                content.id AS content_query_id, content.input_content AS content
@@ -112,7 +111,7 @@ def _candidates(board: _Board) -> list[_Candidate]:
           ORDER BY q.id DESC LIMIT 1
         ) content ON true
         WHERE j.source = ANY(%(sources)s)
-          AND {eligibility.STRUCTURAL.format(criteria=board_criteria.SQL)}
+          AND {eligibility.STRUCTURAL_PER_POSTING.format(criteria=board_criteria.SQL)}
         ORDER BY j.id
         """,
         params,

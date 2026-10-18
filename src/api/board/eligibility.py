@@ -41,6 +41,23 @@ STRUCTURAL = f"""
 """
 
 
+# STRUCTURAL with each posting's latest closed and clearance answers looked up
+# on idx_ai_queries_latest_verdict instead of from latest_check, which reads
+# the latest answer of every url first. For a board's sources that is the
+# faster shape: on production 2026-10-18, board 2's candidates (25,546 rows)
+# took 13.9 s against 38.1 s, and from oci the old shape held the worker's
+# main thread past its heartbeat. A person's FULL read spans every source
+# they follow and is slower this way (31-38 s against 53-57 s), so it keeps
+# STRUCTURAL.
+STRUCTURAL_PER_POSTING = f"""
+        {catalog.IS_AVAILABLE.format(job="j")}
+        {{criteria}}
+        AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'
+        AND (%(bypass_sponsorship)s
+             OR {verdict_reads.latest_status("j.url", "clearance")} = 'passed')
+"""
+
+
 def settings_params(user_id: int) -> dict[str, Any]:
     settings = user_settings.criteria(user_id)
     return {
