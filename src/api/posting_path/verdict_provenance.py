@@ -15,6 +15,7 @@ _LATEST: contextvars.ContextVar[dict[tuple[str, str], Any]] = contextvars.Contex
 _ORIGIN = {
     "verify-batch": "answered when the posting was verified",
     "verify-near-copy": "copied from a twin posting",
+    "filter-near-copy": "copied from a twin posting",
     "reverify": "re-checked",
     "reverify-unchanged": "re-check reused: the page had not changed",
     "admin": "set by an admin",
