@@ -3560,6 +3560,16 @@
             },
             "description": "Payment Required"
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -7154,6 +7164,16 @@
             },
             "description": "Payment Required"
           },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -7491,6 +7511,16 @@
               }
             },
             "description": "Payment Required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "502": {
             "content": {
@@ -9441,6 +9471,16 @@
               }
             },
             "description": "Payment Required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "502": {
             "content": {
@@ -12120,6 +12160,16 @@
               }
             },
             "description": "Payment Required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "502": {
             "content": {
@@ -34075,6 +34125,16 @@
               }
             },
             "description": "Payment Required"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "502": {
             "content": {

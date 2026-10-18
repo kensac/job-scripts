@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 
-from api import db, metrics, telemetry
+from api import ai_pause, db, metrics, telemetry
+from api.ai import access as ai_access
 from api.auth import require_user
 from api.board import visibility
 from api.models import Ok
@@ -82,6 +84,16 @@ app = FastAPI(
     openapi_url=None,
     lifespan=_lifespan,
 )
+
+
+@app.exception_handler(ai_pause.AIPaused)
+async def _ai_paused(_request: Request, _exc: ai_pause.AIPaused) -> JSONResponse:
+    """A route that reaches a model without `require_config` (an admin
+    check, a re-check a report asks for) answers the same refusal."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": {"code": "AI_PAUSED", "message": ai_access.PAUSED_MESSAGE}},
+    )
 
 
 @app.middleware("http")

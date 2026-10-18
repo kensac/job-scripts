@@ -1,6 +1,6 @@
 """Shared, cheap admission boundary for new-posting verification."""
 
-from api import db, user_settings
+from api import ai_pause, db, user_settings
 from api.board import criteria
 from core import screening
 from core.store import AI_ELIGIBLE_JOB, ON_A_BOARD
@@ -185,4 +185,5 @@ def params() -> dict[str, object]:
         "volume_gate_titles": gate.occupation_titles,
         "title_screens": db.jsonb(db.get_config("title_screens")),
         **screening.PARAMS,
+        **ai_pause.params(),
     }

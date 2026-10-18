@@ -14,7 +14,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from api import budget, db, events
+from api import ai_pause, budget, db, events
 from api.ai import batch_results
 from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
@@ -260,6 +260,9 @@ async def submit_or_collect(
         logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
         return await collect_pending(task_id, hook)
 
+    # Every batched paid request passes here; collecting, above, never stops
+    # for the switch, because that work is already paid for (api.ai_pause).
+    ai_pause.check()
     specs = snapshot_specs(task_id, specs)
     if not specs:
         return []

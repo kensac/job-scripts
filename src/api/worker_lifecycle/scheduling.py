@@ -6,7 +6,7 @@ import datetime
 import logging
 import os
 
-from api import db, managed_boards, queue, telemetry
+from api import ai_pause, db, managed_boards, queue, telemetry
 from api.board import visibility
 from api.mail import match as mail_match
 from api.queue import enqueue
@@ -159,7 +159,11 @@ def schedule_ingest_cycle() -> None:
     _managed_board_schedule_attempts.intersection_update(
         {key for key in _managed_board_schedule_attempts if key[0] == cycle}
     )
-    for board in db.query("SELECT id FROM managed_boards WHERE published ORDER BY id"):
+    # While AI is paused (api.ai_pause) nothing that pays a model is
+    # enqueued; the non-AI work around it keeps its schedule.
+    ai_on = not ai_pause.paused()
+    boards = db.query("SELECT id FROM managed_boards WHERE published ORDER BY id")
+    for board in boards if ai_on else ():
         attempt = (cycle, board["id"])
         if attempt in _managed_board_schedule_attempts:
             continue
@@ -181,14 +185,16 @@ def schedule_ingest_cycle() -> None:
     # a resume in: the forms of the postings on their board are read and
     # every question without a draft rides one half-price batch, so the
     # answer is there when the posting is opened. See tasks.application.
-    for u in db.query("SELECT DISTINCT user_id AS id FROM user_resumes ORDER BY 1"):
+    resumes = db.query("SELECT DISTINCT user_id AS id FROM user_resumes ORDER BY 1")
+    for u in resumes if ai_on else ():
         enqueue(
             "application_sweep",
             {"user_id": u["id"], "cycle": cycle},
             dedupe_key=f"appsweep:{u['id']}:{cycle}",
         )
     day = now.strftime("%Y-%m-%d")
-    enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
+    if ai_on:
+        enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync
     # above runs hourly, so without these two the pipeline would fill
@@ -200,9 +206,13 @@ def schedule_ingest_cycle() -> None:
     # checks so a slow classification does not stop matching from running -
     # matching is cheap and re-runs improve on themselves as new board rows
     # appear, which is exactly when it should not be blocked.
-    if db.get_config("mail_classification_enabled") and not db.query_one(
-        "SELECT 1 FROM tasks WHERE kind = 'classify_mail' "
-        "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+    if (
+        ai_on
+        and db.get_config("mail_classification_enabled")
+        and not db.query_one(
+            "SELECT 1 FROM tasks WHERE kind = 'classify_mail' "
+            "AND status IN ('pending', 'running', 'waiting', 'awaiting_batch') LIMIT 1"
+        )
     ):
         enqueue("classify_mail", {"cycle": cycle}, dedupe_key=f"mailclassify:{cycle}")
     # And only when something a sweep reads has changed since the last one
@@ -219,7 +229,7 @@ def schedule_ingest_cycle() -> None:
     enqueue("probe_credentials", {"cycle": cycle}, dedupe_key=f"credprobe:{cycle}")
     # Every derived fact (pay, requirements, job profiles, embeddings,
     # locations): one pass each, only when switched on and none is in flight.
-    for derivation in DERIVATIONS:
+    for derivation in DERIVATIONS if ai_on else ():
         derivation.schedule(cycle)
     enqueue("send_digests", {"cycle": day}, dedupe_key=f"digest:{day}")
     enqueue("data_health", {"cycle": cycle}, dedupe_key=f"health:{cycle}")
@@ -264,7 +274,7 @@ def schedule_ingest_cycle() -> None:
     # held the only sweep for 15 hours on 2026-10-08, and no new posting
     # reached a board in that time. Only an unparked sweep (pending, running,
     # waiting) does, so two never select at once.
-    if not db.query_one(
+    if ai_on and not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'verify_new' "
         "AND status IN ('pending', 'running', 'waiting') LIMIT 1"
     ):

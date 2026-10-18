@@ -10,7 +10,7 @@ from typing import Any
 
 import psycopg
 
-from api import db, events, metrics, telemetry
+from api import ai_pause, db, events, metrics, telemetry
 from core.payloads.objects import PayloadUnavailable
 from tasks import HANDLERS
 from tasks.runtime import (
@@ -153,6 +153,12 @@ async def run_held(
             finish(task["id"], "done")
             metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
             logger.info(f"Task {task['id']} done")
+    except ai_pause.AIPaused as exc:
+        # The switch, not a fault: the task ends without its model work and
+        # the scheduler enqueues a fresh one once AI is back on.
+        finish(task["id"], "done", str(exc))
+        metrics.TASKS_PROCESSED.labels(task["kind"], "ai_paused").inc()
+        logger.info(f"Task {task['id']} ended: {exc}")
     except AwaitingBatch:
         # Parked, not finished and not failed: the slot is free and the task
         # resumes when its batches land.

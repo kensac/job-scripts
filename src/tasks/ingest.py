@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from api import db, filter_runs, hosts, metrics, queue, telemetry, user_settings
+from api import ai_pause, db, filter_runs, hosts, metrics, queue, telemetry, user_settings
 from api.ai import verdicts
 from core import page_fetches
 from core.fetching.hosts import pace_key
@@ -261,6 +261,8 @@ def schedule_filter_runs(cycle: str) -> None:
     until the provider finished it - 6,226 postings for 14 hours on
     2026-09-04.
     """
+    if ai_pause.paused():
+        return
     users = db.query(
         f"""
         SELECT DISTINCT u.id FROM users u

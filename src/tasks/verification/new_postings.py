@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from api import ai, db, managed_boards, metrics
+from api import ai, ai_pause, db, managed_boards, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from core import catalog, near_copy, verdict_reads
@@ -190,7 +190,9 @@ def candidates_sql() -> str:
         SELECT j.id, ({verification_candidates.EVERY_TARGET}) AS every_target
         FROM jobs j
         WHERE {catalog.IS_AVAILABLE.format(job="j")}
-          AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
+          AND NOT (j.url = ANY(%(in_flight)s::text[]))
+          -- A pause's backlog is not bought when AI comes back (api.ai_pause).
+          AND NOT {ai_pause.SKIPPED.format(job="j")} AND (
             NOT {verdict_reads.has_verdict("j.url", "closed")}
             -- Short-circuited pipelines (and any upstream verdict that later
             -- flips to passing) leave downstream checks MISSING, not false;

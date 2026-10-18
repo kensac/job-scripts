@@ -191,6 +191,29 @@ and under a second beside the database. Several statements that must commit
 together still go in `transaction()`; `executemany` and `pipeline()` keep
 their implicit transaction.
 
+## The AI switch
+
+**`ai_paused` stops every paid model request, and nothing else.**
+`api.ai_pause.check()` sits at the two places every paid request passes:
+`api.ai.parse` for live calls and `tasks.runtime.submit_or_collect` before a
+batch is submitted. A batch the provider already accepted is still collected.
+A task refused there ends `done` with the reason, not `failed`. The scheduler
+enqueues no AI kind while it is on (verification, reverification, filter runs,
+managed boards, application sweeps, derivations, mail classification), and an
+AI route answers 503 `AI_PAUSED`, from `require_config` or the app's handler.
+Ingest, page fetches, availability, board recomputes and digests keep their
+schedule. A new paid path goes through one of the two chokepoints or calls
+`ai_pause.check()` itself.
+
+**Resuming reads the pause's last days, not its backlog.** A posting whose
+`jobs.created_at` falls in an ended pause, earlier than
+`ai_resume_backlog_days` before it ended, is left out of verification and
+location classification (`ai_pause.SKIPPED`). Every board, filter and
+extraction needs a verification answer first, so it reaches none of them. The
+pauses are read from `app_config_changes`, so a pause set by anything but the
+admin config route or a migration that writes the history row has no window.
+`verify_new` with a `urls` payload still verifies such a posting by name.
+
 ## Batched work
 
 `core.batch` is the public batch entry point and owns the per-host wave

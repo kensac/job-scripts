@@ -210,9 +210,11 @@ async def parse[T: BaseModel](
 ) -> tuple[T | None, dict[str, int | None]]:
     import time as _time
 
-    from api import metrics
+    from api import ai_pause, metrics
     from core import pricing
 
+    # Every live paid request passes here (api.ai_pause).
+    ai_pause.check()
     start = _time.monotonic()
     try:
         result = await _parse(cfg, instructions, input_text, response_model, timeout)
