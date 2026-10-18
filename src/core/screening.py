@@ -28,6 +28,7 @@ Recipe = Literal[
     "aero_major_v1",
     "nontechnical_occupations_v1",
     "occupation_words_v1",
+    "levels_occupations_v1",
 ]
 BoardRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1"]
 
@@ -112,6 +113,24 @@ _OCCUPATION_WORDS = (
     "therapist", "therapy", "underwriter", "urology",
 )  # fmt: skip
 
+# For a filter whose prompt rejects internships and senior, staff, principal
+# and lead roles but accepts entry, junior and mid level (user 1's
+# pay_tier_200_resume_match). A title naming a rejected level is skipped only
+# when it names no second level: "Software Engineer II/Sr. Software Engineer"
+# and "Entry Level & Senior Software Engineer" are the model's call, and
+# "Member of Technical Staff" is not a level. Measured 2026-10-18 on every
+# verdict of that prompt (228,325 postings, 1,906 keeps): skips 15.7%, and
+# the 2 keeps it skips contradict the prompt (an intern, a "Senior Compiler
+# Engineer"). The negative lookahead is spelled the same in Python and in
+# PostgreSQL's ARE engine.
+_INTERNSHIP_ROLE = _words(r"\b(?:intern(?:ship)?s?|co[ -]?op|apprentice(?:ship)?)\b")
+_REJECTED_LEVEL_ONLY = _words(
+    r"^(?!.*(?:/|&|\+|\bor\b|\band\b|\bentry\b|\bjunior\b|\bjr\b|\bintermediate\b|\bmid\b"
+    r"|\bnew grad|\bearly career|\bgraduate\b|\b(?:i|ii|iii|1|2|3)\b|\bmember of\b"
+    r"|\btechnical staff\b|\bstaff\s*:|\bstaff\s*$|\bstaff (?:accountant|nurse|pharmacist)\b))"
+    r".*\b(?:senior|sr\.?|principal|staff|lead)\b"
+)
+
 RECIPES: dict[str, tuple[tuple[_Rule, ...], Screen]] = {
     # Tech Internships, enforced: measured 2026-10-05, it skips 96.7% of calls
     # and dropped 7 of 1,494 model keeps.
@@ -178,6 +197,15 @@ RECIPES: dict[str, tuple[tuple[_Rule, ...], Screen]] = {
         Screen(False, "no_listed_occupation"),
     ),
 }
+# nontechnical_occupations_v1 with the level and internship rules first.
+RECIPES["levels_occupations_v1"] = (
+    (
+        _skip("internship_role", title=_INTERNSHIP_ROLE),
+        _skip("rejected_level_only", title=_REJECTED_LEVEL_ONLY),
+        *RECIPES["nontechnical_occupations_v1"][0],
+    ),
+    RECIPES["nontechnical_occupations_v1"][1],
+)
 
 
 def screen(recipe: Recipe, *, title: str | None, source: str | None) -> Screen:

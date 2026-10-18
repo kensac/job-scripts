@@ -13,6 +13,7 @@ PINNED = {
     "aero_major_v1": "93738b838f66509e",
     "nontechnical_occupations_v1": "6e941463d4697cd6",
     "occupation_words_v1": "fbb7575ba9e69efe",
+    "levels_occupations_v1": "7502f5b4775e7de3",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -45,6 +46,14 @@ TITLES = [
     "Forklift Operator",
     "Payroll Specialist",
     "Teller, Part Time",
+    "Software Engineer II/Sr. Software Engineer",
+    "Entry Level & Senior Software Engineer, AI Platform",
+    "Member of Technical Staff",
+    "Technical Staff: Full Stack Engineer",
+    "Staff, Software Engineer",
+    "Lead Backend Engineer",
+    "Senior or Mid-Level Platform Engineer",
+    "Apprentice Electrician",
 ]
 SOURCES = ["other", "internships", None]
 
@@ -142,3 +151,26 @@ def test_ambiguous_or_technical_titles_are_reviewed(title):
 def test_occupation_words_yield_to_a_technical_word():
     assert screen("occupation_words_v1", title="Forklift Operator", source=None).skip
     assert not screen("occupation_words_v1", title="Nurse Informatics Engineer", source=None).skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("Senior Software Engineer", True),
+        ("Sr. Backend Engineer", True),
+        ("Staff, Software Engineer", True),
+        ("Lead Backend Engineer", True),
+        ("Software Engineering Intern", True),
+        ("Systems Engineering Co-op", True),
+        ("Software Engineer II/Sr. Software Engineer", False),
+        ("Entry Level & Senior Software Engineer, AI Platform", False),
+        ("Senior or Mid-Level Platform Engineer", False),
+        ("Member of Technical Staff", False),
+        ("Technical Staff: Full Stack Engineer", False),
+        ("Software Engineer", False),
+        ("Backend Engineer, Payments", False),
+        ("Line Cook", True),
+    ],
+)
+def test_levels_occupations_skips_only_a_level_the_filter_rejects(title, skip):
+    assert screen("levels_occupations_v1", title=title, source=None).skip is skip

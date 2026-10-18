@@ -202,6 +202,13 @@ verification volume gate's occupation list are separate recipes there, kept
 separate because each was measured against its own consumers; widening one to
 another's list is a measured change of its own.
 
+A filter's screen may encode what its own prompt rejects, measured on that
+prompt's verdicts and then by a paired re-run of the filter on postings the
+screen would skip. `levels_occupations_v1` (user 1's pay_tier_200_resume_match)
+adds internships and titles naming only a rejected level (senior, staff,
+principal, lead) to `nontechnical_occupations_v1`; a title naming a second,
+accepted level stays the model's call.
+
 **A posting a screen skips leaves the candidates.** A skip writes no verdict,
 so a screen applied after selection meets the same posting on every run: the
 filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802

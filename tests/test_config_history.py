@@ -138,6 +138,7 @@ def test_filter_scope_options_are_named_scoped_and_revision_bound(client, admin_
         "aero_major_v1",
         "nontechnical_occupations_v1",
         "occupation_words_v1",
+        "levels_occupations_v1",
     ]
     assert body["profile_recipes"] == []
     assert body["filters"] == {"user": [str(first)]}
