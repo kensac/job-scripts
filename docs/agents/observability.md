@@ -825,11 +825,36 @@ have no similarity consumer and their membership is unaffected.
 
 ## Scheduled filter transport
 
+**Only the instructions are written to the prompt cache.** On a model with
+explicit prompt caching (GPT-5.6 and later, where a cache write costs 1.25x
+the input rate), `core.batch.cached_prompt` sends the instructions as a
+developer `input_text` block that ends at a cache breakpoint, and turns the
+implicit breakpoint off. The implicit breakpoint sits at the end of the
+whole prompt, so every request wrote its posting text to the cache and
+nothing read it back: in the 7 days to 2026-10-18, 140M tokens were written
+against 126M cached reads, about $0.25/day of premium. The batch line and the
+live call both use it, so no caller opts in. A prefix under the provider's
+1,024-token minimum writes and reads nothing, which is right for plain
+verification, reverify and comp, whose instructions are shorter than that.
+Measured 2026-10-18 (live, gpt-6-luna, production effort, 200 postings
+each), the block form against today's request run twice:
+- Same `input_tokens` on every posting, and each form read the other's cache,
+  so the model sees the same tokens.
+- Filter keeps: 86 and 85 today, 85 in the new form. Discordant pairs: 7/6
+  today against itself, 8/7 against the new form.
+- Joint verify, Tech New Grad: 67 and 71 today, 69 new (7/6 vs 10/12).
+  Aerospace: 13 and 12, 14 new. Clearance: 89 and 89, 90 new. All sign tests
+  p >= 0.45.
+- Writes went from 217k (filter) and 230k (joint) to 0, with cached reads
+  unchanged.
+
+A request that should never be written has no breakpoint at all; adding the
+posting as a second breakpoint would bring the premium back.
+
 `managed_board_cache_writes_enabled` controls provider caching on newly built
 managed-board review requests whose model datasheet explicitly supports it.
 When disabled, explicit-only mode with no breakpoints disables reads as well
-as writes. Personal filters keep default caching, since their reusable prefix
-may be valuable. The policy lives in immutable request context, not the
+as writes. The policy lives in immutable request context, not the
 criteria hash: rollback does not invalidate verdicts or resubmit paid work.
 Legacy snapshot readers accept the context during rollout; verify active
 workers have the new transport before measuring adoption. A cache setting
