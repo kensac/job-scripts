@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from core import providers, routing
-from core.batch import prompt_cache_key
+from core.batch import cached_prompt, prompt_cache_key
 from core.env import env_list
 from core.providers.spec import Model, StructuredOutput
 
@@ -361,8 +361,7 @@ async def _parse[T: BaseModel](
     if declared is not None and declared.wire is providers.Wire.OPENAI_RESPONSES:
         response = await oa.responses.parse(
             model=cfg.model,
-            instructions=instructions,
-            input=input_text,
+            **cached_prompt(cfg.model, instructions, input_text),
             text_format=response_model,
             reasoning={"effort": cfg.params.get("reasoning_effort", "low")},
             # Covers reasoning AND output on the Responses API; too small and
