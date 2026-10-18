@@ -79,8 +79,9 @@ PROVIDER_REFUSALS = _problems(502)
 
 # A route that asks a model something. 402 is `require_config` refusing on
 # entitlement or budget, and it is a refusal a client acts on rather than
-# reports: the answer is to add a key or raise a cap.
-AI_REFUSALS = _problems(402) | PROVIDER_REFUSALS
+# reports: the answer is to add a key or raise a cap. 503 AI_PAUSED is the
+# site-wide switch (api.ai_pause).
+AI_REFUSALS = _problems(402, 503) | PROVIDER_REFUSALS
 
 # A route that takes a file or a page capture. The cap is stated in the
 # message, because a client that knows the limit can say so before the upload

@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import db, user_settings
+from api import ai_pause, db, user_settings
 from api.locations import LocationExtract, Place, store
 from core import catalog
 from core.batch import BatchResult, BatchSpec, structured_response_spec
@@ -58,6 +58,7 @@ _CANDIDATES = f"""
         SELECT DISTINCT btrim(loc) AS text
         FROM jobs j, unnest(j.locations) AS loc
         WHERE {catalog.IS_AVAILABLE.format(job="j")} AND btrim(loc) <> ''
+          AND NOT {ai_pause.SKIPPED.format(job="j")}
         UNION
 {user_settings.CRITERIA_LOCATIONS_SQL}    )
     SELECT r.text FROM raw r
@@ -78,7 +79,7 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
             "SELECT text FROM locations WHERE model <> 'admin' ORDER BY text LIMIT %(cap)s",
             {"cap": cap},
         )
-    return db.query(_CANDIDATES, {"cap": cap})
+    return db.query(_CANDIDATES, {"cap": cap, **ai_pause.params()})
 
 
 def _requests(rows: list[Row]) -> list[BatchSpec]:

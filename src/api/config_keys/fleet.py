@@ -9,6 +9,24 @@ from pydantic import Field, NonNegativeInt, PositiveInt
 from api.config_types import ConfigKey
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
+    # The site-wide AI switch (api.ai_pause), for a stretch nobody uses the
+    # application: ingest and page fetches keep the catalog current, and no
+    # model is paid.
+    "ai_paused": ConfigKey(
+        section="Fleet",
+        default=False,
+        value_type=bool,
+        help="Stops every paid model request: verification, filters, boards, extraction, "
+        "embeddings and the AI buttons. Ingest and page fetches keep running. Batches already "
+        "submitted are still collected.",
+    ),
+    "ai_resume_backlog_days": ConfigKey(
+        section="Fleet",
+        default=7,
+        value_type=PositiveInt,
+        help="When AI is switched back on, postings first seen during the pause are read only "
+        "from this many days before it ended; older ones stay in the catalog unread.",
+    ),
     # The scheduler buckets the hour by this, so it must divide 60 for every
     # bucket to be the same length.
     "ingest_interval_minutes": ConfigKey(
