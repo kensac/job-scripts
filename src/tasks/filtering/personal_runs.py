@@ -11,6 +11,7 @@ from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
 from api.task_jobs import run_jobs
+from core import verdict_reads
 from core.payloads.objects import MAX_CONNECTIONS, PayloadStore
 from core.screening import screen
 from core.store import add_ai_results, ai_result_row, decided_custom_urls, get_contents
@@ -135,13 +136,14 @@ def _take_twin_verdicts(
     decided = {
         (row["source"], row["near_copy_key"]): row
         for row in db.query(
-            "SELECT DISTINCT ON (j.source, j.near_copy_key) j.source, j.near_copy_key, "
-            "v.status, v.reason, v.filter_name, v.parsed_json "
-            "FROM jobs j JOIN verdicts v ON v.url = j.url "
-            "WHERE (j.source, j.near_copy_key) IN (SELECT * FROM unnest(%s::text[], %s::text[])) "
-            "AND NOT (j.url = ANY(%s::text[])) AND v.check_type = 'custom' "
-            "AND v.prompt_hash = %s AND v.model = %s AND v.status IN ('passed', 'rejected') "
-            "ORDER BY j.source, j.near_copy_key, v.id DESC",
+            verdict_reads.latest_per(
+                "j.source, j.near_copy_key",
+                "j.source, j.near_copy_key, v.status, v.reason, v.filter_name, v.parsed_json",
+                "(j.source, j.near_copy_key) IN (SELECT * FROM unnest(%s::text[], %s::text[])) "
+                "AND NOT (j.url = ANY(%s::text[])) AND v.check_type = 'custom' "
+                "AND v.prompt_hash = %s AND v.model = %s",
+                join="JOIN jobs j ON j.url = v.url",
+            ),
             (
                 [source for source, _ in wanted],
                 [key for _, key in wanted],
