@@ -83,6 +83,14 @@ def _store(rows: list[dict[str, Any]]) -> int:
             created_at = now()
         WHERE job_embeddings.content_row_id IS NULL
            OR job_embeddings.content_row_id <= EXCLUDED.content_row_id
+           -- A stored id that names no page_texts row is not newer than
+           -- anything. On 2026-10-18, 6,223 rows held ids from before page
+           -- text moved tables (#843, #930), above their posting's current
+           -- id, so this guard refused every write and the same 126 visible
+           -- postings were paid for every hour and discarded.
+           OR NOT EXISTS (
+               SELECT 1 FROM page_texts p WHERE p.id = job_embeddings.content_row_id
+           )
         """,
         (db.jsonb(rows),),
     )
