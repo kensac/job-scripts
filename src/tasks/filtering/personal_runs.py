@@ -11,7 +11,7 @@ from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
 from api.task_jobs import run_jobs
-from core import verdict_reads
+from core import pay_screen, verdict_reads
 from core.payloads.objects import MAX_CONNECTIONS, PayloadStore
 from core.screening import screen
 from core.store import add_ai_results, ai_result_row, decided_custom_urls, get_contents
@@ -282,6 +282,42 @@ async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None
     )
 
 
+def _settle_by_stated_pay(
+    jobs: list[dict[str, Any]], contents: dict[str, Any], flt: dict[str, Any], model: str
+) -> list[dict[str, Any]]:
+    """Answer, without a call, the postings this filter's pay screen settles
+    (core.pay_screen); return the rest. The answer is stored like the
+    model's, as a filter-pay-screen row, so the posting is decided and not
+    chunked again."""
+    recipe = db.get_config("pay_screens").get(flt["prompt_hash"])
+    if not recipe:
+        return jobs
+    rows, still = [], []
+    for job in jobs:
+        page = contents.get(job["url"])
+        reason = pay_screen.screen(recipe, page.text) if page else None
+        if reason is None:
+            still.append(job)
+            continue
+        rows.append(
+            ai_result_row(
+                job["url"],
+                "rejected",
+                reason,
+                "custom",
+                model=model,
+                filter_name=flt["name"],
+                prompt_hash=flt["prompt_hash"],
+                company=job.get("company"),
+                job_title=job.get("title"),
+                config_name="filter-pay-screen",
+            )
+        )
+    if rows:
+        add_ai_results(rows)
+    return still
+
+
 async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -> None:
     """Centralized half-price path: one worker submits the whole chunk to the
     OpenAI Batch API (core/batch/__init__.py enforces the enqueued-token budget in
@@ -332,6 +368,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
                 task_id,
                 len(excluded),
             )
+        jobs = _settle_by_stated_pay(jobs, contents, flt, cfg.model)
         if not jobs:
             hooks.progress(0, 0, "no new reviews: already decided or owned by an earlier chunk")
             hooks.complete()
