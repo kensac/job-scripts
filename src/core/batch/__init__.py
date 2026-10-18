@@ -21,6 +21,7 @@ from core.batch.specs import (
     BatchSpec,
     _build_line,
     _estimate_tokens,
+    cached_prompt,
     prompt_cache_key,
     structured_response_spec,
 )
@@ -282,6 +283,7 @@ __all__ = [
     "_submit_chunk",
     "_wait_for_batch",
     "batch_progress",
+    "cached_prompt",
     "collect_finished_batches",
     "completion_window_seconds",
     "is_terminal",

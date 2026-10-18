@@ -94,6 +94,32 @@ class TestStore:
         rows = db.query("SELECT content_hash FROM job_embeddings WHERE url = %s", (url,))
         assert [r["content_hash"] for r in rows] == ["hash-2"]
 
+    def test_a_stored_id_naming_no_page_row_does_not_block_the_current_one(self, f):
+        """A dangling provenance id above the current text's id refused every
+        write, so the sweep paid for the same postings every hour."""
+        _, url = f.make_ready_job(content=CONTENT)
+        current = db.query_one("SELECT max(id) AS id FROM page_texts WHERE url = %s", (url,))
+        assert current is not None
+        row = {"url": url, "embedding": str(_vec()), "model": EMBEDDING_MODEL}
+        _store([{**row, "hash": "old", "row_id": current["id"] + 1_000_000}])
+        _store([{**row, "hash": "new", "row_id": current["id"]}])
+        stored = db.query_one(
+            "SELECT content_hash, content_row_id FROM job_embeddings WHERE url = %s", (url,)
+        )
+        assert stored == {"content_hash": "new", "content_row_id": current["id"]}
+
+    def test_an_older_existing_row_still_cannot_overwrite_a_newer_one(self, f):
+        _, url = f.make_ready_job(content=CONTENT)
+        newer = db.query_one("SELECT max(id) AS id FROM page_texts WHERE url = %s", (url,))
+        older = f.make_ready_job(content=CONTENT)[1]
+        older_id = db.query_one("SELECT max(id) AS id FROM page_texts WHERE url = %s", (older,))
+        assert newer is not None and older_id is not None and older_id["id"] > newer["id"]
+        row = {"url": url, "embedding": str(_vec()), "model": EMBEDDING_MODEL}
+        _store([{**row, "hash": "newer", "row_id": older_id["id"]}])
+        _store([{**row, "hash": "older", "row_id": newer["id"]}])
+        stored = db.query_one("SELECT content_hash FROM job_embeddings WHERE url = %s", (url,))
+        assert stored == {"content_hash": "newer"}
+
     def test_a_wrong_width_vector_is_refused_by_the_column(self, f):
         _, url = f.make_ready_job(content=CONTENT)
         with pytest.raises(psycopg.errors.DataException):

@@ -23,12 +23,36 @@ def test_explicit_cache_policy_preserves_request_and_frozen_snapshot(f, model):
     frozen = snapshot_specs(task, [controlled])[0]
     replay = snapshot_specs(task, [original])[0]
     assert replay.context == frozen.context
-    before = batch._build_line(original, model, "medium", 6000)
-    after = batch._build_line(replay, model, "medium", 6000)
-    assert after["body"].pop("prompt_cache_options") == {"mode": "explicit"}
-    assert after == before
+    after = batch._build_line(replay, model, "medium", 6000)["body"]
+    # no_cache: explicit mode and no breakpoint anywhere, so nothing is read or written.
+    assert after["prompt_cache_options"] == {"mode": "explicit"}
+    assert (after["instructions"], after["input"]) == ("criteria", "posting")
     with pytest.raises(ValueError, match="unsupported prompt cache policy"):
         batch._build_line(replay, "gpt-5-nano", "low", 6000)
+
+
+@pytest.mark.parametrize("model", ["gpt-5.6-luna", "gpt-6-luna"])
+def test_only_the_instructions_are_written_to_the_cache(model):
+    spec = batch.structured_response_spec("job", "criteria", "posting", FilterDecision)
+    body = batch._build_line(spec, model, "medium", 6000)["body"]
+    assert "instructions" not in body
+    assert body["prompt_cache_options"] == {"mode": "explicit"}
+    developer, user = body["input"]
+    assert developer == {
+        "role": "developer",
+        "content": [
+            {
+                "type": "input_text",
+                "text": "criteria",
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        ],
+    }
+    assert user == {"role": "user", "content": [{"type": "input_text", "text": "posting"}]}
+    # A model without explicit caching keeps the request it always sent.
+    plain = batch._build_line(spec, "gpt-5-nano", "low", 6000)["body"]
+    assert (plain["instructions"], plain["input"]) == ("criteria", "posting")
+    assert "prompt_cache_options" not in plain
 
 
 @pytest.mark.asyncio
