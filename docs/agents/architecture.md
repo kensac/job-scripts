@@ -259,6 +259,14 @@ to the same model, and 5,776 got back the answer already held. A new purpose
 that re-asks on a timer gets the same treatment rather than a second
 mechanism.
 
+**A re-listing re-asks a closure; it is not a first read.** The sweep's
+re-listing branch takes only postings that already hold a closed verdict. A
+re-listed posting never checked is `verify_new`'s, because only its gate knows
+whether any board or filter can keep it. The branch used to treat a missing
+verdict as older than any re-listing. In the week to 2026-10-18 that bought
+1,407 of 3,209 paid re-checks, all first reads of postings the gate skips,
+most from feeds that keep re-listing.
+
 ## Time
 
 Containers run on a local timezone by deliberate convention; hosts and the
