@@ -122,6 +122,22 @@ async def test_a_relisting_older_than_the_verdict_answering_it_is_not_a_candidat
 
 
 @pytest.mark.asyncio
+async def test_a_relisting_never_checked_is_left_to_verify_new(f, taken):
+    """The branch re-asks a closure. A posting with no closed verdict has
+    none to re-ask, and belongs to verify_new, whose gate decides whether
+    anyone can keep it; taking it here paid for postings that gate skips."""
+    source = f.make_source("unchecked-src")
+    uid = f.make_user()
+    f.subscribe(uid, source)
+    job_id, url = f.make_ready_job(source=source, closed=None)
+    _relist(job_id, source)
+
+    task_id = f.make_task("reverify_open", {}, status="running")
+    await tasks_verify.handle_reverify_open(task_id, {})
+    assert url not in _urls(taken)
+
+
+@pytest.mark.asyncio
 async def test_a_full_run_takes_only_postings_believed_open_and_reachable(f, taken):
     """A full run reads `jobs` directly rather than board rows, which is what
     made it the last way an unreachable posting could cost money (#303)."""
