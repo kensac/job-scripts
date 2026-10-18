@@ -75,7 +75,11 @@ class _Candidate:
     source: str
     sort_at: datetime.datetime
     content_query_id: int | None
-    content: str | None
+    # The page text's length, which is all the reservation reads. Returning
+    # the text itself moved 215M characters for board 6's 35,310 candidates
+    # (104 s against 15 s on production, 2026-10-18) and held a worker's main
+    # thread past its heartbeat.
+    content_chars: int | None
 
 
 def _board(board_id: int, *, lock: bool = False) -> _Board | None:
@@ -103,7 +107,7 @@ def _candidates(board: _Board) -> list[_Candidate]:
         f"""
         SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
-               content.id AS content_query_id, content.input_content AS content
+               content.id AS content_query_id, length(content.input_content) AS content_chars
         FROM jobs j
         LEFT JOIN LATERAL (
           SELECT q.id, q.input_content FROM page_texts q
@@ -123,7 +127,8 @@ def _reservation(board: _Board, candidates: list[_Candidate]) -> int:
     return sum(
         (
             len(instructions)
-            + len(build_custom_input(candidate.company, candidate.title, candidate.content or ""))
+            + len(build_custom_input(candidate.company, candidate.title, ""))
+            + (candidate.content_chars or 0)
         )
         // BATCH_CHARS_PER_TOKEN
         + FILTER_OUTPUT_RESERVATION_TOKENS
@@ -152,7 +157,7 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
         )
         SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
-               NULL::bigint AS content_query_id, NULL::text AS content
+               NULL::bigint AS content_query_id, NULL::int AS content_chars
         FROM jobs j
         WHERE {eligibility.SUBSCRIBED}
           AND {eligibility.STRUCTURAL.format(criteria=board_criteria.SQL)}
