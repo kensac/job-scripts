@@ -207,7 +207,11 @@ prompt's verdicts and then by a paired re-run of the filter on postings the
 screen would skip. `levels_occupations_v1` (user 1's pay_tier_200_resume_match)
 adds internships and titles naming only a rejected level (senior, staff,
 principal, lead) to `nontechnical_occupations_v1`; a title naming a second,
-accepted level stays the model's call.
+accepted level stays the model's call. `levels_roles_occupations_v1` adds
+its Bar A roles (technician, field, operations, operator, part-time and other
+hourly titles) when the title names nothing the prompt accepts (engineer,
+software, data, platform, product, analyst and the like); support-desk titles
+stay the model's, because it kept one.
 
 **A posting a screen skips leaves the candidates.** A skip writes no verdict,
 so a screen applied after selection meets the same posting on every run: the

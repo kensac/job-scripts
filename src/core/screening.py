@@ -29,6 +29,7 @@ Recipe = Literal[
     "nontechnical_occupations_v1",
     "occupation_words_v1",
     "levels_occupations_v1",
+    "levels_roles_occupations_v1",
 ]
 BoardRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1"]
 
@@ -205,6 +206,34 @@ RECIPES["levels_occupations_v1"] = (
         *RECIPES["nontechnical_occupations_v1"][0],
     ),
     RECIPES["nontechnical_occupations_v1"][1],
+)
+
+# Bar A of user 1's filter fails "any hourly, field, technician, operations or
+# support role". A title naming such a role and nothing the filter accepts
+# (engineer, software, data, platform, product, analyst and the like) is
+# skipped. Measured 2026-10-18 on the 185,328 verdicts levels_occupations_v1
+# does not already skip: 13.0% of all (9.2% of the last 7 days), 0 of 1,906
+# keeps; re-asking today's filter on 300 of them kept 0. Support-desk titles
+# are left out: "technical customer support specialist" was kept.
+_ACCEPTED_WORK = (
+    r"\b(?:engineer\w*|software|developer\w*|programmer|data|scien\w*|machine learning|ml|ai|"
+    r"cloud|platform|infrastructure|devops|sre|backend|frontend|full[- ]?stack|architect|"
+    r"quant\w*|research\w*|product|analyst)\b"
+)
+_REJECTED_ROLE_ONLY = _words(
+    rf"^(?!.*{_ACCEPTED_WORK}).*(?:\btechnicians?\b|\btech\b(?! lead)"
+    r"|\bfield (?:service|technician|representative|rep|operations|support)\b"
+    r"|\boperations? (?:associate|specialist|coordinator|assistant|representative|agent|clerk)\b"
+    r"|\boperator\b|\b(?:hourly|part[- ]time|per diem|seasonal|temporary|prn)\b)"
+)
+
+RECIPES["levels_roles_occupations_v1"] = (
+    (
+        *RECIPES["levels_occupations_v1"][0][:2],
+        _skip("rejected_role_only", title=_REJECTED_ROLE_ONLY),
+        *RECIPES["levels_occupations_v1"][0][2:],
+    ),
+    RECIPES["levels_occupations_v1"][1],
 )
 
 
