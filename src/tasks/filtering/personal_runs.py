@@ -13,7 +13,7 @@ from api.model_calls import Payer
 from api.task_jobs import run_jobs
 from core.payloads.objects import MAX_CONNECTIONS, PayloadStore
 from core.screening import screen
-from core.store import decided_custom_urls, get_contents
+from core.store import add_ai_results, ai_result_row, decided_custom_urls, get_contents
 from tasks import batch_policy
 from tasks.board import (
     candidates_for,
@@ -107,6 +107,80 @@ async def _process_jobs(
     )
 
 
+def _take_twin_verdicts(
+    todo: list[dict[str, Any]], flt: dict[str, Any], model: str, held: set[str]
+) -> list[dict[str, Any]]:
+    """The postings in `todo` still to read once their near copies are counted.
+
+    A same-source twin (core.near_copy) already decided by this filter and
+    model gives its verdict, as a row marked filter-near-copy that costs
+    nothing. A twin a live chunk holds, or one earlier in `todo`, is read
+    instead and the rest wait for it. Verification copies only the verdicts a
+    twin holds when it is verified, and the filter answers later: 2,708 of
+    60,799 paid filter reads in the 7 days to 2026-10-18 were a twin's second.
+    """
+    if not todo or not db.get_config("verify_near_copy_reuse"):
+        return todo
+    keys = {
+        row["url"]: (row["source"], row["near_copy_key"])
+        for row in db.query(
+            "SELECT url, source, near_copy_key FROM jobs "
+            "WHERE url = ANY(%s) AND near_copy_key IS NOT NULL",
+            ([job["url"] for job in todo] + sorted(held),),
+        )
+    }
+    wanted = {keys[job["url"]] for job in todo if job["url"] in keys}
+    if not wanted:
+        return todo
+    decided = {
+        (row["source"], row["near_copy_key"]): row
+        for row in db.query(
+            "SELECT DISTINCT ON (j.source, j.near_copy_key) j.source, j.near_copy_key, "
+            "v.status, v.reason, v.filter_name, v.parsed_json "
+            "FROM jobs j JOIN verdicts v ON v.url = j.url "
+            "WHERE (j.source, j.near_copy_key) IN (SELECT * FROM unnest(%s::text[], %s::text[])) "
+            "AND NOT (j.url = ANY(%s::text[])) AND v.check_type = 'custom' "
+            "AND v.prompt_hash = %s AND v.model = %s AND v.status IN ('passed', 'rejected') "
+            "ORDER BY j.source, j.near_copy_key, v.id DESC",
+            (
+                [source for source, _ in wanted],
+                [key for _, key in wanted],
+                [job["url"] for job in todo],
+                flt["prompt_hash"],
+                model,
+            ),
+        )
+    }
+    reading = {keys[url] for url in held if url in keys}
+    rows, still = [], []
+    for job in todo:
+        key = keys.get(job["url"])
+        if key in decided:
+            twin = decided[key]
+            rows.append(
+                ai_result_row(
+                    job["url"],
+                    twin["status"],
+                    twin["reason"],
+                    "custom",
+                    model=model,
+                    filter_name=twin["filter_name"],
+                    prompt_hash=flt["prompt_hash"],
+                    parsed_json=twin["parsed_json"],
+                    company=job.get("company"),
+                    job_title=job.get("title"),
+                    config_name="filter-near-copy",
+                )
+            )
+        elif key is None or key not in reading:
+            if key is not None:
+                reading.add(key)
+            still.append(job)
+    if rows:
+        add_ai_results(rows)
+    return still
+
+
 async def _run_filters(
     task_id: int,
     user_id: int,
@@ -135,6 +209,7 @@ async def _run_filters(
             todo = [
                 j for j in todo if not screen(recipe, title=j["title"], source=j["source"]).skip
             ]
+        todo = _take_twin_verdicts(todo, flt, cfg.model, held)
         if use_batch and todo:
             for start in range(0, len(todo), batch_chunk_size):
                 units.append(("batch", flt, todo[start : start + batch_chunk_size]))

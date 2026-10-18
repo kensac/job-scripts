@@ -270,3 +270,50 @@ async def test_a_storage_outage_at_split_enqueues_no_chunk(set_config, f, monkey
 
     assert db.query("SELECT id FROM tasks WHERE parent_id = %s", (parent,)) == []
     assert db.query_one("SELECT status FROM tasks WHERE id = %s", (parent,))["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_a_near_copy_takes_its_twins_filter_verdict_instead_of_a_read(
+    f, monkeypatch, objects
+):
+    """One store role posted at many places is one read for a filter, as it is
+    for verification (core.near_copy)."""
+    uid, flt, _jobs, parent = _split(f, monkeypatch, 0)
+    decided, copy, first, second, held_twin, waits, alone = (
+        db.query_one("SELECT url, company, title, source FROM jobs WHERE id = %s", (f.make_job(),))
+        for _ in range(7)
+    )
+    for job, key in [
+        (decided, "k1"),
+        (copy, "k1"),
+        (first, "k2"),
+        (second, "k2"),
+        (held_twin, "k3"),
+        (waits, "k3"),
+    ]:
+        db.execute("UPDATE jobs SET near_copy_key = %s WHERE url = %s", (key, job["url"]))
+    add_ai_result(
+        decided["url"],
+        "passed",
+        "fits",
+        "custom",
+        prompt_hash=flt["prompt_hash"],
+        model="gpt-5-nano",
+        filter_name=flt["name"],
+    )
+    _chunk([{"url": held_twin["url"]}], uid=uid, prompt_hash=flt["prompt_hash"])
+    monkeypatch.setattr(filters, "candidates_for", lambda _uid: [copy, first, second, waits, alone])
+
+    await filters._run_filters(parent, uid, [flt], batched=True)
+
+    (child,) = db.query("SELECT payload FROM tasks WHERE parent_id = %s", (parent,))
+    assert child["payload"]["urls"] == [first["url"], alone["url"]]
+    copied = db.query_one(
+        "SELECT status, reason, config_name FROM verdicts WHERE url = %s AND check_type = 'custom'",
+        (copy["url"],),
+    )
+    assert (copied["status"], copied["reason"], copied["config_name"]) == (
+        "passed",
+        "fits",
+        "filter-near-copy",
+    )

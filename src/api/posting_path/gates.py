@@ -217,7 +217,7 @@ def _verdict_step(
             filter_id=filter_id,
         )
     origin = _verdict_origin(row.config_name)
-    if row.config_name == "verify-near-copy" and (twin := _near_copy_source_url(job)):
+    if row.config_name in ("verify-near-copy", "filter-near-copy") and (twin := _near_copy_source_url(job)):
         origin = f"{origin} ({twin})"
     return PathStep(
         stage="verdict",
