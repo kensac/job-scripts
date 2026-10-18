@@ -263,7 +263,12 @@ board and filter reads the verdict. Measured on 51,114 postings verified
 2026-10-06 to 10-08: 17.6% had a twin, and across 674 twin groups Tech New
 Grad agreed in 673, Aerospace in 674, closed in 672 and clearance in 671
 (re-asking the same request flips about 10% of borderline keeps).
-`verify_near_copy_reuse` turns it off.
+A person's filter answers after verification, so the twin often has no filter
+verdict yet when the copy is made: the filter run (`_take_twin_verdicts`) takes
+a decided twin's verdict under the same prompt and model as a
+`filter-near-copy` row, and reads one twin per run while the rest wait. Before
+it, 2,708 of 60,799 paid filter reads in the 7 days to 2026-10-18 were a
+twin's second. `verify_near_copy_reuse` turns both off.
 
 **Verification does not read what no board or filter keeps.** Reading a posting
 is most of what a posting costs, and since the Workday paging fix (2026-10-05)
