@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import PositiveInt
 
 from api.config_types import ColumnState, ConfigKey, SortKey
+from core.pay_screen import PayRecipe
 from core.screening import Recipe
 from core.volume_gate import VolumeGate
 
@@ -60,6 +61,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "its candidates leave out. A posting the screen skips is never chunked, read or "
         "judged for that prompt, and writes nothing; removing a hash returns its postings "
         "on the next run. A prose edit changes the hash and so drops the screen.",
+    ),
+    "pay_screens": ConfigKey(
+        section="Boards",
+        default={},
+        value_type=dict[str, PayRecipe],
+        help="Exact filter prompt hash to the pay screen (core/pay_screen.py) that answers "
+        "its pay bar from the posting's stated figures. A posting the screen settles is "
+        "rejected for that prompt without a model call. A prose edit changes the hash and "
+        "so drops the screen.",
     ),
     # Groups whose filter saves re-judge the board at once. Seeded closed:
     # three edits on one new account cost 10.27 dollars in a day
