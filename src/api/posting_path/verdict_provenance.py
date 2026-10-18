@@ -20,6 +20,7 @@ _ORIGIN = {
     "reverify-unchanged": "re-check reused: the page had not changed",
     "admin": "set by an admin",
     "filter-batch": "judged by its own run",
+    "filter-pay-screen": "settled from the stated pay, no model call",
     "explain": "asked by a person",
 }
 

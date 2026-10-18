@@ -218,6 +218,20 @@ per filter, `managed_boards.admission._plan` per board run (the run payload reco
 `title_screens`), and `verification_candidates.reachable` per target. It is
 evaluated on every run, so switching it off returns the posting on the next.
 
+**A pay screen answers a filter's pay bar from the posting's own figures.**
+`pay_screens` maps an exact filter prompt hash to a named rule in
+`core/pay_screen.py`. In a batched filter chunk, once page text is in hand and
+before anything is submitted, a posting the rule settles is stored as
+rejected under that prompt and model with config_name `filter-pay-screen` and
+no call; unlike a title skip it writes the verdict, because it needs page text
+that planning does not read, and an unanswered posting would be chunked again
+every run. A rule answers only when every dollar figure is under the bar, a
+yearly-scale range is stated, and no range is tied to a place (a range for
+listed states says nothing about the rest). It is listed only after it settles
+no keep that a re-run of the same request keeps: stated_base_under_150k_v1
+settled 1,638 of 12,000 rejects and one of 1,906 keeps (Anduril, $114,000 top,
+which the request itself rejected 5 of 5 times on re-asking).
+
 **A backfill names its postings and passes the screens.** A screened posting
 has no verdict, so its path records nothing. To buy one, name the postings:
 `verify_new` with a `urls` payload verifies them past the reachability gate
