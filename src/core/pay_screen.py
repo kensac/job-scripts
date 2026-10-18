@@ -26,7 +26,7 @@ from typing import Literal
 PayRecipe = Literal["stated_base_under_150k_v1"]
 
 _AMOUNT = r"\$\s?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?([kK]\b)?"
-_RANGE = re.compile(_AMOUNT + r"\s*(?:-|\u2013|\u2014|to)\s*" + _AMOUNT)
+_RANGE = re.compile(_AMOUNT + r"\s*(?:[-\u2010-\u2015]|to)\s*" + _AMOUNT)
 _ONE = re.compile(_AMOUNT)
 _HOURLY = re.compile(r"/\s*h(?:ou)?r|per\s+hour|an\s+hour|hourly|/hr", re.IGNORECASE)
 _PLACE = re.compile(
