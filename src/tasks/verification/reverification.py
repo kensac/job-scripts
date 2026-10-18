@@ -350,12 +350,18 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
             -- Self-clearing: the fresh verdict is newer than the return. A
             -- return is a source's reappeared observation; job_listing_events
             -- held them before, and is frozen.
+            --
+            -- Only a posting that already has a closed verdict. One never
+            -- checked is verify_new's, whose gate skips what no board or
+            -- filter can keep; read here it skipped that gate. On production,
+            -- 2026-10-11 to 10-18, 1,407 of 3,209 paid re-checks were
+            -- such first reads, most from feeds that keep re-listing.
             SELECT j.url, j.company, j.title FROM jobs j
             WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")}
               AND (SELECT MAX(o.at) FROM source_observations o
-                   WHERE o.job_id = j.id AND o.kind = 'reappeared') > COALESCE(
-                    (SELECT MAX(q.created_at) FROM ai_queries q
-                     WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
+                   WHERE o.job_id = j.id AND o.kind = 'reappeared') >
+                  (SELECT MAX(q.created_at) FROM ai_queries q
+                   WHERE q.url = j.url AND q.check_type = 'closed')
             """,
             {"days": int(db.get_config("reverify_days")), "cap": cap},
         )

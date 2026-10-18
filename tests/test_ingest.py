@@ -208,9 +208,9 @@ def _relisted_candidates() -> set[str]:
         SELECT j.url FROM jobs j
         WHERE j.available AND {AI_ELIGIBLE_JOB.format(job="j")}
           AND (SELECT MAX(o.at) FROM source_observations o
-               WHERE o.job_id = j.id AND o.kind = 'reappeared') > COALESCE(
-                (SELECT MAX(q.created_at) FROM ai_queries q
-                 WHERE q.url = j.url AND q.check_type = 'closed'), '-infinity')
+               WHERE o.job_id = j.id AND o.kind = 'reappeared') >
+              (SELECT MAX(q.created_at) FROM ai_queries q
+               WHERE q.url = j.url AND q.check_type = 'closed')
         """
     )
     return {r["url"] for r in rows}
