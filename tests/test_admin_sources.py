@@ -337,3 +337,55 @@ def test_a_bundle_moves_to_a_daily_pull_in_one_write(client, admin_headers, f):
         "/v1/admin/sources/gh_new", json={"ingest_interval_hours": 6}, headers=admin_headers
     )
     assert r.status_code == 200 and r.json()["ingest_interval_hours"] == 6
+
+
+def test_one_board_has_one_active_reader(client, admin_headers, f):
+    """Workday and Ashby read the path without regard to case, so a source
+    whose URL differs only in case reads the same board under different
+    posting URLs: each posting verified, filtered and shown twice. A second
+    active reader is refused one at a time and left off by a bulk switch."""
+    url = "https://tjx.wd1.myworkdayjobs.com/wday/cxs/tjx/TJX_EXTERNAL/jobs"
+    copy = {"name": "wd_tjx_companies", "listings_url": url.lower(), "company": "TJX"}
+    f.make_source("wd_tjx")
+    db.execute("UPDATE sources SET listings_url = %s WHERE name = 'wd_tjx'", (url,))
+
+    r = client.post("/v1/admin/sources", json=copy, headers=admin_headers)
+    assert r.status_code == 409
+    assert (r.json()["detail"]["code"], r.json()["detail"]["other"]) == (
+        "DUPLICATE_BOARD",
+        "wd_tjx",
+    )
+    r = client.post("/v1/admin/sources", json={**copy, "active": False}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    r = client.patch(
+        "/v1/admin/sources/wd_tjx_companies", json={"active": True}, headers=admin_headers
+    )
+    assert r.status_code == 409
+    f.make_source("other_board")
+    r = client.patch(
+        "/v1/admin/sources/other_board",
+        json={"listings_url": url, "company": "TJX"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 409
+
+    # A bundle holding the copy beside its keeper switches on without the copy.
+    db.execute("UPDATE sources SET active = false WHERE name = 'wd_tjx'")
+    db.execute(
+        "INSERT INTO source_groups (name, members) "
+        "VALUES ('f500', ARRAY['wd_tjx', 'wd_tjx_companies'])"
+    )
+    r = client.post(
+        "/v1/admin/sources/switch",
+        json={"active": True, "group": "f500", "ingest_interval_hours": 24},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] == ["wd_tjx", "wd_tjx_companies"]
+    assert db.query(
+        "SELECT name, active, ingest_interval_hours FROM sources "
+        "WHERE name LIKE 'wd_tjx%%' ORDER BY name"
+    ) == [
+        {"name": "wd_tjx", "active": True, "ingest_interval_hours": 24},
+        {"name": "wd_tjx_companies", "active": False, "ingest_interval_hours": 24},
+    ]

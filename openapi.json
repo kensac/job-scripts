@@ -55960,7 +55960,7 @@
           "changed"
         ],
         "title": "SourcesSwitched",
-        "description": "What was asked for, what the selection resolved to, and which rows\nactually moved. `selected` and `changed` differ by the rows that already\nheld the value."
+        "description": "What was asked for, what the selection resolved to, and which rows\nactually moved. `selected` and `changed` differ by the rows that already\nheld the value, and by copies of a board another active source reads,\nwhich a switch on leaves off."
       },
       "Spend": {
         "properties": {

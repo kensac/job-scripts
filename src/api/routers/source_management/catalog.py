@@ -110,6 +110,30 @@ def _check_source(
             raise refuse(400, "BAD_TITLE_PATTERN", f"title_pattern: {exc}") from exc
 
 
+def check_one_active_per_board(turning_on: dict[str, str]) -> None:
+    """Refuses to make these sources (name to listings URL) active when another
+    active source, or another of them, reads the same board. Workday and Ashby
+    read the path without regard to case, so a case-only difference is the same
+    board, and its postings get different URLs: each is verified, filtered and
+    shown twice. On 2026-10-18, 91 boards were read by two or more sources."""
+    clash = db.query_one(
+        "SELECT c.name, s.name AS other FROM unnest(%(names)s::text[], %(urls)s::text[]) "
+        "c(name, url) JOIN sources s ON lower(s.listings_url) = lower(c.url) "
+        "AND s.name <> c.name AND (s.active OR s.name = ANY(%(names)s)) "
+        "ORDER BY c.name, s.name LIMIT 1",
+        {"names": list(turning_on), "urls": list(turning_on.values())},
+    )
+    if clash:
+        raise refuse(
+            409,
+            "DUPLICATE_BOARD",
+            f"{clash['name']} reads the same board as active source {clash['other']}; "
+            "switch one off",
+            source=clash["name"],
+            other=clash["other"],
+        )
+
+
 @router.post("/sources")
 def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)) -> CatalogSource:
     if not body.name or not body.listings_url:
@@ -117,6 +141,8 @@ def create_source(body: SourceBody, user: AuthedUser = Depends(require_admin)) -
     _check_source(body.listings_url, body.company, body.title_pattern)
     if db.query_one("SELECT name FROM sources WHERE name = %s", (body.name,)):
         raise refuse(409, "DUPLICATE_NAME", "source name exists")
+    if body.active is not False:
+        check_one_active_per_board({body.name: body.listings_url})
     row = db.query_one(
         "INSERT INTO sources (name, listings_url, description, active, company, title_pattern, "
         f"ingest_interval_hours) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {_SOURCE_COLS}",
@@ -214,6 +240,8 @@ def patch_source(
     _check_source(
         merged["listings_url"], merged["company"], merged["title_pattern"], current["title_pattern"]
     )
+    if merged["active"] and ("active" in fields or "listings_url" in fields):
+        check_one_active_per_board({name: merged["listings_url"]})
     assignments = ", ".join(f"{column} = %({column})s" for column in fields)
     row = db.query_one(
         f"UPDATE sources SET {assignments} WHERE name = %(name)s RETURNING {_SOURCE_COLS}",
