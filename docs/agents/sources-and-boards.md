@@ -68,6 +68,18 @@ board, only not join it. A bundle (`source_groups`) or a
 format is a way of selecting rows for that flag and the interval through
 `POST /admin/sources/switch`, not a second layer of state.
 
+**A board has one active reader.** Two active sources whose listings URLs
+match without regard to case read one board. A case-only difference gives
+every posting a second URL, so it is verified, filtered and shown twice. An
+identical URL pulls the board twice. On 2026-10-18, 91 boards had 99 extra
+readers. `catalog.check_one_active_per_board` refuses a create or patch that
+would add one. A bulk switch on leaves such a copy off, so a bundle can hold
+the switched-off copy next to its keeper. To retire a copy, switch it off.
+Give the keeper the copy's bundles, managed boards and picks. Then move the
+postings the copy stored on the same URL to the keeper's `jobs.source`.
+Boards and filters read a posting through `jobs.source`, so a posting left
+on a switched-off copy drops out of every followed bundle.
+
 **Who reads which source is written in one place.** A person's picks
 (`user_sources`), a managed board's sources (`managed_board_sources`) and a
 bundle's members (`source_groups.members`) are written only by

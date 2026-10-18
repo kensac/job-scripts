@@ -17,7 +17,8 @@ router = APIRouter()
 class SourcesSwitched(BaseModel):
     """What was asked for, what the selection resolved to, and which rows
     actually moved. `selected` and `changed` differ by the rows that already
-    held the value."""
+    held the value, and by copies of a board another active source reads,
+    which a switch on leaves off."""
 
     active: bool | None
     ingest_interval_hours: int | None
@@ -70,6 +71,24 @@ def switch_sources(
             for source_row in db.query("SELECT name, listings_url FROM sources")
             if boards.kind(source_row["listings_url"]) == body.kind
         }
+    # Switching on never makes a second active reader of one board (see
+    # catalog.check_one_active_per_board): a selected copy of a board that an
+    # active source, or an earlier-created selected one, already reads stays
+    # off. A bundle holds a switched-off copy beside its keeper.
+    copies = (
+        [
+            row["name"]
+            for row in db.query(
+                "SELECT s.name FROM sources s WHERE s.name = ANY(%(names)s) AND NOT s.active "
+                "AND EXISTS (SELECT 1 FROM sources o WHERE o.name <> s.name "
+                "AND lower(o.listings_url) = lower(s.listings_url) AND (o.active "
+                "OR (o.name = ANY(%(names)s) AND (o.created_at, o.name) < (s.created_at, s.name))))",
+                {"names": sorted(selected_sources)},
+            )
+        ]
+        if body.active
+        else []
+    )
     fields_to_set = {
         column: value
         for column, value in (
@@ -78,13 +97,16 @@ def switch_sources(
         )
         if value is not None
     }
+    target = {column: f"%({column})s" for column in fields_to_set}
+    if copies:
+        target["active"] = "CASE WHEN name = ANY(%(copies)s) THEN active ELSE %(active)s END"
     changed = db.query(
         "UPDATE sources SET "
-        + ", ".join(f"{column} = %({column})s" for column in fields_to_set)
+        + ", ".join(f"{column} = {value}" for column, value in target.items())
         + " WHERE name = ANY(%(names)s) AND ("
-        + " OR ".join(f"{column} IS DISTINCT FROM %({column})s" for column in fields_to_set)
+        + " OR ".join(f"{column} IS DISTINCT FROM {value}" for column, value in target.items())
         + ") RETURNING name",
-        {**fields_to_set, "names": sorted(selected_sources)},
+        {**fields_to_set, "names": sorted(selected_sources), "copies": copies},
     )
     return SourcesSwitched(
         active=body.active,
