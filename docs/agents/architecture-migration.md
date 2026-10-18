@@ -125,6 +125,11 @@ reader:
      84,052 profiles, 6,610 of 59,645 requirements, 6,749 of 217,212
      embeddings, 52 of 48,239 comp rows). Such a row is not a url's newest
      fetch, so it does not name the url's current text.
+   - A store guard that refuses an "older" write by comparing ids must treat
+     a stored id that names no `page_texts` row as older than any. Such ids
+     can be higher than the url's current fetch, and the embeddings guard
+     refused every write for them, so the sweep paid for the same 126
+     visible postings every hour (about $0.05/day) until 2026-10-18.
    - An answer points at the fetch it judged (`ai_queries.page_fetch_id`)
      and the call that paid for it (`model_call_id`). A writer carries the
      fetch with its text: `store.Page` from `get_contents` and
