@@ -585,7 +585,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.151.0"
+version = "0.152.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -595,9 +595,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/4b/136a9d2ff03259df54b8b0f11c89b3a86f3db295b15353526ee735ff35d9/fastapi-0.151.0.tar.gz", hash = "sha256:f5bd74323048882837f422b6592b11f84dda1754defc4545a4c570cfa19a7a41", size = 484476, upload-time = "2026-10-20T08:11:50.066Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/7c/5d06e9e29b8576f4a02df605873a44b9a9bc76d170197ac2f9a3c09c44ac/fastapi-0.152.0.tar.gz", hash = "sha256:8356eab05470647405cf280fa51b34f7693527b9d2e43288d6425970e43db768", size = 485311, upload-time = "2026-10-20T12:13:01.291Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/dc/a0/1407b17d9a4c04915d2ece8256b373a039d0000d731111d7eb9e05ba77e6/fastapi-0.151.0-py3-none-any.whl", hash = "sha256:498923b00b193654c839ec613dd84d1b0f98f8c20a5371e4f41100c522f114b9", size = 145297, upload-time = "2026-10-20T08:11:48.152Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/94/67981dee51cf0ba40ec9974f58162b90abbf8b210441d339e3a4415fc7dc/fastapi-0.152.0-py3-none-any.whl", hash = "sha256:ecea8d7b0d00a7a4f4ababc1848593441e6c344cbf40615f5390ce1572f43d78", size = 145466, upload-time = "2026-10-20T12:12:59.681Z" },
 ]
 
 [[package]]
@@ -1042,7 +1042,7 @@ requires-dist = [
     { name = "curl-cffi", specifier = "==0.16.3" },
     { name = "distro", specifier = "==1.9.0" },
     { name = "dotenv", specifier = "==0.9.9" },
-    { name = "fastapi", specifier = "==0.151.0" },
+    { name = "fastapi", specifier = "==0.152.0" },
     { name = "ftfy", specifier = "==6.3.1" },
     { name = "google-auth", specifier = "==2.62.0" },
     { name = "google-auth-oauthlib", specifier = "==1.5.0" },
@@ -1064,7 +1064,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = "==1.45.1" },
     { name = "outcome", specifier = "==1.3.0.post0" },
     { name = "pgvector", specifier = "==0.5.1" },
-    { name = "posthog", specifier = "==7.73.0" },
+    { name = "posthog", specifier = "==7.73.1" },
     { name = "prometheus-client", specifier = "==0.26.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
     { name = "psycopg-pool", specifier = "==3.3.3" },
@@ -1529,7 +1529,7 @@ wheels = [
 
 [[package]]
 name = "posthog"
-version = "7.73.0"
+version = "7.73.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1537,9 +1537,9 @@ dependencies = [
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/3f/cc0d73990f90bbd790475e6040d500588068f6fe1be85b4123fec0677833/posthog-7.73.0.tar.gz", hash = "sha256:18734af7584522bc643b58df5df327871cb53781808659faa8c8138394fe876f", size = 764388, upload-time = "2026-10-19T19:20:37.265Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/55/0ac54e115de9bd2e972c2da341f99161b32ab8cf2cab66c87e16572cd346/posthog-7.73.1.tar.gz", hash = "sha256:af3a2faeb0bfccaebac65e5d8aa1568581c563b00ab2852b92b37d3b241d0ef6", size = 764785, upload-time = "2026-10-20T11:53:49.806Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/1c/2ddbde0c08cd714c80ae0e7ef324b64eadd8e70c3a489f32d2589871d029/posthog-7.73.0-py3-none-any.whl", hash = "sha256:7954037a540d729d6120be67053c68f6fe8d2a237c277545968db9ff2e74fbe8", size = 894238, upload-time = "2026-10-19T19:20:35.099Z" },
+    { url = "https://files.pythonhosted.org/packages/50/a8/5cc1117b7c5c26f4a23e75ed8400ec6fe8ba95dc53788ddc079fa894016c/posthog-7.73.1-py3-none-any.whl", hash = "sha256:aca0e3bea228e50fbd245a3b07bef17413ec7a1cc83f464e0c79086f7adbbd23", size = 894496, upload-time = "2026-10-20T11:53:47.464Z" },
 ]
 
 [[package]]
