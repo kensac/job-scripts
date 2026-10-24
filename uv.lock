@@ -585,7 +585,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.157.0"
+version = "0.158.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -595,9 +595,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/7b/f9540549feb36e84c3420aea470148d0f0bcd1e9d1aec5b36216f3f31738/fastapi-0.157.0.tar.gz", hash = "sha256:460d48b9fe6fabbb785630fc5b256710bc82723b597b4bfbd6e4470ae5bb20f4", size = 504894, upload-time = "2026-10-21T13:56:33.414Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/47/702f3164e1453923434fb997fa5368a7f8e6a443e149d5c0e5148f279623/fastapi-0.158.0.tar.gz", hash = "sha256:890440689039bdadb06131bafae81eb63468a0dd9f6185fcec47afb69424ea6a", size = 509671, upload-time = "2026-10-21T17:02:14.798Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/c3/759716158338892ed8e483077241cdf80e1fd727f56baf750c75bfea58de/fastapi-0.157.0-py3-none-any.whl", hash = "sha256:45b5cbf098ce3f47e008ca67931ce333d028129c823e3b6766a3bd0d70b81f7f", size = 147897, upload-time = "2026-10-21T13:56:31.895Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/df/f273d102d6ee50c5de3e56023a3e69bad30c209f8002e8d2efeecbeb114c/fastapi-0.158.0-py3-none-any.whl", hash = "sha256:c5127864026eca80a419047caba7760d561160904445fd825a60b6285b86ed0b", size = 148533, upload-time = "2026-10-21T17:02:12.881Z" },
 ]
 
 [[package]]
@@ -1042,7 +1042,7 @@ requires-dist = [
     { name = "curl-cffi", specifier = "==0.16.3" },
     { name = "distro", specifier = "==1.9.0" },
     { name = "dotenv", specifier = "==0.9.9" },
-    { name = "fastapi", specifier = "==0.157.0" },
+    { name = "fastapi", specifier = "==0.158.0" },
     { name = "ftfy", specifier = "==6.3.1" },
     { name = "google-auth", specifier = "==2.62.0" },
     { name = "google-auth-oauthlib", specifier = "==1.5.0" },
@@ -1072,7 +1072,7 @@ requires-dist = [
     { name = "pyasn1-modules", specifier = "==0.4.2" },
     { name = "pydantic", specifier = "==2.14.1" },
     { name = "pyparsing", specifier = "==3.3.3" },
-    { name = "pypdf", specifier = "==6.21.1" },
+    { name = "pypdf", specifier = "==6.21.2" },
     { name = "pysocks", specifier = "==1.7.1" },
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "requests", specifier = "==2.34.2" },
@@ -1787,11 +1787,11 @@ wheels = [
 
 [[package]]
 name = "pypdf"
-version = "6.21.1"
+version = "6.21.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/51/e1/32a9c4dbd94618145f8bab5c623bdb0a528f23fc8719afd77ba0278fd377/pypdf-6.21.1.tar.gz", hash = "sha256:2d62c383acd6e0dff0a96322ba8b1135229343b084d73c6f6cfd947fd291afcb", size = 7088597, upload-time = "2026-10-17T10:29:52.801Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/28/081f1cbcca7042441dafc8de00f48ba60853f89e5bff92c5f26477346d81/pypdf-6.21.2.tar.gz", hash = "sha256:0a3e1c5c886a1be03646c16a04827cc166c2a0575c971b26a4bf89686551c2d4", size = 7144571, upload-time = "2026-10-21T16:44:55.272Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/e6/24c944e473c34e818cf1b98085796fcd780465ecfe17663f2bf8fee1958b/pypdf-6.21.1-py3-none-any.whl", hash = "sha256:553e2d42f5bb3bb2a785a7d3de8ef90bb7df74b5413eff5a7b4388007ea9254b", size = 405134, upload-time = "2026-10-17T10:29:50.687Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/4d/c9d2d67f204eff463237a1a8f5e25a6923b7b1043982b91fcaf104c8ef60/pypdf-6.21.2-py3-none-any.whl", hash = "sha256:1d44d1a3a200f25062adff0085b02040e4646431ac2ccac22e42679e91466084", size = 407766, upload-time = "2026-10-21T16:44:53.626Z" },
 ]
 
 [[package]]
