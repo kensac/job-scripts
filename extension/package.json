@@ -23,7 +23,7 @@
     "happy-dom": "21.0.4",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "wxt": "0.21.4"
+    "wxt": "0.21.5"
   },
   "dependencies": { "react": "19.3.1", "react-dom": "19.3.1" },
   "overrides": { "esbuild": "0.28.2" }
