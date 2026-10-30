@@ -42,7 +42,7 @@ dependencies = [
     "posthog==7.75.11",
     "psycopg-pool==3.3.3",
     "psycopg[binary]==3.3.6",
-    "pyasn1==0.6.4",
+    "pyasn1==0.6.5",
     "pyasn1_modules==0.4.2",
     "pydantic==2.14.1",
     "pyparsing==3.3.3",
