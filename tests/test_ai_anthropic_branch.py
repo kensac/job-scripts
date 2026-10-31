@@ -72,7 +72,9 @@ async def test_the_anthropic_branch_round_trips_a_recorded_response(monkeypatch)
     assert usage["prompt_tokens"] == 160 and usage["completion_tokens"] == 9
     assert usage["cached_tokens"] == 40
     assert usage["cache_write_tokens"] == 0
-    assert seen["headers"]["x-api-key"] == "test-key"
+    # Version 2 of the library sends the key as a bearer token with API version
+    # 2026-10-21, which the API accepted on a live call (2026-10-31).
+    assert seen["headers"]["authorization"] == "Bearer test-key"
     assert seen["url"].endswith("/v1/messages")
     body = seen["body"]
     assert body["model"] == "claude-fable-5-1" and body["max_tokens"] == 500
