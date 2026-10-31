@@ -87,7 +87,10 @@ An OR is index-backed only when every arm is, so one arm's unused index can
 be what keeps the others usable. Drop with `DROP INDEX CONCURRENTLY IF
 EXISTS` inside `autocommit_block()` under a `lock_timeout`, and have the
 downgrade rebuild it concurrently. `7c0b33a7fd95` is the worked example,
-including an index with zero scans it kept.
+including an index with zero scans it kept. An index whose only caller moved elsewhere is the
+same case with a date: `last_idx_scan` shows when the scans stopped, and a
+single-column index that leads a composite one is redundant outright.
+`idx_ai_queries_url_trgm` and `idx_ai_queries_url` are the example.
 
 **A table that is about to take a bulk update gets per-table autovacuum
 settings first.** Stock `autovacuum_vacuum_scale_factor` is 0.2: a table

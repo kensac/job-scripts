@@ -46,7 +46,6 @@ class AiQuery(Base):
     __tablename__ = "ai_queries"
     __table_args__ = (
         Index("idx_ai_queries_batch", "batch_id"),
-        Index("idx_ai_queries_url", "url"),
         Index("idx_ai_queries_url_check", "url", "check_type"),
         Index("idx_ai_queries_status", "status"),
         Index("idx_ai_queries_check_type", "check_type"),
@@ -84,17 +83,14 @@ class AiQuery(Base):
             postgresql_include=["status"],
             postgresql_where=text("check_type = 'custom' AND status IN ('passed', 'rejected')"),
         ),
-        # url serves the per-host fetch pacing LIKE, reason the reason-group
-        # regex. company and job_title had one each for the admin search;
-        # production never scanned either, so that search is a seq scan.
-        *(
-            Index(
-                f"idx_ai_queries_{col}_trgm",
-                col,
-                postgresql_using="gin",
-                postgresql_ops={col: "gin_trgm_ops"},
-            )
-            for col in ("url", "reason")
+        # The reason-group regex. url, company and job_title had one each;
+        # nothing scans them any more (the migrations dropping them say why),
+        # so the admin search is a seq scan.
+        Index(
+            "idx_ai_queries_reason_trgm",
+            "reason",
+            postgresql_using="gin",
+            postgresql_ops={"reason": "gin_trgm_ops"},
         ),
     )
 
