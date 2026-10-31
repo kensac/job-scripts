@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
-from core import verdict_reads
+from core import page_fetches, verdict_reads
 from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.derivations import skills as skills_lib
 from core.derivations.requirements import (
@@ -71,9 +71,9 @@ _CANDIDATES = f"""
            OR r.content_row_id IS DISTINCT FROM cr.content_row_id
         LIMIT %(cap)s
     )
-    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content
+    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content, q.content_ref
     FROM todo t
-    {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
+    {CONTENT_LATERAL.format(url="t.url", columns="input_content, content_ref")}
 """
 
 
@@ -188,7 +188,7 @@ def _store(
 
 
 def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
-    return db.query(_CANDIDATES, {"cap": cap})
+    return page_fetches.resolve(db.query(_CANDIDATES, {"cap": cap}))
 
 
 def _requests(rows: list[Row]) -> list[BatchSpec]:

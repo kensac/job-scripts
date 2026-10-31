@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from api import compensation_candidates, db
-from core import catalog, verdict_reads
+from core import catalog, page_fetches, verdict_reads
 from core.batch import BatchResult, BatchSpec, structured_response_spec
 from core.derivations.compensation import (
     COMP_BASES,
@@ -51,13 +52,13 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
     cte, eligible = compensation_candidates.selection(
         bool(db.get_config("compensation_demand_gate_enabled"))
     )
-    return db.query(
+    rows = db.query(
         f"""
         {cte}
-        SELECT j.id, j.url, q.input_content, q.id AS content_row_id,
+        SELECT j.id, j.url, q.input_content, q.content_ref, q.id AS content_row_id,
                CASE WHEN {_UNREADABLE} THEN NULL ELSE c.content_hash END AS stored_hash
         FROM jobs j
-        {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+        {CONTENT_LATERAL.format(url="j.url", columns="id, input_content, content_ref")}
         LEFT JOIN job_comp c ON c.url = j.url
         WHERE (c.url IS NULL
                OR (c.content_row_id IS NOT NULL AND c.content_row_id <> q.id)
@@ -70,6 +71,13 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
         """,
         {"cap": cap},
     )
+    return page_fetches.resolve(rows)
+
+
+def _hash(text: str) -> str:
+    """The stored content_hash: of the text the model read, so an unchanged
+    re-fetch can be told from a changed one (tasks.rescrape hashes the same)."""
+    return hashlib.sha256(text[:COMP_INPUT_CHARS].encode("utf-8")).hexdigest()
 
 
 def _requests(rows: list[Row]) -> list[BatchSpec]:
@@ -79,7 +87,11 @@ def _requests(rows: list[Row]) -> list[BatchSpec]:
             COMP_INSTRUCTIONS,
             r["input_content"][:COMP_INPUT_CHARS],
             CompExtract,
-            context={"job_id": r["id"], "content_row_id": r["content_row_id"]},
+            context={
+                "job_id": r["id"],
+                "content_row_id": r["content_row_id"],
+                "content_hash": _hash(r["input_content"]),
+            },
         )
         for r in rows
     ]
@@ -112,6 +124,10 @@ def _store(result: BatchResult, context: dict[str, Any], parsed: CompExtract) ->
         "basis": comp_basis,
         "model": result.model,
         "row": context["content_row_id"],
+        # A batch submitted before the hash rode in its context is hashed
+        # from the stored row, which is inline: nothing was held by reference
+        # until every image carried this.
+        "hash": context.get("content_hash"),
         "chars": COMP_INPUT_CHARS,
     }
     # The guard is in the statement: it reads the current page row again, so
@@ -132,7 +148,9 @@ _STORE = (
                           comp_basis, model, content_hash, content_row_id)
     SELECT page.url, %(min)s, %(max)s, %(text)s, %(period)s, %(currency)s, %(basis)s,
            %(model)s,
-           encode(sha256(convert_to(left(q.input_content, %(chars)s), 'UTF8')), 'hex'), q.id
+           COALESCE(%(hash)s::text,
+                    encode(sha256(convert_to(left(q.input_content, %(chars)s), 'UTF8')), 'hex')),
+           q.id
     FROM (VALUES (%(url)s::text)) AS page(url)
     """
     + CONTENT_LATERAL.format(url="page.url", columns="id, input_content")

@@ -34,7 +34,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
         WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {SUBSCRIBED_SOURCE.format(source="j.source")}
           AND NOT EXISTS (
             SELECT 1 FROM page_texts q WHERE q.url = j.url
-              AND length(q.input_content) > {MIN_CONTENT_CHARS})
+              AND q.chars > {MIN_CONTENT_CHARS})
           -- Any attempt waits out the base window, including one that
           -- stored too little text to count above; without this the backlog
           -- was the same dead postings every cycle.

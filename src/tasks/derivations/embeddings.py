@@ -9,6 +9,7 @@ from typing import Any
 
 from api import db
 from api.board import visibility
+from core import page_fetches
 from core.batch import BatchResult, BatchSpec
 from core.derivations.embeddings import (
     EMBEDDING_BATCH_SIZE,
@@ -59,9 +60,9 @@ def _candidate_sql(scope: str) -> str:
            OR e.content_row_id IS DISTINCT FROM cr.content_row_id
         LIMIT %(cap)s
     )
-    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content
+    SELECT t.url, t.content_row_id, t.stored_hash, q.input_content, q.content_ref
     FROM todo t
-    {CONTENT_LATERAL.format(url="t.url", columns="input_content")}
+    {CONTENT_LATERAL.format(url="t.url", columns="input_content, content_ref")}
 """
 
 
@@ -100,7 +101,7 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
     if not os.environ.get("OPENAI_API_KEY"):
         logger.info("no api key; nothing embedded")
         return []
-    return db.query(_CANDIDATES, {"cap": cap})
+    return page_fetches.resolve(db.query(_CANDIDATES, {"cap": cap}))
 
 
 def _requests(rows: list[Row]) -> list[BatchSpec]:

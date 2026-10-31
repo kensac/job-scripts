@@ -107,10 +107,10 @@ def _candidates(board: _Board) -> list[_Candidate]:
         f"""
         SELECT j.id, j.url, j.company, j.title, j.source,
                COALESCE(j.date_posted::timestamp AT TIME ZONE 'UTC', j.created_at) AS sort_at,
-               content.id AS content_query_id, length(content.input_content) AS content_chars
+               content.id AS content_query_id, content.chars AS content_chars
         FROM jobs j
         LEFT JOIN LATERAL (
-          SELECT q.id, q.input_content FROM page_texts q
+          SELECT q.id, q.chars FROM page_texts q
           WHERE q.url = j.url
           ORDER BY q.id DESC LIMIT 1
         ) content ON true

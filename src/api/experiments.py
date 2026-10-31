@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from api import db
-from core import catalog, providers, verdict_reads
+from core import catalog, page_fetches, providers, verdict_reads
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 Params = dict[str, Any]
@@ -193,14 +193,16 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
         chunk = [r["url"] for r in order[start : start + _SAMPLE_CHUNK]]
         found = {
             r["url"]: r
-            for r in db.query(
-                f"""
-                SELECT j.url, j.company, j.title, q.input_content
+            for r in page_fetches.resolve(
+                db.query(
+                    f"""
+                SELECT j.url, j.company, j.title, q.input_content, q.content_ref
                 FROM jobs j
-                {CONTENT_LATERAL.format(url="j.url", columns="input_content")}
+                {CONTENT_LATERAL.format(url="j.url", columns="input_content, content_ref")}
                 WHERE j.url = ANY(%(urls)s) AND {verdict_reads.verified_open("j.url")}
                 """,
-                {"urls": chunk},
+                    {"urls": chunk},
+                )
             )
         }
         out += [found[u] for u in chunk if u in found]

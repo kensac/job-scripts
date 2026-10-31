@@ -14,7 +14,7 @@ from api.orm.ai import AiQuery
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale
-from core import query_instructions, reason_taxonomy
+from core import answer_inputs, page_fetches, query_instructions, reason_taxonomy
 
 router = APIRouter()
 
@@ -97,7 +97,8 @@ def _query_filter_clause(
         # A sequential scan of ai_queries: company and job_title have no
         # trigram index (7c0b33a7fd95 dropped them unscanned), and an OR is
         # index-backed only when every arm is. deep=true adds input_content,
-        # the page dumps, which multiplies what that scan reads.
+        # the page dumps, which multiplies what that scan reads. A page held
+        # by reference (core.page_fetches) is not in the database to match.
         cols = (
             "(reason ILIKE %(q)s OR url ILIKE %(q)s OR company ILIKE %(q)s OR job_title ILIKE %(q)s"
         )
@@ -433,7 +434,28 @@ def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> Query
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown query")
+    if row["input_content"] is None:
+        row["input_content"] = _held_input(row)
     return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
+
+
+def _held_input(row: dict) -> str | None:
+    """The input of a row whose page text is held by reference, which
+    ledger_rows cannot rebuild in SQL: a fetch row is its own text, and an
+    answer's is core.answer_inputs over its fetch's text, as the view does."""
+    if row["config_name"] == "content-cache":
+        return page_fetches.text_of(row["id"])
+    answer = db.query_one("SELECT page_fetch_id FROM ai_queries WHERE id = %s", (row["id"],))
+    fetch_id = answer["page_fetch_id"] if answer else None
+    text = page_fetches.text_of(fetch_id) if fetch_id is not None else None
+    if text is None:
+        return None
+    rebuilt = db.query_one(
+        f"SELECT {answer_inputs.sql('q', '%(text)s::text')} AS input "
+        "FROM ai_queries q WHERE q.id = %(id)s",
+        {"text": text, "id": row["id"]},
+    )
+    return rebuilt["input"] if rebuilt else None
 
 
 class DeleteQueries(BaseModel):
