@@ -108,7 +108,10 @@ every pull request, because generated data needs no credential.
 **`@pytest.mark.integration`.** A synced copy of real production. Skipped when
 the database does not hold one, except in the nightly `Real-data checks`
 workflow, which fails before running them when the secret or the synced copy
-is missing: a nightly that skips everything is green and checks nothing. Use it only when the subject is something a
+is missing: a nightly that skips everything is green and checks nothing. The database listens on the tailnet only, so both of its jobs join it
+first as an ephemeral `tag:ci` node (repository secrets `TS_OAUTH_CLIENT_ID`
+and `TS_OAUTH_SECRET`, plus a `tag:ci` to `100.79.4.41:5432` grant in the
+tailnet policy); without that a hosted runner times out on connect. Use it only when the subject is something a
 live writer produced and a generator cannot: what the comp extractor wrote,
 what users typed, whether the reaper is still requeueing, hashes stored by an
 older version of the code.
