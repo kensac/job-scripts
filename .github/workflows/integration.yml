@@ -42,6 +42,20 @@ jobs:
       - run: uv sync --frozen --no-dev
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      # Postgres listens on the tailnet only (100.79.4.41:5432, since
+      # 2026-10-04), so a hosted runner joins as an ephemeral tag:ci node
+      # first; without it both jobs time out on connect. The OAuth client and
+      # the tag:ci -> 100.79.4.41:5432 grant are the ones homelab-config's
+      # deploys use (its docs/cd/README.md). --accept-dns=false is required:
+      # the tailnet resolver breaks public DNS on the runner.
+      - name: Join tailnet
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-dns=false
+
       # A check that cannot run fails. Skipping here was green every night
       # while nothing was measured, which reads exactly like "production
       # still matches".
@@ -72,6 +86,20 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # Postgres listens on the tailnet only (100.79.4.41:5432, since
+      # 2026-10-04), so a hosted runner joins as an ephemeral tag:ci node
+      # first; without it both jobs time out on connect. The OAuth client and
+      # the tag:ci -> 100.79.4.41:5432 grant are the ones homelab-config's
+      # deploys use (its docs/cd/README.md). --accept-dns=false is required:
+      # the tailnet resolver breaks public DNS on the runner.
+      - name: Join tailnet
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-dns=false
 
       # A check that cannot run fails. The integration tests skip themselves
       # on a database that is not a synced copy (tests/conftest.py reads the
