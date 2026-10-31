@@ -17,8 +17,10 @@ def test_dropped_indexes_are_gone_and_the_url_reads_keep_theirs():
         "idx_ai_queries_job_title_trgm",
         "idx_ai_queries_company_trgm",
         "idx_ai_queries_cost_created",
+        "idx_ai_queries_url_trgm",
+        "idx_ai_queries_url",
     }
     assert {
-        "idx_ai_queries_url_trgm",
+        "idx_ai_queries_url_check",
         "idx_ai_queries_reason_trgm",
     } <= present
