@@ -516,9 +516,32 @@ NULL for a held fetch, so the admin detail rebuilds it from `text_of`
 through the same `core.answer_inputs.sql`. The admin ledger's deep search
 does not match held text.
 
+**Which rows are held is one rule, `tasks.page_text_tiering.COLD`.** A fetch
+older than `page_text_cold_after_days` (14) is held when a newer fetch of its
+page holds text `CONTENT_LATERAL` prefers, or when its posting has been
+unavailable with no source observing it for the whole window. On 2026-10-31,
+98.8% of postings that reappeared did so within 14 days. The hourly
+`tier_page_text` task brings back inline every held row the rule no longer
+selects, then holds the inline rows it does, at most
+`page_text_tiering_per_cycle` of each, oldest first. So the stored shape
+follows the settings: a reopened posting, a longer window, or
+`page_text_tiering_enabled` switched off all bring pages back. Nothing is
+deleted and ids never change, so every `content_row_id` and `page_fetch_id`
+stays true.
+
+**A move is upload, read back, then clear.** `PayloadStore.put_bundle` reads
+every member back before any row is cleared, and the clear only touches rows
+still inline. Each move or pull-back is a row update, which marks its hours
+dirty for the ledger rollup (`ledger_dirty_fetches`); oldest-first keeps each
+run inside a few hours. The TOAST space a move frees is reused by new fetches,
+and comes back to disk only with `VACUUM FULL page_fetches`.
+
 **Rollout order.** The release that added the columns, the view and the
-resolving readers runs on every API and worker before anything moves text.
-An older image reads a held row as no text.
+resolving readers (#1230) runs on every API and worker before
+`page_text_tiering_enabled` is switched on. An older image reads a held row
+as no text. Rolling back past #1230 needs the setting off and the task to
+have brought every row back first; its migration's downgrade refuses while
+any row is held.
 
 ## A pull rewrites a catalog row only when the row would change
 

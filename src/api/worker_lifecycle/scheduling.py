@@ -106,6 +106,13 @@ def schedule_ingest_cycle() -> None:
     # reconcile stores what catalog.AVAILABLE says of them, and writes
     # nothing once the catalog agrees (catalog.reconcile_available).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
+    # Where page text lives follows one rule (tasks.page_text_tiering). One at
+    # a time: two runs would upload the same rows twice.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'tier_page_text' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("tier_page_text", {"cycle": cycle}, dedupe_key=f"tier-page-text:{cycle}")
     # Messages whose current event or match pointer lags its log
     # (tasks.mail.pointers). Counting them is a pass over every message,
     # 0.9 s on production on 2026-10-10, so the task counts once a cycle

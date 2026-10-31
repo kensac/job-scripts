@@ -47,6 +47,30 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "When disabled, every fetched posting is admitted while listings.kept still records "
         "whether the stored pattern matched, so the bypass remains measurable and reversible.",
     ),
+    # tasks.page_text_tiering. Off until every API and worker reads text held
+    # by reference (core.page_fetches.resolve); switched off, the next runs
+    # bring every held page back inline.
+    "page_text_tiering_enabled": ConfigKey(
+        section="Catalog",
+        default=False,
+        value_type=bool,
+        help="Hold page text that nothing reads in object storage: older copies of a page "
+        "fetched again, and the pages of postings closed for the window below. Switched off, "
+        "the hourly task brings every held page back into the database.",
+    ),
+    "page_text_cold_after_days": ConfigKey(
+        section="Catalog",
+        default=14,
+        value_type=PositiveInt,
+        help="Days a fetch must be old, and its posting closed, before its page text moves to "
+        "object storage. Raising it brings back the pages it no longer covers.",
+    ),
+    "page_text_tiering_per_cycle": ConfigKey(
+        section="Catalog",
+        default=20000,
+        value_type=PositiveInt,
+        help="Most page texts the hourly task moves, and separately brings back, in one run.",
+    ),
     "verification_reachability_gate_enabled": ConfigKey(
         section="Catalog",
         default=False,
