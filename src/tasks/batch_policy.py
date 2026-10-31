@@ -26,13 +26,13 @@ def _unsupported(task_id: int, cfg: ai.AIConfig) -> None:
 
 
 def require_transport(task_id: int, cfg: ai.AIConfig) -> None:
-    # The persisted batch collector currently uses only the server OpenAI key.
-    # A provider offering batches does not make a different credential usable
-    # by that collector, and falling back would violate the scheduled intent.
+    # The persisted batch collector holds only the server's own keys, one per
+    # vendor whose protocol core.batch implements. A person's credential is
+    # not usable by it, and falling back would violate the scheduled intent.
     if (
         cfg.key_source != "owner"
-        or cfg.provider != "openai"
-        or providers.PROVIDERS["openai"].batch_endpoint is None
+        or cfg.provider not in ("openai", "anthropic")
+        or providers.PROVIDERS[cfg.provider].batch_endpoint is None
     ):
         _unsupported(task_id, cfg)
 
@@ -43,7 +43,7 @@ def transport(task_id: int, cfg: ai.AIConfig) -> str:
 
     A person who brought their own key was promised no cap and their own
     bill (Kanishk, 2026-09-08), and the persisted batch collector only holds
-    the server's OpenAI key, so their hourly sweep runs live, billed to them,
+    the server's keys, so their hourly sweep runs live, billed to them,
     rather than not at all. Refusing with BATCH_UNSUPPORTED is reserved for
     the shared key, where a live fallback would spend the shared budget at
     full price against the scheduled intent."""

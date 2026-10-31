@@ -14,8 +14,10 @@ def test_catalog_distinguishes_vendor_batch_from_application_transport():
     anthropic = {m["model"]: m for m in _catalog("anthropic")}
     opus = anthropic["claude-opus-5"]
     assert opus["vendor_batch_supported"] is True
-    assert opus["batch_available"] is False
-    assert "not implemented" in opus["batch_unavailable_reason"]
+    assert opus["batch_available"] is True
+    grok = {m["model"]: m for m in _catalog("xai")}["grok-4.3"]
+    assert grok["vendor_batch_supported"] is True
+    assert "not implemented" in grok["batch_unavailable_reason"]
     assert opus["cache_write_5m_per_mtok"] == 6.25
     assert opus["cache_write_1h_per_mtok"] == 10
     assert opus["rate_cached_in_per_mtok"] == 0.5

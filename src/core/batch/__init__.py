@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Iterable
 
 from openai import AsyncOpenAI
 
-from core import batch_capabilities
+from core import batch_capabilities, providers, store
+from core.batch import anthropic_batches as anthropic
 from core.batch.collection import _collect_batch
 from core.batch.progress import TERMINAL_STATES, BatchProgress, is_terminal, read_batch_progress
 from core.batch.specs import (
@@ -135,18 +137,30 @@ async def submit_batches(
     reason = batch_capabilities.unavailable_reason(model)
     if reason:
         raise ValueError(f"BATCH_UNSUPPORTED: {model}: {reason}")
-    client = _client()
+    vendor = providers.provider_of(model)
+    client = anthropic.client() if vendor == "anthropic" else _client()
     if not client or not specs:
         return []
     if len({spec.endpoint for spec in specs}) != 1:
         raise ValueError("a provider submission must contain exactly one endpoint")
+    if vendor == "anthropic":
+        # Fails the whole submission before anything is sent, rather than
+        # wave by wave below, which would read as a provider error.
+        for spec in specs:
+            anthropic.request_params(spec, model, reasoning_effort, max_output_tokens)
     chunks = _chunk_specs(specs, max_output_tokens)
     logger.info(f"Submitting {len(specs)} requests as {len(chunks)} batch(es)")
     ids: list[str] = []
     for index, chunk in enumerate(chunks, start=1):
         try:
-            batch = await _submit_chunk(
-                client, chunk, model, reasoning_effort, max_output_tokens, on_event
+            submit = anthropic.submit_chunk if vendor == "anthropic" else _submit_chunk
+            batch = await submit(
+                client,  # type: ignore[arg-type]
+                chunk,
+                model,
+                reasoning_effort,
+                max_output_tokens,
+                on_event,
             )
         except Exception as exc:
             # A failed submission must not discard the waves already created
@@ -158,10 +172,21 @@ async def submit_batches(
 
 
 async def batch_progress(batch_ids: list[str]) -> dict[str, BatchProgress]:
-    client = _client()
-    if not client:
-        return {}
-    return await read_batch_progress(client, batch_ids)
+    out: dict[str, BatchProgress] = {}
+    theirs = [b for b in batch_ids if anthropic.holds(b)]
+    ours = [b for b in batch_ids if not anthropic.holds(b)]
+    client = _client() if ours else None
+    if client:
+        out.update(await read_batch_progress(client, ours))
+    claude = anthropic.client() if theirs else None
+    if claude is None:
+        return out
+    for batch_id in theirs:
+        try:
+            out[batch_id] = anthropic.progress(await claude.messages.batches.retrieve(batch_id))
+        except Exception as exc:
+            logger.warning(f"Batch {batch_id} status check failed: {exc}")
+    return out
 
 
 async def run_responses_batch(
@@ -174,6 +199,8 @@ async def run_responses_batch(
     reason = batch_capabilities.unavailable_reason(model)
     if reason:
         raise ValueError(f"BATCH_UNSUPPORTED: {model}: {reason}")
+    if providers.provider_of(model) == "anthropic":
+        return await _run_anthropic(specs, model, reasoning_effort, max_output_tokens, on_event)
     client = _client()
     if not client:
         return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}
@@ -219,6 +246,29 @@ async def run_responses_batch(
     return results
 
 
+async def _run_anthropic(
+    specs: list[BatchSpec],
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int,
+    on_event: BatchEventHook = None,
+) -> dict[str, BatchResult]:
+    """Submit-and-wait on the Anthropic transport, for the experiment runner."""
+    if not anthropic.client():
+        return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}
+    ids = await submit_batches(specs, model, reasoning_effort, max_output_tokens, on_event)
+    custom_ids = [spec.custom_id for spec in specs]
+    results: dict[str, BatchResult] = {}
+    while ids:
+        collected, ids = await _collect_anthropic(ids, on_event, custom_ids)
+        results.update({r.custom_id: r for r in collected})
+        if ids:
+            await asyncio.sleep(BATCH_POLL_INTERVAL)
+    for spec in specs:
+        results.setdefault(spec.custom_id, BatchResult(spec.custom_id, error="not submitted"))
+    return results
+
+
 async def collect_finished_batches(
     batch_ids: list[str], on_event: BatchEventHook = None
 ) -> tuple[list[BatchResult], list[str]]:
@@ -233,11 +283,19 @@ async def collect_finished_batches(
     batch, not the request: take what finished, hand the rest back to be
     parked on again.
     """
-    client = _client()
-    if not client:
-        return [], list(batch_ids)
     results: list[BatchResult] = []
     unfinished: list[str] = []
+    theirs = [b for b in batch_ids if anthropic.holds(b)]
+    if theirs:
+        done, waiting = await _collect_anthropic(theirs, on_event)
+        results.extend(done)
+        unfinished.extend(waiting)
+    batch_ids = [b for b in batch_ids if not anthropic.holds(b)]
+    if not batch_ids:
+        return results, unfinished
+    client = _client()
+    if not client:
+        return results, unfinished + batch_ids
     for batch_id in batch_ids:
         try:
             batch = await client.batches.retrieve(batch_id)
@@ -253,6 +311,39 @@ async def collect_finished_batches(
             continue
         collected: dict[str, BatchResult] = {}
         await _collect_batch(client, batch, collected, create_missing=True)
+        results.extend(collected.values())
+    return results, unfinished
+
+
+async def _collect_anthropic(
+    batch_ids: list[str], on_event: BatchEventHook, custom_ids: Iterable[str] | None = None
+) -> tuple[list[BatchResult], list[str]]:
+    """Anthropic results name a request by the id it was sent under
+    (anthropic.wire_id). `custom_ids` maps them back; without it they are the
+    submitting task's frozen requests."""
+    claude = anthropic.client()
+    if not claude:
+        return [], list(batch_ids)
+    given = None if custom_ids is None else anthropic.wire_ids(custom_ids)
+    results: list[BatchResult] = []
+    unfinished: list[str] = []
+    for batch_id in batch_ids:
+        try:
+            batch = await claude.messages.batches.retrieve(batch_id)
+            anthropic.emit(on_event, batch)
+            if batch.processing_status != "ended":
+                unfinished.append(batch_id)
+                continue
+            known = given
+            if known is None:
+                known = anthropic.wire_ids(store.submitted_custom_ids(batch_id))
+            collected: dict[str, BatchResult] = {}
+            await anthropic.collect(claude, batch, collected, known, create_missing=True)
+        except Exception as exc:
+            # Unreadable is unfinished, as for the OpenAI batches below.
+            logger.warning(f"Batch {batch_id} collection failed: {exc}")
+            unfinished.append(batch_id)
+            continue
         results.extend(collected.values())
     return results, unfinished
 

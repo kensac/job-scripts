@@ -229,6 +229,34 @@ A terminal batch may be collected without waiting for unrelated unfinished
 batches. The event hook reports progress and estimates; it does not book
 model cost.
 
+**Two vendors' batches run here: OpenAI and Anthropic.** `core.batch` picks
+the transport from the model's provider at submission, and from the batch id
+afterwards: an Anthropic id starts `msgbatch_`, so status and collection need
+no lookup. `core.batch.anthropic_batches` owns that vendor's protocol and
+returns the same `BatchResult` and `BatchProgress` shapes, with usage in the
+Responses receipt shape: cache reads and writes are counted inside
+`input_tokens`, as OpenAI counts them, so consumers and `core.pricing` read
+one shape. Its rules:
+
+- A custom id outside `^[a-zA-Z0-9_-]{1,64}$` (every posting url) is sent as a
+  digest (`wire_id`). Collection maps it back through the submitting task's
+  `batch_requests` rows, found through `ai_batches.task_id`. A result whose
+  sent id maps to no request is kept with an error, not dropped.
+- Every request with instructions puts them in one system block ending at a
+  one-hour cache breakpoint, except a `no_cache` request (#635). The vendor
+  caches a prefix of 512 tokens or more and ignores a shorter one without
+  error. Its tiers' write rate is therefore the one-hour rate, 2x input.
+- Effort is checked against the model's declared set before anything is
+  sent, and a request the transport cannot express fails the whole
+  submission rather than one wave.
+- The vendor's states map to the poller's: `ended` is `completed`,
+  `canceling` is `cancelling`, anything else is `in_progress`. Its errored,
+  canceled and expired requests count as failed, and none of them is billed.
+
+Another vendor's batches need their own module beside it and an entry in
+`core.batch_capabilities` and `tasks.batch_policy`. A vendor that offers
+batches is not one this application can collect.
+
 Location classification uses `classify_locations_max_output_tokens` for new
 submissions. The task model screen and fleet budget estimate read the same
 configured shape. A multi-place response needs an array, so the default allows

@@ -60,10 +60,24 @@ _SCHEMA = StructuredOutputSpec(mode=StructuredOutput.JSON_SCHEMA)
 
 _PRICES_1030 = replace(_PRICES, read_on=datetime.date(2026, 10, 30))
 
+# A tier's cache-write rate is the ONE-HOUR rate, 2x input, because the only
+# writes this application requests are core.batch's one-hour breakpoints; a
+# live call sends no cache_control and writes nothing. Should five-minute
+# writes appear they are billed at the hour's rate, which overstates.
+_WRITE_1H = Decimal("2")
+
 
 def _rates(rate_in: str, rate_out: str, rate_cached_in: str, source: Source = _PRICES) -> Rates:
     return Rates(
-        tiers=(Tier(None, Decimal(rate_in), Decimal(rate_out), Decimal(rate_cached_in)),),
+        tiers=(
+            Tier(
+                None,
+                Decimal(rate_in),
+                Decimal(rate_out),
+                Decimal(rate_cached_in),
+                Decimal(rate_in) * _WRITE_1H,
+            ),
+        ),
         batch_rate=Decimal("0.5"),
         source=source,
         batch_source=_BATCH,
@@ -87,8 +101,6 @@ _EFFORT_46 = Reasoning("effort", ("low", "medium", "high", "max"), ("xhigh",), N
 _EFFORT_45 = Reasoning("effort", ("low", "medium", "high"), ("xhigh", "max"), None, _API_MODELS)
 
 
-# Cache creation is not requested by this integration. Do not treat one-hour
-# cache writes as five-minute writes if explicit caching is added later.
 def _current(
     name: str, note: str, rate_in: str, rate_out: str, cached: str, source: Source = _PRICES
 ) -> Model:
@@ -163,8 +175,10 @@ PROVIDER = Provider(
             # it at the second tier, cache reads and writes included.
             rates=Rates(
                 tiers=(
-                    Tier(100_000, Decimal("0.10"), Decimal("0.50"), Decimal("0.01")),
-                    Tier(None, Decimal("0.50"), Decimal("2.50"), Decimal("0.05")),
+                    Tier(
+                        100_000, Decimal("0.10"), Decimal("0.50"), Decimal("0.01"), Decimal("0.20")
+                    ),
+                    Tier(None, Decimal("0.50"), Decimal("2.50"), Decimal("0.05"), Decimal("1.00")),
                 ),
                 batch_rate=Decimal("0.5"),
                 source=_PRICES_1030,
