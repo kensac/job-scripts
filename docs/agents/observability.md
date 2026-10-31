@@ -887,6 +887,14 @@ against 126M cached reads, about $0.25/day of premium. The batch line and the
 live call both use it, so no caller opts in. A prefix under the provider's
 1,024-token minimum writes and reads nothing, which is right for plain
 verification, reverify and comp, whose instructions are shorter than that.
+The joint verify request carries a fixed description of its input
+(`core.answers._INPUT_NOTE`) that adds no rule and keeps every combination of
+board questions past the minimum: without it, unpublishing Aerospace New Grad
+(2026-10-29) left the longest joint instructions near 860 tokens and
+verification cached nothing, $0.120 per 1,000 batched requests against $0.091
+with the block. The measurement is in that constant's comment. A board whose
+question is removed or shortened can drop a combination back under the
+minimum; `cached_tokens` on the verify purpose in `model_calls` shows it.
 Measured 2026-10-18 (live, gpt-6-luna, production effort, 200 postings
 each), the block form against today's request run twice:
 - Same `input_tokens` on every posting, and each form read the other's cache,

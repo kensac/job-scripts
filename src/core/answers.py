@@ -132,6 +132,61 @@ _JOINT_VERIFY_INSTRUCTIONS = _VERIFY_INSTRUCTIONS.replace(
 assert _JOINT_VERIFY_INSTRUCTIONS != _VERIFY_INSTRUCTIONS
 
 
+# A fixed description of the input, ahead of the questions. It adds no rule; it
+# lifts every joint request past the provider's 1,024-token cache minimum. With
+# Aerospace New Grad unpublished (2026-10-29) the longest joint instructions
+# fell to about 860 tokens and verification cached nothing: $0.120 per 1,000
+# batched requests against $0.094 the week before. Measured 2026-10-31 (live,
+# gpt-6-luna, low effort), today's request twice against it with this block:
+# - 300 recent joint postings: 1,186 tokens cached per request, $0.091 per 1,000.
+#   Tech New Grad keeps 6, 6 and 5; clearance 81, 83 and 83; closed 1, 1, 1.
+# - 300 recent keeps and closures: 1,313 cached, $0.132 to $0.097 per 1,000.
+#   Tech New Grad 64, 60 and 60 (13/17 discordant against itself and the block);
+#   Tech Internships 172, 173 and 178 of 183 (p=0.06, more keeps); clearance 152,
+#   152 and 153; closed 8, 7 and 7.
+_INPUT_NOTE = (
+    "<about_the_input>\n"
+    "This part describes how the request is built. It is not a question and adds no "
+    "rule; it says what the text that follows is, so each answer can be read against "
+    "the right text.\n"
+    "\n"
+    "The user message holds one job posting in three parts, in this order: a line "
+    "naming the company that listed it, a line with the posting's title as the listing "
+    "gave it, and then the text of the posting's own page. The company and title lines "
+    "come from the employer's job listing feed rather than from the page, so they are "
+    "present even when the page text is short or broken. The page text was fetched "
+    "automatically from the posting's link and converted from HTML to plain text. "
+    "Formatting does not survive that conversion: headings, bullet points, tables, "
+    "links and buttons become plain lines, and sections can appear in a different order"
+    " from the one a visitor sees. The text is cut at a fixed length, so a long posting"
+    " can end in the middle of a sentence; where the text ends is a property of the "
+    "fetch, not of the job.\n"
+    "\n"
+    "Careers sites wrap a posting in their own page furniture: site navigation, search "
+    "boxes, cookie and privacy notices, language pickers, sign-in links, lists of "
+    "similar or recently viewed jobs, links to the employer's other openings, equal-"
+    "opportunity statements, benefits summaries shared by every posting, application "
+    "forms with their questions, and footers. Many pages are served by an applicant "
+    "tracking system (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, iCIMS and "
+    "others), whose layout and boilerplate are the same for every employer that uses "
+    "it. Pages are fetched in English where the site offers it, but some arrive partly "
+    "or wholly in another language.\n"
+    "\n"
+    "Each question below is asked of this same text, and each is answered on its own "
+    "terms. Every posting reaches this request through the same steps, whatever its "
+    "employer, location or seniority, so nothing about how a posting was chosen says "
+    "anything about any answer.\n"
+    "\n"
+    "The reply is one JSON object. Its key named verification holds is_closed and "
+    "requires_clearance_or_restrictions, each true or false, and closed_reason and "
+    "clearance_reason, each text. Each board question has its own key, named board_ "
+    "followed by that board's number, holding should_filter, true or false. The "
+    "response schema fixes the keys and their types, so their order in the reply "
+    "carries no meaning.\n"
+    "</about_the_input>"
+)
+
+
 _COUNTS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six"}
 
 
@@ -167,6 +222,8 @@ def joint_verification(board_criteria: dict[int, str]) -> tuple[str, type[BaseMo
         f"You will answer {_COUNTS.get(count, str(count))} independent questions about one job "
         "posting. Answer each exactly as if it were the only question; one answer must not "
         "influence another.\n\n"
+        + _INPUT_NOTE
+        + "\n\n"
         + "\n\n".join(blocks)
         + "\n\nReturn only a JSON object with verification (its four fields) and "
         + ", ".join(f"{key}.should_filter" for key in keys)
