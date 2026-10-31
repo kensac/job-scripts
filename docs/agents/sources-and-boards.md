@@ -482,6 +482,44 @@ row is one new row version, so expect WAL about the size of the rows moved;
 the TOAST it frees is reused after vacuum, and the files shrink only with a
 rewrite, which is not part of this.
 
+
+## A page's text can be held by reference
+
+`core.page_fetches` owns both shapes of a fetch's text, as
+`core.payloads.listings` does for listings. Page text is most of the database
+(4.1 GB of 21 GB on 2026-10-31), and most of it is read by nothing: older
+copies of a page fetched again, and the pages of postings closed long ago.
+Such a row can hold its text as a member of a verified bundle object:
+`content_sha256` names the member, `content_object` and `content_object_size`
+the bundle, and `content_chars` keeps the text's length. `content` is then
+NULL. The four are set together or not at all
+(`ck_page_fetches_reference_whole`).
+
+**Every reader of page text selects `content_ref` beside `input_content` from
+`page_texts` and passes its rows through `core.page_fetches.resolve`.** A held
+row reads NULL in `input_content`, so a reader that skipped it fails on None
+rather than judging an empty page. An inline row costs nothing to resolve. A
+link that cannot be read, or reads something else, raises
+`PayloadUnavailable`; it is never a page without text. Resolve outside a
+transaction. `core.page_fetches.text_of` reads one fetch by id.
+
+**Length is `page_texts.chars`, never `length(input_content)`.** It is the
+stored length on a held row and `length(content)` on an inline one, so "longer
+than MIN_CONTENT_CHARS" is answered the same in both shapes.
+`idx_page_fetches_url_text`'s predicate spells the view's condition and
+`CONTENT_LATERAL`'s exactly, which is what keeps the lookup index-only.
+
+**SQL that computes on the text cannot see a held row.** A hash or a cut of
+the text is computed in Python from resolved text (the comp sweep's
+`content_hash`). `ledger_rows` rebuilds an answer's input in SQL and reads
+NULL for a held fetch, so the admin detail rebuilds it from `text_of`
+through the same `core.answer_inputs.sql`. The admin ledger's deep search
+does not match held text.
+
+**Rollout order.** The release that added the columns, the view and the
+resolving readers runs on every API and worker before anything moves text.
+An older image reads a held row as no text.
+
 ## A pull rewrites a catalog row only when the row would change
 
 `catalog.upsert_postings` follows the first two listings rules above for

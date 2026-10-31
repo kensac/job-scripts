@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from api import db
-from core import verdict_reads
+from core import page_fetches, verdict_reads
 from core.derivations.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 from core.store import AI_ELIGIBLE_JOB, CONTENT_LATERAL
 
 _ELIGIBLE = f"""
     FROM jobs j
-    {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content")}
+    {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content, content_ref")}
     WHERE {AI_ELIGIBLE_JOB.format(job="j")}
       AND {verdict_reads.verified_open("j.url")}
       AND NOT EXISTS (
@@ -24,11 +24,13 @@ PARAMS = {"version": CLASSIFIER_VERSION, "model": JOB_PROFILE_MODEL}
 
 
 def candidates(cap: int) -> list[dict[str, Any]]:
-    return db.query(
-        "SELECT j.url, j.title, q.content_row_id, q.input_content "
-        + _ELIGIBLE
-        + " ORDER BY j.id LIMIT %(cap)s",
-        {**PARAMS, "cap": cap},
+    return page_fetches.resolve(
+        db.query(
+            "SELECT j.url, j.title, q.content_row_id, q.input_content, q.content_ref "
+            + _ELIGIBLE
+            + " ORDER BY j.id LIMIT %(cap)s",
+            {**PARAMS, "cap": cap},
+        )
     )
 
 

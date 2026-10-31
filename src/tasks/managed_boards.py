@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from api import ai, db, run_configs
 from api import managed_boards as runs
 from api.model_calls import Payer
-from core import providers, routing
+from core import page_fetches, providers, routing
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
 from tasks.filtering.execution import (
@@ -19,12 +18,6 @@ from tasks.filtering.execution import (
     frozen_page,
 )
 from tasks.runtime import cancelled, has_batch_work, pending_batch_ids, set_progress
-
-
-@dataclass(frozen=True)
-class _Content:
-    id: int
-    input_content: str
 
 
 async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> None:
@@ -108,11 +101,12 @@ async def _handle_managed_filter(
     # Keyed by the job's content_query_id, which is None for a job with no
     # content: that lookup misses and the job is checked on an empty page.
     frozen_contents: dict[int | None, str] = {
-        row.id: row.input_content
-        for row in db.query_as(
-            _Content,
-            "SELECT id, input_content FROM page_texts WHERE id = ANY(%s)",
-            (content_ids,),
+        row["id"]: row["input_content"]
+        for row in page_fetches.resolve(
+            db.query(
+                "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
+                (content_ids,),
+            )
         )
     }
     jobs = [

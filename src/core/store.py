@@ -215,11 +215,14 @@ MIN_CONTENT_CHARS = 200
 #
 # Not always the same row as get_content(), which takes the newest text of
 # any length.
+#
+# A caller taking input_content also takes content_ref and passes its rows
+# through core.page_fetches.resolve: a row held by reference reads NULL here.
 CONTENT_LATERAL = (
     """
         JOIN LATERAL (
             SELECT {columns} FROM page_texts q
-            WHERE q.url = {url} AND length(q.input_content) > """
+            WHERE q.url = {url} AND q.chars > """
     + str(MIN_CONTENT_CHARS)
     + """
             ORDER BY q.id DESC LIMIT 1
@@ -331,21 +334,26 @@ def get_contents(urls: list[str]) -> dict[str, Page]:
         return {}
     with connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT ON (url) url, id, input_content FROM page_texts "
+            "SELECT DISTINCT ON (url) url, id, input_content, content_ref FROM page_texts "
             "WHERE url = ANY(%s) ORDER BY url, id DESC",
             (urls,),
         ).fetchall()
-    return {row["url"]: Page(row["id"], row["input_content"]) for row in rows}
+    from core.page_fetches import resolve
+
+    return {row["url"]: Page(row["id"], row["input_content"]) for row in resolve(rows)}
 
 
 def get_content(url: str) -> str | None:
     """Most recent page text fetched for a url (page_texts)."""
     with connection() as conn:
         row = conn.execute(
-            "SELECT input_content FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
+            "SELECT input_content, content_ref FROM page_texts "
+            "WHERE url = %s ORDER BY id DESC LIMIT 1",
             (url,),
         ).fetchone()
-    return row["input_content"] if row else None
+    from core.page_fetches import resolve
+
+    return resolve([row])[0]["input_content"] if row else None
 
 
 def submitted_custom_ids(provider_batch_id: str) -> list[str]:

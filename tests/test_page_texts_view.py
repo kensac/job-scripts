@@ -34,7 +34,7 @@ def test_the_text_lookups_are_index_only():
         "SELECT q.id FROM (SELECT 'https://x/a' AS url) j "
         + store.CONTENT_LATERAL.format(url="j.url", columns="q.id"),
         "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM page_texts q WHERE q.url = 'https://x/a' "
-        f"AND length(q.input_content) > {store.MIN_CONTENT_CHARS})",
+        f"AND q.chars > {store.MIN_CONTENT_CHARS})",
     )
     with db.pool.connection() as conn:
         conn.execute("SET LOCAL enable_seqscan = off")

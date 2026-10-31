@@ -8,7 +8,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, Query, Response
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from api import db
 from api.params import csv
 from api.problem import refuse
 from api.routers.job_board import ATS_SQL, AtsName, Openness
-from core import catalog, verdict_reads
+from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
@@ -127,6 +127,7 @@ class _JobRow:
 @dataclass(frozen=True)
 class _DetailRow(_JobRow):
     content: str | None
+    content_ref: dict[str, Any] | None
     content_fetched_at: datetime.datetime | None
 
 
@@ -423,13 +424,14 @@ def get_public_job_list(
 def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetail:
     detail_sql = f"""
     SELECT {_CARD_COLUMNS.format(sort_expression="mj.sort_at")},
-           content.input_content AS content, content.created_at AS content_fetched_at
+           content.input_content AS content, content.content_ref,
+           content.created_at AS content_fetched_at
     FROM managed_board_jobs mj
     JOIN jobs j ON j.id = mj.job_id
     LEFT JOIN job_comp pay ON pay.url = j.url
     JOIN managed_boards b ON b.id = mj.managed_board_id AND b.published
     LEFT JOIN LATERAL (
-        SELECT q.input_content, q.created_at FROM page_texts q
+        SELECT q.input_content, q.content_ref, q.created_at FROM page_texts q
         WHERE q.url = j.url
         ORDER BY q.id DESC LIMIT 1
     ) content ON TRUE
@@ -439,6 +441,9 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
     if row is None:
         raise refuse(404, "NOT_FOUND", "unknown job", headers={"Cache-Control": "no-store"})
     response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    [page] = page_fetches.resolve(
+        [{"content": row.content, "ref": row.content_ref}], "content", "ref"
+    )
     return PublicJobDetail(
-        job=_card(row), content=row.content, content_fetched_at=row.content_fetched_at
+        job=_card(row), content=page["content"], content_fetched_at=row.content_fetched_at
     )

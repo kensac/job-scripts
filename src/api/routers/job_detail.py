@@ -12,7 +12,7 @@ from api import db, signals
 from api.auth import AuthedUser, require_user
 from api.board.access import require_visible_job
 from api.mail import applications
-from core import catalog, verdict_reads
+from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import CompBasis, CompPeriod
 
 router = APIRouter()
@@ -120,9 +120,12 @@ def job_detail(job_id: int, user: AuthedUser = Depends(require_user)) -> JobDeta
         f"{verdict_reads.closed_verdict('j.url')} AS closed_verdict",
     )
     content_row = db.query_one(
-        "SELECT input_content, created_at FROM page_texts WHERE url = %s ORDER BY id DESC LIMIT 1",
+        "SELECT input_content, content_ref, created_at FROM page_texts "
+        "WHERE url = %s ORDER BY id DESC LIMIT 1",
         (job["url"],),
     )
+    if content_row:
+        [content_row] = page_fetches.resolve([content_row])
     checks = db.query_as(
         CheckVerdict,
         verdict_reads.latest_per(

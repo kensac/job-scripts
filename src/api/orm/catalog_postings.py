@@ -11,6 +11,8 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
+    LargeBinary,
     Text,
     text,
 )
@@ -99,8 +101,11 @@ class PostingUpload(Base):
 class PageFetch(Base):
     """One fetch of a posting's page: what came back and how it was read.
 
-    A fact, appended and never updated, written only by core.page_fetches.
-    page_texts is the view of the fetches that brought text back.
+    A fact, appended and written only by core.page_fetches. The one update
+    is where its text is held: inline in content, or by reference
+    (content_sha256, content_object, content_object_size, with content_chars
+    its length and content NULL), all set together (ck_page_fetches_reference_whole).
+    page_texts is the view of the fetches that brought text back, either way.
 
     Ids come from ai_queries' sequence: the fetches stored there before
     2026-10-10 kept their ids when they moved, so every content_row_id that
@@ -112,13 +117,25 @@ class PageFetch(Base):
         CheckConstraint("status IN ('passed', 'failed')", name="ck_page_fetches_status"),
         Index("idx_page_fetches_url_id", "url", text("id DESC")),
         # The fetches page_texts' readers want: text longer than
-        # core.store.MIN_CONTENT_CHARS. Index-only for CONTENT_LATERAL's id
-        # and the content backfill's gap check (migration 1276e94618f8).
+        # core.store.MIN_CONTENT_CHARS, in either shape. Index-only for
+        # CONTENT_LATERAL's id and the content backfill's gap check
+        # (migrations 1276e94618f8, 7e5c9370784e): the predicate is the view's
+        # condition and the lateral's, spelled as they are.
         Index(
             "idx_page_fetches_url_text",
             "url",
             text("id DESC"),
-            postgresql_where=text("content <> '' AND length(content) > 200"),
+            postgresql_where=text(
+                "(content <> '' OR content_object IS NOT NULL) "
+                "AND COALESCE(content_chars, length(content)) > 200"
+            ),
+        ),
+        CheckConstraint(
+            "(content_object IS NULL AND content_sha256 IS NULL "
+            " AND content_object_size IS NULL AND content_chars IS NULL) OR "
+            "(content IS NULL AND content_sha256 IS NOT NULL "
+            " AND content_object_size IS NOT NULL AND content_chars IS NOT NULL)",
+            name="ck_page_fetches_reference_whole",
         ),
         Index("idx_page_fetches_created_at", "created_at"),
         # The admin ledger's filter options skip-scan distinct values through
@@ -140,5 +157,9 @@ class PageFetch(Base):
     # and 'unknown' (no recorded origin).
     method: Mapped[str] = mapped_column(Text)
     content: Mapped[str | None] = mapped_column(Text)
+    content_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
+    content_object: Mapped[bytes | None] = mapped_column(LargeBinary)
+    content_object_size: Mapped[int | None] = mapped_column(Integer)
+    content_chars: Mapped[int | None] = mapped_column(Integer)
     worker: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

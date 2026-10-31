@@ -302,12 +302,12 @@ _OLD_REACHABLE = f"""
 
 _OLD_CANDIDATES = f"""
     WITH {verification_candidates.TARGETS}, candidates AS (
-    SELECT j.url, j.source, j.company, j.title, q.input_content,
+    SELECT j.url, j.source, j.company, j.title, q.input_content, q.content_ref,
            q.id AS page_fetch_id,
            NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
            NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
     FROM jobs j
-    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content, content_ref")}
     WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {_OLD_REACHABLE}
       AND NOT (j.url = ANY(%(in_flight)s::text[])) AND (
         NOT {verdict_reads.has_verdict("j.url", "closed")}

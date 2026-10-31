@@ -9,7 +9,7 @@ from typing import Any
 from api import ai, ai_pause, db, managed_boards, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
-from core import catalog, near_copy, verdict_reads
+from core import catalog, near_copy, page_fetches, verdict_reads
 from core.answers import VERIFICATION_REQUEST, FilterDecision, joint_question_key
 from core.shapes import VERIFY_TASK
 from core.store import (
@@ -213,7 +213,7 @@ def candidates_sql() -> str:
         WHERE (
             SELECT EXISTS (
                 SELECT 1 FROM page_texts q
-                WHERE q.url = j.url AND length(q.input_content) > {MIN_CONTENT_CHARS})
+                WHERE q.url = j.url AND q.chars > {MIN_CONTENT_CHARS})
             FROM jobs j WHERE j.id = r.id
         )
         -- Freshest first, as the content sweep already selects. The cap
@@ -229,12 +229,12 @@ def candidates_sql() -> str:
         ORDER BY r.date_posted DESC NULLS LAST
         LIMIT %(cap)s
     )
-    SELECT j.url, j.source, j.company, j.title, q.input_content,
+    SELECT j.url, j.source, j.company, j.title, q.input_content, q.content_ref,
            q.id AS page_fetch_id,
            NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
            NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
     FROM chosen c JOIN jobs j ON j.id = c.id
-    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content, content_ref")}
     ORDER BY c.date_posted DESC NULLS LAST
     """
 
@@ -248,12 +248,12 @@ def listed_sql() -> str:
     verdict, so nothing records what happened to them. The availability,
     missing-verdict, in-flight and page-text conditions are the sweep's own."""
     return f"""
-    SELECT j.url, j.source, j.company, j.title, q.input_content,
+    SELECT j.url, j.source, j.company, j.title, q.input_content, q.content_ref,
            q.id AS page_fetch_id,
            NOT {verdict_reads.has_verdict("j.url", "closed")} AS needs_closed,
            NOT {verdict_reads.has_verdict("j.url", "clearance")} AS needs_clearance
     FROM jobs j
-    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content")}
+    {CONTENT_LATERAL.format(url="j.url", columns="id, input_content, content_ref")}
     WHERE j.url = ANY(%(urls)s::text[])
       AND {catalog.IS_AVAILABLE.format(job="j")}
       AND NOT (j.url = ANY(%(in_flight)s::text[]))
@@ -292,6 +292,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             with db.transaction():
                 db.execute("SET LOCAL jit = off")
                 rows = db.query(candidates_sql(), candidate_params)
+        rows = page_fetches.resolve(rows)
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
