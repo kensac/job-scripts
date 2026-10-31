@@ -230,3 +230,11 @@ def test_the_joint_request_asks_for_reasons_only_on_a_flagged_axis():
     instructions, _ = joint_verification({1: "criteria"})
     assert "When that axis is false, an empty string." in instructions
     assert "When that axis is false" not in _VERIFY_INSTRUCTIONS, "the plain request is unchanged"
+
+
+def test_the_joint_request_describes_its_input_ahead_of_the_questions():
+    from core.answers import _INPUT_NOTE, VERIFICATION_REQUEST, joint_verification
+
+    instructions, _ = joint_verification({1: "criteria"})
+    assert instructions.index(_INPUT_NOTE) < instructions.index('<question name="verification">')
+    assert _INPUT_NOTE not in VERIFICATION_REQUEST.instructions, "the plain request is unchanged"
