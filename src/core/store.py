@@ -348,6 +348,20 @@ def get_content(url: str) -> str | None:
     return row["input_content"] if row else None
 
 
+def submitted_custom_ids(provider_batch_id: str) -> list[str]:
+    """The ids of the requests frozen for the task that submitted this batch.
+
+    A superset of the batch's own requests when the task submitted several
+    waves, which is all a caller mapping results back by id needs."""
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT q.custom_id FROM ai_batches b JOIN batch_requests q ON q.task_id = b.task_id "
+            "WHERE b.provider_batch_id = %s",
+            (provider_batch_id,),
+        )
+        return [row["custom_id"] for row in cur.fetchall()]
+
+
 def record_batch_errors(provider_batch_id: str, errors: dict[str, str]) -> None:
     """Every per-request error a batch returned, as the provider wrote it.
 

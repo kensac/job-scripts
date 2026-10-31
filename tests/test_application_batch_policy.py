@@ -28,7 +28,7 @@ def _setup(f, *, cached=True):
 async def test_unsupported_shared_transport_is_refused_before_form_reads(f, monkeypatch):
     uid, _, _ = _setup(f, cached=False)
     task_id = f.make_task("application_sweep", {"user_id": uid}, status="running")
-    cfg = ai.AIConfig("anthropic", "test", "owner", "claude-test")
+    cfg = ai.AIConfig("xai", "test", "owner", "grok-4.3")
     monkeypatch.setattr(application, "load_config", lambda uid: (None, cfg))
     read = []
     monkeypatch.setattr(application, "read_form", read.append)
@@ -43,7 +43,7 @@ async def test_scheduled_draft_gate_precedes_generation_reservation(f, monkeypat
     uid, jid, url = _setup(f)
     application.ensure_answer_rows(uid, jid, [{"key": "why", "label": "Why?"}])
     task_id = f.make_task("application_sweep", {"user_id": uid}, status="running")
-    cfg = ai.AIConfig("anthropic", "test", "owner", "claude-test")
+    cfg = ai.AIConfig("xai", "test", "owner", "grok-4.3")
     monkeypatch.setattr(application, "load_config", lambda uid: (None, cfg))
     rows = [
         {
@@ -154,7 +154,7 @@ async def test_shared_transport_is_rechecked_before_reserving_drafts(f, monkeypa
     configs = iter(
         [
             ai.AIConfig("openai", "test", "owner", "gpt-5-mini"),
-            ai.AIConfig("anthropic", "test", "owner", "claude-test"),
+            ai.AIConfig("xai", "test", "owner", "grok-4.3"),
         ]
     )
     monkeypatch.setattr(application, "load_config", lambda uid: (None, next(configs)))

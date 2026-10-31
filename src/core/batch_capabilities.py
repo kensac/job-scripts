@@ -26,9 +26,9 @@ def unavailable_reason(model: str) -> str | None:
         return "provider does not support batching this model"
     if supported is None:
         return "batch support for this model is unverified"
-    # The persisted collector authenticates with the OpenAI server key and
-    # consumes Responses/Embeddings receipts. A compatible live API does not
-    # make another vendor's batch protocol or credentials interchangeable.
-    if provider != "openai":
+    # A vendor's batches run only where this application implements its
+    # protocol (core.batch): a compatible live API does not make another
+    # vendor's batch protocol or credentials interchangeable.
+    if provider not in ("openai", "anthropic"):
         return "provider batch transport is not implemented in this application"
     return None
