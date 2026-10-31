@@ -45,6 +45,8 @@ def test_gpt56_long_context_prices_the_full_request(model):
     [
         ("claude-fable-5-1", "10", "50", "0.25"),
         ("claude-opus-5-5", "4", "20", "0.20"),
+        ("claude-sonnet-5-5", "2", "10", "0.10"),
+        ("claude-haiku-5-5", "0.10", "0.50", "0.01"),
         ("grok-4.7", "2", "6", "0.50"),
         ("grok-build-0.1", "1", "2", "0.20"),
         ("deepseek-flash", "0.30", "1.20", "0.006"),
@@ -59,6 +61,13 @@ def test_current_models_have_vendor_verified_prices(name, input_rate, output_rat
     assert (tier.rate_in, tier.rate_out, tier.rate_cached_in) == tuple(
         map(Decimal, (input_rate, output_rate, cached_rate))
     )
+
+
+def test_haiku_55_long_prompts_bill_the_whole_request_at_five_times():
+    """Read 2026-10-30: the second tier starts past 100K prompt tokens."""
+    at = pricing.estimate_cost_usd("claude-haiku-5-5", 100_000, 1_000, cache_write_tokens=0)
+    past = pricing.estimate_cost_usd("claude-haiku-5-5", 100_001, 1_000, cache_write_tokens=0)
+    assert past > at * Decimal("4.9")
 
 
 def test_haiku_does_not_accept_an_effort_control():

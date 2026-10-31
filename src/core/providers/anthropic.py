@@ -1,4 +1,4 @@
-"""Direct Claude API rates and capabilities, reviewed 2026-09-23."""
+"""Direct Claude API rates and capabilities, reviewed 2026-09-23; 5.5 models 2026-10-30."""
 
 from __future__ import annotations
 
@@ -58,11 +58,14 @@ _OUTPUT = Output(
 _SCHEMA = StructuredOutputSpec(mode=StructuredOutput.JSON_SCHEMA)
 
 
-def _rates(rate_in: str, rate_out: str, rate_cached_in: str) -> Rates:
+_PRICES_1030 = replace(_PRICES, read_on=datetime.date(2026, 10, 30))
+
+
+def _rates(rate_in: str, rate_out: str, rate_cached_in: str, source: Source = _PRICES) -> Rates:
     return Rates(
         tiers=(Tier(None, Decimal(rate_in), Decimal(rate_out), Decimal(rate_cached_in)),),
         batch_rate=Decimal("0.5"),
-        source=_PRICES,
+        source=source,
         batch_source=_BATCH,
     )
 
@@ -86,13 +89,15 @@ _EFFORT_45 = Reasoning("effort", ("low", "medium", "high"), ("xhigh", "max"), No
 
 # Cache creation is not requested by this integration. Do not treat one-hour
 # cache writes as five-minute writes if explicit caching is added later.
-def _current(name: str, note: str, rate_in: str, rate_out: str, cached: str) -> Model:
+def _current(
+    name: str, note: str, rate_in: str, rate_out: str, cached: str, source: Source = _PRICES
+) -> Model:
     return Model(
         name=name,
         note=note,
         context_tokens=1_000_000,
         structured_output=_SCHEMA,
-        rates=_rates(rate_in, rate_out, cached),
+        rates=_rates(rate_in, rate_out, cached, source),
         reasoning=_EFFORT,
         output=_OUTPUT,
         batch_supported=True,
@@ -148,6 +153,29 @@ PROVIDER = Provider(
             cache_write_1h_per_mtok=Decimal("2"),
         ),
         _current("claude-opus-5-5", "Current Opus; adaptive thinking always on", "4", "20", "0.2"),
+        _current("claude-sonnet-5-5", "Current Sonnet", "2", "10", "0.1", _PRICES_1030),
+        Model(
+            name="claude-haiku-5-5",
+            note="Current Haiku; batched, priced like gpt-6-luna",
+            context_tokens=1_000_000,
+            structured_output=_SCHEMA,
+            # A request whose prompt passes 100K tokens bills every token in
+            # it at the second tier, cache reads and writes included.
+            rates=Rates(
+                tiers=(
+                    Tier(100_000, Decimal("0.10"), Decimal("0.50"), Decimal("0.01")),
+                    Tier(None, Decimal("0.50"), Decimal("2.50"), Decimal("0.05")),
+                ),
+                batch_rate=Decimal("0.5"),
+                source=_PRICES_1030,
+                batch_source=_BATCH,
+            ),
+            reasoning=_EFFORT,
+            output=_OUTPUT,
+            batch_supported=True,
+            cache_write_5m_per_mtok=Decimal("0.125"),
+            cache_write_1h_per_mtok=Decimal("0.20"),
+        ),
         _current(
             "claude-fable-5-1",
             "Frontier reasoning; adaptive thinking always on",
