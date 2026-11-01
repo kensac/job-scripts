@@ -140,3 +140,30 @@ test("a rich-text editor receives an answer as text, not markup", async () => {
   await editor.happyDOM.close();
   await window.happyDOM.close();
 });
+
+// Markup from a production page report (Chime, 2026-10-03): once the resume
+// uploads, Greenhouse replaces its file input with the file's name and a
+// Remove button inside the same labelled group.
+test("Greenhouse still reads an uploaded resume after the page drops its file input", async () => {
+  const { window, context } = dom(
+    '<form id="application-form">' +
+      '<div role="group" aria-labelledby="upload-label-resume" class="file-upload"><div id="upload-label-resume" class="label upload-label">Resume/CV<span class="required">*</span></div>' +
+      '<div class="file-upload__wrapper"><div class="file-upload__filename"><p class="body body__secondary">resume.pdf</p><button type="button" aria-label="Remove file"></button></div></div></div>' +
+      '<div role="group" aria-labelledby="upload-label-cover_letter" class="file-upload"><div id="upload-label-cover_letter" class="label upload-label">Cover Letter</div>' +
+      '<button type="button">Attach</button><label class="visually-hidden" for="cover_letter">Attach</label><input id="cover_letter" type="file"></div>' +
+    "</form>",
+    "https://job-boards.greenhouse.io/chime/jobs/8859182002",
+  );
+  context.getPublicJson = async () => ({ ok: true, json: { questions: [
+    { label: "Resume/CV", required: true, fields: [{ name: "resume", type: "input_file" }, { name: "resume_text", type: "textarea" }] },
+    { label: "Cover Letter", required: false, fields: [{ name: "cover_letter", type: "input_file" }, { name: "cover_letter_text", type: "textarea" }] },
+  ] } });
+  const adapter = greenhouse(context);
+  const fields = await adapter.read();
+  const resume = fields.find(f => f.key === "resume");
+  assert.equal(resume?.kind, "file");
+  assert.equal(adapter.current(resume!), "resume.pdf");
+  // A file input that is still there and empty reads as empty.
+  assert.equal(adapter.current(fields.find(f => f.key === "cover_letter")!), "");
+  await window.happyDOM.close();
+});
