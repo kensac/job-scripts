@@ -94,14 +94,10 @@ select = ["E4", "E7", "E9", "F", "I", "B", "S", "ASYNC", "DTZ", "SIM", "PIE", "R
 
 # UP* (pep585/604 modernisation) is on. It is cosmetic, but a codebase that
 # mixes typing.Dict with dict makes the inconsistency itself a thing to think
-# about at every edit. Applied as one mechanical commit so it is reviewable
-# separately from behaviour.
+# about at every edit.
 ignore = [
     # FastAPI's whole idiom is `x = Depends(...)` / `Query(...)` in defaults.
     "B008",
-    # Broad excepts are load-bearing here: a scrape or an AI call failing must
-    # not kill a sweep. Reviewed individually rather than banned.
-    "BLE001",
     # asserts are used as invariant checks after db.query_one, not as
     # validation of untrusted input.
     "S101",
@@ -128,13 +124,16 @@ ignore = [
 # Tests legitimately use hardcoded credentials-shaped strings and sleeps.
 # conftest deliberately shells out to initdb/pg_ctl to build a scratch
 # database; the arguments are literals, not untrusted input.
-"tests/*" = ["S105", "S106", "S311", "ASYNC251", "S603", "S607", "PLW1510", "DTZ005", "DTZ011"]
+"tests/*" = ["S105", "S311", "ASYNC251", "S603", "S607", "PLW1510", "DTZ005", "DTZ011"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# No test uses an async fixture; set so the plugin stops warning that the
+# default will change.
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     "corpus: runs against the generated corpus (tests/corpus.py), built on demand",
     "no_board_recompute: the client fixture must not recompute the board before a read",
@@ -146,9 +145,6 @@ markers = [
 
 # The layering, enforced. `core` is the bottom: fetching, scraping, providers,
 # the catalog and the stores, none of which may reach up into the API layer.
-# The one violation when this was added was core/devseed.py, which seeded a
-# development database through api.db and has moved to api/ where it belongs.
-#
 [tool.importlinter]
 root_packages = ["api", "core", "tasks"]
 
@@ -161,30 +157,10 @@ forbidden_modules = ["api"]
 # The second layer. `tasks` is the work the worker runs, and it uses `api`;
 # `api` must not reach back.
 #
-# One line only because `tasks` is a SIBLING of `api` rather than a child:
-# import-linter's `forbidden` skips a target sitting inside its source, so
-# while the handlers lived at api.tasks this rule passed whatever the code
-# did. Verified before the move by adding a violation and watching it stay
-# green.
-#
-# Nine imports were ignored here, in three causes. Five were one smell wearing
-# five hats: something in `api` reaching past a handler for a SHAPE or a
-# CONSTANT, never for behaviour. Those five are gone.
-#
-# What each task declares is now core/shapes.py, so api.budget prices a fleet
-# cycle and api.routers.task_models configures one without importing the code
-# that runs it. `configured_model` is api/task_config.py and `load_config` is
-# api/budget.py; both were reading the database on behalf of the services from
-# inside the task runtime. What a draft is written from is
-# api/apply/drafting.py, so the two routers that draft one live no longer
-# borrow it from the sweep that batches them.
-#
-# Two of the five were called impossible here, and the reading was wrong. The
-# claim was that mail_classify BUILDS its two shapes in a function so its
-# declaration cannot invert, and that application reads its purpose from
-# another module. A factory moves down exactly as well as a literal does, and
-# api.apply.writes now reads its purpose off the shape rather than spelling it
-# a second time.
+# `tasks` must stay a SIBLING of `api`, not a child: import-linter's
+# `forbidden` skips a target sitting inside its source, so under api.tasks this
+# rule would pass whatever the code did. A shape or constant `api` needs from a
+# task belongs in core (core/shapes.py), not behind this contract.
 #
 # The worker is the task runner and sits above handlers by definition. Its
 # entry point and the claim, scheduling and execution modules load the handler

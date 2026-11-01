@@ -9,7 +9,7 @@ from core import pricing, providers
 
 
 def test_catalog_distinguishes_vendor_batch_from_application_transport():
-    from api.routers.users import _catalog
+    from api.routers.users_routes.model_catalog import _catalog
 
     anthropic = {m["model"]: m for m in _catalog("anthropic")}
     opus = anthropic["claude-opus-5"]

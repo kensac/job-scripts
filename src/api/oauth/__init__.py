@@ -15,7 +15,6 @@ from api import crypto, db
 from api.oauth import authorization as consent
 from api.oauth import provider
 
-OAuthState = consent.OAuthState
 authorization_url = consent.authorization_url
 issue_state = consent.issue_state
 verify_state = consent.verify_state
@@ -25,7 +24,6 @@ CONNECT_GROUPS_KEY = provider.CONNECT_GROUPS_KEY
 GMAIL_SCOPES = provider.GMAIL_SCOPES
 GOOGLE = provider.GOOGLE
 STATE_TTL_SECONDS = provider.STATE_TTL_SECONDS
-OAuthError = provider.OAuthError
 NotConnected = provider.NotConnected
 NeedsReconnect = provider.NeedsReconnect
 StateInvalid = provider.StateInvalid
