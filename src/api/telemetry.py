@@ -70,8 +70,8 @@ DEFAULT_HOST = "https://us.i.posthog.com"
 
 # Loggers whose records must never be shipped: the exporter's own, so a
 # failing endpoint cannot generate the records that fail to ship, and this
-# module's, for the same reason one level up.
-_UNSHIPPED_LOGGERS = ("opentelemetry", "jobtracker_telemetry", "urllib3", "posthog")
+# module's (`shipped_form` matches it by name), for the same reason one level up.
+_UNSHIPPED_LOGGERS = ("opentelemetry", "urllib3", "posthog")
 # Loggers configured with propagate=False by their owner, so a handler on the
 # root never sees them; they get the shipping handler directly.
 _NON_PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error")
@@ -107,7 +107,7 @@ def shipped_form(record: logging.LogRecord) -> logging.LogRecord | None:
     its text past the scrub markers. A copy, because the same record object
     goes on to the stdout handler, which keeps the full line locally.
     """
-    if record.name.split(".")[0] in _UNSHIPPED_LOGGERS:
+    if record.name == __name__ or record.name.split(".")[0] in _UNSHIPPED_LOGGERS:
         return None
     try:
         message = record.getMessage()
