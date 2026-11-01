@@ -69,6 +69,7 @@ def test_google_reads_every_posting_with_its_text_from_one_feed(monkeypatch):
     )
     assert "Solve sequential decision-making problems" in engineer.description
     # The record minus its text: the employer it named is kept.
+    assert engineer.raw is not None
     assert engineer.raw["employer"] == "DeepMind"
     assert engineer.raw["categories"] == ["SOFTWARE_ENGINEERING"]
     assert engineer.raw["locations"] == [{"city": "London", "state": None, "country": "UK"}]

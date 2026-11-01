@@ -592,6 +592,14 @@ the labels most often blank or corrected. That list is the backlog; a label
 on it is a rule to add or a fact the profile lacks. Never add a rule
 without a label in the ledger asking for it.
 
+**A submission lives on the fill that holds the fields.** A submit of an
+open zero-field fill goes to the newest earlier open fill with fields for
+the same person and url (`api.apply.submissions.target`). The empty fill
+stays, names that fill in `superseded_by`, and holds no `submitted_at` or
+`application_id`. Readers count submissions by `submitted_at` and need no
+filter of their own. A field with no `changed` key has no known final: the
+report counts it neither corrected nor unchanged.
+
 **A report is the page as the extension saw it.** The panel's report
 button posts `application_reports`: the fields as read with the markup
 around each, what the API resolved, what took, and the person's note, for

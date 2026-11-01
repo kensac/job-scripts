@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
+import sqlalchemy.exc
 from psycopg.errors import UniqueViolation
 
 from api import db
@@ -181,7 +182,9 @@ def test_migration_refuses_ambiguous_choices_without_changing_them(f):
                     {"uid": uid},
                 )
                 with (
-                    pytest.raises(sa.exc.DBAPIError, match="1 users have multiple enabled filters"),
+                    pytest.raises(
+                        sqlalchemy.exc.DBAPIError, match="1 users have multiple enabled filters"
+                    ),
                     connection.begin_nested(),
                     Operations.context(MigrationContext.configure(connection)),
                 ):

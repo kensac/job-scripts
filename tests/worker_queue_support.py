@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from api import db, worker
@@ -37,11 +39,15 @@ def _reclaim_elsewhere(task_id: int) -> None:
     )
 
 
+# What the stand-in provider last accepted, read back by `_collect_from`.
+_submitted = SimpleNamespace(specs=[], calls=0)
+
+
 async def _submit_ids(specs, model, effort, max_out, on_event=None):
     """Stands in for the provider accepting a submission."""
-    _submit_ids.last_specs = list(specs)
-    _submit_ids.calls = getattr(_submit_ids, "calls", 0) + 1
-    batch_id = f"batch_test_{_submit_ids.calls}"
+    _submitted.specs = list(specs)
+    _submitted.calls += 1
+    batch_id = f"batch_test_{_submitted.calls}"
     if on_event:
         on_event(batch_id, "submitted", {"requests": len(specs)})
     return [batch_id]
@@ -52,7 +58,7 @@ def _collect_from(fake_batch):
     per-test expectations stay exactly as they were written."""
 
     async def _collect(batch_ids, on_event=None):
-        results = await fake_batch(getattr(_submit_ids, "last_specs", []), "m", "low", 0, None)
+        results = await fake_batch(_submitted.specs, "m", "low", 0, None)
         for result in results.values():
             result.batch_id = batch_ids[0]
         return list(results.values())

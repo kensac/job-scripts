@@ -389,3 +389,39 @@ def test_one_board_has_one_active_reader(client, admin_headers, f):
         {"name": "wd_tjx", "active": True, "ingest_interval_hours": 24},
         {"name": "wd_tjx_companies", "active": False, "ingest_interval_hours": 24},
     ]
+
+
+def test_an_admin_patch_refuses_null_for_a_column_that_cannot_hold_one(client, admin_headers):
+    """An explicit null used to reach the UPDATE and fail as a 500 on a NOT NULL
+    column. Omitting the field leaves it; null is refused before any write."""
+    r = client.post(
+        "/v1/admin/sources",
+        json={"name": "nulls", "listings_url": "https://boards-api.greenhouse.io/v1/boards/n/jobs"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 200, r.text
+    for field in ("listings_url", "description", "active", "ingest_interval_hours"):
+        r = client.patch("/v1/admin/sources/nulls", json={field: None}, headers=admin_headers)
+        assert r.status_code == 422, (field, r.text)
+    r = client.patch("/v1/admin/sources/nulls", json={"company": None}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+
+    r = client.post(
+        "/v1/admin/filter-presets", json={"name": "p", "prompt": "x"}, headers=admin_headers
+    )
+    assert r.status_code == 200, r.text
+    preset_id = r.json()["id"]
+    for field in ("name", "description", "prompt", "on_ambiguous", "fail_closed", "active"):
+        r = client.patch(
+            f"/v1/admin/filter-presets/{preset_id}", json={field: None}, headers=admin_headers
+        )
+        assert r.status_code == 422, (field, r.text)
+
+    job = db.query_one(
+        "INSERT INTO jobs (url, source, company, title) "
+        "VALUES ('https://nulls.test/1', 'nulls', 'C', 'T') RETURNING id"
+    )
+    assert job is not None
+    for field in ("company", "title", "locations", "terms", "active"):
+        r = client.patch(f"/v1/admin/jobs/{job['id']}", json={field: None}, headers=admin_headers)
+        assert r.status_code == 422, (field, r.text)
