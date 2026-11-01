@@ -87,7 +87,7 @@ jobs:
             shard-*) args+=(-m 'not corpus' --shard-count="$TEST_SHARDS" --shard-index="${TEST_LANE#shard-}") ;;
             *) echo "Unknown test lane: $TEST_LANE"; exit 1 ;;
           esac
-          if [ "$TEST_LANE" = profile ]; then
+          if [ "$TEST_LANE" = profile ] || [ "$TEST_LANE" = corpus ]; then
             python -m cProfile -o results/profile.pstats -m pytest "${args[@]}"
           else
             python -m pytest "${args[@]}"

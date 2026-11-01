@@ -111,7 +111,6 @@ jobs:
   # checks none of them consume: the manifest below is read by `check` at
   # the end, not by a lane. Now it runs beside them.
   static:
-    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,7 +181,6 @@ jobs:
           if-no-files-found: error
 
   extension:
-    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -211,7 +209,6 @@ jobs:
           include-hidden-files: true
 
   tests:
-    needs: gate
     strategy:
       fail-fast: false
       matrix:
