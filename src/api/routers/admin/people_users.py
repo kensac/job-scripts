@@ -271,7 +271,7 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
     # invited the reading that the owner was over budget when his group is
     # uncapped. Resolve it here rather than leaving the UI to infer.
     member_groups = profile.groups
-    owner_key, weekly_cap = _budget._owner_budget(member_groups)
+    owner_key, weekly_cap = _budget.owner_budget(member_groups)
     uploads = db.query_one_as(
         UploadCounts,
         "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'failed') AS failed "

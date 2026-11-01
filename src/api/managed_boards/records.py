@@ -14,6 +14,7 @@ from api import budget, db, task_jobs
 from api.managed_boards.admission import _TaskId
 from api.task_admission import TaskProgress
 from api.task_jobs import run_jobs
+from api.verdict_equivalence import answering_models
 
 MANAGED_BOARD_RUN_KINDS = task_jobs.MANAGED_BOARD_RUNS.kinds
 _KINDS_SQL = task_jobs.MANAGED_BOARD_RUNS.kinds_sql
@@ -115,7 +116,7 @@ WITH candidate AS (
   SELECT DISTINCT ON (j.id) j.id AS job_id, q.status
   FROM candidate c JOIN jobs j ON j.id = c.job_id
   LEFT JOIN ai_queries q ON q.url = j.url AND q.check_type = 'custom'
-    AND q.prompt_hash = %(hash)s AND q.model = %(model)s
+    AND q.prompt_hash = %(hash)s AND q.model = ANY(%(models)s)
     AND q.status IN ('passed', 'rejected', 'failed')
   ORDER BY j.id, q.id DESC NULLS LAST
 )
@@ -183,7 +184,7 @@ def replace_projection(payload: dict[str, Any], jobs: list[dict[str, Any]] | Non
                 "ids": ids,
                 "sort": sort_at,
                 "hash": payload["prompt_hash"],
-                "model": payload["requested_model"],
+                "models": answering_models("custom", payload["requested_model"]),
                 "board": board.id,
                 "fail_closed": payload["fail_closed"],
             },

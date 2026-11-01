@@ -214,14 +214,11 @@ def list_threads(
                array_agg(DISTINCT m.from_email) FILTER (WHERE m.from_email IS NOT NULL)
                    AS participants,
                array_agg(DISTINCT ce.kind) FILTER (WHERE ce.kind IS NOT NULL) AS kinds,
-               count(*) FILTER (
-                   WHERE ce.kind IS NOT NULL AND ce.kind <> 'not_job_related'
-                     AND cm.application_id IS NULL
-               ) > 0 AS needs_attention,
+               {_CORRECTABLE} AS needs_attention,
                (array_agg(m.id ORDER BY m.sent_at DESC))[1] AS latest_message_id,
                max(cm.application_id) AS application_id
         {base}
-        ORDER BY {order} {direction} NULLS LAST
+        ORDER BY {order} {direction} NULLS LAST, thread_id
         LIMIT %(limit)s OFFSET %(offset)s
         """,
         params,

@@ -10,8 +10,19 @@ from api.posting_path.models import PathStep
 from api.posting_path.verdict_provenance import (
     _latest_verdict,
     _near_copy_source_url,
+    _verdict_detail,
     _verdict_origin,
 )
+
+# How the stored text was read (page_fetches.method), in the drawer's words.
+_FETCH_METHOD = {
+    "ats text": "From the employer's applicant tracking system",
+    "listing text": "From the job board's listing",
+    "static": "Read from the posting page",
+    "scraped": "Read from the posting page in a browser",
+    "verification": "Kept from an earlier verification",
+    "unknown": None,
+}
 
 
 def _catalog_steps(job: dict[str, Any]) -> list[PathStep]:
@@ -76,7 +87,7 @@ def _content_step(job: dict[str, Any]) -> PathStep:
             stage="content",
             outcome="passed",
             label="Posting text stored",
-            detail=f"From {row['reason']}" if row["reason"] else None,
+            detail=_FETCH_METHOD.get(row["reason"], row["reason"]),
             basis="recorded",
             at=row["created_at"],
         )
@@ -128,7 +139,7 @@ def _verification_steps(job: dict[str, Any]) -> list[PathStep]:
                 stage="verification",
                 outcome="failed" if verdict.status == "rejected" else "passed",
                 label=flagged if verdict.status == "rejected" else clear,
-                detail="; ".join(part for part in (verdict.reason, origin) if part),
+                detail=_verdict_detail(verdict.reason, origin),
                 basis="recorded",
                 at=verdict.created_at,
                 check=check,

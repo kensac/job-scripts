@@ -10,6 +10,7 @@ from api import ai, db, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.board.person_state import UNTOUCHED
+from api.verdict_equivalence import answering_models
 from core import catalog, routing, verdict_reads
 from core.answers import VERIFICATION_REQUEST
 from core.routing import resolve
@@ -50,12 +51,21 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
     hash forward. The rows written are model-less like record_manual's, because
     no call was made, so spend and call counts stay true; they reset the
     staleness clock exactly as a paid verdict would.
+
+    An answer from a model grouped with this one (api.verdict_equivalence)
+    matches when it answered the same question asked of that model; the row
+    written carries this model's question, so the next check matches it
+    directly.
     """
-    questions = {
-        url: question_sha256(model, _verification_spec(url, text)) for url, text in fetched
-    }
+    specs = {url: _verification_spec(url, text) for url, text in fetched}
+    questions = {url: question_sha256(model, spec) for url, spec in specs.items()}
     if not questions:
         return set()
+    peers = [m for m in answering_models("verify", model) if m != model]
+    accepted = {
+        url: {question, *(question_sha256(m, specs[url]) for m in peers)}
+        for url, question in questions.items()
+    }
     latest = verdict_reads.latest_checks(list(questions))
     rows = [
         ai_result_row(
@@ -70,7 +80,7 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
         )
         for url, checks in latest.items()
         if len(checks) == 2
-        and all(verdict.request_sha256 == questions[url] for verdict in checks.values())
+        and all(verdict.request_sha256 in accepted[url] for verdict in checks.values())
         for check, verdict in checks.items()
     ]
     add_ai_results(rows)
