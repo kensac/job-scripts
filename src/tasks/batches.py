@@ -142,11 +142,14 @@ def _expire_orphans(window: int) -> int:
     failed at submission on 2026-09-02, on the batches page, as if in flight.
     Past the provider's completion window with no parked task, the batch is
     terminal on the provider's side whatever we recorded; expired is the
-    honest state, and the reason is on the row's updated_at.
+    honest state, and the reason is on the row's updated_at. It also stamps
+    completed_at, as every other terminal write does, because readers count a
+    batch without one as in flight.
     """
     rows = db.query(
         """
-        UPDATE ai_batches SET status = 'expired', updated_at = now()
+        UPDATE ai_batches SET status = 'expired', updated_at = now(),
+            completed_at = COALESCE(completed_at, now())
         WHERE status NOT IN ('completed', 'failed', 'expired', 'cancelled')
           AND submitted_at < now() - make_interval(secs => %s)
           AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = ai_batches.task_id

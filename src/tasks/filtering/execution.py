@@ -12,6 +12,7 @@ from api import ai, budget, db
 from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
 from api.model_calls import Payer
+from api.verdict_equivalence import answering_models
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
@@ -105,9 +106,12 @@ async def execute_live(
     # One read of each for the whole run, before the first paid call. Per job,
     # each cost its own BEGIN, read and COMMIT for every candidate, which a
     # worker far from the database pays at full latency (observability.md).
-    # Model scope is load-bearing: changing models deliberately invalidates the
-    # cache rather than treating another model's verdict as this model's work.
-    decided = decided_custom_urls([job["url"] for job in jobs], snapshot.prompt_hash, cfg.model)
+    # Model scope is load-bearing: changing models invalidates the cache rather
+    # than treating another model's verdict as this model's work, unless the
+    # two were measured and grouped (api.verdict_equivalence).
+    decided = decided_custom_urls(
+        [job["url"] for job in jobs], snapshot.prompt_hash, answering_models("custom", cfg.model)
+    )
     stored = get_contents(
         [job["url"] for job in jobs if "content" not in job and job["url"] not in decided]
     )
