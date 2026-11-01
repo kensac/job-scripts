@@ -6,12 +6,12 @@ entry, and a new key is one entry in its api.config_keys section module."""
 from __future__ import annotations
 
 from api import db
-from api.routers.admin import config as admin_config
+from api.config import CONFIG_KEYS
 
 
 def test_every_key_is_served_with_its_type_help_and_choices(client, admin_headers):
     body = client.get("/v1/admin/config", headers=admin_headers).json()
-    assert set(body["keys"]) == set(admin_config._CONFIG_KEYS)
+    assert set(body["keys"]) == set(CONFIG_KEYS)
     for key, spec in body["keys"].items():
         assert spec["type"] in {"bool", "int", "str", "list", "dict"}, key
         assert spec["help"].strip(), key
@@ -28,7 +28,7 @@ def test_every_key_is_served_with_its_type_help_and_choices(client, admin_header
         "kind": "value",
         "section": "Health",
         "default": 4,
-        "help": admin_config._CONFIG_KEYS["batch_straggler_hours"].help,
+        "help": CONFIG_KEYS["batch_straggler_hours"].help,
         "choices": [],
     }
 
@@ -36,7 +36,7 @@ def test_every_key_is_served_with_its_type_help_and_choices(client, admin_header
 def test_every_key_is_filed_under_a_named_section():
     """A new key with no section would otherwise appear in General, which is
     a heading that says nothing about what the value does."""
-    sections = {spec.section for spec in admin_config._CONFIG_KEYS.values()}
+    sections = {spec.section for spec in CONFIG_KEYS.values()}
     assert sections == {
         "Access",
         "Applications",
@@ -48,11 +48,11 @@ def test_every_key_is_filed_under_a_named_section():
         "Health",
         "Mail",
     }
-    assert not [k for k, s in admin_config._CONFIG_KEYS.items() if s.section == "General"]
+    assert not [k for k, s in CONFIG_KEYS.items() if s.section == "General"]
 
 
 def test_section_registries_have_distinct_keys_and_matching_sections():
-    from api.config import _CONFIG_KEYS_BY_SECTION, CONFIG_KEYS
+    from api.config import _CONFIG_KEYS_BY_SECTION
 
     keys = [key for section_keys in _CONFIG_KEYS_BY_SECTION.values() for key in section_keys]
     assert len(keys) == len(set(keys)) == len(CONFIG_KEYS)
@@ -66,12 +66,12 @@ def test_the_served_default_is_the_registry_default(client, admin_headers):
     default that is not the seed would mark every untouched key changed."""
     body = client.get("/v1/admin/config", headers=admin_headers).json()
     for key, spec in body["keys"].items():
-        assert spec["default"] == admin_config._CONFIG_KEYS[key].default, key
+        assert spec["default"] == CONFIG_KEYS[key].default, key
 
 
 def test_every_seeded_key_is_in_the_registry_and_the_reverse():
     seeded = {key for key, _ in db._APP_CONFIG_SEED}
-    assert seeded == set(admin_config._CONFIG_KEYS)
+    assert seeded == set(CONFIG_KEYS)
 
 
 def test_seeded_layout_round_trips_through_admin(client, admin_headers):
@@ -108,13 +108,13 @@ def test_host_limits_reject_boolean_rates_without_coercion(client, admin_headers
 def test_malformed_stored_group_flags_fail_closed():
     from api import oauth
     from api.auth import AuthedUser
-    from api.routers import filters
+    from api.routers.filtering import run_controls
 
     for key in ("gmail_connect_groups", "filter_rejudge_on_change_groups"):
         db.execute("UPDATE app_config SET value = %s WHERE key = %s", (db.jsonb([{}]), key))
     assert oauth.connect_allowed(["infra-admins"]) is False
     assert (
-        filters._rejudge_on_change(
+        run_controls._rejudge_on_change(
             AuthedUser(
                 id=1, sub="test", name="Test", email="test@example.com", groups=["infra-admins"]
             )

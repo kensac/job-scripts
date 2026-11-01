@@ -16,7 +16,7 @@ from api import (
     db,
     events,
 )
-from api.apply import fill_answers
+from api.apply import fill_answers, submissions
 from api.auth import AuthedUser, require_user
 from api.board.person_state import board_row, touchable_job_ids
 from api.board.person_state import write_board_row as _write_board_row
@@ -56,13 +56,13 @@ def track_fill(fill_id: int, user: AuthedUser = Depends(require_user)) -> Tracke
         raise refuse(422, "INVALID_URL", error)
     with db.transaction():
         locked = db.query_one(
-            "SELECT job_id, submitted_at FROM application_fills "
+            "SELECT job_id, submitted_at, superseded_by FROM application_fills "
             "WHERE id = %s AND user_id = %s FOR UPDATE",
             (fill_id, user.id),
         )
         if not locked:
             raise refuse(404, "NOT_FOUND", "unknown fill")
-        if locked["submitted_at"] is not None:
+        if locked["submitted_at"] is not None or locked["superseded_by"] is not None:
             raise refuse(409, "FILL_SUBMITTED", "This application was already submitted.")
         if locked["job_id"] is not None:
             existing = db.query_one("SELECT url FROM jobs WHERE id = %s", (locked["job_id"],))
@@ -107,7 +107,7 @@ def resolve_form(body: ResolveBody, user: AuthedUser = Depends(require_user)) ->
         open_fill = (
             db.query_one(
                 "SELECT id, fields FROM application_fills WHERE id = %s AND user_id = %s "
-                "AND submitted_at IS NULL AND url = %s FOR UPDATE",
+                "AND submitted_at IS NULL AND superseded_by IS NULL AND url = %s FOR UPDATE",
                 (body.fill_id, user.id, body.url),
             )
             if body.fill_id is not None
@@ -194,14 +194,20 @@ def fill_submitted(
     """The person clicked submit. Every field's final value goes on the
     ledger beside what was filled; a field they asked to remember goes in
     the bank; the board row flips to submitted."""
+    lock = (
+        "SELECT id, job_id, url, fields, submitted_at, superseded_by FROM application_fills "
+        "WHERE id = %s AND user_id = %s FOR UPDATE"
+    )
     with db.transaction():
-        fill = db.query_one(
-            "SELECT id, job_id, url, fields, submitted_at FROM application_fills "
-            "WHERE id = %s AND user_id = %s FOR UPDATE",
-            (fill_id, user.id),
-        )
+        fill = db.query_one(lock, (fill_id, user.id))
         if not fill:
             raise refuse(404, "NOT_FOUND", "unknown fill")
+        # An empty fill left by a form the extension lost track of submits
+        # onto the earlier fill that holds the fields.
+        fill_id = submissions.target(user.id, fill)
+        if fill_id != fill["id"]:
+            fill = db.query_one(lock, (fill_id, user.id))
+            assert fill is not None
         if fill["submitted_at"] is not None:
             return Submitted(job_id=fill["job_id"], fields=fill["fields"])
         finals = {f.key: f for f in body.fields}
