@@ -452,7 +452,7 @@ the claim holder releasing its own claim (a `Deferred` requeue, a graceful
 exit, `PayloadUnavailable`) gives the attempt back; a park never does,
 because a lowered `attempts` on a parked task lets a later claim reuse a
 stamp a lost worker still holds. The retry budget is `attempts - batch_resumes`
-(`api.worker_lifecycle.claims.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
+(`api.queue.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
 and both the transient-error requeue and the reaper compare the difference
 with `task_max_attempts` (app_config). Counting resumes as attempts let 404
 batch tasks reach the cap by waiting alone in the 30 days to 2026-10-04.
