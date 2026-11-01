@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
 lazy from anthropic import AsyncAnthropic
@@ -77,9 +77,6 @@ def _declared_efforts(provider: str, model: str | None) -> tuple[tuple[str, ...]
     for m in known.models:
         accepts.update(m.reasoning.accepts)
     return tuple(sorted(accepts)), ()
-
-
-T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass
