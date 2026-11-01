@@ -1,17 +1,9 @@
 // The panel's DOM, and nothing about applying.
 //
-// It runs in whichever frame SHOWS the panel, which is not always the frame
-// that reads the form. An employer's careers page embeds the application in a
-// cross-origin iframe (Greenhouse's embed is one, 6084px tall inside an 805px
-// window on app.careerpuck.com), and position: fixed inside an iframe pins to
-// that FRAME's viewport, so a panel mounted beside the form rides the page
-// down and out of sight. The top layer does not help: it is per-document, and
-// the form's document is the iframe.
-//
-// So content.js stays with the form, where the reader's DOM handles are, and
-// asks the top frame to show the panel for it. This file is what runs there.
-// It knows how to paint HTML and report which control the person used; every
-// decision about WHAT to paint stays in content.js.
+// It runs in whichever frame SHOWS the panel: the top frame when the form is
+// embedded in an iframe (README, "Where the panel sits"). It paints HTML and
+// reports which control the person used; every decision about WHAT to paint
+// stays in runtime/application.js, beside the form.
 import { mountAnswerReview } from "./answer-review";
 
 export function panelSurface() {
@@ -66,9 +58,9 @@ export function panelSurface() {
       // and the frame that owns the flow binds by id rather than by node.
       for (const type of ["click", "change"]) {
         panel.addEventListener(type, (ev) => {
-          const el = ev.target.closest("[id], [data-ai]");
+          const el = ev.target.closest("[id]");
           if (!el) return;
-          onEvent({ type, id: el.id || null, ai: el.dataset.ai || null, values: values(panel) });
+          onEvent({ type, id: el.id, values: values(panel) });
         });
       }
       attach();
@@ -154,7 +146,7 @@ export function panelSurface() {
 
   window[key] = { create };
 
-  // Driven from another frame: content.js cannot reach this document, so the
+  // Driven from another frame: application.js cannot reach this document, so the
   // background worker relays an operation in and an event back out. The
   // listener is installed on every frame this file lands in and does nothing
   // until an operation arrives, so the frame that mounts its own panel simply

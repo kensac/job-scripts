@@ -160,12 +160,15 @@ def _inserting[**P](build: Callable[P, dict[str, Any]]) -> Callable[P, int]:
 add_ai_result = _inserting(ai_result_row)
 
 
-def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = None) -> set[str]:
+def decided_custom_urls(
+    urls: list[str], prompt_hash: str, model: str | list[str] | None = None
+) -> set[str]:
     """The urls that already have a decided custom result under a specific
     filter (by hash), so the check need not run again.
 
-    With `model`, only verdicts produced by that model count; without it, any
-    model's verdict is reused.
+    With `model`, only verdicts produced by that model count, or by any of a
+    list of models (api.verdict_equivalence); without it, any model's verdict
+    is reused.
 
     One statement for the whole candidate list, never one per candidate. The
     per-candidate form cost three round trips each (BEGIN, the read, COMMIT):
@@ -181,8 +184,9 @@ def decided_custom_urls(urls: list[str], prompt_hash: str, model: str | None = N
     """
     if not urls:
         return set()
-    clause = " AND model = %s" if model is not None else ""
-    params = (urls, prompt_hash, model) if model is not None else (urls, prompt_hash)
+    models = [model] if isinstance(model, str) else model
+    clause = " AND model = ANY(%s)" if models is not None else ""
+    params = (urls, prompt_hash, models) if models is not None else (urls, prompt_hash)
     with connection() as conn:
         sql = verdict_reads.latest_per(
             "url",

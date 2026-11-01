@@ -10,6 +10,7 @@ from api.posting_path.models import PathStep
 from api.posting_path.verdict_provenance import (
     _latest_verdict,
     _near_copy_source_url,
+    _verdict_detail,
     _verdict_origin,
 )
 from core import verdict_reads
@@ -225,7 +226,7 @@ def _verdict_step(
         stage="verdict",
         outcome="passed" if row.status == "passed" else "failed",
         label="Kept" if row.status == "passed" else "Rejected",
-        detail="; ".join(part for part in (row.reason, origin, row.model) if part),
+        detail=_verdict_detail(row.reason, origin, row.model),
         basis="recorded",
         at=row.created_at,
         check="custom",

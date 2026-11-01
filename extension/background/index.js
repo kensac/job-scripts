@@ -79,11 +79,10 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 // THE PANEL IN THE TOP FRAME.
 //
-// When the form is embedded in a cross-origin iframe, content.js runs beside
-// the form, where the reader's DOM handles are, and the panel has to be in
-// the top frame or it rides the page out of sight (content.js says why). Two
-// content scripts in one tab cannot speak to each other, so every operation
-// and every event passes through here.
+// When the form is embedded in a cross-origin iframe, runtime/application.js
+// runs beside the form and the panel goes in the top frame (README, "Where
+// the panel sits"). Two content scripts in one tab cannot speak to each
+// other, so every operation and every event passes through here.
 //
 // The owner is kept in session storage rather than a variable: this worker is
 // stopped whenever the browser feels like it, and a click that came back to
