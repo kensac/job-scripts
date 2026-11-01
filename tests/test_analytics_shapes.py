@@ -15,10 +15,11 @@ import time
 import pytest
 
 from api import db
+from api.analytics.models import BoardAnalytics
 from api.routers import analytics
 
 
-def _sources() -> list[analytics.BoardAnalytics]:
+def _sources() -> list[BoardAnalytics]:
     return analytics._collect(analytics.DEFAULT_MIN_SAMPLE)
 
 

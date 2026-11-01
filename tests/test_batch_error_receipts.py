@@ -49,7 +49,8 @@ async def test_mixed_output_and_error_files_checkpoint_and_replay(f, monkeypatch
     by_id = {result.custom_id: result for result in first}
     assert by_id["success"].text == "answer"
     assert by_id["success"].usage == {"input_tokens": 10, "output_tokens": 2}
-    assert "invalid_request" in by_id["failure"].error
+    failure = by_id["failure"].error
+    assert failure is not None and "invalid_request" in failure
     assert (
         db.query_one("SELECT payload FROM tasks WHERE id=%s", (task_id,))["payload"]["batch_ids"]
         == []

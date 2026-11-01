@@ -53,6 +53,7 @@ def test_only_a_listed_prompt_is_settled_and_the_answer_is_stored(f, set_config)
         "SELECT status, config_name, model, prompt_hash FROM verdicts WHERE url = %s",
         (low["url"],),
     )
+    assert row is not None
     assert dict(row) == {
         "status": "rejected",
         "config_name": "filter-pay-screen",

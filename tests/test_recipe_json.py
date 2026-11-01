@@ -12,6 +12,7 @@ from api.apply.recipe_json import InvalidRecipe, RecipeParser
 def check(raw: bytes, chunk_size: int = 65536) -> None:
     frames: dict[int, dict] = {}
     state = None
+    parser = None
     for start in range(0, len(raw), chunk_size):
         parser = RecipeParser("workday", state, frames.get)
         parser.feed(raw[start : start + chunk_size])
@@ -19,6 +20,7 @@ def check(raw: bytes, chunk_size: int = 65536) -> None:
         if parser.deleted_from is not None:
             frames = {depth: body for depth, body in frames.items() if depth < parser.deleted_from}
         frames.update(parser.changed_frames())
+    assert parser is not None, "no input to parse"
     parser.finish()
 
 

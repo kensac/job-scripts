@@ -40,5 +40,7 @@ def test_the_text_lookups_are_index_only():
         conn.execute("SET LOCAL enable_seqscan = off")
         conn.execute("SET LOCAL enable_bitmapscan = off")
         for sql in lookups:
-            plan = "\n".join(r["QUERY PLAN"] for r in conn.execute("EXPLAIN " + sql).fetchall())
+            plan = "\n".join(
+                r["QUERY PLAN"] for r in conn.execute(db._as_query("EXPLAIN " + sql)).fetchall()
+            )
             assert "Index Only Scan using idx_page_fetches_url_text" in plan, plan
