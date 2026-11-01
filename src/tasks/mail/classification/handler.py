@@ -16,7 +16,7 @@ from api.mail import events as mail_events
 from api.task_config import configured_shape
 from core.shapes import BACKFILL_TASK, ONGOING_TASK
 from tasks.mail.classification.dates import is_appointment, parse_when
-from tasks.mail.classification.identity import _SELF_SENT, _heal_self_sent, identities_for
+from tasks.mail.classification.identity import _SELF_SENT, _heal_self_sent, identities_by_owner
 from tasks.mail.classification.spec import (
     CLASSIFICATION_INSTRUCTIONS,
     MailClassification,
@@ -102,10 +102,9 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
     # Events are append-only and the latest per message wins
     # (api.mail.current.current_event), so a corrected event
     # supersedes the old one. Nothing is deleted and nothing is migrated.
-    # Once per run rather than per message: the derivation is an aggregate over
-    # the whole mailbox and the answer is the same for every row in the sweep.
-    owner = db.query_one("SELECT user_id FROM email_messages ORDER BY id DESC LIMIT 1")
-    identities = identities_for((owner or {}).get("user_id") or 0)
+    # Once per owner per run rather than per message: the derivation is an
+    # aggregate over that owner's mailbox, and the sweep spans every owner.
+    identities = identities_by_owner()
     logger.info(f"Task {task_id}: mailbox identities {identities}")
     requested = payload.get("message_ids")
     if not requested:
@@ -134,13 +133,13 @@ async def handle_classify_mail(task_id: int, payload: dict[str, Any]) -> None:
             JOIN users u ON u.id = m.user_id
             WHERE m.id = ANY(%(ids)s) ORDER BY m.id
             """,
-            {"ids": ids, "identities": identities},
+            {"ids": ids, "identities": db.jsonb(identities)},
         )
         logger.info(f"Task {task_id}: re-classifying {len(rows)} of {len(ids)} requested messages")
     else:
         rows = db.query(
             _SELECTION,
-            {"cap": cap, "identities": identities, "task_id": task_id},
+            {"cap": cap, "identities": db.jsonb(identities), "task_id": task_id},
         )
     # Self-sent mail only reaches here through an explicit message_ids repair,
     # because the sweep excludes it. Correcting one needs no model: the header

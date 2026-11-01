@@ -9,6 +9,7 @@ from typing import Any
 from api import db
 from api.board import criteria as board_criteria
 from api.board import eligibility
+from api.verdict_equivalence import answering_models
 from core import verdict_reads
 from core.batch import BATCH_CHARS_PER_TOKEN
 from core.filters import build_custom_decision_instructions, build_custom_input
@@ -139,14 +140,17 @@ def _reservation(board: _Board, candidates: list[_Candidate]) -> int:
 _LATEST_CUSTOM = verdict_reads.latest_per(
     "v.url, v.prompt_hash",
     "v.url, v.prompt_hash, v.status",
-    "v.check_type = 'custom' AND v.model = %(model)s "
+    "v.check_type = 'custom' AND v.model = ANY(%(models)s) "
     "AND v.prompt_hash = ANY(ARRAY(SELECT prompt_hash FROM enabled))",
 )
 
 
 def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
     """Machine-only personal-filter results at one exact verdict identity."""
-    params = {"model": resolved_model, **eligibility.settings_params(sponsor_id)}
+    params = {
+        "models": answering_models("custom", resolved_model),
+        **eligibility.settings_params(sponsor_id),
+    }
     return db.query_as(
         _Candidate,
         f"""
@@ -243,7 +247,9 @@ def verification_questions(
         recipes = board_screens(board.title_gate, board.prompt_hash, screens)
         admitted = {r["url"] for r in rows if not screened(recipes, r["title"], r["source"])}
         decided = decided_custom_urls(
-            sorted(admitted), board.prompt_hash, model=board.requested_model
+            sorted(admitted),
+            board.prompt_hash,
+            model=answering_models("custom", board.requested_model),
         )
         criteria = custom_criteria_instructions(board.prompt, board.on_ambiguous)
         for url in admitted:

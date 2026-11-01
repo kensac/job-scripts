@@ -46,7 +46,6 @@ logger = logging.getLogger(__name__)
 _AVAILABLE = catalog.IS_AVAILABLE.format(job="j")
 
 PURPOSE = application_writes.PURPOSE
-IN_FLIGHT = ("pending", "running", "awaiting_batch", "waiting")
 
 
 def store_form(url: str, questions: list[forms.Question] | None, error: str | None = None) -> None:
