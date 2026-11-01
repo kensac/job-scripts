@@ -13,10 +13,10 @@ from api.ai import verdicts
 from api.auth import AuthedUser
 from api.board import column_filters as column_filters_
 from api.problem import refuse
-from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord, _held_input
+from api.routers.admin.query_ledger import QueryRecord, query_records
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale, StaleByKey
-from core import catalog, query_instructions, verdict_reads
+from core import catalog, verdict_reads
 
 router = APIRouter()
 
@@ -446,18 +446,7 @@ class QueryResponses(BaseModel):
 
 @router.get("/jobs/responses")
 def job_responses(url: str, user: AuthedUser = Depends(require_admin)) -> QueryResponses:
-    rows = db.query(
-        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE url = %s ORDER BY id ASC",
-        (url,),
-    )
-    # ponytail: one lookup per held row, as GET /queries/{id} does; batch it if
-    # a posting's history grows past a drawer's worth of calls.
-    for row in rows:
-        if row["input_content"] is None:
-            row["input_content"] = _held_input(row)
-    return QueryResponses(
-        rows=[QueryRecord.model_validate(row) for row in query_instructions.hydrate(rows)]
-    )
+    return QueryResponses(rows=query_records("url = %s ORDER BY id ASC", (url,)))
 
 
 class TimelineEntry(BaseModel):
