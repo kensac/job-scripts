@@ -115,9 +115,6 @@ class FilterScopeOption(BaseModel):
 class FilterScopeOptions(BaseModel):
     scopes: list[FilterScopeOption]
     title_recipes: list[str]
-    # Always empty: the profile gate is gone. Kept until the scope picker
-    # stops reading it.
-    profile_recipes: list[str]
     filters: dict[str, list[str]]
     filterable: list[str]
 
@@ -143,7 +140,6 @@ def filter_scopes(
     return FilterScopeOptions(
         scopes=scopes,
         title_recipes=list(screening.RECIPES),
-        profile_recipes=[],
         filters={"user": scoping.echo(ids)},
         filterable=["user"],
     )

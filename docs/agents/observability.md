@@ -408,13 +408,18 @@ per paid verdict, reached 9.76M decisions (1.64 GB) by 2026-10-10, 93.6% of
 them repeating one already stored, and its only readers were admin reports.
 
 Distinguish submission rejection from per-request failure using the stored
-provider errors. Failure counts alone do not establish the cause.
+provider errors. Failure counts alone do not establish the cause. A submission
+the provider refuses outright has no batch id to store an error under, so
+when every wave is refused the task fails with the provider's reason in
+`tasks.error`.
 
 **Every error a batch returns is stored as the provider wrote it**
 (`ai_batch_errors`, one row per failed request, or one row under an empty
 custom_id for a batch rejected before any request ran). The batch row counts
 failures; only the text says why, and a handler that skips errored results
-must not be the only reader of it. The whole-failure alert carries the most
+must not be the only reader of it. A request the provider refused over HTTP
+carries a null top-level `error` and its reason in `response.body.error`;
+the reader takes the reason from either place, never a placeholder. The whole-failure alert carries the most
 frequent stored reason and resolves once a later batch for the same purpose
 succeeds, whatever fixed it.
 
@@ -586,6 +591,14 @@ reads that ledger: fields by rung, the share filled and left unchanged, and
 the labels most often blank or corrected. That list is the backlog; a label
 on it is a rule to add or a fact the profile lacks. Never add a rule
 without a label in the ledger asking for it.
+
+**A submission lives on the fill that holds the fields.** A submit of an
+open zero-field fill goes to the newest earlier open fill with fields for
+the same person and url (`api.apply.submissions.target`). The empty fill
+stays, names that fill in `superseded_by`, and holds no `submitted_at` or
+`application_id`. Readers count submissions by `submitted_at` and need no
+filter of their own. A field with no `changed` key has no known final: the
+report counts it neither corrected nor unchanged.
 
 **A report is the page as the extension saw it.** The panel's report
 button posts `application_reports`: the fields as read with the markup

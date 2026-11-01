@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db, model_calls, scoping, sorting, user_settings
+from api import budget, db, model_calls, scoping, sorting, user_settings
 from api.auth import AuthedUser
 from api.board import populations
 from api.problem import refuse
@@ -260,14 +260,12 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
     )
     if not profile:
         raise refuse(404, "NOT_FOUND", "unknown user")
-    from api import budget as _budget
-
     # The Users page showed a weekly token total one click from a page showing
     # a 5,000,000 budget, with nothing saying which cap applied to whom - which
     # invited the reading that the owner was over budget when his group is
     # uncapped. Resolve it here rather than leaving the UI to infer.
     member_groups = profile.groups
-    owner_key, weekly_cap = _budget._owner_budget(member_groups)
+    owner_key, weekly_cap = budget.owner_budget(member_groups)
     uploads = db.query_one_as(
         UploadCounts,
         "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'failed') AS failed "
@@ -288,7 +286,7 @@ def user_detail(user_id: int, user: AuthedUser = Depends(require_admin)) -> User
             owner_key=owner_key,
             # None means uncapped, which is a real answer and not a missing one.
             weekly_token_budget=weekly_cap,
-            spent_this_week=_budget.spent_this_week(user_id) if owner_key else 0,
+            spent_this_week=budget.spent_this_week(user_id) if owner_key else 0,
             granted_by=db.query_as(
                 GroupGrant,
                 "SELECT group_name, weekly_token_budget FROM group_budgets "

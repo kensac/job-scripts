@@ -1,7 +1,6 @@
 import { SubmissionStore } from "./submissions.js";
 import { PolicyStore, RecipeStore } from "./policy.js";
 import { ReportUploadQueue } from "./report-uploads.js";
-export function startBackground() {
 // Every API call goes through here: a fetch from the service worker with
 // host permission on the site rides the site's session cookie, while one
 // from the content script on the ATS page is cross-site and gets the
@@ -11,7 +10,7 @@ export function startBackground() {
 const SITE = "https://www.kanishksachdev.com";
 const API = `${SITE}/job-tracker/api/`;
 
-async function call({ path, method = "GET", body }) {
+export async function call({ path, method = "GET", body }) {
   const binary = body instanceof Uint8Array;
   const res = await fetch(API + path, {
     method,
@@ -20,12 +19,18 @@ async function call({ path, method = "GET", body }) {
     body: binary ? body : body ? JSON.stringify(body) : undefined,
     redirect: "manual",
   });
-  const type = res.headers.get("content-type") || "";
-  if (res.type === "opaqueredirect" || res.status === 401 || !type.includes("json")) {
+  // The site's middleware redirects a request without a session, and its
+  // proxy answers 401. Anything else that is not JSON is an outage in front
+  // of the API or an unhandled API error, never a reason to sign in again.
+  if (res.type === "opaqueredirect" || res.status === 401) {
     return { ok: false, status: res.status || 401, signin: `${SITE}/job-tracker` };
   }
+  const type = res.headers.get("content-type") || "";
+  if (!type.includes("json")) return { ok: false, status: res.status, error: `not JSON (${type || "no content type"})` };
   return { ok: res.ok, status: res.status, json: await res.json() };
 }
+
+export function startBackground() {
 
 async function pdf({ path }) {
   const res = await fetch(API + path, { credentials: "include", redirect: "manual" });
@@ -79,11 +84,10 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 // THE PANEL IN THE TOP FRAME.
 //
-// When the form is embedded in a cross-origin iframe, content.js runs beside
-// the form, where the reader's DOM handles are, and the panel has to be in
-// the top frame or it rides the page out of sight (content.js says why). Two
-// content scripts in one tab cannot speak to each other, so every operation
-// and every event passes through here.
+// When the form is embedded in a cross-origin iframe, runtime/application.js
+// runs beside the form and the panel goes in the top frame (README, "Where
+// the panel sits"). Two content scripts in one tab cannot speak to each
+// other, so every operation and every event passes through here.
 //
 // The owner is kept in session storage rather than a variable: this worker is
 // stopped whenever the browser feels like it, and a click that came back to

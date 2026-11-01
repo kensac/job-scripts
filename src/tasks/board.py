@@ -13,6 +13,7 @@ from typing import Any
 from api import db, metrics
 from api.board import criteria
 from api.board import eligibility as board_eligibility
+from api.verdict_equivalence import answering_models
 from core import catalog, verdict_reads
 
 logger = logging.getLogger(__name__)
@@ -112,12 +113,18 @@ def submission_exclusions(
         )
         SELECT DISTINCT url FROM verdicts
         WHERE url = ANY(%(urls)s) AND check_type = 'custom'
-          AND prompt_hash = %(hash)s AND model = %(model)s
+          AND prompt_hash = %(hash)s AND model = ANY(%(models)s)
         UNION
         SELECT chunk_url.url FROM owners {CHUNK_URLS.format(t="owners")}
         WHERE chunk_url.url = ANY(%(urls)s)
         """,
-        {"tid": task_id, "uid": user_id, "urls": urls, "hash": prompt_hash, "model": model},
+        {
+            "tid": task_id,
+            "uid": user_id,
+            "urls": urls,
+            "hash": prompt_hash,
+            "models": answering_models("custom", model),
+        },
     )
     return {row["url"] for row in rows}
 

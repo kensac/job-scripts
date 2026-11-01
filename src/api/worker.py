@@ -28,11 +28,8 @@ from api.queue import enqueue as enqueue
 from api.worker_lifecycle import claims as worker_claims
 from api.worker_lifecycle import execution as worker_execution
 from api.worker_lifecycle import scheduling as worker_scheduling
-from api.worker_lifecycle.claims import CLAIM_ORDER as CLAIM_ORDER
 from api.worker_lifecycle.claims import EXCLUDE_KINDS, WORKER_KINDS
-from api.worker_lifecycle.claims import RETRIES_SPENT as RETRIES_SPENT
 from api.worker_lifecycle.claims import _kinds_clause as _kinds_clause
-from api.worker_lifecycle.execution import _exhausted as _exhausted
 from api.worker_lifecycle.execution import _is_transient as _is_transient
 from core import pool
 from tasks import HANDLERS as HANDLERS
@@ -51,7 +48,6 @@ logger = logging.getLogger(__name__)
 
 
 POLL_SECONDS = float(os.environ.get("JOBTRACKER_WORKER_POLL", "5"))
-BATCH_POLL_MINUTES = worker_scheduling.BATCH_POLL_MINUTES
 _managed_board_schedule_attempts = worker_scheduling._managed_board_schedule_attempts
 schedule_ingest_cycle = worker_scheduling.schedule_ingest_cycle
 
@@ -129,11 +125,6 @@ def _release_all() -> None:
             pass
 
 
-# Captured at import, so the upsert below reports when this PROCESS came up.
-# started_at was previously absent from the ON CONFLICT update list, which left
-# it pinned to whenever the row was first inserted - it survived every restart
-# and every deploy, so a column named for a start time answered a different
-# question entirely, and a roll could look like it had not happened.
 # How often a busy worker proves it is alive.
 #
 # Bounded above by the two things that read the answer: the admin fleet view
@@ -144,7 +135,8 @@ def _release_all() -> None:
 # task. The config refuses a window under two beats.
 HEARTBEAT_SECONDS = 60
 
-
+# Captured at import, so the status upsert reports when this process came up,
+# not when the row was first inserted: a roll must show as a new start.
 _PROCESS_STARTED_AT = datetime.datetime.now(datetime.UTC)
 
 

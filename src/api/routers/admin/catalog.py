@@ -11,11 +11,13 @@ from pydantic import BaseModel, Field
 
 from api import db, pagination, scoping, task_admission
 from api import params as params_
+from api.ai import verdicts
 from api.auth import AuthedUser
 from api.locations import LocationExtract, Place, store
 from api.problem import refuse
 from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
+from api.updates import NonNullUpdate
 from core import catalog, verdict_reads
 
 router = APIRouter()
@@ -275,11 +277,11 @@ def resolve_report(
 
 
 class JobCorrection(BaseModel):
-    company: str | None = None
-    title: str | None = None
-    locations: list[str] | None = None
-    terms: list[str] | None = None
-    active: bool | None = None
+    company: NonNullUpdate[str] = None
+    title: NonNullUpdate[str] = None
+    locations: NonNullUpdate[list[str]] = None
+    terms: NonNullUpdate[list[str]] = None
+    active: NonNullUpdate[bool] = None
 
 
 class CorrectedJob(BaseModel):
@@ -335,15 +337,13 @@ def close_posting(
     still lists it, and a board can keep listing a posting that should never
     have passed.
     """
-    from api.ai import verdicts as _verdicts
-
     job = db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise refuse(404, "NOT_FOUND", "unknown job")
     reason = f"closed by admin {user.email}" + (
         f": {body.reason.strip()}" if body.reason.strip() else ""
     )
-    _verdicts.record_manual(
+    verdicts.record_manual(
         url=job["url"],
         check_type="closed",
         rejected=True,

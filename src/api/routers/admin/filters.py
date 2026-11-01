@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, filter_runs
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
+from api.updates import NonNullUpdate
 
 router = APIRouter()
 
@@ -25,12 +27,12 @@ _PRESET_COLS = (
 
 
 class PresetBody(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    description: str | None = Field(default=None, max_length=500)
-    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
-    on_ambiguous: str | None = None
-    fail_closed: bool | None = None
-    active: bool | None = None
+    name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=80)]] = None
+    description: NonNullUpdate[Annotated[str, Field(max_length=500)]] = None
+    prompt: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=8000)]] = None
+    on_ambiguous: NonNullUpdate[str] = None
+    fail_closed: NonNullUpdate[bool] = None
+    active: NonNullUpdate[bool] = None
 
 
 class FilterPreset(BaseModel):
@@ -86,8 +88,6 @@ def admin_run_filter(
     the shared weekly cap for that run alone, so the cap never has to be
     raised and put back (Kanishk, 2026-09-08). The person's own run endpoint
     cannot set the flag."""
-    from api import filter_runs
-
     if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
         raise refuse(404, "NOT_FOUND", "unknown user")
     if body.filter_id is not None and not db.query_one(

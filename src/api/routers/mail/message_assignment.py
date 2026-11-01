@@ -138,7 +138,11 @@ def assign_message(
             """,
             {"user": user.id, "msg": message_id, "cap": MAX_THREAD_FANOUT},
         )
-        targets.extend(r["id"] for r in siblings)
+        # A group over the cap is not a conversation. Moving the first few
+        # dozen of its messages by id would attach unrelated mail, so only
+        # the message itself moves.
+        if len(siblings) < MAX_THREAD_FANOUT:
+            targets.extend(r["id"] for r in siblings)
 
     rationale = body.note or "assigned by the user"
     for index, target in enumerate(targets):

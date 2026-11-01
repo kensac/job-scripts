@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 
+import psycopg
 import pytest
 
 from api import db, worker
@@ -92,6 +93,30 @@ class TestTheBeatDoesNotDependOnTheHandler:
         monkeypatch.setitem(worker.HANDLERS, "liveness_probe", steals_its_own_claim)
         await worker.run_once()
         assert seen, "the handler should still finish; only the beat stops"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_beat_does_not_stop_the_beat(self, monkeypatch, f):
+        """A database error on one beat used to end the thread, so the reaper
+        requeued a task that was still running."""
+        f.make_task("liveness_probe", {})
+        monkeypatch.setattr(worker, "HEARTBEAT_SECONDS", 0.05)
+        real_count = db.execute_count
+        calls: list[int] = []
+
+        def flaky_count(sql, params=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise psycopg.OperationalError("connection lost")
+            return real_count(sql, params)
+
+        monkeypatch.setattr(worker_execution.db, "execute_count", flaky_count)
+
+        async def slow(task_id, payload):
+            time.sleep(0.4)
+
+        monkeypatch.setitem(worker.HANDLERS, "liveness_probe", slow)
+        await worker.run_once()
+        assert len(calls) >= 2, "the beat stopped after one failure"
 
 
 class TestWorkerStatusIsTruthful:

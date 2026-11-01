@@ -2,7 +2,7 @@ def test_every_modelled_provider_is_offerable_on_the_owner_key(client, user_head
     """The owner-key branch listed ("openai", "anthropic") from before xAI and
     DeepSeek existed, so two fully modelled and fully priced providers were
     invisible on this page while being selectable everywhere else."""
-    from api.routers import users as users_router
+    from api import budget
 
     seen = []
 
@@ -15,7 +15,7 @@ def test_every_modelled_provider_is_offerable_on_the_owner_key(client, user_head
                     seen.append(m.name)
         return sorted(seen)
 
-    monkeypatch.setattr(users_router.budget, "owner_allowed_models", fake_allowed)
+    monkeypatch.setattr(budget, "owner_allowed_models", fake_allowed)
     body = client.get("/v1/models", headers=user_headers).json()
     offered = {p["provider"] for p in body["providers"]}
     assert {"openai", "anthropic", "xai", "deepseek"} <= offered
@@ -25,7 +25,7 @@ def test_a_model_carries_what_its_datasheet_declares(client, user_headers):
     """The page showed a name and a note while the provider modules carried
     rates, context, batch eligibility and accepted reasoning values - so
     choosing a model meant guessing at everything that distinguishes one."""
-    from api.routers.users import _catalog
+    from api.routers.users_routes.model_catalog import _catalog
 
     nano = next(m for m in _catalog("openai") if m["model"] == "gpt-5-nano")
     assert nano["rate_in_per_mtok"] == 0.05
@@ -46,7 +46,7 @@ def test_params_come_from_the_datasheets_not_a_hardcoded_map(client, user_header
     came later, so offering them would have raised KeyError on a page that only
     ever showed two. The reasoning parameter is per MODEL, so the provider
     offers the union and validate_params still checks the specific one."""
-    from api.routers.users import _provider_params
+    from api.routers.users_routes.model_catalog import _provider_params
 
     assert _provider_params("openai") == ["reasoning_effort", "max_output_tokens"]
     assert _provider_params("anthropic") == ["effort", "max_output_tokens"]
@@ -63,7 +63,7 @@ def test_an_unlooked_up_rate_stays_null_rather_than_zero(client, user_headers):
     """None means nobody has looked it up. Rendering it as 0 would make an
     unknown cost look free, which is the same failure as an unpriced model
     booking as zero spend."""
-    from api.routers.users import _catalog
+    from api.routers.users_routes.model_catalog import _catalog
 
     for provider in ("openai", "anthropic", "xai", "deepseek"):
         for m in _catalog(provider):
