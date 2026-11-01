@@ -11,7 +11,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from core.mail.importer.message import ImportedMessage
-from core.mail.importer.text import _clean_header, clean_text, html_to_text, parse_sent_at
+from core.mail.importer.text import clean_header, clean_text, html_to_text, parse_sent_at
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
         sender, sender_name = _olm_sender(node)
         yield ImportedMessage(
             provider_message_id=(
-                _bracketed(_clean_header(_olm_text(node, "OPFMessageCopyMessageID")))
+                _bracketed(clean_header(_olm_text(node, "OPFMessageCopyMessageID")))
                 or f"{source}-{origin}-{idx}"
             ),
             source=source,
@@ -130,11 +130,11 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
             # and putting it here made every ATS autoresponder sharing a
             # subject line look like one conversation.
             provider_thread_id=None,
-            thread_topic=_clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
-            from_email=_clean_header(sender),
-            from_name=_clean_header(sender_name or _olm_text(node, "OPFMessageCopyFromAddresses")),
-            to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
-            subject=_clean_header(_olm_text(node, "OPFMessageCopySubject")),
+            thread_topic=clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
+            from_email=clean_header(sender),
+            from_name=clean_header(sender_name or _olm_text(node, "OPFMessageCopyFromAddresses")),
+            to_emails=[r for r in (clean_header(a) for a in addresses) if r and r != sender],
+            subject=clean_header(_olm_text(node, "OPFMessageCopySubject")),
             sent_at=_olm_sent_at(node),
             body_text=(clean_text(text) if text else None),
             body_html=html_source,

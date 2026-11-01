@@ -12,7 +12,7 @@ from email.utils import getaddresses
 from pathlib import Path
 
 from core.mail.importer.message import ImportedMessage
-from core.mail.importer.text import _clean_header, clean_text, html_to_text, parse_sent_at
+from core.mail.importer.text import clean_header, clean_text, html_to_text, parse_sent_at
 
 # Only the headers that describe threading. Storing every header would carry
 # routing trace, spam scores and DKIM signatures for 67k messages to answer a
@@ -28,7 +28,7 @@ def _header(msg: Message, name: str) -> str:
 def _threading_headers(msg: Message) -> dict[str, str]:
     out: dict[str, str] = {}
     for name in _THREADING_HEADERS:
-        value = _clean_header(_header(msg, name))
+        value = clean_header(_header(msg, name))
         if value:
             out[name.lower()] = value
     return out
@@ -87,13 +87,13 @@ def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMes
         # Message-ID is the only cross-archive stable identity available. The
         # four .olm exports overlap heavily with each other and with Takeout,
         # so without it the same message imports many times.
-        provider_message_id=_clean_header(_header(msg, "Message-ID")) or fallback_id,
+        provider_message_id=clean_header(_header(msg, "Message-ID")) or fallback_id,
         source=source,
-        provider_thread_id=_clean_header(next(iter(_header(msg, "References").split()), None)),
-        from_email=_clean_header(from_email),
-        from_name=_clean_header(from_name),
-        to_emails=[r for r in (_clean_header(a) for a in recipients) if r],
-        subject=_clean_header(_header(msg, "Subject")),
+        provider_thread_id=clean_header(next(iter(_header(msg, "References").split()), None)),
+        from_email=clean_header(from_email),
+        from_name=clean_header(from_name),
+        to_emails=[r for r in (clean_header(a) for a in recipients) if r],
+        subject=clean_header(_header(msg, "Subject")),
         sent_at=parse_sent_at(_header(msg, "Date")),
         body_text=text,
         body_html=html,

@@ -5,10 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-# Bodies are stored whole: always retain all data
-# (docs/agents/engineering-standards.md). A reader that feeds a model or a
-# display bounds what it reads, not what is kept.
-
 
 @dataclass
 class ImportedMessage:
@@ -27,6 +23,9 @@ class ImportedMessage:
     to_emails: list[str] = field(default_factory=list)
     subject: str | None = None
     sent_at: datetime | None = None
+    # Bodies are stored whole: always retain all data
+    # (docs/agents/engineering-standards.md). A reader that feeds a model or a
+    # display bounds what it reads, not what is kept.
     body_text: str | None = None
     # The markup it arrived as, kept so a reader can render mail as mail.
     # None means there was none, or that this source cannot supply it.

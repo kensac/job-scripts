@@ -1,4 +1,7 @@
-"""Normalisation shared by imported and live mail."""
+"""Normalisation shared by imported and live mail.
+
+api/mail/gmail.py also calls clean_text, html_to_text, and parse_sent_at.
+Live and imported mail therefore use the same normalization rules."""
 
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ def clean_text(text: str) -> str:
     return _BLANKS.sub("\n\n", text).strip()
 
 
-def _clean_header(value: str | None) -> str | None:
+def clean_header(value: str | None) -> str | None:
     """Headers reach the database too, and carry the same hazard.
 
     Subject lines in particular: a mis-declared charset in an encoded-word
