@@ -54,5 +54,7 @@ def _int_from(column: str, key: str) -> str:
 
 
 # A worker whose last report is older than this is not idle, it is gone, and
-# the reaper's concern rather than this detector's. Two housekeeping ticks.
+# the reaper's concern rather than this detector's. Two heartbeats
+# (api.worker.HEARTBEAT_SECONDS), so one late beat does not read as a dead
+# worker. The admin fleet and queue views use the same window.
 WORKER_FRESH = "2 minutes"
