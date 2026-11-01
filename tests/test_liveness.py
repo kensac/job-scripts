@@ -1,7 +1,7 @@
-"""Monitor stalled tasks and batches, and check the visibility projection.
+"""Check the visibility projection and the health detectors over the corpus.
 
-The task and batch checks need a running fleet and use synced production data.
-The projection comparison runs on the generated corpus in every pull request.
+Whether the live fleet has a stalled task or batch is the health detectors'
+job (api.health), not a test's.
 
 The original test rationale recorded 14,196 verdicts with no matching job and
 10,342 active jobs awaiting a first closed verdict on 2026-09-01. Those were
@@ -22,70 +22,13 @@ def _count(sql: str, params=None) -> int:
     return int(next(iter(row.values())))
 
 
-@pytest.mark.integration
-def test_no_task_is_wedged_in_running():
-    """The reaper requeues a task whose worker died after HEARTBEAT_TIMEOUT.
-    Anything still 'running' a day later means the reaper itself is not
-    working, which is invisible until the queue backs up.
-
-    Real data only: this is a monitor of the reaper, not a test of any code path.
-    Nothing generates tasks in the corpus, so there is no reaper for it to be watching.
-    """
-    wedged = db.query(
-        "SELECT id, kind, worker, started_at FROM tasks "
-        "WHERE status = 'running' AND started_at < now() - interval '24 hours' LIMIT 5"
-    )
-    assert not wedged, f"tasks stuck running for over a day: {wedged}"
-
-
-@pytest.mark.integration
-def test_no_batch_is_parked_past_the_providers_own_window():
-    """Tasks now park on provider batches instead of holding a worker. The
-    failure mode that replaces 'worker blocked' is 'parked forever', so this
-    is the check that the poller is actually resuming them.
-
-    The window is the provider's, read from the same constant the submitter
-    uses, so this cannot drift from what we asked for.
-
-
-    Real data only: a monitor of the batch poller, for the same reason.
-    """
-    from core.batch import completion_window_seconds
-
-    window = completion_window_seconds()
-    stale = db.query(
-        "SELECT provider_batch_id, status, submitted_at FROM ai_batches "
-        "WHERE status NOT IN ('completed', 'failed', 'expired', 'cancelled') "
-        "AND submitted_at < now() - make_interval(secs => %s) LIMIT 5",
-        (window * 2,),
-    )
-    assert not stale, f"batches unresolved past twice the completion window: {stale}"
-
-
-@pytest.mark.integration
-def test_no_task_parked_without_batches_to_wait_for():
-    """awaiting_batch with an empty batch_ids list would wait forever - the
-    poller has nothing to check, so nothing ever resumes it.
-
-    Real data only: a monitor of the submitter. The corpus draws task status and
-    payload independently, so it parks tasks with no batch_ids and would fail on its
-    own generator.
-    """
-    orphaned = db.query(
-        "SELECT id, kind FROM tasks WHERE status = 'awaiting_batch' "
-        "AND COALESCE(jsonb_array_length(payload->'batch_ids'), 0) = 0 LIMIT 5"
-    )
-    assert not orphaned, f"parked with nothing to wait on: {orphaned}"
-
-
 @pytest.mark.corpus
 def test_visibility_projection_matches_its_canonical_builder():
     """The materialized visibility projection stores the canonical answer."""
     from api.board import visibility
 
     user = db.query_one("SELECT id FROM users ORDER BY id LIMIT 1")
-    if user is None:
-        pytest.skip("no users in the synced copy")
+    assert user is not None, "the corpus holds five users"
     uid = user["id"]
     expected = set(visibility.member_ids(uid))
     assert visibility.recompute(uid) == len(expected)
@@ -122,45 +65,3 @@ def test_health_detectors_execute_against_real_data():
     assert isinstance(alerts, list)
     for a in alerts:
         assert {"kind", "subject", "severity", "message"} <= set(a), f"malformed alert: {a}"
-
-
-@pytest.mark.integration
-def test_every_batch_row_has_a_task_that_exists():
-    """
-    Real data only: ai_batches.task_id has no foreign key, so in production this can
-    genuinely orphan. The corpus draws it from the tasks it has already written, so it
-    never can.
-    """
-    orphans = _count(
-        "SELECT count(*) FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id "
-        "WHERE b.task_id IS NOT NULL AND t.id IS NULL"
-    )
-    assert orphans == 0
-
-
-@pytest.mark.integration
-def test_token_counts_are_never_negative():
-    """
-    Real data only: the subject is what the providers reported. The corpus samples
-    token counts from a measured range whose floor is zero.
-    """
-    bad = _count(
-        "SELECT count(*) FROM ai_queries "
-        "WHERE prompt_tokens < 0 OR completion_tokens < 0 OR total_tokens < 0"
-    )
-    assert bad == 0
-
-
-@pytest.mark.integration
-def test_every_enabled_filter_has_a_prompt_hash():
-    """Verdicts are keyed on prompt_hash. A filter without one can never match
-    a verdict, so its user's board silently loses every job.
-
-    Real data only: the corpus computes a prompt_hash for every filter it writes, so a
-    missing one cannot occur.
-    """
-    missing = _count(
-        "SELECT count(*) FROM user_filters WHERE enabled "
-        "AND (prompt_hash IS NULL OR prompt_hash = '')"
-    )
-    assert missing == 0

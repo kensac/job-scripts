@@ -85,18 +85,6 @@ def _claim_database_exclusively() -> None:
 _claim_database_exclusively()
 
 
-def _schema_already_provisioned() -> bool:
-    """True when the target database already has the schema, which is the case
-    for an integration run against a synced copy. The credential there is
-    read-only on purpose, so attempting to migrate or seed would fail - and
-    should, rather than the role being widened to make a test pass."""
-    row = db.query_one("SELECT to_regclass('public.alembic_version') AS t")
-    if not (row and row["t"]):
-        return False
-    version = db.query_one("SELECT count(*) AS c FROM alembic_version")
-    return bool(version and version["c"])
-
-
 _PGVECTOR_HELP = (
     "This Postgres has no pgvector, and a migration needs it.\n"
     "Point the suite at one that does:\n"
@@ -135,8 +123,7 @@ def _causes(exc: BaseException) -> list[BaseException]:
     return chain
 
 
-if not _schema_already_provisioned():
-    _provision()
+_provision()
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
@@ -172,7 +159,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     items[:] = [item for item in items if not item.get_closest_marker("corpus")] + corpus
 
 
-from tests.database_reset import _SYNCED_AT, _reset_to_empty  # noqa: E402
+from tests.database_reset import _reset_to_empty  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -239,18 +226,8 @@ def _clean_db(request):
     """Prepare the database population selected by each test marker.
 
     Unmarked tests start empty. Corpus tests share generated data and rebuild
-    it after an unmarked reset. Integration tests require a synced production
-    copy and skip when none is present. A prior count found 632 unmarked tests.
+    it after an unmarked reset.
     """
-    if request.node.get_closest_marker("integration"):
-        if not _SYNCED_AT:
-            pytest.skip(
-                "needs a synced copy of production (make testdb-sync); "
-                "this database holds the generated corpus or nothing"
-            )
-        yield
-        return
-
     if request.node.get_closest_marker("corpus"):
         from tests import corpus
 
@@ -259,18 +236,6 @@ def _clean_db(request):
         yield
         return
 
-    if _SYNCED_AT:
-        # An unmarked test truncates, and this database is a copy of
-        # production. Refuse rather than delete it: the copy takes minutes to
-        # cut, and the run that destroyed it would go green while every test
-        # that wanted it skipped.
-        raise RuntimeError(
-            f"{urlparse(os.environ['DATABASE_URL']).path.lstrip('/')!r} holds a synced "
-            "copy of production, and this test truncates every table.\n"
-            "Run only the tests that want the copy:\n"
-            "    make integration\n"
-            "or point TEST_DATABASE_URL at a scratch database for the rest."
-        )
     _reset_to_empty()
     yield
 

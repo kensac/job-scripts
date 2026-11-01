@@ -90,10 +90,10 @@ Prefer real shapes over invented ones. Real data carries the awkward cases.
 Nulls where you expected values, strings where you expected numbers, absent
 fields whose absence is the meaning. Those are where the bugs are.
 
-## Three populations, and how a test picks one
+## Two populations, and how a test picks one
 
 Every test here is in exactly one of these. The marker says which. There is no
-marker filter, so `pytest tests` runs all three.
+marker filter, so `pytest tests` runs both. No test reads production.
 
 **Unmarked.** A truncated database the test fills itself. Fast, hermetic, and
 where almost everything belongs.
@@ -105,30 +105,24 @@ subject is code running over realistic shape and volume: a query plan, a
 predicate over a whole catalog, an aggregate across several users. It runs on
 every pull request, because generated data needs no credential.
 
-**`@pytest.mark.integration`.** A synced copy of real production. Skipped when
-the database does not hold one, except in the nightly `Real-data checks`
-workflow, which fails before running them when the secret or the synced copy
-is missing: a nightly that skips everything is green and checks nothing. The database listens on the tailnet only, so both of its jobs join it
-first as an ephemeral `tag:ci` node (repository secrets `TS_OAUTH_CLIENT_ID`
-and `TS_OAUTH_SECRET`, plus a `tag:ci` to `100.79.4.41:5432` grant in the
-tailnet policy); without that a hosted runner times out on connect. Use it only when the subject is something a
-live writer produced and a generator cannot: what the comp extractor wrote,
-what users typed, whether the reaper is still requeueing, hashes stored by an
-older version of the code.
-
 **Do not build the corpus to satisfy an assertion.** A corpus that reproduces
 an invariant makes every test of that invariant a tautology, which is the
 first failure mode listed above. When a test needs an invariant the generator
-does not produce, that is the signal it belongs on real data, and it must say
-so in its own docstring. `tests/test_prod_shapes.py` is the worked example.
+does not produce, it is not a test. Whether production still holds something
+(no wedged task, comp stored yearly, no orphaned batch row) is a question
+about live data, and its home is a health detector (`api.health`), which runs
+against production on the fleet and alerts. The synced copy of production
+these used to run against was retired on 2026-10-31.
 
 ## Keeping the corpus a measurement
 
 The profile is the whole safety argument, and a measurement taken once is an
-assumption again within a month. `scripts/measure_profile.py --check` runs on
-a schedule against production and fails when production holds a shape the
-generator cannot produce: a new categorical value, a column that started
-holding nulls, a range that moved, a table nobody added to the profile.
+assumption again within a month. `make profile-check` reads production and
+fails when production holds a shape the generator cannot produce: a new
+categorical value, a column that started holding nulls, a range that moved, a
+table nobody added to the profile. It runs by hand, not in CI, because CI
+holds no production credential. Run it before a change whose tests lean on a
+shape the corpus may not have yet.
 
 When it fails, re-measure with `make profile`, commit the result, then check
 that the corpus and the tests reading it still cover what it now says. Do not
@@ -148,11 +142,6 @@ recorded only when it is low-cardinality, short, absent from
 `measure_profile.IDENTIFYING`, and free of anything that looks like an address
 or a token. Everything else is reduced to lengths and character classes. The
 file is committed, so that rule is load-bearing rather than a nicety.
-
-The synced copy is still real data and now anonymises on the way out:
-`sync_testdb.ANONYMISE` rewrites the mailbox, the email addresses and the
-OAuth tokens inside the `INSERT ... SELECT`, so they never leave the server
-they were already on.
 
 ## Test databases
 

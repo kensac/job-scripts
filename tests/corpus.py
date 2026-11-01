@@ -118,21 +118,9 @@ def build(*, target_jobs: int = TARGET_JOBS) -> dict[str, int]:
 
 
 def _refuse_to_destroy_anything_that_matters() -> None:
-    """Reject a non-disposable database or a synced production copy.
-
-    `make corpus` runs outside conftest's database-name guard. Building over a
-    synced copy would erase integration evidence and could make tests skip.
-    Check both conditions before truncation.
-    """
-    name = require_disposable_dsn(os.environ["DATABASE_URL"])
-    if holds_real_data():
-        raise RuntimeError(
-            f"{name!r} holds a synced copy of production, and building the corpus "
-            "would truncate it.\n"
-            "Point the suite at a different database, or select only the tests "
-            "that want the copy:\n"
-            "    make integration"
-        )
+    """Reject a non-disposable database before truncating it. `make corpus`
+    runs outside conftest's database-name guard."""
+    require_disposable_dsn(os.environ["DATABASE_URL"])
 
 
 def _materialise_boards() -> None:
@@ -176,11 +164,3 @@ def fingerprint() -> str:
 def is_present() -> bool:
     row = db.query_one("SELECT value FROM app_config WHERE key = 'testdb_corpus_seed'")
     return bool(row) and row["value"].get("fingerprint") == fingerprint()
-
-
-def holds_real_data() -> bool:
-    """True when this database is a synced copy of production rather than a
-    corpus. `sync_testdb.py` stamps when the copy was cut; `build()` stamps
-    that it generated one. A database with neither is an empty scratch."""
-    row = db.query_one("SELECT 1 AS t FROM app_config WHERE key = 'testdb_synced_at'")
-    return bool(row) and not is_present()

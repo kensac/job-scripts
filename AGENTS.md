@@ -74,8 +74,8 @@ These are instructions, not history. Follow them.
 - `src/core/`: provider datasheets, pricing, routing, task shapes, storage
   primitives.
 - `alembic/`: migrations. See migrations.md before adding one.
-- `tests/`: three populations against a real database: hermetic, the
-  generated corpus, and a synced copy of production. See testing.md.
+- `tests/`: two populations against a real database: hermetic, and the
+  generated corpus. No test reads production. See testing.md.
 - The frontend lives in a separate repository, `personal-portfolio`, under
   `app/job-tracker/` (a person's own data) and `app/job-scripts/` (the
   administrative view). It is not documented there: [frontend.md](docs/agents/frontend.md)

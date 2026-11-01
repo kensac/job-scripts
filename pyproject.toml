@@ -150,13 +150,11 @@ quote-style = "double"
 testpaths = ["tests"]
 markers = [
     "corpus: runs against the generated corpus (tests/corpus.py), built on demand",
-    "integration: needs a synced copy of REAL production; skipped without one",
     "no_board_recompute: the client fixture must not recompute the board before a read",
 ]
 # No marker filter. `pytest tests` runs everything: the hermetic suite on a
-# truncated database, the corpus suite on generated data measured out of
-# production, and the integration suite skipped unless the database actually
-# holds a synced copy. That is what lets CI run the whole thing on a pull
+# truncated database and the corpus suite on generated data measured out of
+# production. No test reads production, so CI runs the whole thing on a pull
 # request with no production credential anywhere.
 
 # The layering, enforced. `core` is the bottom: fetching, scraping, providers,
