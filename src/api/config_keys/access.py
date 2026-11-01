@@ -17,7 +17,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # client is ready for them.
     "gmail_connect_groups": ConfigKey(
         section="Access",
-        default=sorted(ADMIN_GROUPS),
+        default=[group for group in sorted(ADMIN_GROUPS)],
         value_type=list[str],
         kind="groups",
         help="Authentik groups whose members may connect a mailbox.",
