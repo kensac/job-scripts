@@ -145,12 +145,16 @@ def _etag(parts: list[str]) -> str:
     return f'"{digest}"'
 
 
-def _not_modified(if_none_match: str | None, etag: str) -> Response | None:
+_REVALIDATE = "public, max-age=0, must-revalidate"
+
+
+def _not_modified(if_none_match: str | None, etag: str, response: Response) -> Response | None:
+    """A 304 when the client already holds `etag`; otherwise None, with the
+    ETag and cache headers set on `response`."""
+    headers = {"ETag": etag, "Cache-Control": _REVALIDATE}
     if etag in csv(if_none_match):
-        return Response(
-            status_code=304,
-            headers={"ETag": etag, "Cache-Control": "public, max-age=0, must-revalidate"},
-        )
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
     return None
 
 
@@ -218,11 +222,9 @@ def list_public_job_lists(
 ) -> PublicJobListIndex | Response:
     rows = db.query_as(_IndexRow, _INDEX_SQL)
     etag = _etag([f"{row.slug}:{row.public_revision}" for row in rows])
-    unchanged = _not_modified(if_none_match, etag)
+    unchanged = _not_modified(if_none_match, etag, response)
     if unchanged is not None:
         return unchanged
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return PublicJobListIndex(
         job_lists=[PublicJobListLink.model_validate(row, from_attributes=True) for row in rows]
     )
@@ -428,11 +430,9 @@ def get_public_job_list(
             *(card.model_dump_json() for card in cards),
         ]
     )
-    unchanged = _not_modified(if_none_match, etag)
+    unchanged = _not_modified(if_none_match, etag, response)
     if unchanged is not None:
         return unchanged
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return PublicJobList(
         slug=board.slug,
         name=board.name,
@@ -466,7 +466,7 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
     row = db.query_one_as(_DetailRow, detail_sql, (slug, job_id))
     if row is None:
         raise refuse(404, "NOT_FOUND", "unknown job", headers={"Cache-Control": "no-store"})
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    response.headers["Cache-Control"] = _REVALIDATE
     [page] = page_fetches.resolve(
         [{"content": row.content, "ref": row.content_ref}], "content", "ref"
     )
