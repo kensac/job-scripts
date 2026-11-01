@@ -118,7 +118,6 @@ LOCATIONS = Derivation(
     requests=_requests,
     store=_store,
     input_chars=None,
-    recipe=None,
     shape=LOCATIONS_TASK,
     answer=LocationAnswer,
     context_keys=("text",),

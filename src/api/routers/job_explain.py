@@ -66,6 +66,42 @@ async def explain_check(
     # make this caller's model an authority on a posting everyone sees: that
     # is what recording shared checks under explain:<check> is for, below.
     job = require_visible_job(user, job_id, "j.id, j.url, j.company, j.title")
+    filter_name = prompt_hash = None
+    spec = POSTING_CHECKS.get(body.check)
+    if spec:
+        instructions, model_cls, verdict_of = (
+            spec.instructions,
+            spec.response_model,
+            spec.verdict_of,
+        )
+        # ai_queries has no user column and every board takes the latest
+        # closed and clearance row per url, so a row under the shared name
+        # from this caller's model (any key, any base_url) would decide the
+        # posting for everyone. A distinct name keeps the audit row and
+        # leaves the shared verdict to the fleet.
+        check = f"explain:{spec.name}"
+    elif body.check.startswith("filter:"):
+        # Compared as text so a malformed id is an unknown filter, not a 500.
+        flt = db.query_one(
+            "SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters "
+            "WHERE user_id = %s AND id::text = %s",
+            (user.id, body.check.removeprefix("filter:")),
+        )
+        if not flt:
+            raise refuse(404, "NOT_FOUND", "unknown filter")
+        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
+        model_cls = FilterVerdict
+        verdict_of = lambda p: (p.should_filter, p.reason)
+        filter_name = f"user{user.id}:{flt['name']}"
+        prompt_hash = flt["prompt_hash"]
+        check = "custom"
+    else:
+        raise refuse(
+            400,
+            "INVALID_CHECK",
+            f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
+        )
+
     fresh, closure_signal = await _verdicts.refresh_page(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
@@ -86,41 +122,6 @@ async def explain_check(
         raise refuse(409, "NO_CONTENT", "could not fetch this posting just now")
     cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
-
-    filter_name = prompt_hash = None
-    spec = POSTING_CHECKS.get(body.check)
-    if spec:
-        instructions, model_cls, verdict_of = (
-            spec.instructions,
-            spec.response_model,
-            spec.verdict_of,
-        )
-        # ai_queries has no user column and every board takes the latest
-        # closed and clearance row per url, so a row under the shared name
-        # from this caller's model (any key, any base_url) would decide the
-        # posting for everyone. A distinct name keeps the audit row and
-        # leaves the shared verdict to the fleet.
-        check = f"explain:{spec.name}"
-    elif body.check.startswith("filter:"):
-        flt = db.query_one(
-            "SELECT name, prompt, on_ambiguous, prompt_hash FROM user_filters "
-            "WHERE user_id = %s AND id = %s",
-            (user.id, int(body.check.split(":", 1)[1])),
-        )
-        if not flt:
-            raise refuse(404, "NOT_FOUND", "unknown filter")
-        instructions = build_custom_instructions(flt["prompt"], flt["on_ambiguous"])
-        model_cls = FilterVerdict
-        verdict_of = lambda p: (p.should_filter, p.reason)
-        filter_name = f"user{user.id}:{flt['name']}"
-        prompt_hash = flt["prompt_hash"]
-        check = "custom"
-    else:
-        raise refuse(
-            400,
-            "INVALID_CHECK",
-            f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
-        )
 
     parsed, _usage = await _verdicts.run_check(
         cfg,
