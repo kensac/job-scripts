@@ -31,7 +31,7 @@ async def test_new_embedding_submissions_follow_visibility(f, monkeypatch):
         submitted.extend(specs)
         return ["scope-batch"]
 
-    monkeypatch.setattr(batch, "submit_responses_batches", submit)
+    monkeypatch.setattr(batch, "submit_batches", submit)
     with pytest.raises(runtime.AwaitingBatch):
         await embeddings.EMBEDDINGS.handle(task, {})
     actual = {row["url"] for spec in submitted for row in spec.context["rows"]}

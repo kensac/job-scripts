@@ -355,9 +355,6 @@ async def _collect_anthropic(
     return results, unfinished
 
 
-# Existing response callers and integrations retain their public entry point.
-submit_responses_batches = submit_batches
-
 __all__ = [
     "BATCH_CHARS_PER_TOKEN",
     "BATCH_COMPLETION_WINDOW",
@@ -389,5 +386,4 @@ __all__ = [
     "run_responses_batch",
     "structured_response_spec",
     "submit_batches",
-    "submit_responses_batches",
 ]
