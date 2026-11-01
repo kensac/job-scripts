@@ -120,7 +120,8 @@ def test_large_recipe_upload_is_chunked_and_published(client, admin_headers, use
         path = f"/v1/admin/extension/recipe-uploads/{upload_id}/chunks/{index}"
         assert client.put(path, headers=admin_headers, content=pieces[index]).status_code == 200
     changed = b"x" + pieces[0][1:]
-    assert client.put(path, headers=admin_headers, content=changed).status_code == 409
+    first = f"/v1/admin/extension/recipe-uploads/{upload_id}/chunks/0"
+    assert client.put(first, headers=admin_headers, content=changed).status_code == 409
     assert (
         client.post(
             f"/v1/admin/extension/recipe-uploads/{upload_id}/complete", headers=admin_headers

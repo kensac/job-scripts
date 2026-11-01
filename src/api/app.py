@@ -13,7 +13,7 @@ from api.ai import access as ai_access
 from api.auth import require_user
 from api.board import visibility
 from api.models import Ok
-from api.problem import PUBLIC_REFUSALS, REFUSALS
+from api.problem import PUBLIC_REFUSALS, REFUSALS, Problem, ProblemResponse
 from api.routers import (
     admin,
     analytics,
@@ -96,12 +96,23 @@ async def _ai_paused(_request: Request, _exc: ai_pause.AIPaused) -> JSONResponse
     )
 
 
+@app.exception_handler(Exception)
+async def _unhandled(_request: Request, _exc: Exception) -> JSONResponse:
+    """An unhandled error answers in the problem shape every refusal has, so
+    a client reads `detail.code` here too instead of special-casing a
+    plain-text body. The message says nothing of the exception: its text can
+    carry SQL, paths or user data. Starlette re-raises after this answer, so
+    the server still logs the traceback and `_capture_unhandled` records it."""
+    problem = Problem(code="INTERNAL_ERROR", message="the server failed to answer this request")
+    return JSONResponse(status_code=500, content=ProblemResponse(detail=problem).model_dump())
+
+
 @app.middleware("http")
 async def _capture_unhandled(request: Request, call_next):
     """An unhandled exception in a request handler is recorded with the
-    request it failed on and the caller it failed for, then re-raised so the
-    response is the 500 it always was. HTTPException is a handled answer, not
-    a failure, and never reaches here."""
+    request it failed on and the caller it failed for, then re-raised so
+    `_unhandled` answers it. HTTPException is a handled answer, not a
+    failure, and never reaches here."""
     try:
         return await call_next(request)
     except Exception as exc:

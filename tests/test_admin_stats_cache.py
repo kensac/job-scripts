@@ -3,6 +3,8 @@ worker event. It answers from a cache for admin_stats_cache_seconds."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from api.routers.admin import ledger_stats
 
 
@@ -38,7 +40,7 @@ def test_a_stale_cache_is_served_while_one_thread_recomputes(client, admin_heade
 
     first = ledger_stats._compute_stats()
     ledger_stats._stats._value = (-1e9, first)  # long expired
-    started: list[object] = []
+    started: list[Callable[[], object]] = []
 
     class Thread:
         def __init__(self, target, daemon):

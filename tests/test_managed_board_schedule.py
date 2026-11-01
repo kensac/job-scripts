@@ -33,6 +33,25 @@ def test_scheduler_admits_every_published_board_and_isolates_refusals(f, monkeyp
     assert all(key and key.startswith(f"managed-board:{board_id}:") for board_id, key in calls)
 
 
+def test_an_admission_error_does_not_stop_the_cycle(f, monkeypatch):
+    first = _board(f, "first", published=True)
+    second = _board(f, "second", published=True)
+    calls = []
+
+    def admit(board_id, *, dedupe_key=None):
+        calls.append(board_id)
+        if board_id == first:
+            raise RuntimeError("admission broke")
+
+    monkeypatch.setattr(managed_boards, "admit", admit)
+    worker._managed_board_schedule_attempts.clear()
+    worker.schedule_ingest_cycle()
+
+    assert calls == [first, second]
+    # Scheduling after the boards still ran.
+    assert db.query_one("SELECT 1 FROM tasks WHERE kind = 'send_digests'")
+
+
 def test_scheduler_with_no_published_boards_never_calls_admission(f, monkeypatch):
     _board(f, "draft", published=False)
     monkeypatch.setattr(

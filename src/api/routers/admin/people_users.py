@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime
-import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -16,9 +15,6 @@ from api.problem import refuse
 from api.routers.admin.shared import require_admin
 
 router = APIRouter()
-
-
-logger = logging.getLogger(__name__)
 
 
 # Whitelisted sort keys for the users ledger; the SQL names the computed

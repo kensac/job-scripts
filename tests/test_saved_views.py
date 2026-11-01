@@ -204,6 +204,7 @@ def test_concurrent_default_selection_serializes_on_owner(client, user_headers, 
             # Inspect actual PostgreSQL waits rather than relying on timing to
             # manufacture a race; the deadline bounds a broken implementation.
             deadline = time.monotonic() + 5
+            waiting = 0
             while time.monotonic() < deadline:
                 db.execute("SELECT pg_stat_clear_snapshot()")
                 waiting = db.query_one(

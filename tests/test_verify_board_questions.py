@@ -39,6 +39,7 @@ def _board(f, source: str, *, slug: str = "joint-board", title_gate: dict | None
             db.jsonb(title_gate) if title_gate else None,
         ),
     )
+    assert board is not None
     db.execute(
         "INSERT INTO managed_board_sources (managed_board_id, source) VALUES (%s, %s)",
         (board["id"], source),

@@ -13,9 +13,9 @@ from api.orm import Base, UserJob, UserJobWorkingSet
 
 
 def test_working_set_model_is_a_narrow_idempotent_association():
-    table = UserJobWorkingSet.__table__
+    table = Base.metadata.tables["user_job_working_set"]
 
-    assert Base.metadata.tables["user_job_working_set"] is table
+    assert UserJobWorkingSet.__table__ is table
     assert list(table.columns) == [table.c.user_id, table.c.job_id]
     assert [column.name for column in table.primary_key.columns] == ["user_id", "job_id"]
     assert {index.name for index in table.indexes} == {"idx_user_job_working_set_job"}

@@ -197,6 +197,10 @@ def test_the_admin_queue_takes_the_owner_as_a_parameter(client, me, f):
     body = client.get(f"/v1/admin/resolve/queue?user_id={uid}", headers=admin).json()
     assert body["total"] == 1
 
+    resp = client.get(f"/v1/admin/resolve/queue?user_id={uid}&kind=nonsense", headers=admin)
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "UNKNOWN_KIND"
+
 
 def test_the_candidate_picker_serves_the_same_declared_choices(client, me):
     """The modal is where a person actually makes this decision, and it is
