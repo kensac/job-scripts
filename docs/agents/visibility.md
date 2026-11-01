@@ -32,26 +32,24 @@ branch. Deleting a pair removes nothing from anybody's board.
 
 `user_jobs` is what a person did: a status, a note, a date, a hide, or a
 tracking stamp (`person_touched_at`). A row with a status, a note or a date
-applied is visible whatever the criteria or the verdicts say. The worker
-wrote empty machine rows here too until 2026-10-10 (phase 2b); a legacy
-all-default row is working-set membership, not person state.
+applied is visible whatever the criteria or the verdicts say. Nothing writes
+an empty machine row here; a legacy all-default row is working-set
+membership, not person state.
 
-Reading the first as the second is how a board question was answered wrongly
-on 2026-09-10. `tests/test_worker_board.py` pins the two apart.
+`tests/test_worker_board.py` pins the two apart.
 
 ## Visibility is computed, never evaluated on read
 
-Job visibility is one predicate, spelled once (`api.visibility.FULL`), and it
+Job visibility is one predicate, spelled once (`api.board.visibility.FULL`), and it
 is COMPUTED. A worker runs it per person into `board_visible`. Every board
 read, per-object route and requirements slice then goes through
-`api.visibility.FAST`, a lookup.
-
-It was evaluated on every read until 2026-09-05, at 2 to 7 seconds a sort.
+`api.board.visibility.FAST`, a lookup. Evaluated per read, it cost 2 to 7
+seconds a sort.
 
 Membership changes when a preference changes or a verdict lands, so a
 preference write asks for a recompute within a minute, and the scheduler asks
 every `board_refresh_minutes` (persisted config, seeded 3) for everyone the
-predicate can admit anything for: a subscription, an acted-on row or an
+predicate can admit anything for: a subscription, any `user_jobs` row or an
 upload. A users row with none of those is skipped; one such row drew 825
 recomputes in a day for zero rows. Neither asks while a recompute for that
 person is pending (`visibility.RECOMPUTE_PENDING`): the pending one reads
@@ -61,7 +59,9 @@ held 66 pending recomputes for three people on 2026-10-10. A posting the
 person uploaded or acted on is visible without waiting.
 
 **Never write a fresh "can this user see this" predicate, and never evaluate
-FULL on a request.**
+FULL on a request.** The board task's materialise and candidate queries share
+`criteria.SQL` and the structural gates with `FULL` and must stay consistent
+with it.
 
 **A recompute writes only the rows that changed.** `visibility.store` deletes
 the members that left, inserts the ones that joined and leaves the rest alone,
@@ -115,10 +115,8 @@ the same `FAST` template.
 
 A picked posting is bookkeeping, not a decision, so it obeys the whole
 predicate like any other posting: the person's criteria (locations, posted
-date) and the verdicts. The first version re-checked only the criteria, so
-a filter that later rejected a posting could not remove the row the earlier
-pass had made: 614 rejected postings sat on one board on 2026-09-07 after a
-model change, and the change read as having no effect.
+date) and the verdicts. Re-checking only the criteria left rejected postings
+on boards after a filter changed its answer.
 
 A status, a note or a date applied is a decision, and the row is theirs
 whatever the criteria or the verdicts say.
@@ -149,30 +147,24 @@ onboarding checklist carries that as its fifth step.
 **"Is this person an admin" has one answer: `api.auth.is_admin(groups)`.**
 It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`), and
 `require_admin` is that test as a route dependency. Code never names the
-group: the signup gate and the health alert recipients each hard-coded
-`infra-admins` and ignored the variable, so renaming the group would have
-moved admin routes and left signups and alert mail behind.
+group outside seeded defaults.
 
 **A non-admin's board keeps postings at most 30 days old.** The age window
 (`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
 and 30 at most; a wider value is refused at the write (400 `MAX_AGE_DAYS`)
-by `PUT /user/settings`, and every non-admin row was set to 30 on
-2026-09-08. Admins (the `JOBTRACKER_ADMIN_GROUPS` groups) keep the full
-range. Checked at the write only, by Kanishk's choice; a stored value is
-what applies. `GET /user/usage` carries both caps as `limits`
+by `PUT /user/settings`. Admins (the `JOBTRACKER_ADMIN_GROUPS` groups) keep
+the full range. Checked at the write only; a stored value is what applies. `GET /user/usage` carries both caps as `limits`
 (`enabled_filters`, `max_age_days`, null for an admin) beside the weekly
 allowance, so the Usage page states every limit in one place instead of
 each surfacing only as a refusal.
 
-**A run may go past the shared cap without the cap moving.** `POST
-/admin/filters/run` `{user_id, filter_id?, ignore_budget}` queues a
-`run_filter` (or `run_all_filters`) task for any person; with
-`ignore_budget: true` the task, and the chunks it splits into, load their
-entitlement with the weekly cap lifted for that run alone, the spend still
-recorded in `model_calls`. Only an admin can queue it (the person's own run
-endpoints never set the flag), and the same flag on a task row written by
-hand works the same way. Raising `group_budgets.weekly_token_budget` for a
-run and putting it back is not the tool for this.
+**A run may go past the shared cap without the cap moving.** A
+`run_filter` or `run_all_filters` task row written by hand with
+`ignore_budget: true` in its payload, and the chunks it splits into, load
+their entitlement with the weekly cap lifted for that run alone, the spend
+still recorded in `model_calls`. No route sets the flag. Raising
+`group_budgets.weekly_token_budget` for a run and putting it back is not the
+tool for this.
 
 **A filter save does not re-judge the board unless the person's group is in
 `filter_rejudge_on_change_groups`** (app_config, seeded `[]`, `"*"` for
@@ -218,9 +210,9 @@ software, data, platform, product, analyst and the like); support-desk titles
 stay the model's, because it kept one.
 
 **A posting a screen skips leaves the candidates.** A skip writes no verdict,
-so a screen applied after selection meets the same posting on every run: the
-filter review gate's title stage did until 2026-10-10, and 3,501 of 3,802
-filter batch chunks in the 7 days before read pages only to skip them again.
+so a screen applied after selection meets the same posting on every run (on
+2026-10-10, 3,501 of 3,802 filter batch chunks in 7 days read pages only to
+skip them again).
 Each screen applies where candidates are chosen: `tasks.filtering.personal_runs._run_filters`
 per filter, `managed_boards.admission._plan` per board run (the run payload records
 `title_screens`), and `verification_candidates.reachable` per target. It is
@@ -300,8 +292,7 @@ it, 2,708 of 60,799 paid filter reads in the 7 days to 2026-10-18 were a
 twin's second. `verify_near_copy_reuse` turns both off.
 
 **Verification does not read what no board or filter keeps.** Reading a posting
-is most of what a posting costs, and since the Workday paging fix (2026-10-05)
-most new volume is store, clinic and warehouse roles reposted under the same
+is most of what a posting costs, and most new volume is store, clinic and warehouse roles reposted under the same
 titles. `verification_volume_gate` lists the prompt hashes that opt in; for
 those targets `verification_candidates.reachable` skips a posting whose (source,
 title) was judged `title_min_judged` (50) times in `window_days` with no keep by
@@ -312,17 +303,14 @@ always read. A new or edited prompt is not covered until its hash is added,
 because both rules were measured against these prompts' keeps.
 
 **A company's board that boards and filters do not keep is not read.** This one
-is a volume decision, not a zero-loss one (Kanishk, 2026-10-09: "if there are
-companies that aren't getting on boards I don't see merit in keeping them").
+is a volume decision, not a zero-loss one (Kanishk, 2026-10-09).
 A source with `source_min_judged` (50) postings judged in `window_days` and a
 keep rate at or below `source_max_keep_rate` (0) is skipped, with the same
 audit sample. Over the 30 days to 2026-10-08 that was 164 sources, 22% of the
 last week's judged volume, and none of their postings was kept in those 30
 days; a 0.2% rate would reach 35% for 68 of 18,566 keeps. On held-out splits a
 zero-keep source occasionally produced a later keep (Bank of America, RR
-Donnelley); the audit sample is what returns such a source. #821 first shipped
-this at 300 postings as if it were zero-loss, which is why it was briefly
-removed (#825).
+Donnelley); the audit sample is what returns such a source.
 
 ## A posting's path is one read, in the drawer
 
@@ -441,8 +429,7 @@ A comma list has two parsers and no others: `api.params.csv` for query
 parameters and headers, `core.env.env_list` for environment variables (in
 core so core can use it). User ids go through `scoping.user_ids`, which keeps
 plain non-negative integers and drops the rest. `tests/test_comma_lists.py`
-fails on a module that splits its own; one admin lookup's copy had drifted to
-accept negative ids.
+fails on a module that splits its own.
 
 **A saved view is a name that returns a page to a state.**
 `api.routers.saved_views` owns `/user/views`, backed by `saved_views`. Each
@@ -488,9 +475,9 @@ are not unified because each is a published contract the frontend reads.
 | Shape | In | Out | Where |
 |---|---|---|---|
 | Page number | `page`, `page_size` | `page`, `page_size`, `total`, `has_more` | `api.pagination.Page`: admin queries and jobs, catalog reports |
-| Id or keyset cursor | `limit` and `before_id` or `cursor` | `has_more`, and `next_cursor` where there is a cursor | the task queue (`before_id`), `GET /user/jobs` (`cursor` is the last id, legacy), public job lists (opaque keyset on the sort value and id) |
+| Id or keyset cursor | `limit` and `before_id` or `cursor` | `has_more`, and `next_cursor` where there is a cursor | the task queue (`before_id`), public job lists (opaque keyset on the sort value and id) |
 | Offset cursor | `limit`, `cursor` (an offset as a string) | `has_more`, `next_cursor` | `/admin/companies` only |
-| Limit and offset | `limit`, `offset` | `has_more`, sometimes `total` | `GET /user/jobs` without a cursor, and older admin lists: users, sources, screened postings, batch rows, spend rows, filter insights, the catalog |
+| Limit and offset | `limit`, `offset` | `has_more`, sometimes `total` | `GET /user/jobs`, and older admin lists: users, sources, screened postings, batch rows, spend rows, filter insights, the catalog |
 
 Use a page number unless rows arrive while someone is paging and a skipped
 or repeated row would matter; then use an id or keyset cursor. Do not add
@@ -498,8 +485,7 @@ the last two shapes.
 
 Page-number lists use `api.pagination.Page` for bounds, offsets and metadata.
 Rows, totals and summaries share the same selection; pagination never narrows
-a total or summary. The user board's legacy cursor orders by descending ID
-and echoes that actual order, regardless of requested sort.
+a total or summary.
 
 ## The ATS on the board
 
@@ -507,7 +493,7 @@ Every board row carries `ats`, the applicant tracking system its url lives
 on (ashby, greenhouse, lever, workable, workday and a few more by host;
 anything else is "other", usually the employer's own careers site, of
 which a real board has a couple of hundred, so listing them would make
-the select useless). One SQL expression, `ATS_SQL` in api.routers.jobs, feeds the row,
+the select useless). One SQL expression, `ATS_SQL` in `api.routers.job_board`, feeds the row,
 the `ats=` filter on GET /user/jobs and the counted list in
 GET /user/jobs/options, so the filter offers what is on the board rather
 than a fixed list. It exists because assisted apply works one ATS at a

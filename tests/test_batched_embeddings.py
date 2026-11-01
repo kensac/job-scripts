@@ -162,7 +162,7 @@ async def test_submission_parks_packed_requests_and_respects_existing_work(f, mo
         on_event("batch", "submitted", {"requests": len(specs)})
         return ["batch"]
 
-    monkeypatch.setattr(batch, "submit_responses_batches", submit)
+    monkeypatch.setattr(batch, "submit_batches", submit)
     with pytest.raises(runtime.AwaitingBatch):
         await embeddings.EMBEDDINGS.handle(task_id, {})
     assert [len(spec.inputs) for spec in submitted] == [100, 1]
@@ -202,7 +202,7 @@ async def test_rejected_packed_request_is_acknowledged_without_live_fallback(f, 
     async def no_submit(*args, **kwargs):
         raise AssertionError("unexpected provider retry")
 
-    monkeypatch.setattr(batch, "submit_responses_batches", no_submit)
+    monkeypatch.setattr(batch, "submit_batches", no_submit)
     await embeddings.EMBEDDINGS.handle(task_id, {})
     assert batch_results.outcome_counts(task_id) == {"failed": 1}
     assert db.query_one("SELECT count(*) AS n FROM job_embeddings")["n"] == 0

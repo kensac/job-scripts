@@ -13,8 +13,8 @@ behaviour-driving config as remote logic. The payload travels compressed and
 base64-encoded: that keeps the selector tables out of casual view and out of
 a public repo diff, and stops nobody who reads the extension's decoder.
 
-Publishing keeps history: each publish is a row, the newest enabled row is
-served, and an earlier one can be re-enabled (rollback). Version 1 revisions
+Publishing keeps history: each publish is a row and the newest enabled row is
+served. Publishing an earlier table again re-enables its row. Version 1 revisions
 hash canonical bytes. Version 2 revisions chain ordered chunk digests.
 """
 
@@ -127,7 +127,7 @@ def publish(adapter: str, body: Any, published_by: str | None) -> str:
     from api.apply.recipe_uploads import process
 
     for index in range(len(chunks)):
-        process(upload_id, index, enqueue_next=False)
+        process(upload_id, index)
     result = db.query_one(
         "SELECT status, error, revision FROM extension_recipe_uploads WHERE id = %s", (upload_id,)
     )
@@ -141,36 +141,6 @@ def current(adapter: str) -> dict[str, Any] | None:
         "SELECT adapter, revision, upload_id, published_by, published_at FROM extension_recipes "
         "WHERE adapter = %s AND enabled ORDER BY published_at DESC LIMIT 1",
         (adapter,),
-    )
-
-
-def rollback(adapter: str) -> str | None:
-    """Re-enable the publish before the current one; returns its revision, or
-    None when there is nothing to go back to."""
-    with db.transaction():
-        now = current(adapter)
-        if not now:
-            return None
-        previous = db.query_one(
-            "SELECT revision FROM extension_recipes WHERE adapter = %s AND NOT enabled "
-            "AND published_at < %s ORDER BY published_at DESC LIMIT 1",
-            (adapter, now["published_at"]),
-        )
-        if not previous:
-            return None
-        db.execute(
-            "UPDATE extension_recipes SET enabled = (revision = %s) WHERE adapter = %s",
-            (previous["revision"], adapter),
-        )
-    return previous["revision"]
-
-
-def history() -> list[dict[str, Any]]:
-    return db.query(
-        "SELECT r.adapter, r.revision, r.enabled, r.published_by, r.published_at, "
-        "(SELECT sum(octet_length(c.body)) FROM extension_recipe_chunks c "
-        "WHERE c.upload_id = r.upload_id) AS bytes FROM extension_recipes r "
-        "ORDER BY r.adapter, r.published_at DESC"
     )
 
 
