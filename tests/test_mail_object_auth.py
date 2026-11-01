@@ -15,6 +15,7 @@ import pytest
 from api import db
 from tests import mail_log
 from tests.conftest import _auth_headers
+from tests.factories import user_id_for_subject
 
 
 def _other_user_application(f) -> tuple[int, int, int]:
@@ -48,7 +49,7 @@ def _other_user_application(f) -> tuple[int, int, int]:
 def mine(client, f):
     headers = _auth_headers("objauth-user", "obj@example.com", ["jobtracker-users-internal"])
     assert client.post("/v1/users/bootstrap", headers=headers).status_code == 200
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", ("objauth-user",))["id"]
+    uid = user_id_for_subject("objauth-user")
     app = db.query_one(
         "INSERT INTO applications (user_id, company_name, source_provenance) "
         "VALUES (%s, 'Mine', 'email') RETURNING id",

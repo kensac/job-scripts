@@ -7,6 +7,7 @@ import pytest
 from api import db
 from tests import mail_log
 from tests.conftest import _auth_headers
+from tests.factories import user_id_for_subject
 
 SENT = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 
@@ -15,9 +16,7 @@ SENT = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
 def me(client):
     headers = _auth_headers("inbox-user", "inbox@example.com", ["jobtracker-users-internal"])
     assert client.post("/v1/users/bootstrap", headers=headers).status_code == 200
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", ("inbox-user",))
-    assert row is not None
-    return headers, row["id"]
+    return headers, user_id_for_subject("inbox-user")
 
 
 def _msg(uid: int, mid: str, kind: str, company: str | None) -> int:

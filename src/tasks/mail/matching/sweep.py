@@ -10,7 +10,7 @@ from api import db
 from api.mail import match as mail_match
 from api.mail.current import current_event, current_match
 
-logger = logging.getLogger("tasks.mail.matching.handler")
+logger = logging.getLogger(__name__)
 
 # Progress is written every this many messages or applications, because a
 # single user's sweep is most of a run: 4,853 messages and 2,587 applications

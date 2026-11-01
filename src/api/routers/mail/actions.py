@@ -15,7 +15,7 @@ from api.mail import pipeline as mail_pipeline
 from api.mail.pipeline import Proposal, ProposalAnswered
 from api.models import Ok
 from api.problem import refuse
-from api.routers.mail.shared import Evidence, _evidence_for
+from api.routers.mail.shared import Evidence, evidence_for
 
 router = APIRouter()
 
@@ -58,7 +58,7 @@ def suggestions(user: AuthedUser = Depends(require_user)) -> Suggestions:
     body is a detail view's worth of payload and there are 1,159 of these.
     """
     rows = mail_pipeline.proposals_for(user.id)
-    evidence = _evidence_for(sorted({r.message_id for r in rows}))
+    evidence = evidence_for(sorted({r.message_id for r in rows}))
     return Suggestions(
         suggestions=[
             Suggestion(**row.model_dump(), evidence=evidence.get(row.message_id)) for row in rows
