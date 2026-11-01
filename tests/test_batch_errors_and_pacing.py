@@ -52,6 +52,26 @@ async def test_per_request_errors_are_stored_as_the_provider_wrote_them():
     assert "minimal is not supported" in stored[0]["error"]
 
 
+HTTP_REFUSED_LINE = (
+    '{"custom_id": "u1", "error": null, "response": {"status_code": 400, '
+    '"body": {"error": {"message": "Billing hard limit has been reached", '
+    '"type": "invalid_request_error"}}}}'
+)
+
+
+@pytest.mark.asyncio
+async def test_a_request_refused_over_http_keeps_the_reason_from_its_response_body():
+    """The line's top-level error is null; the reason sits in the response.
+    On 2026-10-31 all 33,365 such rows were stored as "batch error"."""
+    fake = SimpleNamespace(
+        id="b-http", status="completed", output_file_id=None, error_file_id="e1", errors=None
+    )
+    results = {"u1": batch.BatchResult("u1")}
+    await batch._collect_batch(_Client(HTTP_REFUSED_LINE), fake, results)  # type: ignore[arg-type]
+    assert results["u1"].error == "400: Billing hard limit has been reached"
+    assert [e["error"] for e in _errors("b-http")] == ["400: Billing hard limit has been reached"]
+
+
 @pytest.mark.asyncio
 async def test_a_batch_rejected_before_any_request_ran_keeps_its_reason():
     """No output file, no error file: the reason is on the batch object and
@@ -67,6 +87,24 @@ async def test_a_batch_rejected_before_any_request_ran_keeps_its_reason():
     await batch._collect_batch(_Client(""), fake, results)  # type: ignore[arg-type]
     assert all("model not eligible" in (r.error or "") for r in results.values())
     assert {e["custom_id"] for e in _errors("b-whole")} == {"u1", "u2"}
+
+
+@pytest.mark.asyncio
+async def test_an_expired_batch_keeps_the_answers_it_returned():
+    """An expired batch's output file holds the requests it finished. Those
+    are answered; only the request with no line is marked expired."""
+    answered = (
+        '{"custom_id": "u1", "response": {"status_code": 200, "body": {"output": '
+        '[{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}]}}}'
+    )
+    fake = SimpleNamespace(
+        id="b-expired", status="expired", output_file_id="o1", error_file_id=None, errors=None
+    )
+    results = {"u1": batch.BatchResult("u1"), "u2": batch.BatchResult("u2")}
+    await batch._collect_batch(_Client(answered), fake, results)  # type: ignore[arg-type]
+    assert (results["u1"].text, results["u1"].error) == ("{}", None)
+    assert (results["u2"].text, results["u2"].error) == (None, "batch expired")
+    assert [e["custom_id"] for e in _errors("b-expired")] == ["u2"]
 
 
 def _batch(purpose: str, batch_id: str, requests: int, failed: int, minutes_ago: int) -> None:
@@ -158,3 +196,17 @@ async def test_a_deferred_fetch_writes_nothing_so_the_next_cycle_retries(monkeyp
         )["n"]
         == 0
     )
+
+
+@pytest.mark.asyncio
+async def test_a_submission_the_provider_refuses_fails_with_its_reason(monkeypatch):
+    """Every wave refused: the task's error carries the provider's reason.
+    On 2026-10-31 only a log line said "Billing hard limit has been reached"."""
+    monkeypatch.setattr(batch, "_client", object)
+
+    async def refuse(*args, **kwargs):
+        raise RuntimeError("Error code: 400 - Billing hard limit has been reached")
+
+    monkeypatch.setattr(batch, "_submit_chunk", refuse)
+    with pytest.raises(RuntimeError, match=r"accepted by the provider: .*Billing hard limit"):
+        await batch.submit_batches([batch.BatchSpec("one", "text")], "gpt-6-luna", "low", 256)

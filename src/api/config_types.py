@@ -47,7 +47,7 @@ class ConfigKey:
     # renamed.
     section: str = "General"
     choices: tuple[str, ...] = ()
-    kind: Literal["value", "text", "groups", "hosts", "columns"] = "value"
+    kind: Literal["value", "text", "groups", "hosts", "columns", "json"] = "value"
     _adapter: TypeAdapter = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

@@ -19,7 +19,6 @@ from api.companies.models import (
     _StatusRow,
 )
 from api.companies.projection import _bucket, _item
-from api.companies.projection import _response_block as _response_block
 from api.companies.queries import (
     _BASE_SQL,
     _CAVEATS,
@@ -27,20 +26,10 @@ from api.companies.queries import (
     _CURRENCY_SQL,
     _CUTS,
     _OPEN_SQL,
+    _OUTCOME_KINDS,
     _REPOST_SQL,
+    _RESPONSE_SQL,
     _STATUS_SQL,
-)
-from api.companies.queries import (
-    _OUTCOME_KINDS as _OUTCOME_KINDS,
-)
-from api.companies.queries import (
-    _RESPONSE_SQL as _RESPONSE_SQL,
-)
-from api.companies.queries import (
-    APPLICATIONS_MIN as APPLICATIONS_MIN,
-)
-from api.companies.queries import (
-    OPEN_MIN_CHECKED as OPEN_MIN_CHECKED,
 )
 from api.mail import pipeline as mail_pipeline
 from api.problem import refuse

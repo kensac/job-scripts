@@ -10,12 +10,9 @@ from __future__ import annotations
 import datetime
 
 from api import db, rates
-from api.routers.companies import (
-    _OUTCOME_KINDS,
-    _RESPONSE_SQL,
-    _response_block,
-    _ResponseRow,
-)
+from api.companies.models import _ResponseRow
+from api.companies.projection import _response_block
+from api.companies.queries import _OUTCOME_KINDS, _RESPONSE_SQL
 from tests import mail_log
 
 OUTCOMES = list(_OUTCOME_KINDS)
