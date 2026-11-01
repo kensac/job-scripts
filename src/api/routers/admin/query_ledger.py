@@ -168,7 +168,7 @@ def _skip_scan(table: str, col: str) -> str:
     """
 
 
-def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
+def distinct_query_values(col: str, recent: bool = False) -> list[str]:
     """`SELECT DISTINCT col FROM ledger_rows WHERE col IS NOT NULL ORDER BY
     col`, as a skip scan: each step asks the index for the next value above the
     last, so the cost is one descent per distinct value instead of a read of
@@ -227,12 +227,12 @@ def _compute_options() -> QueryFilterOptions:
     sources = [r["name"] for r in db.query("SELECT name FROM sources WHERE active ORDER BY name")]
     return QueryFilterOptions(
         sources=[v for v in sources if v],
-        check_types=[v for v in _distinct_query_values("check_type") if v],
-        statuses=[v for v in _distinct_query_values("status") if v],
+        check_types=[v for v in distinct_query_values("check_type") if v],
+        statuses=[v for v in distinct_query_values("status") if v],
         # Pipeline context (which code path decided), not the dead legacy
         # config names: only values seen in the last 30 days.
-        contexts=[v for v in _distinct_query_values("config_name", recent=True) if v],
-        workers=[v for v in _distinct_query_values("worker", recent=True) if v],
+        contexts=[v for v in distinct_query_values("config_name", recent=True) if v],
+        workers=[v for v in distinct_query_values("worker", recent=True) if v],
     )
 
 
@@ -427,17 +427,26 @@ class QueryRecord(BaseModel):
     batch_id: str | None
 
 
+def query_records(where: str, params: tuple) -> list[QueryRecord]:
+    """Whole model calls from ledger_rows, `where` being the WHERE clause and
+    any ORDER BY. A page held by reference is read back into input_content."""
+    rows = db.query(
+        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE {where}", params
+    )
+    # ponytail: one lookup per held row; batch it if a posting's history grows
+    # past a drawer's worth of calls.
+    for row in rows:
+        if row["input_content"] is None:
+            row["input_content"] = _held_input(row)
+    return [QueryRecord.model_validate(row) for row in query_instructions.hydrate(rows)]
+
+
 @router.get("/queries/{query_id}")
 def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> QueryRecord:
-    row = db.query_one(
-        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE id = %s",
-        (query_id,),
-    )
-    if not row:
+    records = query_records("id = %s", (query_id,))
+    if not records:
         raise refuse(404, "NOT_FOUND", "unknown query")
-    if row["input_content"] is None:
-        row["input_content"] = _held_input(row)
-    return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
+    return records[0]
 
 
 def _held_input(row: dict) -> str | None:

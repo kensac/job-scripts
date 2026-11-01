@@ -7,7 +7,8 @@ from __future__ import annotations
 import datetime
 
 from api import sorting
-from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
 
 def test_parse_pairs_keys_with_dirs_and_drops_unknown_keys():
@@ -28,7 +29,7 @@ def test_parse_pairs_keys_with_dirs_and_drops_unknown_keys():
 
 
 def test_board_sorts_by_company_then_date_posted(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     d = datetime.date
     rows = [
         ("https://x.test/m1", "Beta", d(2026, 9, 1)),

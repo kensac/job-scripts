@@ -102,24 +102,20 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // The model is asked about these; free text has the drafts, and a file
   // or a date picker is the person's.
   const ASKABLE = new Set(["text", "number", "select", "yesno", "multiselect"]);
+  const { prefs, savePref, load: loadPreferences } = createApplicationPreferences(api);
+  await loadPreferences();
+  if (lifecycle.isInvalid) return;
   // Consents are filled like everything else: the extension relays the
   // consent of the one person it fills for, who asked for exactly that.
   // With the switch on, the free-text boxes go to the model as well (the
   // drafts cover the ones the board knew about). The admin's never-fill
   // list (location, for one) is applied by the API, which names the
   // fields it kept back so the panel lists them as the person's.
-  const { prefs, savePref, load: loadPreferences } = createApplicationPreferences(api);
-  await loadPreferences();
-  if (lifecycle.isInvalid) return;
   const askable = (e) => !e.never_ai && (ASKABLE.has(e.kind) || (prefs.aiAll && e.kind === "long"));
 
   let panelUp = false;
   let step = 0;
   let fields = [];
-  const clickThrough = (el) => {
-    for (const t of ["mousedown", "mouseup"]) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));
-    el.click();
-  };
   let fill = null;
   let filled = new Map();
   let reviewState = null;
@@ -136,10 +132,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const VERSION = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "unknown"; } })();
   let mountedFor = null;
 
-  // The theme: data-jt-theme="light" or "dark" for an explicit choice, and
-  // no attribute at all for "system", which follows prefers-color-scheme in
-  // panel.css. The button cycles light, dark, system and names the next.
-  const { THEME_NEXT, themeLabel, render, operationControls } = createPanelShell({ prefs, surface, operation, esc, getPanelUp: () => panelUp, getSubmission: () => submission, getApplicationContext: () => applicationContext });
+  const { THEME_NEXT, themeIcon, themeTitle, render, operationControls } = createPanelShell({ prefs, surface, operation, esc, getPanelUp: () => panelUp, getSubmission: () => submission, getApplicationContext: () => applicationContext });
 
   operation.subscribe(() => { surface.region("jt-operation", operationControls()); drawReview(); });
   on("click", "jt-pause", () => operation.state === "paused" ? operation.resume() : operation.pause());
@@ -167,15 +160,17 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
   }
 
-  function reportForm() { return reportPanel.reportForm(); }
-  on("click", "jt-report-btn", reportForm);
+  on("click", "jt-report-btn", () => reportPanel.reportForm());
   on("change", "jt-ai-all", (values) => savePref("aiAll", (prefs.aiAll = !!values["jt-ai-all"])));
   on("change", "jt-advance", (values) => savePref("autoAdvance", (prefs.autoAdvance = !!values["jt-advance"])));
+  // The theme: data-jt-theme="light" or "dark" for an explicit choice, and
+  // no attribute at all for "system", which follows prefers-color-scheme in
+  // panel.css. The button cycles light, dark, system and names the next.
   on("click", "jt-theme", () => {
     prefs.theme = THEME_NEXT[String(prefs.theme)];
     savePref("theme", prefs.theme);
     surface.appearance({ theme: prefs.theme, collapsed: prefs.collapsed });
-    surface.mark("jt-theme", { text: prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐", label: `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}` });
+    surface.mark("jt-theme", { text: themeIcon(prefs.theme), label: themeTitle(prefs.theme) });
   });
   on("click", "jt-min", () => {
     prefs.collapsed = !prefs.collapsed;
@@ -215,9 +210,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   }, true);
   for (const type of ["beforeinput", "input", "change"]) lifecycle.addEventListener(document, type, protectManualEdit, true);
 
-  // The panel appears when a form is on the page and goes when it is not,
-  // so the posting page shows nothing and the form page shows the button
-  // without a reload.
   // The controls on the page by id or name: it changes when the form moves
   // to its next page under the same url (Workday), not when the person
   // types. Recorded after a fill pass; a change with none of the filled
@@ -233,6 +225,13 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     // subtle fact about where the panel is mounted.
     [...document.querySelectorAll("input, textarea, select")].filter((e) => !e.closest("#jt-apply")).map((e) => e.id || e.name || e.type).join("|");
   let pageSig = null;
+  const clickThrough = (el) => {
+    for (const t of ["mousedown", "mouseup"]) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true }));
+    el.click();
+  };
+  // The panel appears when a form is on the page and goes when it is not,
+  // so the posting page shows nothing and the form page shows the button
+  // without a reload.
   function mount() {
     if (submission) return;
     if (operation.busy) {
@@ -346,7 +345,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     return execute(runPage);
   }
 
-
   // DOM quiet is only a rendering heuristic, not a server-save receipt.
   const fingerprint = () =>
     [...document.querySelectorAll("input, textarea, select, button[aria-pressed]")]
@@ -392,6 +390,10 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     }
   }
 
+  const isFilled = (entry) => {
+    const f = filled.get(entry.key);
+    return !!(f && f.ok && f.value != null && f.value !== "");
+  };
   async function verify() {
     await sleep(400);
     const lost = fill.fields.filter((e) => {
@@ -402,11 +404,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     await readFields();
     for (const entry of lost) await put(entry, entry.value, null);
   }
-
-  const isFilled = (entry) => {
-    const f = filled.get(entry.key);
-    return !!(f && f.ok && f.value != null && f.value !== "");
-  };
 
   // One call for everything still blank. The answers land in the form
   // like any other rung, marked "ai" so the panel and the ledger say so.
@@ -450,8 +447,18 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     } else fill.board_error = true;
   }
 
-  const reviewController = createApplicationReview({ state: { get fill() { return fill; }, get filled() { return filled; }, get reviewState() { return reviewState; }, set reviewState(value) { reviewState = value; }, get reviewMessage() { return reviewMessage; }, set reviewMessage(value) { reviewMessage = value; }, get panelUp() { return panelUp; }, touched }, render, on, api, surface, operation, fieldByKey, reader, boxOf, allowed, askable, entryByKey, execute, taskApi, put, esc, trackFilledJob, run });
-  const { show, loadReview, drawReview, reviewAction } = reviewController;
+  const { show, drawReview, reviewAction } = createApplicationReview({
+    state: {
+      get fill() { return fill; },
+      get filled() { return filled; },
+      get reviewState() { return reviewState; }, set reviewState(value) { reviewState = value; },
+      get reviewMessage() { return reviewMessage; }, set reviewMessage(value) { reviewMessage = value; },
+      get panelUp() { return panelUp; },
+      touched,
+    },
+    render, on, api, surface, operation, fieldByKey, reader, boxOf, allowed,
+    askable, entryByKey, execute, taskApi, put, esc, trackFilledJob, run,
+  });
 
   const { queueReport, autoReport } = createApplicationReportCapture({ reader, boxOf, plain, traces, send, VERSION, BUILD, getFields: () => fields, getFill: () => fill, getReviewState: () => reviewState, getFilled: () => filled, getLastError: () => lastError, getPolicy: () => policy, getRecipeRevision: () => recipeRevision });
 
