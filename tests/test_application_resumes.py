@@ -4,7 +4,7 @@ from api import db
 from api.apply.drafting import resume_text
 from core.answers import DEFAULT_STYLE
 from tests.application_support import _available_owner_key as _available_owner_key
-from tests.job_board_support import _uid
+from tests.factories import user_id_for_subject
 from tests.resume_support import create_text_resume, seed_text_resume
 
 
@@ -52,7 +52,7 @@ class TestResumes:
         assert client.get("/v1/user/resumes", headers=user_headers).json()["resumes"] == []
 
     def test_rename_keeps_canonical_text_and_revision(self, client, user_headers):
-        resume_id = seed_text_resume(_uid(user_headers), "old", "Original text")
+        resume_id = seed_text_resume(user_id_for_subject("test-user"), "old", "Original text")
         text_change = client.patch(
             f"/v1/user/resumes/{resume_id}",
             json={"text": "replacement"},
@@ -111,11 +111,11 @@ class TestResumes:
         row = db.query_one(
             "INSERT INTO user_resumes (user_id, name, filename) "
             "VALUES (%s, 'old', 'old.pdf') RETURNING id",
-            (_uid(user_headers),),
+            (user_id_for_subject("test-user"),),
         )
         assert row is not None
         resume_id = row["id"]
-        assert resume_text(_uid(user_headers), resume_id) is None
+        assert resume_text(user_id_for_subject("test-user"), resume_id) is None
         listed = client.get("/v1/user/resumes", headers=user_headers)
         assert listed.status_code == 503
         info = client.get(f"/v1/user/resumes/{resume_id}/text", headers=user_headers)

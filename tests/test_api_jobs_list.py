@@ -4,11 +4,12 @@ from api import db
 from api.routers.job_board import NOT_APPLIED
 from core import page_fetches
 from core.store import add_ai_result
-from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe
 
 
 def test_statuses_csv_filter_including_not_applied_sentinel(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     j_none = _insert_job("src-g", "https://x.test/g1")
     j_applied = _insert_job("src-g", "https://x.test/g2")
     j_interviewing = _insert_job("src-g", "https://x.test/g3")
@@ -36,7 +37,7 @@ def test_bogus_sort_param_does_not_500(client, user_headers):
 
 
 def test_offset_limit_with_total(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     for i in range(5):
         url = f"https://x.test/h{i}"
         _insert_job("src-h", url)
@@ -65,7 +66,7 @@ def test_offset_limit_with_total(client, user_headers):
 
 
 def test_job_detail_returns_content_verdicts_history(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-d", "https://x.test/d1", company="Acme", title="SWE")
     page_fetches.record("https://x.test/d1", "passed", "scraped", "THE JOB TEXT")
     add_ai_result("https://x.test/d1", "passed", "job open", "closed")
@@ -93,7 +94,7 @@ def test_job_options_serves_canon_plus_in_use(client, user_headers):
     db.execute(
         "INSERT INTO sources (name, listings_url) VALUES ('src-opt', 'https://x') ON CONFLICT DO NOTHING"
     )
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     db.execute(
         "INSERT INTO user_sources (user_id, source) VALUES (%s, 'src-opt') ON CONFLICT DO NOTHING",
         (uid,),
@@ -113,10 +114,9 @@ def test_comp_amounts_are_served_with_their_currency(client, user_headers, f):
     carry no currency. Serving the amount without the unit invites a renderer
     to supply one, which is how a CAD range becomes a dollar figure. NULL
     means we never captured a unit. It does not mean USD."""
-    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
-    assert user_id is not None
+    user_id = user_id_for_subject("test-user")
     job_id, url = f.make_ready_job(source="comped", comp_min=90000, comp_max=120000)
-    f.make_board_row(user_id["id"], job_id)
+    f.make_board_row(user_id, job_id)
     db.execute("UPDATE job_comp SET comp_currency = 'CAD' WHERE url = %s", (url,))
 
     row = next(
@@ -130,10 +130,9 @@ def test_comp_amounts_are_served_with_their_currency(client, user_headers, f):
 
 
 def test_an_amount_with_no_captured_currency_says_so(client, user_headers, f):
-    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
-    assert user_id is not None
+    user_id = user_id_for_subject("test-user")
     job_id, _ = f.make_ready_job(source="uncurrenced", comp_min=90000, comp_max=120000)
-    f.make_board_row(user_id["id"], job_id)
+    f.make_board_row(user_id, job_id)
 
     row = next(
         r
@@ -151,7 +150,7 @@ def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_head
     selected, so an hourly rate and a salary rendered identically: a $45/hr
     posting and a $94k posting both showed as "$94k".
     """
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     _subscribe(uid, "src-comp")
     job_id = _insert_job("src-comp", "https://comp.test/1")
     db.execute(
@@ -172,7 +171,7 @@ def test_comp_carries_the_period_and_basis_it_was_derived_from(client, user_head
 
 
 def test_total_rides_on_the_page_and_survives_an_empty_page(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     for i in range(4):
         url = f"https://x.test/tt{i}"
         _insert_job("src-tt", url)
@@ -196,7 +195,7 @@ def test_total_rides_on_the_page_and_survives_an_empty_page(client, user_headers
 def test_the_board_filters_by_ats(client, user_headers):
     """ "Only the Ashby ones": the ATS is read off the url, offered with counts
     in the options, carried on every row, and filters the list."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     urls = {
         "ashby": "https://jobs.ashbyhq.com/acme/1111",
         "greenhouse": "https://job-boards.greenhouse.io/acme/jobs/2222",

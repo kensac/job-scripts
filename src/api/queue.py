@@ -15,6 +15,17 @@ from typing import Any, LiteralString
 
 from api import db, events
 
+# The retry budget, which is not the claim count. Every claim increments
+# attempts, because (worker, attempts) is the generation stamp a claim's
+# writes are guarded by and a repeated stamp would let a lost worker write
+# over the run that replaced it. A claim that resumes a parked batch wait is
+# not a retry, so resume_parked counts it in batch_resumes and the budget
+# subtracts it. Counting resumes against the budget let 404 batch tasks reach
+# the cap in the 30 days to 2026-10-04 without a single failure, and two of
+# them were then failed at their first real error with 1,198 paid receipts
+# unconsumed.
+RETRIES_SPENT: LiteralString = "(attempts - batch_resumes)"
+
 
 def enqueue(kind: str, payload: dict[str, Any], dedupe_key: str | None = None) -> int | None:
     """Insert a task; with a dedupe_key, at most one task per key ever exists,

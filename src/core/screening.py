@@ -30,8 +30,9 @@ Recipe = Literal[
     "occupation_words_v1",
     "levels_occupations_v1",
     "levels_roles_occupations_v1",
+    "finance_new_grad_v1",
 ]
-BoardRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1"]
+BoardRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1", "finance_new_grad_v1"]
 
 
 @dataclass(frozen=True)
@@ -234,6 +235,66 @@ RECIPES["levels_roles_occupations_v1"] = (
         *RECIPES["levels_occupations_v1"][0][2:],
     ),
     RECIPES["levels_occupations_v1"][1],
+)
+
+# Finance New Grad's gate: the board judges only titles that name finance work
+# at an early-career level. In order: internships go; a title naming a senior
+# level, or a manager or partner title, goes unless it also names an
+# early-career program; software and
+# engineering work goes unless it is quant work; the core finance families
+# (investment banking, sales and trading, research, private equity, asset
+# management, quant) stay; branch and retail banking and advisor sales go; any
+# other finance word stays. Sized on production 2026-11-01 (see
+# docs/agents/visibility.md).
+_EARLY_CAREER = (
+    r"\b(?:new grad\w*|graduate|campus|early career|entry[- ]level|university"
+    r"|analyst program|development program|full[- ]time analyst)\b"
+)
+_FINANCE_EXPERIENCED = _words(
+    rf"^(?!.*{_EARLY_CAREER}).*\b(?:senior|sr\.?|principal|director|vice president|vp|svp"
+    r"|managing director|executive director|head|chief|lead)\b"
+)
+# Goldman titles name the division before the corporate title ("Portfolio
+# Manager, Analyst"), so a manager or partner title is a level only when it
+# names no analyst or associate.
+_FINANCE_MANAGER = _words(
+    rf"^(?!.*{_EARLY_CAREER})(?!.*\b(?:analyst|associate)s?\b).*\b(?:managers?|partners?)\b"
+)
+_QUANT = r"\b(?:quant|quants|quantitative|financial engineer\w*)\b"
+_NON_QUANT_TECHNICAL = _words(
+    rf"^(?!.*{_QUANT}).*\b(?:software|developer\w*|engineer\w*|programmer|devops|sre"
+    r"|architect|cyber\w*)\b"
+)
+_CORE_FINANCE = _words(
+    rf"{_QUANT}|\b(?:investment bank\w*|sales (?:and|&) trading|equity research"
+    r"|private equity|private credit|asset management|corporate finance|fp&a"
+    r"|leveraged finance|m&a|fixed income|analyst (?:development )?program)\b"
+)
+# The board's criteria leave these out, and branch titles were most of the
+# bank postings the finance words matched.
+_RETAIL_BANKING = _words(
+    r"\b(?:bankers?|banking advisor|branch|teller|part[- ]time|\d+ hours?|safe act|mlo"
+    r"|loan officer|mortgage|client advisor|financial advisor|financial solutions advisor"
+    r"|planning advisor|advisor development program|collections?)\b"
+)
+_FINANCE_SIGNAL = _words(
+    r"\b(?:investments?|investing|investor\w*|banking|trader|traders|trading|markets"
+    r"|wealth|private markets|credit|financ\w*|leveraged|mergers|restructuring"
+    r"|structured (?:finance|products|credit)|treasury|valuation|portfolio|risk|hedge"
+    r"|funds?|capital|securities|derivatives|underwrit\w*|equities|commodities|lending"
+    r"|economist|macro|budget\w*|forecasting|liquidity|fx|full[- ]time analyst)\b"
+)
+RECIPES["finance_new_grad_v1"] = (
+    (
+        _skip("internship_title_signal", title=_EXPLICIT_INTERNSHIP),
+        _skip("experienced_title_signal", title=_FINANCE_EXPERIENCED),
+        _skip("manager_title_signal", title=_FINANCE_MANAGER),
+        _skip("technical_title", title=_NON_QUANT_TECHNICAL),
+        _keep("core_finance_title", title=_CORE_FINANCE),
+        _skip("retail_banking_title", title=_RETAIL_BANKING),
+        _keep("finance_title_signal", title=_FINANCE_SIGNAL),
+    ),
+    Screen(True, "no_finance_title_signal"),
 )
 
 

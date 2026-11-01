@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 SERVICE_TOKEN = os.environ["JOBTRACKER_SERVICE_TOKEN"]
 
@@ -74,6 +77,29 @@ def test_closed_signups_admit_the_configured_admin_groups(client, admin_headers,
         headers=_headers("old-admin", "old@example.com", ["infra-admins"]),
     )
     assert stale.status_code == 403
+
+
+def test_seeded_defaults_name_the_configured_admin_groups():
+    # The seeds are computed at import, so a fresh interpreter reads the
+    # renamed groups. Nothing seeds or allows 'infra-admins' once it is renamed.
+    probe = (
+        "from api import db; from api.config import CONFIG_KEYS; "
+        "print(db._GROUP_BUDGET_SEED, CONFIG_KEYS['gmail_connect_groups'].default)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        env={
+            **os.environ,
+            "JOBTRACKER_ADMIN_GROUPS": "staff,ops",
+            "PYTHONPATH": str(Path(__file__).resolve().parent.parent / "src"),
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert out.strip() == (
+        "[('ops', None), ('staff', None), ('jobtracker-users-internal', 5000000)] ['ops', 'staff']"
+    )
 
 
 def test_admin_group_budgets_roundtrip(client, admin_headers):

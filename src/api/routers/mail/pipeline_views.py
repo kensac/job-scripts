@@ -22,7 +22,7 @@ from api.routers.mail.pipeline_rows import (
     application_rows_for_user,
     correction_actor_label,
 )
-from api.routers.mail.shared import Evidence, _evidence_for
+from api.routers.mail.shared import Evidence, evidence_for
 
 router = APIRouter()
 
@@ -346,7 +346,7 @@ def pipeline_detail(
     # Every match carries what it was decided FROM, not just what it decided.
     # Without this a person has to open their mail client to check a match,
     # which is the same as not being able to check it.
-    evidence = _evidence_for(sorted({m.message_id for m in matches}))
+    evidence = evidence_for(sorted({m.message_id for m in matches}))
     # Both additions kept: #227 wraps actions in their settling state, this
     # branch adds who corrected each match. Independent answers to the same
     # question - what does this row let a person question.
