@@ -9,7 +9,7 @@ import uuid
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from api import db, queue
+from api import db, queue, task_admission
 from api.apply import recipes as extension_recipes
 from api.auth import AuthedUser
 from api.problem import refuse
@@ -166,8 +166,8 @@ def complete_recipe_upload(
             active = db.query_one(
                 "SELECT id FROM tasks WHERE kind = 'publish_extension_recipe' "
                 "AND payload->>'upload_id' = %s "
-                "AND status IN ('pending', 'running', 'waiting', 'parked') LIMIT 1",
-                (str(upload_id),),
+                "AND status = ANY(%s) LIMIT 1",
+                (str(upload_id), list(task_admission.ACTIVE_STATUSES)),
             )
             if active is None:
                 queue.enqueue(

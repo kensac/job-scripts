@@ -71,7 +71,8 @@ class ModelChangeEffect(StrEnum):
     MIXES = "mixes"
     # The sweep's skip-check is scoped by model, so the next cycle sees no
     # completed work and re-pays for all of it. tasks/filtering/personal_runs.py is the case:
-    # decided_custom_urls(urls, prompt_hash, cfg.model).
+    # decided_custom_urls(urls, prompt_hash, cfg.model), unless the old and
+    # new models are grouped in app_config verdict_model_equivalence.
     RERUNS = "reruns"
 
 
@@ -107,13 +108,13 @@ class TaskShape:
     what every existing call site wants.
     """
 
-    # The weakest structured-output mode the task can work with. Batched
-    # extraction wants JSON_SCHEMA: the provider enforces the shape, so a bad
-    # answer is a provider error rather than 20,000 rows of wrong keys.
     # The stable key for this task, and the same string the ledgers group by.
     # It lives on the declaration rather than being passed beside it so a
     # caller cannot name one purpose while running another's shape.
     purpose: str
+    # The weakest structured-output mode the task can work with. Batched
+    # extraction wants JSON_SCHEMA: the provider enforces the shape, so a bad
+    # answer is a provider error rather than 20,000 rows of wrong keys.
     structured: StructuredOutput
     # True when the work is scheduled and can wait hours for a batch. This is a
     # HARD constraint, not a preference: submit_or_collect needs a provider
@@ -426,11 +427,9 @@ def resolve(
         raise NoEligibleModel("no declared model can run this task - " + "; ".join(rejected))
 
     # Ties keep the caller's own ordering, which is the only ordering that
-    # encodes their judgment. sorted() is stable, so an equal-priced later
-    # candidate never displaces an earlier one.
-    cost, name, provider, off_peak = min(
-        eligible, key=lambda e: e[0] if e[0] is not None else Decimal("Infinity")
-    )
+    # encodes their judgment. min() returns the first of equal keys, so an
+    # equal-priced later candidate never displaces an earlier one.
+    cost, name, provider, off_peak = min(eligible, key=lambda e: e[0])
     declared = providers.model(name)
     assert declared is not None
     params = _params_for(shape, declared)

@@ -21,7 +21,7 @@ class Entitlement:
     weekly_token_budget: int | None
     spent_this_week: int
     has_byo_key: bool
-    groups: list[str] = None  # type: ignore[assignment]
+    groups: list[str]
 
     @property
     def key_source(self) -> str | None:
@@ -78,7 +78,8 @@ def access_failure(user: AuthedUser) -> AIAccessError | None:
     return None
 
 
-def _owner_budget(groups: list[str]) -> tuple[bool, int | None]:
+def owner_budget(groups: list[str]) -> tuple[bool, int | None]:
+    """Whether these groups have server credits and their shared weekly cap."""
     if not groups:
         return False, None
     rows = db.query(
@@ -93,11 +94,6 @@ def _owner_budget(groups: list[str]) -> tuple[bool, int | None]:
     return True, max(budgets)
 
 
-def owner_budget(groups: list[str]) -> tuple[bool, int | None]:
-    """Whether these groups have server credits and their shared weekly cap."""
-    return _owner_budget(groups)
-
-
 def spent_this_week(user_id: int) -> int:
     row = db.query_one(
         "SELECT COALESCE(SUM(total_tokens), 0) AS spent FROM model_calls "
@@ -109,7 +105,7 @@ def spent_this_week(user_id: int) -> int:
 
 
 def get_entitlement(user: AuthedUser) -> Entitlement:
-    owner, weekly = _owner_budget(user.groups)
+    owner, weekly = owner_budget(user.groups)
     return Entitlement(
         owner_key=owner,
         weekly_token_budget=weekly,
@@ -132,7 +128,7 @@ def owner_allowed_models(groups: list[str]) -> list[str]:
         "SELECT weekly_token_budget, allowed_models FROM group_budgets WHERE group_name = ANY(%s)",
         (groups,),
     )
-    allowed: set = set()
+    allowed: set[str] = set()
     for r in rows:
         if r["allowed_models"] is not None:
             allowed |= set(r["allowed_models"])
@@ -174,7 +170,7 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             and entitlement.spent_this_week >= entitlement.weekly_token_budget
         ):
             raise AIBudgetExceeded(BUDGET_EXCEEDED, entitlement)
-        allowed = owner_allowed_models(entitlement.groups or [])
+        allowed = owner_allowed_models(entitlement.groups)
         chosen = creds.ai_model
         model = chosen
         substituted_from = reason = None
