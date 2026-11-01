@@ -23262,7 +23262,7 @@
     "/v1/admin/sources": {
       "get": {
         "summary": "Admin List Sources",
-        "description": "shape=full is the ledger. shape=names is the vocabulary (name, active,\nkind, bundles) for pickers and filters; shape=counts is what a dashboard\ntile needs. Both skip the per-source aggregation over jobs, tasks and\nsubscribers, which the dashboard was paying for on every live tick.",
+        "description": "shape=full is the ledger. shape=names is the vocabulary (name, active,\nkind, bundles) for pickers and filters; shape=counts is what the dashboard\ntiles and pull health need. Both skip the per-source aggregation over jobs, tasks and\nsubscribers, which the dashboard was paying for on every live tick.",
         "operationId": "admin_list_sources_v1_admin_sources_get",
         "parameters": [
           {
@@ -36239,12 +36239,20 @@
             "type": "object",
             "title": "By Kind"
           },
-          "last_ingest": {
-            "additionalProperties": {
-              "type": "integer"
+          "pulled_ok_24h": {
+            "type": "integer",
+            "title": "Pulled Ok 24H"
+          },
+          "stale": {
+            "type": "integer",
+            "title": "Stale"
+          },
+          "failing": {
+            "items": {
+              "$ref": "#/components/schemas/FailingPull"
             },
-            "type": "object",
-            "title": "Last Ingest"
+            "type": "array",
+            "title": "Failing"
           },
           "bundles": {
             "type": "integer",
@@ -36256,11 +36264,13 @@
           "sources",
           "active",
           "by_kind",
-          "last_ingest",
+          "pulled_ok_24h",
+          "stale",
+          "failing",
           "bundles"
         ],
         "title": "CatalogCounts",
-        "description": "What a dashboard tile needs. `by_kind` counts active sources per board\nformat; `last_ingest` counts sources by how their most recent pull ended."
+        "description": "What the dashboard's tiles and pull health panel need. `by_kind` counts\nactive sources per board format. Pull health reads each active source's\nmost recent pull: `pulled_ok_24h` finished done within the last day,\n`stale` did not fail but has not finished within the day, and `failing`\nlists the ones that failed, by name."
       },
       "CatalogPosting": {
         "properties": {
@@ -39019,6 +39029,45 @@
         ],
         "title": "FailedCheck",
         "description": "One failure behind a pivot row. `error` is the first 300 characters:\na driver traceback is longer than the screen and the cause is at the front."
+      },
+      "FailingPull": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "error",
+          "at"
+        ],
+        "title": "FailingPull",
+        "description": "An active source whose most recent pull failed, and how."
       },
       "FailureBreakdown": {
         "properties": {
