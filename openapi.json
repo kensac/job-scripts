@@ -42709,65 +42709,19 @@
       "JobCorrection": {
         "properties": {
           "company": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Company"
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "locations": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Locations"
+            "$ref": "#/components/schemas/NonNullUpdate_list_str__"
           },
           "terms": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Terms"
+            "$ref": "#/components/schemas/NonNullUpdate_list_str__"
           },
           "active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           }
         },
         "type": "object",
@@ -46686,6 +46640,11 @@
         "type": "integer",
         "minimum": 0.0
       },
+      "NonNullUpdate_Annotated_int__FieldInfo_annotation_NoneType__required_True__metadata__Ge_ge_1___Le_le_168_____": {
+        "type": "integer",
+        "maximum": 168.0,
+        "minimum": 1.0
+      },
       "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____": {
         "items": {
           "type": "string"
@@ -46701,6 +46660,10 @@
         "type": "string",
         "maxLength": 100,
         "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_500_____": {
+        "type": "string",
+        "maxLength": 500
       },
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_120_____": {
         "type": "string",
@@ -46731,6 +46694,12 @@
       "NonNullUpdate_dict_str__Any__": {
         "additionalProperties": true,
         "type": "object"
+      },
+      "NonNullUpdate_list_str__": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       },
       "NonNullUpdate_str_": {
         "type": "string"
@@ -48426,75 +48395,22 @@
       "PresetBody": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 80,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_80_____"
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_500_____"
           },
           "prompt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 8000,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_8000_____"
           },
           "on_ambiguous": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "On Ambiguous"
+            "$ref": "#/components/schemas/NonNullUpdate_str_"
           },
           "fail_closed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fail Closed"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           },
           "active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           }
         },
         "type": "object",
@@ -54622,52 +54538,16 @@
       "SourceBody": {
         "properties": {
           "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 80,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MinLen_min_length_1___MaxLen_max_length_80_____"
           },
           "listings_url": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 1000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Listings Url"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____"
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_500_____"
           },
           "active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active"
+            "$ref": "#/components/schemas/NonNullUpdate_bool_"
           },
           "company": {
             "anyOf": [
@@ -54693,17 +54573,7 @@
             "title": "Title Pattern"
           },
           "ingest_interval_hours": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 168.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ingest Interval Hours"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_int__FieldInfo_annotation_NoneType__required_True__metadata__Ge_ge_1___Le_le_168_____"
           }
         },
         "type": "object",
