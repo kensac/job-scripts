@@ -24856,7 +24856,7 @@
     "/v1/admin/task-models/{purpose}/history": {
       "get": {
         "summary": "Task Model History",
-        "description": "Every decision ever made for this task, newest first.\n\nThe table is append-only and a cleared override is a NULL row rather than a\ndeletion, so this is the whole record and not a reconstruction. A monthly\nreview is looking for the switch that explains a regression noticed weeks\nlater, which only works if the switch is still here.",
+        "description": "The newest HISTORY_LIMIT decisions for this task, newest first.\n\nThe table is append-only and a cleared override is a NULL row rather than a\ndeletion, so this is the record and not a reconstruction. A monthly\nreview is looking for the switch that explains a regression noticed weeks\nlater, which only works if the switch is still here.",
         "operationId": "task_model_history_v1_admin_task_models__purpose__history_get",
         "parameters": [
           {
@@ -44613,7 +44613,7 @@
           "evidence"
         ],
         "title": "ModelCandidate",
-        "description": "One model this task could run on, eligible or not, carrying WHY.\n\nEvery dollar figure is a decimal string, never a number: these are\nDecimals and a float would round money on the way out. None means unknown\n- an ineligible model has no price and an unbounded sweep has no cycle\ncost - and rendering either as 0 would make an unknown look like a free\none."
+        "description": "One model this task could run on, eligible or not, carrying WHY.\n\nEvery dollar figure is a `_money` string, and None means unknown."
       },
       "ModelChangeEffect": {
         "type": "string",
