@@ -211,11 +211,13 @@ def fill_submitted(
         if fill["submitted_at"] is not None:
             return Submitted(job_id=fill["job_id"], fields=fill["fields"])
         finals = {f.key: f for f in body.fields}
+        names = submissions.resume_names(user.id, fill["fields"])
         fields = []
         for read in fill["fields"]:
             sub = finals.get(read["key"])
             final = sub.final if sub else read.get("value")
-            entry = {**read, "final": final, "changed": (final or "") != (read.get("value") or "")}
+            entry = {**read, "final": final}
+            entry["changed"] = submissions.changed(entry, names)
             fields.append(entry)
             if sub and sub.remember and final and entry["kind"] != "file" and entry["label"]:
                 db.execute(

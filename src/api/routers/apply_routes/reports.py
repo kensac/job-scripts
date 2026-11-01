@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from api import apply, db
+from api.apply import submissions
 from api.auth import AuthedUser, require_user
 from api.problem import SIZE_REFUSALS, refuse
 from api.routers.apply_routes.models import (
@@ -93,29 +94,33 @@ def report(user: AuthedUser = Depends(require_user)) -> ApplyReport:
     is a rule to add or a fact the profile is missing."""
     rows = db.query(
         """
-        SELECT f.host, e.value->>'label' AS label, e.value->>'kind' AS kind,
-               COALESCE(e.value->>'rung', '') AS rung,
-               (e.value->>'changed')::boolean AS changed
+        SELECT e.value AS entry
         FROM application_fills f, jsonb_array_elements(f.fields) e
         WHERE f.user_id = %s AND f.submitted_at IS NOT NULL
         """,
         (user.id,),
     )
+    entries = [r["entry"] for r in rows]
+    # Decided again on read, not taken from the stored flag: a resume field
+    # submitted before the comparison knew file names says changed.
+    names = submissions.resume_names(user.id, entries)
     by_rung: dict[str, int] = {}
     blank: dict[str, int] = {}
     corrected: dict[str, int] = {}
     unchanged = 0
-    for r in rows:
-        by_rung[r["rung"] or "blank"] = by_rung.get(r["rung"] or "blank", 0) + 1
-        norm = apply.normalize(r["label"] or "")
-        if not r["rung"]:
+    for entry in entries:
+        rung = entry.get("rung") or ""
+        by_rung[rung or "blank"] = by_rung.get(rung or "blank", 0) + 1
+        norm = apply.normalize(entry.get("label") or "")
+        was_changed = submissions.changed(entry, names)
+        if not rung:
             blank[norm] = blank.get(norm, 0) + 1
-        elif r["changed"]:
+        elif was_changed:
             corrected[norm] = corrected.get(norm, 0) + 1
-        elif r["changed"] is False:
+        elif was_changed is False:
             unchanged += 1
-        # changed is NULL on a field whose final the submit never read
-        # (api.apply.submissions): neither corrected nor unchanged.
+        # None is a field whose final the submit never read, or a resume
+        # whose file name cannot be found: neither corrected nor unchanged.
 
     def top(counts: dict[str, int]) -> list[LabelCount]:
         ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:25]

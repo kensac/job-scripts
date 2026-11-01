@@ -45,10 +45,7 @@ fetcher builds its request and parses the answer; it never sets any of those.
 A 429 is returned at once, never retried there, because the host budget
 answers a refusal for the whole address. A fetcher does not catch its own
 failures: a feed that answered with something it cannot parse fails the pull,
-so the failure run backs it off and switches it off. Before the aggregator
-fetcher raised, it returned an empty list after its own retries; `Loop`
-(a Rippling page, not a JSON feed) read as 151 empty pulls in the week to
-2026-10-10.
+so the failure run backs it off and switches it off.
 
 The row carries what ingest needs and nothing derived: `company` (required
 where the system never names it), a `title_pattern` that normally gates which
@@ -57,9 +54,10 @@ titles enter the catalog, and an `ingest_interval_hours`.
 `source_title_patterns_enabled` is the fleet-wide admission switch. When true,
 only titles matching a source's pattern enter `jobs`. When false, every fetched
 posting enters `jobs`; the pattern remains stored and `listings.kept` continues
-to record whether it matched. Turning enforcement back on retires unmatched
-rows on the next authoritative pull, so the experiment is reversible without
-discarding its counterfactual.
+to record whether it matched. Enforcement is read where availability is read,
+so turning it back on makes unmatched (`filtered`) rows unavailable at the
+next hourly reconcile, with no pull needed, and the experiment is reversible
+without discarding its counterfactual.
 
 `sources.active = false` stops both the scrape and every AI check on that
 board's postings, and retires the postings themselves within the hour (below).
@@ -71,8 +69,7 @@ format is a way of selecting rows for that flag and the interval through
 **A board has one active reader.** Two active sources whose listings URLs
 match without regard to case read one board. A case-only difference gives
 every posting a second URL, so it is verified, filtered and shown twice. An
-identical URL pulls the board twice. On 2026-10-18, 91 boards had 99 extra
-readers. `catalog.check_one_active_per_board` refuses a create or patch that
+identical URL pulls the board twice. `catalog.check_one_active_per_board` refuses a create or patch that
 would add one. A bulk switch on leaves such a copy off, so a bundle can hold
 the switched-off copy next to its keeper. To retire a copy, switch it off.
 Give the keeper the copy's bundles, managed boards and picks. Then move the
@@ -116,11 +113,10 @@ listings URL, not stored as another source field. Keep the title pattern out
 of the full ledger, and include it on the single-source edit read.
 
 **A paged listing stops on the count its first page states.** Workday sends
-`total` on the first page only and 0 on every later one; a fetcher that re-read
-it per page stopped after two pages, and because the pull is authoritative,
-retired everything past them as closed. On 2026-10-05 that held 130 of 454
-Workday sources at exactly 40 postings (Boeing listed 752). A source pinned at a
-round multiple of its format's page size is the symptom to look for.
+`total` on the first page only and 0 on every later one; a fetcher that re-reads
+it per page stops after two pages, and because the pull is authoritative,
+marks everything past them unlisted. A source pinned at a round multiple of
+its format's page size is the symptom to look for.
 
 **An iCIMS board is one of two formats, and the listings URL says which.**
 A portal (`https://careers-<tenant>.icims.com/jobs/search`, kind `icims`) is
@@ -239,7 +235,7 @@ upstream. A worker idle beside pulls whose slots are closed is not stalled.
 Every pull records every listing in `listings`, matched by the pattern or not.
 Each row holds the posting text the listing call carried and the raw record
 minus that text. Greenhouse (with `content=true`), Lever, Ashby and Gem carry the
-text; it is assembled by the same `core/fetching/ats/__init__.py` helpers the resolvers
+text; it is assembled by the same `core/fetching/ats/common.py` helpers the resolvers
 use, so it is what a per-posting fetch would have returned. ByteDance carries
 it too, as a description and a requirement, and Jibe carries it; neither has a
 resolver. Amazon carries it too (the description and both qualification
@@ -347,9 +343,8 @@ is judged against every title the board has listed.
 
 **A pull rewrites a listings row only when the row would change.** Equal
 content is filtered out before the insert, so an unchanged row gets no new
-version, no lock and no WAL. Before this, every pull rewrote every row it
-listed: 1.18M upserts a day, 99.2% of them unchanged, 9.17 GB of WAL a day and
-19% of the cluster's (pg_stat_statements, 2026-10-03). Four rules keep it
+version, no lock and no WAL (rewriting every row was 9.17 GB of WAL a day,
+99.2% unchanged, 2026-10-03). Four rules keep it
 that way, and a change to the upsert must keep all four:
 
 - Compare what the row would hold after the update, not what the board sent.
@@ -382,8 +377,7 @@ of the text (a btree entry cannot hold a long pattern), and
 it. A digest match is accepted only when the text is equal
 (`catalog.title_pattern_id`), and rows are never updated or deleted, so a
 pointer cannot outlive its text. The upsert's change check compares
-`pattern_id`. The copy this replaces was 492 MB of the table's 863 MB of row
-data for 4 distinct values (1,060,806 rows, 2026-10-10).
+`pattern_id`.
 
 A candidate pattern is judged against this table (`pattern-preview`) before it
 replaces the live one. A posting a wider pattern admits arrives in `jobs` on
@@ -400,9 +394,7 @@ reads it.
 `core.payloads.listings` owns listing fields stored inline or by reference.
 Keep listing readers and writers on that module so both shapes resolve to the same value.
 
-`description` and `raw` were 1.3 GB of TOAST on about 650k rows (about 595 MB
-and 630 MB compressed, from a 5% sample, 2026-10-03), and the only thing that
-read them was the upsert's own change check. Each field can instead be a
+Each field of `description` and `raw` can be a
 member of a verified bundle object: `<field>_sha256` is the SHA-256 of
 `encode_payload(value)` and names the member, `<field>_object` is the bundle's
 SHA-256 (the key is `payloads/v3/sha256/<hex>.json` in the configured bucket)
@@ -415,9 +407,7 @@ referenced: `''` with no reference is "the board never carried the text".
 and goes through `core.payloads.listings.resolve`.** Selecting the inline columns
 alone reads `''` and `'{}'` for every referenced row. A reference that cannot
 be read, or reads a value whose digest differs, raises `PayloadUnavailable`;
-it is never a listing without text. On 2026-10-03 nothing outside the upsert
-read either column: pattern preview and the screened list select title, url,
-company and dates only.
+it is never a listing without text.
 
 **The change check trusts a digest only beside its reference.** A stored
 referenced value equals an incoming one when the digests match; an inline
@@ -474,13 +464,9 @@ from the printed `after` until `exhausted` is true.
   clears its reference, leaving the row exactly as an inline writer stored it.
 
 Done means `count` from the start reports no `inline` and `verify` no
-`failed`. One object per value would be about 825k PUTs (650k raw records
-and 175k texts, the 27% of descriptions that are not empty) at about 16 a
-second, over 14 hours before the read-back; a page of 1,000 rows is one
-bundle, about 650 PUTs and their read-backs for the table. Each externalized
-row is one new row version, so expect WAL about the size of the rows moved;
-the TOAST it frees is reused after vacuum, and the files shrink only with a
-rewrite, which is not part of this.
+`failed`. A page of rows is one bundle, so the table is about 650 PUTs, not
+one per value. The TOAST a move frees is reused after vacuum; the files shrink
+only with a rewrite.
 
 
 ## A page's text can be held by reference
@@ -546,10 +532,7 @@ any row is held.
 ## A pull rewrites a catalog row only when the row would change
 
 `catalog.upsert_postings` follows the first two listings rules above for
-`jobs`. Rewriting every admitted row on every pull was 1.33M updates in 36
-hours on a 605k-row catalog and 5.7 GB of WAL, while the feeds put back 5,336
-postings in the same window (pg_stat_statements and `job_listing_events`,
-2026-10-03).
+`jobs`.
 
 - The filter is the update's `SET` evaluated against the stored row, column
   for column. A feed row keeps the company and title it was first stored with
@@ -563,57 +546,43 @@ postings in the same window (pg_stat_statements and `job_listing_events`,
 `jobs` has no seen-at or updated-at column for an unchanged pull to refresh,
 and its columns stay inline (the largest `locations` was 1,680 bytes), so
 neither the refresh interval nor the TOAST rule has anything to apply to. The
-return events are read from the old row before the upsert, and a return
-changes `active`, so every return is still both written and recorded.
+upsert does not touch availability: a return is a `reappeared` observation.
 
 **A person's upload is its own row, not catalog state.** `posting_uploads`
 holds who added a posting by url and where reading it stands (`pending`,
 `done`, `failed`), one row per upload, written only by `core.catalog`. A
 takeover marks it `done` in the upsert's transaction. Saving a url the
 catalog already holds, or an admin's forced reparse of a posting nobody
-uploaded, writes no row: the reparse's outcome is its task's. On 2026-10-10
-production held 11 uploads. The other 6,022 `jobs` rows with
-`extraction_status = 'done'` are not uploads: 6,021 are the one-time sheet
-import of 2026-08-24, which stamped every row it wrote, and one is a forced
-reparse (task 726592). No reader tells `done` from NULL (the board's pending
-flag is set only by `pending`), so they get no row. Every reader of who
+uploaded, writes no row: the reparse's outcome is its task's. Every reader of who
 uploaded a posting, or of its extraction status, reads `posting_uploads`;
 a predicate takes the non-correlated form `j.id IN (SELECT job_id FROM
 posting_uploads ...)`, which plans as one hashed subplan (the board reads
 measured the same rows and buffers as on the jobs columns, production,
-2026-10-10). `jobs.uploaded_by` is dropped, after a task cleared every copy
-whose owner `posting_uploads` named (11, none unmatched) and a migration
-proved it empty. `jobs.extraction_status` is frozen: nothing reads or writes
-it, and it keeps the sheet import's `done` stamp and the one forced reparse,
-which are recorded nowhere else (6,022 rows). All data is retained, so it is
-not dropped; `tests/test_catalog_one_writer.py` fails on a write of it. A
+2026-10-10). `jobs.extraction_status` is frozen, kept as retained data (the
+sheet import's `done` stamps); `tests/test_catalog_one_writer.py` fails on a
+write of it. A
 takeover is found by reading which listed urls are still uploads before the
 upsert, since afterwards their source is the feed's. A writer of both tables
 takes the jobs row first.
 
 ## A company board's pull is the closure signal for its rows
 
-After a pull from a board that lists every open posting
-(`boards.AUTHORITATIVE`), every active catalog row of that source the pull did
-not admit is set inactive: the board dropped it, or the pattern stopped
-admitting it.
-
-Inactive rows are excluded from every sweep and leave boards through
-`demote_closed`. Listed and admitted again, the upsert reactivates them.
-
-An aggregator list is not such a signal, and an empty pull is a broken fetch
-rather than an empty board, so neither retires anything.
-
-**Every pull is also recorded as observations.** `catalog.observe` appends
+**Every pull is recorded as observations, and availability is read from
+them.** `catalog.observe` appends
 to `source_observations` what the pull says about each catalog row whose
 source's latest observation said something else: `appeared`, `reappeared`,
 `filtered` (listed, the pattern does not match), `unlisted` (left out of a
 complete authoritative pull, or flagged inactive by its feed) or `not_listed`
 (left out of an aggregator's pull). A partial or empty pull records no
-absence. Its inserts share-lock job rows through the foreign key, so they run
-in url order in their own transaction. What each kind means, and the
-availability projection read from them, is phase 3 of
-[architecture-migration.md](architecture-migration.md).
+absence: an aggregator list is not a closure signal, and an empty pull is a
+broken fetch rather than an empty board. Its inserts share-lock job rows
+through the foreign key, so they run in url order in their own transaction.
+A row left out of a complete authoritative pull becomes unavailable; one the
+pattern stopped admitting is unavailable while enforcement is on. Listed and
+admitted again, it is `reappeared` and available. Unavailable rows
+(`catalog.IS_AVAILABLE`) are excluded from every sweep and leave boards
+through `demote_closed`. What each kind means, and how `jobs.available` is
+stored, is phase 3 of [architecture-migration.md](architecture-migration.md).
 
 **A pull that cannot prove it saw everything retires nothing.** Some Workday
 tenants stop a search at 2,000 results (first page total=2000, later pages wrap
@@ -623,11 +592,9 @@ a time, the two widest facets whose every value is under the window, and raises
 `boards.PartialPull` with the union. Ingest admits those postings but records
 no absence, because a posting outside the slices is not evidence of a
 closure; re-verification closes them instead. Airbus went from 2,000 to 2,883
-of about 2,940. A tenant stating more than 2,000 pages past it (CVS, 18,841)
-and is read to its total. The pull is complete only when it reaches that total
-without a page repeating; otherwise it is partial. Stopping such a tenant at
-2,000 retired every posting after the first 2,000 each day: about 16,000
-across 15 boards in the 10 days to 2026-10-16. Sources filter at our gate, the title pattern, and not at the
+of about 2,940. A tenant that pages past 2,000 without wrapping (CVS, 18,841)
+is read to its stated total. The pull is complete only when it reaches that
+total without a page repeating; otherwise it is partial. Sources filter at our gate, the title pattern, and not at the
 board: a listings URL carries no search. Oracle serves at most 10,000 rows of a search, newest first,
 and a pull that ends short of the stated count raises `PartialPull` the same way.
 So do IBM and Goldman. A role Goldman closes mid-walk shifts the next one back
@@ -790,9 +757,7 @@ A source that is off is never pulled, so nothing it said can be refreshed. A
 posting is available when some switched-on source's latest observation of it
 admits it (`catalog.AVAILABLE`), so a posting only a switched-off source
 lists is not, and a posting another source still lists stays available,
-whichever source first stored it. On 2026-10-04, before this rule, the flag
-held 50,994 active rows of 115 switched-off sources (24,736 of them
-`sr_domino_s`).
+whichever source first stored it.
 
 Switching a source writes no observation, so the hourly `retire_switched_off`
 task (the name is kept) runs `catalog.reconcile_available`, which stores the
@@ -812,15 +777,11 @@ reconcile.
 
 The re-verification sweep asks `_VERIFY_INSTRUCTIONS` and records both the
 closed and the clearance verdict, which is the same question the first pass
-asks. It used to ask only whether the posting had closed, and that is why a
-clearance verdict was written once and never again: nothing else revisits one.
-On 2026-09-10 that held 12,444 active postings rejected on a clearance verdict
-that had never been re-read, against 1,152 for closed.
+asks. Nothing else revisits a clearance verdict.
 
 The page is already fetched and the call is already made, so the second axis
-costs its output tokens and nothing else. Usage books onto the first row
-written and the second is a zero-token decided row, which is how
-routers/spend.py tells a joint call apart.
+costs its output tokens and nothing else. Both verdicts name the same
+`model_call_id`, so the call is counted once.
 
 Stale on one axis is stale on both. A parked batch carries page text as old as
 its submission, so if anything decided either check after the batch went out,
@@ -883,15 +844,16 @@ iCIMS resolver reads the frame (`?in_iframe=1`) and its JobPosting JSON-LD;
 a posting that is not public answers 410, which is gone. A frame without
 the JSON-LD is an error, never text.
 
-A page fetch's `method` (`ats text`, `static`, `scraped`) is how the share
+A page fetch's `method` (`ats text`, `static`, `scraped`, and `listing text`
+for text a listing carried) is how the share
 each tier serves is read, so the engine can be switched in config and judged
 from `page_fetches` rather than assumed.
 
 ## A host that blocks bursts is drip-fed, not pulled off
 
 `fetch_host_limits` (persisted config, host to page fetches per hour) paces
-the browser fetch fleet-wide. `verdicts.host_paced` counts the hour's content
-rows for the host and defers the fetch, writing nothing, so the next cycle
+the browser fetch fleet-wide. `verdicts.host_paced` counts the hour's
+`page_fetches` rows for the host and defers the fetch, writing nothing, so the next cycle
 tries again.
 
 The fetch-failure alert names the host, and adding it to the map is the way to
@@ -899,13 +861,13 @@ resolve that alert. No host is written into code.
 
 ## A page fetch that returns nothing leaves a record
 
-It is a `content` row with `status = 'failed'` and no text. Without the record
+It is a `page_fetches` row with `status = 'failed'` and no text. Without the record
 the hourly cycle was the retry: every dead link, every hour, from every
 worker, which was most of the fleet's block rate.
 
 ## A page that keeps failing is retried less often, then not at all
 
-The run of failed `content` rows since the URL's last passed one decides
+The run of failed `page_fetches` rows since the URL's last passed one decides
 whether an automatic path may fetch it (`verdicts.fetch_parked_sql`). After
 the k-th consecutive failure the wait is `fetch_retry_after_hours * 2^(k-1)`,
 capped at `fetch_retry_max_hours`. At `fetch_give_up_after_failures` the
@@ -947,9 +909,7 @@ age check.
 A failed pull counts toward the interval, and a run of them backs off. After
 the k-th failed pull in a row the board waits its own interval times 2^(k-1),
 capped at `ingest_retry_max_hours` but never below the interval
-(`queue.pull_wait_hours`). Before this a failed pull did not count, so a board
-answering 404 was pulled every hour: twelve boards for up to eleven days, and
-every board together failed 1,509 pulls in the week to 2026-10-04.
+(`queue.pull_wait_hours`).
 
 The pull that makes the run `ingest_give_up_after_failures` long switches the
 source off (`tasks.ingest`). That retires its postings through the ordinary

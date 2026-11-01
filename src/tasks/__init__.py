@@ -11,7 +11,6 @@ without importing the code that runs it.
 
 from __future__ import annotations
 
-from api.apply.recipe_uploads import handle_publish_recipe
 from tasks.application import handle_application_draft, handle_application_sweep
 from tasks.batch_objects import handle_consolidate_batch_objects
 from tasks.batches import handle_poll_batches
@@ -56,7 +55,6 @@ from tasks.verify import (
 DERIVATIONS: tuple[Derivation, ...] = (PAY, REQUIREMENTS, PROFILES, EMBEDDINGS, LOCATIONS)
 
 HANDLERS = {
-    "publish_extension_recipe": lambda task_id, payload: handle_publish_recipe(payload),
     "extract_upload": lambda task_id, payload: handle_extract_upload(payload),
     "process_resume_upload": lambda task_id, payload: handle_process_resume_upload(payload),
     "classify_mail": handle_classify_mail,
