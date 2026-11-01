@@ -1,5 +1,5 @@
 """Jobvite board behavior over Nutanix's careers page and XML feed as served on
-2026-11-01, trimmed to the lines read and one posting open in two places."""
+2026-11-01, trimmed to the line read and one posting open in two places."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from tests.fetching.boards.responses import BoardResponse
 _URL = "https://jobs.jobvite.com/nutanix/jobs"
 _FEED = "https://app.jobvite.com/CompanyJobs/Xml.aspx?c=qKr9VfwZ"
 _PAGE = """<script>
-    function getCompanyId() { return 'qKr9VfwZ'; }
+    jvConfig = {
+        companyEId: 'qKr9VfwZ',
+    };
 </script>"""
 
 # The posting's own row, then the row for its second place, as the feed lists them.

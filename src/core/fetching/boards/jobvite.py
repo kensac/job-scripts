@@ -25,8 +25,10 @@ _JOBVITE_FIELDS = (
     "date",
     "parentId",
 )
-# The careers page names the company id the feed is keyed by.
-_JOBVITE_COMPANY_ID = re.compile(r"getCompanyId\(\)\s*\{\s*return\s*'([A-Za-z0-9]+)'")
+# The careers page names the company id the feed is keyed by, in the
+# `companyEId` its scripts are configured with. Both page generations seen
+# carry it (Nutanix, Metropolitan Transportation Authority, 2026-11-01).
+_JOBVITE_COMPANY_ID = re.compile(r"companyEId:\s*'([A-Za-z0-9]+)'")
 
 
 def _jobvite_posted(text: str | None) -> int:
@@ -49,7 +51,11 @@ def _jobvite(url: str, company: str) -> list[JobPosting]:
     several places is one row per place: the first with the posting's id, the
     rest `{id}-{suffix}` with a `parentId`, all linking the one posting. On
     Nutanix on 2026-11-01 that was 392 rows and 270 ids, and the site's
-    search listed the same 270 ids.
+    search listed the same 270 ids, as it listed MTA's 322.
+
+    app.jobvite.com answered 429 after seven feeds read two seconds apart
+    (2026-11-01). Every Jobvite listings URL is on jobs.jobvite.com, so the
+    one pace key backs all of them off together.
     """
     slug = _JOBVITE_BOARD.fullmatch(urlparse(url).path)
     if not slug:

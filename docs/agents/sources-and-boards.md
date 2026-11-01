@@ -188,7 +188,7 @@ feed, never the careers page, except for Jobvite:
 | Kind | Listings URL | Text | Matched on |
 |---|---|---|---|
 | `jazzhr` | `https://app.jazz.co/feeds/export/jobs/<subdomain>` | listing | Space Dynamics Laboratory (23) |
-| `jobvite` | `https://jobs.jobvite.com/<slug>/jobs` | listing | Nutanix (270) |
+| `jobvite` | `https://jobs.jobvite.com/<slug>/jobs` | listing | Nutanix (270), MTA (322) |
 | `bamboohr` | `https://<tenant>.bamboohr.com/careers/list` | browser | its own `totalCount` |
 | `pinpoint` | `https://<tenant>.pinpointhq.com/postings.json` | listing | Impulse Space (216) |
 | `breezy` | `https://<tenant>.breezy.hr/json` | static page | JND (25), NucleusTeq (28), Reveleer (17) |
@@ -202,7 +202,9 @@ app.jobvite.com, so `_jobvite` reads the id off the page and builds
 `jobs.jobvite.com/<slug>/job/<id>` from the listings URL's slug. A Jobvite
 posting open in several places is one feed row per place, `<id>-<suffix>`
 with a `parentId`; the rows fold into one posting with every place. The feed
-also names each posting's hiring team, which is not stored. A missing
+also names each posting's hiring team, which is not stored. app.jobvite.com
+answered 429 after seven feeds read two seconds apart; every Jobvite listings
+URL is on jobs.jobvite.com, so its one pace key backs them all off. A missing
 BambooHR tenant redirects to bamboohr.com, so `_bamboohr` refuses the
 redirect rather than read a marketing page. Pinpoint rows can link the
 employer's own domain (careers.wolve.com); the posting is kept on the tenant
