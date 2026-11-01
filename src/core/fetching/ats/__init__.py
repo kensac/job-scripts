@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from core.fetching.ats.apple import Apple
 from core.fetching.ats.ashby import Ashby
+from core.fetching.ats.brassring import BrassRing
 from core.fetching.ats.common import (
     UNSUPPORTED,
     AtsResolver,
@@ -54,6 +55,7 @@ __all__ = [
     "Ashby",
     "AtsResolver",
     "AtsResult",
+    "BrassRing",
     "Eightfold",
     "Gem",
     "Goldman",
@@ -105,6 +107,7 @@ RESOLVERS: list[AtsResolver] = [
     Goldman(),
     Ibm(),
     Ukg(),
+    BrassRing(),
 ]
 
 

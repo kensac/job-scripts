@@ -179,6 +179,43 @@ one for one on Function Health (29) and Bilt (19) on 2026-10-16, so a pull is
 authoritative. The posting page is a 7 KB script shell, so a re-check reads
 `/job_posts/<id>` through the Gem resolver.
 
+**A small-company system with one public feed is read in that one call.**
+Each of these answers every open posting in one unpaged reply, states no
+count (BambooHR excepted), and matched the employer's careers page one for
+one on 2026-11-01, so each pull is authoritative. The listings URL is the
+feed, never the careers page, except for Jobvite:
+
+| Kind | Listings URL | Text | Matched on |
+|---|---|---|---|
+| `jazzhr` | `https://app.jazz.co/feeds/export/jobs/<subdomain>` | listing | Space Dynamics Laboratory (23) |
+| `jobvite` | `https://jobs.jobvite.com/<slug>/jobs` | listing | Nutanix (270), MTA (322) |
+| `bamboohr` | `https://<tenant>.bamboohr.com/careers/list` | browser | its own `totalCount` |
+| `pinpoint` | `https://<tenant>.pinpointhq.com/postings.json` | listing | Impulse Space (216) |
+| `breezy` | `https://<tenant>.breezy.hr/json` | static page | JND (25), NucleusTeq (28), Reveleer (17) |
+| `teamtailor` | `https://<tenant>.teamtailor.com/jobs.rss` | listing | Oatly (20), Polestar (13) |
+| `pageup` | `https://careers.pageuppeople.com/<instance>/cw/<language>/rss` | listing | Mutual of Omaha (68) |
+| `recruitee` | `https://<tenant>.recruitee.com/api/offers/` | listing | Hard Rock Digital (62) |
+
+Jobvite's XML feed (`app.jobvite.com/CompanyJobs/Xml.aspx?c=<company id>`) is
+keyed by a company id that only the careers page names, and its rows link
+app.jobvite.com, so `_jobvite` reads the id off the page and builds
+`jobs.jobvite.com/<slug>/job/<id>` from the listings URL's slug. A Jobvite
+posting open in several places is one feed row per place, `<id>-<suffix>`
+with a `parentId`; the rows fold into one posting with every place. The feed
+also names each posting's hiring team, which is not stored. app.jobvite.com
+answered 429 after seven feeds read two seconds apart; every Jobvite listings
+URL is on jobs.jobvite.com, so its one pace key backs them all off. A missing
+BambooHR tenant redirects to bamboohr.com, so `_bamboohr` refuses the
+redirect rather than read a marketing page. Pinpoint rows can link the
+employer's own domain (careers.wolve.com); the posting is kept on the tenant
+host, which serves the same path and is what the aggregators link. A
+BambooHR posting page is a script shell under 10 characters of text, so the
+static gate rejects it and the browser reads it; a Breezy posting page is
+server rendered and the static tier reads it whole. PageUp's `/ci/` feed is
+the internal careers site and is not a board. A Teamtailor site on the
+employer's own domain is not matched; store its `<tenant>.teamtailor.com`
+feed, which serves the same postings.
+
 ## A posting has one URL, whichever feed spelled it
 
 `jobs.url` is the posting's identity, and every row, verdict and link keys on
@@ -255,18 +292,24 @@ carries it (`ats.goldman_text`), and its resolver reads the same text back
 from the site's GraphQL `role`. Google's feed carries it, and has no resolver:
 the static tier reads an open posting's page whole (10,388 characters with
 every section, 2026-10-16), and a closed id answers the same 200 search page
-as a made-up one, so no answer means GONE. Workday,
+as a made-up one, so no answer means GONE. JazzHR, Jobvite, Pinpoint,
+Teamtailor, PageUp and Recruitee carry it whole and have no resolver. Workday,
 SmartRecruiters, Oracle Recruiting, Workable, Rippling and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo, IBM and Avature list without the text and
+posting's frame. Taleo, IBM, Avature, BambooHR and Breezy list without the text and
 no resolver returns it, so their postings get it from the page fetch tiers
 below. Every careers.ibm.com page answers the static tier with an AWS WAF
 challenge (202), so IBM's text always comes from the browser (7 of 7 listed
 postings read on 2026-10-05); the static tier read Bloomberg's and Two Sigma's
 Avature posting pages whole the same day. Eightfold lists without the text,
-and its resolver reads it from the tenant's detail endpoint.
+and its resolver reads it from the tenant's detail endpoint. A BrassRing row
+carries one section of the posting as its summary, which is not the text and
+is not stored; the `BrassRing` resolver reads the text from the posting page,
+whose fields sit as JSON in its `preLoadJSON` input, which no page tier reads.
+A delisted id and a made-up one both answer that page with `Jobdetails` null
+(2026-11-01), so the resolver never says GONE.
 
 **A board on its employers' own domains is known by its sources, never by a
 URL's shape.** An Eightfold tenant posts on its own host
@@ -786,6 +829,34 @@ span, a field labelled Location, or an unlabelled span under the title, and
 Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
 challenge, also to a browser-fingerprinted client, so they are not sources
 (IBM is read through its own search API, `_ibm`).
+
+**A board whose sort ties is read in the order of its key.** A BrassRing site
+(IBM Kenexa, on `sjobs.brassring.com` or an employer host such as
+`jobs.ubs.com`) is listed by its own search page,
+`https://<host>/TGnewUI/Search/Home/Home?partnerid=<p>&siteid=<s>`, and read
+through the call its "show more" button makes,
+`POST /TgNewUI/Search/Ajax/ProcessSortAndShowMoreJobs`, which needs no cookie
+or token. It answers 50 rows a page, every page states `JobsCount`, and a page
+past the last is empty, with no window up to Walgreens' 22,525. Sorted by date,
+tied rows trade places between pages (Edward Jones: 654 distinct of 668), so
+`_brassring` sorts by `reqid` and raises `PartialPull` short of the count.
+A row is a list of the tenant's questions: which is the title
+(`JobFieldsToDisplay.JobTitle`, `formtext8` at General Atomics) and which are
+the place (`LocationCustomSolrFields`) is read off the search page each pull.
+A tenant that names no place field (Edward Jones, Walgreens) lists no place.
+Each site is its own board, and a posting's URL carries the site it was
+listed under: UBS's sites 5012 and 5155 list 565 of the same requisitions
+under different URLs, so add one of them.
+
+**Oleeo (`*.tal.net`) is not a board format.** Its Atom feed,
+`/vx/candidate/jobboard/vacancy/<n>/feed`, is public but carries only the
+title and link. On 2026-11-01 nine of eleven finance tenants answered their
+search page with a captcha ("Quick Check Needed", Oleeo Protect), and the
+posting pages their feeds link answered it too: Evercore's, Rothschild's and
+Perella Weinberg's on the first request, Jefferies' on three of seven requests
+spaced 20 seconds apart. No page tier reads past it, so those postings could
+not be checked. The two tenants with no captcha (Morgan Stanley's and
+BlackRock's campus sites) publish no feed.
 
 ## A switched-off source holds no posting available
 
