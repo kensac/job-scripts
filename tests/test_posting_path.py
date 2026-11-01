@@ -74,7 +74,8 @@ def test_outside_the_criteria_names_the_criterion(f):
 
     assert consumer.included is False
     assert consumer.summary == "Outside the criteria"
-    assert "inside the age window" in _stages(consumer)["criteria"].detail
+    criteria = _stages(consumer)["criteria"].detail
+    assert criteria is not None and "inside the age window" in criteria
 
 
 def test_a_volume_skip_says_why_verification_never_read_it(f):
@@ -140,6 +141,7 @@ def test_a_near_copy_verdict_names_its_twin(f):
     path = posting_path.for_admin(copy)
 
     closed = next(s for s in path.steps if s.check == "closed")
+    assert closed.detail is not None
     assert "copied from a twin posting" in closed.detail and twin in closed.detail
 
 

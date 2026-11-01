@@ -16,12 +16,14 @@ NANO = "gpt-5-nano"
 
 
 def _row(answer_id: int) -> dict:
-    return db.query_one(
+    row = db.query_one(
         "SELECT input_content, prompt_tokens, completion_tokens, total_tokens, cached_tokens, "
         "cache_write_tokens, reasoning_tokens, duration_ms, cost_usd FROM ledger_rows "
         "WHERE id = %s",
         (answer_id,),
     )
+    assert row is not None
+    return row
 
 
 def test_an_answer_shows_the_input_rebuilt_from_the_fetch_it_names(f):

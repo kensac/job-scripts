@@ -38,7 +38,7 @@ class _Generator:
     def _text(self, shape: dict[str, Any], length: int | None = None) -> str:
         lengths = shape.get("lengths") or [8]
         if length is None:
-            length = self._from_quantiles(lengths)
+            length = int(self._from_quantiles(lengths))
         classes = shape.get("charclasses") or ["Aa "]
         alphabet = ""
         for symbol in self.rng.choice(classes) or "a":

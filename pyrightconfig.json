@@ -1,10 +1,22 @@
 {
   "extraPaths": ["src"],
-  "include": ["src/api", "src/core", "src/tasks"],
+  "include": ["src/api", "src/core", "src/tasks", "tests"],
   "exclude": ["**/__pycache__"],
   "typeCheckingMode": "standard",
   "reportMissingImports": "error",
   "pythonVersion": "3.15",
   "venvPath": ".",
-  "venv": ".venv"
+  "venv": ".venv",
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "extraPaths": ["src", "."],
+      "reportOptionalSubscript": "none",
+      "reportOptionalMemberAccess": "none",
+      "reportOptionalOperand": "none",
+      "reportOptionalIterable": "none",
+      "reportOptionalCall": "none",
+      "reportArgumentType": "none"
+    }
+  ]
 }

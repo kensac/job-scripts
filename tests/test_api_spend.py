@@ -170,14 +170,20 @@ def test_superseded_verdicts_are_counted_as_waste(client, admin_headers):
     assert Decimal(str(body["waste"]["superseded_cost_usd"])) == Decimal("0.05")
 
 
+def _cost(*args, **kwargs) -> Decimal:
+    cost = pricing.estimate_cost_usd(*args, **kwargs)
+    assert cost is not None, "the model has no price"
+    return cost
+
+
 def test_cost_matches_the_pricing_function(client, admin_headers, spend_rows):
     """The endpoint sums a stored column; the column is written by
     pricing.estimate_cost_usd. Pin them together so a change to either is
     caught here rather than in a chart."""
     expected = (
-        pricing.estimate_cost_usd(NANO, 1_000_000, 1_000_000)
-        + pricing.estimate_cost_usd(NANO, 1_000_000, 1_000_000, batched=True)
-        + pricing.estimate_cost_usd(NANO, 1_000_000, 0, cached_tokens=1_000_000)
+        _cost(NANO, 1_000_000, 1_000_000)
+        + _cost(NANO, 1_000_000, 1_000_000, batched=True)
+        + _cost(NANO, 1_000_000, 0, cached_tokens=1_000_000)
     )
     body = client.get("/v1/admin/spend?days=30", headers=admin_headers).json()
     assert Decimal(str(body["totals"]["cost_usd"])) == expected
