@@ -28,7 +28,9 @@ class AnswerList(BaseModel):
 
 class Fill(BaseModel):
     """One pass of the extension over one form. `job_id` is null when the url
-    matched no posting on the board, which is normal rather than an error."""
+    matched no posting on the board, which is normal rather than an error.
+    `superseded_by` names the fill this empty one's submission was moved to
+    (api.apply.submissions); such a fill was not itself submitted."""
 
     id: int
     job_id: int | None
@@ -36,6 +38,7 @@ class Fill(BaseModel):
     host: str | None
     created_at: datetime.datetime
     submitted_at: datetime.datetime | None
+    superseded_by: int | None
     company: str | None
     title: str | None
     fields: int

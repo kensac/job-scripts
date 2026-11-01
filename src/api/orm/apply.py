@@ -238,6 +238,14 @@ class ApplicationFill(Base):
     application_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("applications.id", ondelete="SET NULL")
     )
+    # The filled fill this zero-field fill's submission was moved to
+    # (api.apply.submissions). Set, this row holds no submission of its own.
+    superseded_by: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "application_fills.id", name="fk_application_fills_superseded_by", ondelete="SET NULL"
+        ),
+    )
 
 
 class ApplicationReport(Base):

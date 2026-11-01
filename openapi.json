@@ -40533,6 +40533,17 @@
             ],
             "title": "Submitted At"
           },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
           "company": {
             "anyOf": [
               {
@@ -40568,12 +40579,13 @@
           "host",
           "created_at",
           "submitted_at",
+          "superseded_by",
           "company",
           "title",
           "fields"
         ],
         "title": "Fill",
-        "description": "One pass of the extension over one form. `job_id` is null when the url\nmatched no posting on the board, which is normal rather than an error."
+        "description": "One pass of the extension over one form. `job_id` is null when the url\nmatched no posting on the board, which is normal rather than an error.\n`superseded_by` names the fill this empty one's submission was moved to\n(api.apply.submissions); such a fill was not itself submitted."
       },
       "FillAnswerEdit": {
         "properties": {
