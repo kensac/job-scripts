@@ -329,7 +329,34 @@ def provider_spend(
     days: int = Query(30, ge=1, le=365),
     user: AuthedUser = Depends(require_admin),
 ) -> ProviderCosts:
-    """Provider-reported costs for completed UTC days, separate from usage estimates."""
+    """Provider-reported costs for completed UTC days, separate from usage estimates.
+
+    Served stale for admin_stats_cache_seconds per window and UTC day: the
+    provider's API took 1.2 to 1.5 s a read on production (2026-11-01), the
+    longest wait on the spend page. Keyed on the day because a new day moves
+    the window. A read that is not available is answered, never cached, so
+    the next visit asks the provider again."""
+    today = datetime.datetime.now(datetime.UTC).date()
+    try:
+        return _provider_pages.get((days, today), lambda: _available_costs(days))
+    except _ProviderUnavailable as unavailable:
+        return unavailable.costs
+
+
+_provider_pages: StaleByKey[tuple[int, datetime.date], ProviderCosts] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+class _ProviderUnavailable(Exception):
+    def __init__(self, costs: ProviderCosts) -> None:
+        self.costs = costs
+
+
+def _available_costs(days: int) -> ProviderCosts:
     from core.provider_costs import fetch_costs
 
-    return ProviderCosts(**fetch_costs(days))
+    costs = ProviderCosts(**fetch_costs(days))
+    if costs.status != "available":
+        raise _ProviderUnavailable(costs)
+    return costs

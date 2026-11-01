@@ -59,6 +59,26 @@ def test_the_fleet_and_queue_views_agree_on_which_workers_are_alive(client, admi
     assert {(w["name"], w["fresh"]) for w in queue} == expected
 
 
+def test_the_fleet_view_counts_each_workers_last_day_and_an_idle_one_as_zero(client, admin_headers):
+    _worker("worked", idle=True)
+    _worker("idle", idle=True)
+    for status, hours_ago in (("done", 1), ("done", 2), ("failed", 3), ("done", 30)):
+        db.execute(
+            "INSERT INTO tasks (kind, payload, status, worker, finished_at) "
+            "VALUES ('verify_new', '{}', %s, 'worked', now() - make_interval(hours => %s))",
+            (status, hours_ago),
+        )
+
+    fleet = client.get("/v1/admin/workers", headers=admin_headers).json()["rows"]
+
+    # The 30-hour-old task is outside the day; a worker with nothing in it
+    # reads 0, not null.
+    assert {(w["name"], w["done_24h"], w["failed_24h"]) for w in fleet} == {
+        ("worked", 2, 1),
+        ("idle", 0, 0),
+    }
+
+
 def test_ingest_pending_past_two_cycles_is_a_backlog_and_within_one_is_not(set_config, monkeypatch):
 
     set_config("ingest_interval_minutes", 60)

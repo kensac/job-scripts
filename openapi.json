@@ -25912,7 +25912,7 @@
     "/v1/admin/spend/provider": {
       "get": {
         "summary": "Provider Spend",
-        "description": "Provider-reported costs for completed UTC days, separate from usage estimates.",
+        "description": "Provider-reported costs for completed UTC days, separate from usage estimates.\n\nServed stale for admin_stats_cache_seconds per window and UTC day: the\nprovider's API took 1.2 to 1.5 s a read on production (2026-11-01), the\nlongest wait on the spend page. Keyed on the day because a new day moves\nthe window. A read that is not available is answered, never cached, so\nthe next visit asks the provider again.",
         "operationId": "provider_spend_v1_admin_spend_provider_get",
         "parameters": [
           {
@@ -26795,7 +26795,7 @@
     "/v1/admin/mail/{message_id}/candidates": {
       "get": {
         "summary": "Admin Match Candidates",
-        "description": "The same picker the user gets, over the message owner's applications.\n\nThe admin panel offered a bare application-id field, which requires\nknowing an id that is not displayed anywhere - so the only correction\navailable in practice was no correction. This is the identical ranking the\nuser side computes, including the candidates `_by_company` refused to\nchoose between, which are the ones a person is best placed to settle.",
+        "description": "The same picker the user gets, over the message owner's applications.\n\nThe admin panel offered a bare application-id field, which requires\nknowing an id that is not displayed anywhere - so the only correction\navailable in practice was no correction. This is the identical ranking the\nuser side computes, including the candidates `by_company` refused to\nchoose between, which are the ones a person is best placed to settle.",
         "operationId": "admin_match_candidates_v1_admin_mail__message_id__candidates_get",
         "parameters": [
           {
@@ -55750,7 +55750,8 @@
             "enum": [
               "internship_v1",
               "new_grad_v1",
-              "aero_major_v1"
+              "aero_major_v1",
+              "finance_new_grad_v1"
             ],
             "title": "Recipe"
           },
