@@ -102,3 +102,48 @@ async def test_only_new_managed_requests_receive_cache_control(f):
     assert captured[0].context["prompt_cache_policy"] == "no_cache"
     assert captured[1].context.get("prompt_cache_policy") is None
     assert captured[2].context.get("prompt_cache_policy") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("params", "sent"),
+    [
+        ({"reasoning_effort": "high"}, "high"),
+        # An Anthropic setting names it `effort`. It was recorded but
+        # "medium" was sent.
+        ({"effort": "low"}, "low"),
+        ({}, "medium"),
+    ],
+)
+async def test_the_recorded_effort_is_the_effort_sent(f, params, sent):
+    _, url = f.make_ready_job(content="posting")
+    job = {"url": url, "company": "Company", "title": "Software Engineer"}
+    hooks = filter_execution.ExecutionHooks(
+        verdict_label="filter",
+        key_source="owner",
+        payer=Payer(user_id=1),
+        purpose="filter",
+        record_usage=lambda *_: None,
+        budget_exceeded=lambda: False,
+        cancelled=lambda: False,
+        progress=lambda *_: None,
+        complete=lambda: None,
+    )
+    calls = []
+
+    async def submit(task_id, specs, model, effort, *_args):
+        calls.append((effort, snapshot_specs(task_id, specs)[0].context["reasoning_effort"]))
+        return []
+
+    task = f.make_task("run_filter_batch_chunk", {}, status="running")
+    await filter_execution.execute_batch(
+        task,
+        ai.AIConfig("openai", "key", "owner", "gpt-6-luna", params=params),
+        filter_execution.FilterSnapshot("filter", "criteria", "filter", "hash"),
+        [job],
+        hooks,
+        contents={url: Page(1, "posting")},
+        unavailable=0,
+        submit=submit,
+    )
+    assert calls == [(sent, sent)]
