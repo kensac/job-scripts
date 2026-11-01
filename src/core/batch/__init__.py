@@ -7,7 +7,7 @@ import logging
 import os
 from collections.abc import Iterable
 
-from openai import AsyncOpenAI
+lazy from openai import AsyncOpenAI
 
 from core import batch_capabilities, providers, store
 from core.batch import anthropic_batches as anthropic

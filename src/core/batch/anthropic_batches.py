@@ -20,9 +20,9 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from anthropic import AsyncAnthropic
-from anthropic.lib._parse._transform import transform_schema
-from anthropic.types.messages import MessageBatch
+lazy from anthropic import AsyncAnthropic
+lazy from anthropic.lib._parse._transform import transform_schema
+lazy from anthropic.types.messages import MessageBatch
 
 from core import providers, store
 from core.batch.progress import BatchProgress

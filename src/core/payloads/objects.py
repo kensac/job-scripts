@@ -10,8 +10,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-import boto3
-from botocore.config import Config
+lazy import boto3
+lazy from botocore.config import Config
 
 # botocore's default connection pool size, named so callers can bound their
 # concurrency by it: a thread beyond the pool waits for a connection, and the

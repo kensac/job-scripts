@@ -60,3 +60,8 @@ backups/
 extension/node_modules/
 extension/.wxt/
 extension/.output/
+
+# Local agent worktrees, each with its own .venv. CI builds from a clean
+# checkout, so these only ever reach a build made on a laptop.
+.claude/
+.worktrees/

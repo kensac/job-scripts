@@ -8,7 +8,7 @@ class Page:
     size: int
 
     @classmethod
-    def from_params(cls, number: int, size: int, *, maximum: int) -> "Page":
+    def from_params(cls, number: int, size: int, *, maximum: int) -> Page:
         return cls(max(1, number), max(1, min(size, maximum)))
 
     @property

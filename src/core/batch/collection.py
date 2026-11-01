@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
-from openai import AsyncOpenAI
-from openai.types import Batch
+lazy from openai import AsyncOpenAI
+lazy from openai.types import Batch
 
 from core import store
 from core.batch.specs import BATCH_ENDPOINT, BatchResult

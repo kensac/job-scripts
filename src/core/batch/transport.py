@@ -9,8 +9,8 @@ import logging
 from collections.abc import Callable
 from typing import TypedDict
 
-from openai import AsyncOpenAI
-from openai.types import Batch
+lazy from openai import AsyncOpenAI
+lazy from openai.types import Batch
 
 from core.batch.progress import TERMINAL_STATES
 from core.batch.specs import BatchSpec, _build_line, _estimate_tokens

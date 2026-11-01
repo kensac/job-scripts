@@ -1,6 +1,6 @@
 from api import ai_pause, budget
-from api.auth import AuthedUser
 from api.problem import refuse
+lazy from api.auth import AuthedUser
 
 PAUSED_MESSAGE = "AI features are paused by an administrator. Everything else still works."
 
