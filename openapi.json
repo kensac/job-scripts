@@ -41704,6 +41704,10 @@
             "type": "string",
             "title": "Model"
           },
+          "run_model": {
+            "type": "string",
+            "title": "Run Model"
+          },
           "classifications": {
             "type": "integer",
             "title": "Classifications"
@@ -41785,6 +41789,7 @@
         "required": [
           "classifier_version",
           "model",
+          "run_model",
           "classifications",
           "distinct_jobs",
           "superseded_observations",
