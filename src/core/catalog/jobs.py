@@ -120,6 +120,33 @@ def correct_posting(job_id: int, fields: dict) -> dict | None:
             ).fetchone()
 
 
+def fill_source_company(source: str, company: str) -> int:
+    """Names the source's nameless rows with the company the source names,
+    and returns how many it named. Only empty rows are written, so a company
+    a feed or an administrator stored is never replaced and a second call
+    writes nothing. Each chunk of _BATCH rows is one statement, locked
+    in url order (_LOCK_ORDER), because ingest upserts the same urls."""
+    company = company.strip()
+    if not company:
+        raise ValueError("a company to fill with is required")
+    named = 0
+    while True:
+        with statement() as conn:
+            written = conn.execute(
+                f"""
+                WITH locked AS (
+                    SELECT id FROM jobs WHERE source = %s AND company = ''
+                    ORDER BY url {_LOCK_ORDER} LIMIT %s FOR UPDATE
+                )
+                UPDATE jobs SET company = %s FROM locked WHERE jobs.id = locked.id
+                """,
+                (source, _BATCH, company),
+            ).rowcount
+        named += written
+        if written < _BATCH:
+            return named
+
+
 def fill_date_posted(url: str, posted: datetime.date) -> None:
     """Only where the board's listing left it empty: a date the listing stated
     is the same fact from the same board, and never worse."""

@@ -169,21 +169,25 @@ def rejection_reasons(
     applied = params_.applied(prompt_hash=params_.csv(prompt_hash), user=scoping.echo(ids))
     filterable = ["prompt_hash", "user"]
 
+    # Reads only columns `idx_ai_queries_custom_window` carries, so the
+    # 740,000 verdicts of a 30-day window are an index-only scan rather than a
+    # walk of 1.5 GB of heap. `rejected_with_reason` needs `reason`, so it is
+    # counted from the rejection rows below. The distincts sort in "C": two
+    # strings are equal under en_US exactly when their bytes are, so the
+    # counts are the same, and the url sort took 2.5-3 s against 18 s
+    # (production, 2026-11-01).
     totals = db.query(
         f"""
         SELECT prompt_hash,
                count(*) AS evaluated,
                count(*) FILTER (WHERE status = 'passed') AS passed,
                count(*) FILTER (WHERE status = 'rejected') AS rejected,
-               count(*) FILTER (
-                   WHERE status = 'rejected' AND reason IS NOT NULL AND reason <> ''
-               ) AS rejected_with_reason,
-               count(DISTINCT url) AS distinct_jobs_evaluated,
-               count(DISTINCT url) FILTER (WHERE status = 'rejected')
+               count(DISTINCT url COLLATE "C") AS distinct_jobs_evaluated,
+               count(DISTINCT url COLLATE "C") FILTER (WHERE status = 'rejected')
                    AS distinct_jobs_rejected,
                min(created_at) AS first_seen,
                max(created_at) AS last_seen,
-               array_remove(array_agg(DISTINCT filter_name), NULL) AS filter_names
+               array_remove(array_agg(DISTINCT filter_name COLLATE "C"), NULL) AS filter_names
         FROM ai_queries
         WHERE check_type = 'custom' AND prompt_hash IS NOT NULL
           AND {DECISION_WINDOW_SQL}{hash_clause}
@@ -202,15 +206,18 @@ def rejection_reasons(
             filterable=filterable,
         )
 
+    # Exactly the predicate of `idx_ai_queries_custom_reasons`, an index-only
+    # scan. It reads ai_queries rather than the verdicts view, whose extra
+    # predicates this one implies.
     rejections = db.query(
         f"""
-        SELECT prompt_hash, url, reason FROM verdicts
-        WHERE check_type = 'custom' AND status = 'rejected'
-          AND prompt_hash IS NOT NULL AND reason IS NOT NULL AND reason <> ''
-          AND {DECISION_WINDOW_SQL}{hash_clause}
+        SELECT prompt_hash, url, reason FROM ai_queries
+        WHERE check_type = 'custom' AND status = 'rejected' AND reason <> ''
+          AND prompt_hash IS NOT NULL AND {DECISION_WINDOW_SQL}{hash_clause}
         """,
         params,
     )
+    reasoned = collections.Counter(r["prompt_hash"] for r in rejections)
 
     hashes = [r["prompt_hash"] for r in totals]
     # One person can hold SEVERAL filters carrying the same prompt text - one
@@ -278,7 +285,7 @@ def rejection_reasons(
                     filters=current,
                 ),
                 sufficient=row["rejected"] >= min_decisions,
-                totals=_prompt_totals(row, missing),
+                totals=_prompt_totals(row, missing, reasoned[h]),
                 groups=_named_group_breakdowns(buckets, examples),
                 ungrouped=buckets.get(
                     UNGROUPED_REASON_KEY, ReasonBreakdownAccumulator()
