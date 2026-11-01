@@ -70,17 +70,16 @@ def closed_verdict(url: str) -> str:
     return f"({latest(url, 'closed', shown)})"
 
 
-# closed_verdict is three-valued and must stay that way: 'open', 'closed', or
-# NULL for never checked. `active` cannot answer this question - it is whatever
-# a board's feed last said and nothing ever clears it, so on a board that is
-# not re-listed (sheet_import, imported once from a sheet) it reports our own
-# stale copy as the posting's state. The closed check observes the posting
-# itself and is applied uniformly across boards, which is what makes it
-# comparable. Collapsing NULL into 'closed' would reintroduce exactly the bug
-# this column exists to fix: 114 of the applications flagged dead by `active`
-# have a closed-check that says the posting is open.
-# Whether the posting is still up, as the closed check saw it. Three-valued and
-# it must stay that way: null is "never checked", which is not "open".
+# Whether the posting is still up, as the closed check saw it: what
+# closed_verdict() selects. Three-valued with NULL, and it must stay that way:
+# NULL is "never checked", which is not "open". `active` cannot answer this
+# question - it is whatever a board's feed last said and nothing ever clears
+# it, so on a board that is not re-listed (sheet_import, imported once from a
+# sheet) it reports our own stale copy as the posting's state. The closed check
+# observes the posting itself and is applied uniformly across boards, which is
+# what makes it comparable. Collapsing NULL into 'closed' would reintroduce
+# exactly the bug this column exists to fix: 114 of the applications flagged
+# dead by `active` have a closed-check that says the posting is open.
 Openness = Literal["open", "closed"]
 
 
