@@ -232,7 +232,11 @@ class ModelEvidence(BaseModel):
 class ModelCandidate(BaseModel):
     """One model this task could run on, eligible or not, carrying WHY.
 
-    Every dollar figure is a `_money` string, None when unknown.
+    Every dollar figure is a decimal string, never a number: these are
+    Decimals and a float would round money on the way out. None means unknown
+    - an ineligible model has no price and an unbounded sweep has no cycle
+    cost - and rendering either as 0 would make an unknown look like a free
+    one.
     """
 
     model: str
