@@ -310,7 +310,7 @@ def test_no_fleet_task_defaults_to_a_model_that_is_dropping_requests():
     Asserting on the defaults rather than on behaviour: a task pointed at a
     failing model works fine most of the time, which is exactly why this needs
     to be a fact about the configuration."""
-    from api.routers.filters import IMPROVE_MODEL
+    from api.routers.filtering.prompt_assistance import IMPROVE_MODEL
     from core.shapes import BACKFILL_MODEL, ONGOING_MODEL, REQUIREMENTS_MODEL
 
     for name, model in (

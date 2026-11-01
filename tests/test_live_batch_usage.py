@@ -32,6 +32,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
     ent = budget.Entitlement(True, None, 0, False, [])
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
+    assert job is not None
     f.make_verdict(job["url"], "closed")
     f.make_fetch(job["url"], content="Build useful software.")
     text = '{"should_filter": false}' if family == "filter" else '{"answer": "Fits."}'
@@ -52,6 +53,7 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         }
 
     monkeypatch.setattr(ai, "parse", parsed_live)
+    flt = None
     if family == "filter":
         flt = f.make_filter(uid, on_ambiguous="keep")
         payload = {

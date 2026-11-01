@@ -341,5 +341,15 @@ type-checked, however green the check is. `src/tasks` was outside it until
 interpreter the image runs (`deploy/Dockerfile`), because typeshed's stubs
 differ between versions.
 
+`tests` is in the list too, so a test that imports a name that no longer
+exists fails `make check` instead of failing collection in every CI lane at
+once. Its execution environment turns off six rules that `src` keeps:
+`reportArgumentType` and the five `reportOptional*` rules. Measured
+2026-11-01, they were 929 of the 972 errors in `tests`. A test reads
+`db.query_one(...)["n"]` and passes `enqueue()`'s `int | None` straight on,
+and a None there fails the test at once. The other 43 were fixed. Missing
+imports and unknown import symbols stay errors in `tests`. Turn a rule back on
+by fixing what it reports, not by widening the list.
+
 Fix a type error with the true type or real `None` handling. A
 `# type: ignore` is acceptable only when the checker is wrong, and it says why.

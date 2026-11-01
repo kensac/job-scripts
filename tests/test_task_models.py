@@ -308,6 +308,21 @@ class TestTakesEffect:
         assert task_config.configured_model("requirements") is None
 
 
+def test_the_list_reads_model_health_once(client, admin_headers, monkeypatch):
+    from api.routers import task_models
+
+    calls = []
+    read = task_models._model_health
+
+    def counted():
+        calls.append(1)
+        return read()
+
+    monkeypatch.setattr(task_models, "_model_health", counted)
+    assert client.get("/v1/admin/task-models", headers=admin_headers).status_code == 200
+    assert len(SHAPES) > 1 and len(calls) == 1
+
+
 @pytest.mark.parametrize("purpose", sorted(SHAPES))
 def test_every_registered_task_renders(client, admin_headers, purpose):
     """A task that cannot be displayed is a task nobody can configure."""

@@ -189,11 +189,13 @@ def test_the_verdict_index_covers_exactly_the_registered_checks():
     """
     import re
 
-    from api.orm import AiQuery
+    from api.orm import AiQuery, Base
     from core.checks import POSTING_CHECK_NAMES
 
     index = next(
-        ix for ix in AiQuery.__table__.indexes if ix.name == "idx_ai_queries_latest_verdict"
+        ix
+        for ix in Base.metadata.tables[AiQuery.__tablename__].indexes
+        if ix.name == "idx_ai_queries_latest_verdict"
     )
     predicate = str(index.dialect_options["postgresql"]["where"])
     listed = re.search(r"check_type IN \(([^)]*)\)", predicate)

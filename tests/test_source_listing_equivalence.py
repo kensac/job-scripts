@@ -12,7 +12,7 @@ ingest tasks for a source that no longer exists."""
 from __future__ import annotations
 
 from api import db
-from api.routers.source_admin import SourceLedger, SourceName
+from api.routers.source_management.listing import SourceLedger, SourceName
 from api.routers.sources import Source
 from core.fetching import boards
 
