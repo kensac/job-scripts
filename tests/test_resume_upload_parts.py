@@ -13,7 +13,7 @@ from api.apply.drafting import resume_text
 from api.resumes.text_versions import store_text
 from core.payloads.blob_parts import PART_BYTES, BlobPartStore
 from tasks import resume_uploads
-from tests.job_board_support import _uid
+from tests.factories import user_id_for_subject
 from tests.resume_support import seed_text_resume
 
 
@@ -56,7 +56,9 @@ async def test_large_transfer_retries_and_streams_download(
         "_extract",
         lambda _, user_id, *__: store_text(user_id, ["Complete resume text"])[0],
     )
-    previous_id = seed_text_resume(_uid(user_headers), "master", "Previous resume text")
+    previous_id = seed_text_resume(
+        user_id_for_subject("test-user"), "master", "Previous resume text"
+    )
     previous_version = db.query_one(
         "SELECT text_version_id FROM user_resumes WHERE id = %s", (previous_id,)
     )["text_version_id"]

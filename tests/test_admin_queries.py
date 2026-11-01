@@ -109,3 +109,33 @@ def test_query_options_read_both_ledger_arms_like_the_view(client, admin_headers
     assert got["statuses"] == view["status"] == ["failed", "passed", "rejected"]
     assert got["contexts"] == view["config_name"] == ["content-cache", "verify-batch"]
     assert got["workers"] == view["worker"] == ["w-answer", "w-fetch"]
+
+
+def test_newest_ledger_page_walks_each_arms_index():
+    """A newest-first page of ledger_rows reads a page of each table. With a
+    WHERE of its own the fetch arm was not flattened, and the page sorted every
+    fetch (2.0 s on production, 2026-11-01)."""
+    db.execute(
+        "INSERT INTO page_fetches (url, status, method) "
+        "SELECT 'https://walk.test/' || i, 'passed', "
+        "CASE WHEN i % 10 = 0 THEN 'verification' ELSE 'scraped' END "
+        "FROM generate_series(1, 5000) i"
+    )
+    db.execute("ANALYZE page_fetches")
+    sql = "SELECT id, reason FROM ledger_rows ORDER BY id DESC LIMIT 5"
+    explained = db.query_one("EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) " + sql)
+    plan = explained["QUERY PLAN"][0]["Plan"]
+
+    def nodes(node):
+        yield node
+        for child in node.get("Plans", []):
+            yield from nodes(child)
+
+    examined = sum(
+        (n["Actual Rows"] + n.get("Rows Removed by Filter", 0)) * n["Actual Loops"]
+        for n in nodes(plan)
+        if n.get("Relation Name") == "page_fetches"
+    )
+    assert examined < 100, plan
+    # Still the view's rows: verification copies are not ledger rows.
+    assert [r["reason"] for r in db.query(sql)] == ["scraped"] * 5

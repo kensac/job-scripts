@@ -1,11 +1,12 @@
 from api import crypto, db
+from tests.factories import user_id_for_subject
 from tests.resume_support import create_text_resume
 
 
 def test_missing_model_has_same_reason_in_filter_admission_and_ai_errors(
     client, user_headers, runs_permitted
 ):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     db.execute(
         "UPDATE user_settings SET api_key_enc = %s, ai_provider = 'openai_compatible', ai_model = NULL "
         "WHERE user_id = %s",
@@ -52,7 +53,7 @@ def test_filter_admission_refuses_missing_owner_provider_key(
 
 
 def test_missing_model_refuses_draft_before_any_task_is_queued(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     job_id = f.make_job()
     f.make_board_row(uid, job_id, status="Saved")
     resume = create_text_resume(

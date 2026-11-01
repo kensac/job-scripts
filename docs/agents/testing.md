@@ -242,11 +242,14 @@ per-test reset is no longer the thing to attack; the remaining per-test cost
 is the application answering real requests against Postgres, about eleven
 queries and 17 ms per request.
 
-`gate` decides whether a revision is worth judging and everything waits on
-it, so it holds only the auto-fix and the two checks that decide that. It
-needs no database: the schema export reads the app's routes, and exported
-against a DSN on a closed port it is byte-identical to the committed file.
-Everything else static runs beside the lanes.
+`gate` decides whether a revision is worth judging, so it holds only the
+auto-fix and the two checks that decide that. Nothing waits on it: every job
+starts at once and `check` refuses a run whose gate failed, so a red gate
+still means the run judged nothing. Waiting cost every run about 18 s of wall
+time to save runner time on the 1 run in 200 whose gate failed (measured
+2026-11-01). It needs no database: the schema export reads the app's routes,
+and exported against a DSN on a closed port it is byte-identical to the
+committed file.
 
 ## Measured and rejected
 
