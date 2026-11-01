@@ -4,9 +4,11 @@ import pytest
 
 from api import ai, budget, db
 from core import pricing
+from core.query_instructions import hydrate
 from tasks import application
 from tasks.filtering import personal_runs as filters
 from tests.factories import filter_config
+from tests.resume_support import seed_text_resume
 
 MODEL = "gpt-5-mini"
 RAW_USAGE = {
@@ -18,28 +20,24 @@ RAW_USAGE = {
 }
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("batched", [True, False], ids=["batch", "live"])
-@pytest.mark.parametrize("family", ["filter", "application"])
-@pytest.mark.parametrize("outcome", ["success", "empty", "invalid"])
-async def test_every_consumed_result_records_transport_and_cached_usage(
-    f, monkeypatch, family, outcome, batched
-):
-    uid = f.make_user()
-    cfg = ai.AIConfig(
+def _config(batched: bool) -> ai.AIConfig:
+    return ai.AIConfig(
         provider="openai", api_key="test", key_source="owner" if batched else "byo", model=MODEL
     )
-    ent = budget.Entitlement(True, None, 0, False, [])
+
+
+def _job_with_page(f) -> dict:
     job_id = f.make_job()
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (job_id,))
     assert job is not None
     f.make_verdict(job["url"], "closed")
     f.make_fetch(job["url"], content="Build useful software.")
-    text = '{"should_filter": false}' if family == "filter" else '{"answer": "Fits."}'
-    if outcome == "empty":
-        text = None
-    elif outcome == "invalid":
-        text = "invalid json"
+    return job
+
+
+def _answer_live(monkeypatch, outcome: str, success: str) -> str | None:
+    """Patch the live call to reply per the outcome; return the reply text."""
+    text = {"success": success, "empty": None, "invalid": "invalid json"}[outcome]
 
     async def parsed_live(cfg, instructions, input_text, response_model):
         parsed = response_model.model_validate_json(text) if outcome == "success" else None
@@ -53,45 +51,10 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         }
 
     monkeypatch.setattr(ai, "parse", parsed_live)
-    flt = None
-    if family == "filter":
-        flt = f.make_filter(uid, on_ambiguous="keep")
-        payload = {
-            "user_id": uid,
-            "config_id": filter_config(flt),
-            "jobs": [job],
-            "parent_id": None,
-        }
-        task_id = f.make_task("run_filter_batch_chunk", payload, status="running")
-        monkeypatch.setattr(filters, "load_config", lambda *args: (ent, cfg))
+    return text
 
-        async def submitted(*args):
-            return [
-                f.make_batch_result(task_id, args[1][0], text=text, usage=RAW_USAGE, model=MODEL)
-            ]
 
-        monkeypatch.setattr(filters, "submit_or_collect", submitted)
-        if batched:
-            await filters.handle_run_filter_batch_chunk(task_id, payload)
-        else:
-            await filters._process_jobs(task_id, uid, ent, cfg, flt, [job])
-    else:
-        from tests.resume_support import seed_text_resume
-
-        seed_text_resume(uid, "main", "Python")
-        application.ensure_answer_rows(uid, job_id, [{"key": "why", "label": "Why us?"}])
-        task_id = f.make_task("application_draft", {"user_id": uid}, status="running")
-        monkeypatch.setattr(application, "load_config", lambda *args: (ent, cfg))
-
-        async def drafted(*args, **kwargs):
-            return [
-                f.make_batch_result(task_id, args[2][0], text=text, usage=RAW_USAGE, model=MODEL)
-            ], SimpleNamespace(model=MODEL)
-
-        monkeypatch.setattr(application, "run_batched", drafted)
-        await application.draft_rows(
-            task_id, uid, [{**job, "job_id": job_id, "key": "why", "question": "Why us?"}]
-        )
+def _one_priced_call(uid: int, batched: bool) -> dict:
     ledger = db.query("SELECT * FROM model_calls WHERE user_id = %s", (uid,))
     assert len(ledger) == 1
     row = ledger[0]
@@ -107,18 +70,78 @@ async def test_every_consumed_result_records_transport_and_cached_usage(
         cache_write_tokens=500,
         batched=batched,
     )
-    if family == "filter":
-        verdict = db.query_one("SELECT * FROM ledger_rows WHERE check_type = 'custom'")
-        assert verdict["status"] == ("passed" if outcome == "success" else "failed")
-        if outcome == "success":
-            assert verdict["reason"] is None
-        assert verdict["total_tokens"] == 1100
-        assert verdict["cached_tokens"] == 400
-        assert verdict["cost_usd"] == row["cost_usd"]
-        assert verdict["filter_name"] == f"user{uid}:{flt['name']}"
-        from core.query_instructions import hydrate
+    return row
 
-        assert hydrate([verdict])[0]["instructions"]
-        assert verdict["input_content"] == (
-            "Company: Acme\nJob Title: Engineer\n\nJob Content:\nBuild useful software."
-        )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [True, False], ids=["batch", "live"])
+@pytest.mark.parametrize("outcome", ["success", "empty", "invalid"])
+async def test_every_consumed_filter_result_records_transport_and_cached_usage(
+    f, monkeypatch, outcome, batched
+):
+    uid = f.make_user()
+    cfg = _config(batched)
+    ent = budget.Entitlement(True, None, 0, False, [])
+    job = _job_with_page(f)
+    text = _answer_live(monkeypatch, outcome, '{"should_filter": false}')
+    flt = f.make_filter(uid, on_ambiguous="keep")
+    payload = {
+        "user_id": uid,
+        "config_id": filter_config(flt),
+        "jobs": [job],
+        "parent_id": None,
+    }
+    task_id = f.make_task("run_filter_batch_chunk", payload, status="running")
+    monkeypatch.setattr(filters, "load_config", lambda *args: (ent, cfg))
+
+    async def submitted(*args):
+        return [f.make_batch_result(task_id, args[1][0], text=text, usage=RAW_USAGE, model=MODEL)]
+
+    monkeypatch.setattr(filters, "submit_or_collect", submitted)
+    if batched:
+        await filters.handle_run_filter_batch_chunk(task_id, payload)
+    else:
+        await filters._process_jobs(task_id, uid, ent, cfg, flt, [job])
+
+    row = _one_priced_call(uid, batched)
+    verdict = db.query_one("SELECT * FROM ledger_rows WHERE check_type = 'custom'")
+    assert verdict["status"] == ("passed" if outcome == "success" else "failed")
+    if outcome == "success":
+        assert verdict["reason"] is None
+    assert verdict["total_tokens"] == 1100
+    assert verdict["cached_tokens"] == 400
+    assert verdict["cost_usd"] == row["cost_usd"]
+    assert verdict["filter_name"] == f"user{uid}:{flt['name']}"
+    assert hydrate([verdict])[0]["instructions"]
+    assert verdict["input_content"] == (
+        "Company: Acme\nJob Title: Engineer\n\nJob Content:\nBuild useful software."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [True, False], ids=["batch", "live"])
+@pytest.mark.parametrize("outcome", ["success", "empty", "invalid"])
+async def test_every_consumed_application_result_records_transport_and_cached_usage(
+    f, monkeypatch, outcome, batched
+):
+    uid = f.make_user()
+    cfg = _config(batched)
+    ent = budget.Entitlement(True, None, 0, False, [])
+    job = _job_with_page(f)
+    text = _answer_live(monkeypatch, outcome, '{"answer": "Fits."}')
+    seed_text_resume(uid, "main", "Python")
+    application.ensure_answer_rows(uid, job["id"], [{"key": "why", "label": "Why us?"}])
+    task_id = f.make_task("application_draft", {"user_id": uid}, status="running")
+    monkeypatch.setattr(application, "load_config", lambda *args: (ent, cfg))
+
+    async def drafted(*args, **kwargs):
+        return [
+            f.make_batch_result(task_id, args[2][0], text=text, usage=RAW_USAGE, model=MODEL)
+        ], SimpleNamespace(model=MODEL)
+
+    monkeypatch.setattr(application, "run_batched", drafted)
+    await application.draft_rows(
+        task_id, uid, [{**job, "job_id": job["id"], "key": "why", "question": "Why us?"}]
+    )
+
+    _one_priced_call(uid, batched)

@@ -448,7 +448,7 @@ submitted, but it must not block every later posting either: one straggling
 verify batch held the only `verify_new` for 15 hours on 2026-10-08 and no new
 posting reached a board. `verify_new` starts a new sweep whenever none is
 pending, running or waiting, and
-`tasks.verification.new_postings._in_flight` excludes the postings a parked
+`tasks.verification.selection._in_flight` excludes the postings a parked
 sweep's `batch_requests` already name.
 
 **A resume is not a retry.** Every claim increments `attempts`, because

@@ -65,11 +65,6 @@ class _TaskId:
 
 
 @dataclass(frozen=True)
-class _ActiveTask:
-    id: int
-
-
-@dataclass(frozen=True)
 class _UsagePosition:
     spent: int
     reserved: int
@@ -111,7 +106,7 @@ class _Plan:
 
 
 def _refuse_active(board_id: int) -> None:
-    active = db.query_one_as(_ActiveTask, ACTIVE_SQL, (board_id, list(ACTIVE_STATUSES)))
+    active = db.query_one_as(_TaskId, ACTIVE_SQL, (board_id, list(ACTIVE_STATUSES)))
     if active:
         raise RunRefusal("IN_PROGRESS", "this board already has an active run", task_id=active.id)
 

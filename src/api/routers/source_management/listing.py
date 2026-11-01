@@ -29,14 +29,27 @@ class SourceNames(BaseModel):
     sources: list[SourceName]
 
 
+class FailingPull(BaseModel):
+    """An active source whose most recent pull failed, and how."""
+
+    name: str
+    error: str | None
+    at: datetime.datetime | None
+
+
 class CatalogCounts(BaseModel):
-    """What a dashboard tile needs. `by_kind` counts active sources per board
-    format; `last_ingest` counts sources by how their most recent pull ended."""
+    """What the dashboard's tiles and pull health panel need. `by_kind` counts
+    active sources per board format. Pull health reads each active source's
+    most recent pull: `pulled_ok_24h` finished done within the last day,
+    `stale` did not fail but has not finished within the day, and `failing`
+    lists the ones that failed, by name."""
 
     sources: int
     active: int
     by_kind: dict[str, int]
-    last_ingest: dict[str, int]
+    pulled_ok_24h: int
+    stale: int
+    failing: list[FailingPull]
     bundles: int
 
 
@@ -85,8 +98,8 @@ def admin_list_sources(
     shape: str = "full", user: AuthedUser = Depends(require_admin)
 ) -> SourceNames | CatalogCounts | SourceLedgers:
     """shape=full is the ledger. shape=names is the vocabulary (name, active,
-    kind, bundles) for pickers and filters; shape=counts is what a dashboard
-    tile needs. Both skip the per-source aggregation over jobs, tasks and
+    kind, bundles) for pickers and filters; shape=counts is what the dashboard
+    tiles and pull health need. Both skip the per-source aggregation over jobs, tasks and
     subscribers, which the dashboard was paying for on every live tick."""
     if shape == "names":
         source_rows = db.query(
@@ -115,24 +128,37 @@ def admin_list_sources(
         total = db.query_one(
             "SELECT COUNT(*) AS sources, COUNT(*) FILTER (WHERE active) AS active FROM sources"
         )
-        by_kind: dict[str, int] = {}
-        for source_row in db.query("SELECT listings_url FROM sources WHERE active"):
-            source_kind = boards.kind(source_row["listings_url"])
-            by_kind[source_kind] = by_kind.get(source_kind, 0) + 1
-        last_ingest = db.query(
+        # The latest pull per active source, one probe of
+        # idx_tasks_ingest_source_latest each, as the full ledger reads it.
+        active_rows = db.query(
             """
-            SELECT status, COUNT(*) AS n FROM (
-                SELECT DISTINCT ON (payload->>'source') status
-                FROM tasks WHERE kind = 'ingest_source'
-                ORDER BY payload->>'source', id DESC
-            ) t GROUP BY status
+            SELECT s.name, s.listings_url, li.status, li.finished_at, li.error,
+                   li.finished_at > now() - interval '24 hours' AS within_day
+            FROM sources s
+            LEFT JOIN LATERAL (
+                SELECT status, finished_at, error FROM tasks
+                WHERE kind = 'ingest_source' AND payload->>'source' = s.name
+                ORDER BY id DESC LIMIT 1
+            ) li ON true
+            WHERE s.active
+            ORDER BY s.name
             """
         )
+        by_kind: dict[str, int] = {}
+        for source_row in active_rows:
+            source_kind = boards.kind(source_row["listings_url"])
+            by_kind[source_kind] = by_kind.get(source_kind, 0) + 1
         return CatalogCounts(
             sources=total["sources"] if total else 0,
             active=total["active"] if total else 0,
             by_kind=by_kind,
-            last_ingest={status_row["status"]: status_row["n"] for status_row in last_ingest},
+            pulled_ok_24h=sum(1 for r in active_rows if r["status"] == "done" and r["within_day"]),
+            stale=sum(1 for r in active_rows if r["status"] != "failed" and not r["within_day"]),
+            failing=[
+                FailingPull(name=r["name"], error=r["error"], at=r["finished_at"])
+                for r in active_rows
+                if r["status"] == "failed"
+            ],
             bundles=(db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
         )
 

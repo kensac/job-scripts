@@ -5,15 +5,7 @@ import pytest
 from api import db
 from api.ai import verdicts
 from core.fetching import ats
-
-
-class Response:
-    def __init__(self, body, status_code=200):
-        self.body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self.body
+from tests.fetching.ats.responses import AtsResponse
 
 
 def test_explicit_greenhouse_closure_cannot_be_overwritten_by_hostname_guess(monkeypatch):
@@ -22,7 +14,7 @@ def test_explicit_greenhouse_closure_cannot_be_overwritten_by_hostname_guess(mon
 
     def get(url):
         asked.append(url)
-        return Response({"status": 404, "error": "Job not found"}, 404)
+        return AtsResponse({"status": 404, "error": "Job not found"}, 404)
 
     monkeypatch.setattr(resolver, "get", get)
     result = resolver.fetch("https://boards.greenhouse.io/nuro/jobs/8227399")
@@ -40,7 +32,7 @@ def test_smartrecruiters_retained_description_is_not_public_availability(monkeyp
     monkeypatch.setattr(
         resolver,
         "get",
-        lambda url: Response(
+        lambda url: AtsResponse(
             {
                 "name": "Software Engineer",
                 "jobAd": {"sections": {"jobDescription": {"text": "Build software."}}},
@@ -56,7 +48,7 @@ def test_smartrecruiters_retained_description_is_not_public_availability(monkeyp
         monkeypatch.setattr(
             resolver,
             "get",
-            lambda url, value=availability: Response({"name": "Software Engineer", **value}),
+            lambda url, value=availability: AtsResponse({"name": "Software Engineer", **value}),
         )
         assert resolver.fetch("https://jobs.smartrecruiters.com/LinkedIn3/744000151447279").ok
 

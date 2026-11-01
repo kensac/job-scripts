@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 
 lazy from openai import AsyncOpenAI
+lazy from openai.types import Batch
 
 logger = logging.getLogger(__name__)
 TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}
@@ -27,6 +28,16 @@ class BatchProgress:
     failed: int = 0
 
 
+def progress(batch: Batch) -> BatchProgress:
+    counts = getattr(batch, "request_counts", None)
+    return BatchProgress(
+        status=batch.status,
+        total=getattr(counts, "total", 0) or 0,
+        completed=getattr(counts, "completed", 0) or 0,
+        failed=getattr(counts, "failed", 0) or 0,
+    )
+
+
 async def read_batch_progress(
     client: AsyncOpenAI, batch_ids: list[str]
 ) -> dict[str, BatchProgress]:
@@ -35,14 +46,7 @@ async def read_batch_progress(
     out: dict[str, BatchProgress] = {}
     for batch_id in batch_ids:
         try:
-            batch = await client.batches.retrieve(batch_id)
-            counts = getattr(batch, "request_counts", None)
-            out[batch_id] = BatchProgress(
-                status=batch.status,
-                total=getattr(counts, "total", 0) or 0,
-                completed=getattr(counts, "completed", 0) or 0,
-                failed=getattr(counts, "failed", 0) or 0,
-            )
+            out[batch_id] = progress(await client.batches.retrieve(batch_id))
         except Exception as exc:
             logger.warning(f"Batch {batch_id} status check failed: {exc}")
     return out

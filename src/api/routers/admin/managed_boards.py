@@ -29,6 +29,7 @@ _BOOTSTRAP_CRITERIA = Criteria(
 _BOOTSTRAP_DEFINITIONS = (
     (
         "software-engineering-internships",
+        "managed_filter",
         "Tech Internships",
         "Internships in software engineering, product management, data, infrastructure, machine learning, and adjacent roles at tech and tech-adjacent companies.",
         """Managed board bootstrap prompt v2.
@@ -36,6 +37,7 @@ Include only internship opportunities in software engineering, product managemen
     ),
     (
         "software-engineering-new-grad",
+        "managed_filter",
         "Tech New Grad",
         "Entry-level and new-graduate roles in software engineering, product management, data, infrastructure, machine learning, and adjacent fields at tech and tech-adjacent companies.",
         """Managed board bootstrap prompt v2.
@@ -43,6 +45,7 @@ Include only full-time entry-level or new-graduate opportunities in software eng
     ),
     (
         "kanishks-job-list",
+        "sponsor_filter_reuse",
         "Kanishk's Job List",
         "Jobs selected by Kanishk's enabled personal machine filters, without personal activity or fields.",
         "This board reuses the sponsor's enabled personal machine-filter outcomes.",
@@ -113,14 +116,21 @@ class _Count(BaseModel):
     n: int
 
 
+_Slug = Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)]
+_BoardName = Annotated[str, Field(min_length=1, max_length=120)]
+_Description = Annotated[str, Field(max_length=1000)]
+_Prompt = Annotated[str, Field(min_length=1, max_length=8000)]
+_Sources = Annotated[list[str], Field(max_length=5000)]
+
+
 class ManagedBoardCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)
-    name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=1000)
+    slug: _Slug
+    name: _BoardName
+    description: _Description = ""
     sponsor_user_id: int | None = None
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: _Prompt
     requested_model: str
     execution_mode: str = "managed_filter"
     on_ambiguous: str = "keep"
@@ -128,19 +138,17 @@ class ManagedBoardCreate(BaseModel):
     bypass_sponsorship_filter: bool = False
     criteria: Criteria = Field(default_factory=Criteria)
     title_gate: TitleGateConfig | None = None
-    sources: list[str] = Field(default_factory=list, max_length=5000)
+    sources: _Sources = Field(default_factory=list)
 
 
 class ManagedBoardPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int = Field(ge=1)
-    slug: NonNullUpdate[
-        Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)]
-    ] = None
-    name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=120)]] = None
-    description: NonNullUpdate[Annotated[str, Field(max_length=1000)]] = None
-    prompt: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=8000)]] = None
+    slug: NonNullUpdate[_Slug] = None
+    name: NonNullUpdate[_BoardName] = None
+    description: NonNullUpdate[_Description] = None
+    prompt: NonNullUpdate[_Prompt] = None
     requested_model: NonNullUpdate[str] = None
     execution_mode: NonNullUpdate[str] = None
     on_ambiguous: NonNullUpdate[str] = None
@@ -148,7 +156,7 @@ class ManagedBoardPatch(BaseModel):
     bypass_sponsorship_filter: NonNullUpdate[bool] = None
     criteria: NonNullUpdate[Criteria] = None
     title_gate: TitleGateConfig | None = None
-    sources: NonNullUpdate[Annotated[list[str], Field(max_length=5000)]] = None
+    sources: NonNullUpdate[_Sources] = None
     published: NonNullUpdate[bool] = None
 
 
@@ -203,6 +211,13 @@ def _get(board_id: int, *, lock: bool = False) -> ManagedBoard | None:
     )
 
 
+def _require(board_id: int, *, lock: bool = False) -> ManagedBoard:
+    board = _get(board_id, lock=lock)
+    if board is None:
+        raise refuse(404, "NOT_FOUND", "unknown managed board")
+    return board
+
+
 @router.get("/managed-boards")
 def list_managed_boards(user: AuthedUser = Depends(require_admin)) -> ManagedBoards:
     return ManagedBoards(
@@ -216,7 +231,7 @@ def list_managed_boards(user: AuthedUser = Depends(require_admin)) -> ManagedBoa
 def bootstrap_managed_boards(
     user: AuthedUser = Depends(require_admin),
 ) -> ManagedBoards:
-    """Create the two versioned starter boards as drafts for this sponsor."""
+    """Create the versioned starter boards as drafts for this sponsor."""
     with db.transaction():
         db.execute("SELECT pg_advisory_xact_lock(hashtext('managed-boards-bootstrap-v2'))")
         sources = [
@@ -225,10 +240,7 @@ def bootstrap_managed_boards(
         ]
         criteria_json = _BOOTSTRAP_CRITERIA.model_dump(mode="json")
         boards: list[ManagedBoard] = []
-        for slug, name, description, prompt in _BOOTSTRAP_DEFINITIONS:
-            execution_mode = (
-                "sponsor_filter_reuse" if slug == "kanishks-job-list" else "managed_filter"
-            )
+        for slug, execution_mode, name, description, prompt in _BOOTSTRAP_DEFINITIONS:
             board = db.query_one_as(
                 ManagedBoard,
                 f"SELECT {_BOARD_COLS} FROM managed_boards b WHERE b.slug = %s FOR UPDATE",
@@ -283,10 +295,7 @@ def bootstrap_managed_boards(
 
 @router.get("/managed-boards/{board_id}")
 def get_managed_board(board_id: int, user: AuthedUser = Depends(require_admin)) -> ManagedBoard:
-    board = _get(board_id)
-    if board is None:
-        raise refuse(404, "NOT_FOUND", "unknown managed board")
-    return board
+    return _require(board_id)
 
 
 @router.post("/managed-boards/{board_id}/run")
@@ -304,8 +313,7 @@ def run_managed_board(
 def latest_managed_board_run(
     board_id: int, user: AuthedUser = Depends(require_admin)
 ) -> ManagedBoardLatestRun:
-    if _get(board_id) is None:
-        raise refuse(404, "NOT_FOUND", "unknown managed board")
+    _require(board_id)
     return ManagedBoardLatestRun(run=managed_boards.latest(board_id))
 
 
@@ -313,8 +321,7 @@ def latest_managed_board_run(
 def managed_board_cost(
     board_id: int, user: AuthedUser = Depends(require_admin)
 ) -> managed_boards.ManagedBoardCost:
-    if _get(board_id) is None:
-        raise refuse(404, "NOT_FOUND", "unknown managed board")
+    _require(board_id)
     return managed_boards.cost(board_id)
 
 
@@ -383,9 +390,7 @@ def patch_managed_board(
         _validate_execution_mode(fields["execution_mode"])
     requested_sources = fields.pop("sources") if "sources" in fields else None
     with db.transaction():
-        existing = _get(board_id, lock=True)
-        if existing is None:
-            raise refuse(404, "NOT_FOUND", "unknown managed board")
+        existing = _require(board_id, lock=True)
         if existing.revision != body.expected_revision:
             raise refuse(
                 409,

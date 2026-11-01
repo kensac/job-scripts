@@ -5,6 +5,7 @@ lists cut and counted rather than rendered whole."""
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def _sources(f):
@@ -31,6 +32,14 @@ def test_a_person_sees_format_employer_and_bundle_on_every_board(client, user_he
     assert (rows["fulltime"]["kind"], rows["fulltime"]["company"]) == ("sheet_era", None)
     assert rows["fulltime"]["groups"] == ["aggregators"]
     assert rows["ashby_ramp"]["kind"] == "ashby"
+
+
+def test_a_large_list_travels_compressed(client, user_headers, f):
+    for _ in range(20):
+        f.make_source()
+    listed = client.get("/v1/sources", headers={**user_headers, "Accept-Encoding": "gzip"})
+    assert listed.headers["content-encoding"] == "gzip"
+    assert len(listed.json()["sources"]) >= 20
 
 
 def test_a_subscription_changes_by_delta_not_by_replacing_the_whole_set(client, user_headers, f):
@@ -95,7 +104,7 @@ def test_the_queue_cuts_to_one_board_and_the_requests_badge_counts_everything(
     ).json()["rows"]
     assert len(rows) == 2 and all(r["payload"]["source"] == "gh_stripe" for r in rows)
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     for i in range(3):
         db.execute(
             "INSERT INTO source_requests (user_id, url) VALUES (%s, %s)",

@@ -14,11 +14,12 @@ from fastapi import APIRouter, Header, Query, Response
 from pydantic import BaseModel
 
 from api import db
+from api.board.ats import ATS_SQL, AtsName
 from api.params import csv
 from api.problem import refuse
-from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
+from core.verdict_reads import Openness
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]
@@ -145,12 +146,16 @@ def _etag(parts: list[str]) -> str:
     return f'"{digest}"'
 
 
-def _not_modified(if_none_match: str | None, etag: str) -> Response | None:
+_REVALIDATE = "public, max-age=0, must-revalidate"
+
+
+def _not_modified(if_none_match: str | None, etag: str, response: Response) -> Response | None:
+    """A 304 when the client already holds `etag`; otherwise None, with the
+    ETag and cache headers set on `response`."""
+    headers = {"ETag": etag, "Cache-Control": _REVALIDATE}
     if etag in csv(if_none_match):
-        return Response(
-            status_code=304,
-            headers={"ETag": etag, "Cache-Control": "public, max-age=0, must-revalidate"},
-        )
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
     return None
 
 
@@ -218,11 +223,9 @@ def list_public_job_lists(
 ) -> PublicJobListIndex | Response:
     rows = db.query_as(_IndexRow, _INDEX_SQL)
     etag = _etag([f"{row.slug}:{row.public_revision}" for row in rows])
-    unchanged = _not_modified(if_none_match, etag)
+    unchanged = _not_modified(if_none_match, etag, response)
     if unchanged is not None:
         return unchanged
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return PublicJobListIndex(
         job_lists=[PublicJobListLink.model_validate(row, from_attributes=True) for row in rows]
     )
@@ -280,33 +283,20 @@ def _cursor_predicate(
     return f"AND ({expression} IS NULL OR {expression} {comparator} %(cursor_value)s OR ({expression} = %(cursor_value)s AND mj.job_id {comparator} %(cursor_id)s))"
 
 
-@router.get("/{slug}", response_model=PublicJobList)
-def get_public_job_list(
-    slug: str,
-    response: Response,
-    limit: int = Query(default=50, ge=1, le=100),
-    cursor: str | None = None,
-    sort: PublicSort = "posted",
-    dir: SortDirection = "desc",
-    q: str | None = Query(default=None, max_length=200),
-    terms: str | None = None,
-    location: str | None = Query(default=None, max_length=200),
-    remote: bool | None = None,
-    min_comp: Decimal | None = Query(default=None, ge=0, le=100000000),
-    comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
-    comp_period: PayPeriodParam | None = None,
-    hide_restricted: bool = False,
-    if_none_match: str | None = Header(default=None),
-) -> PublicJobList | Response:
-    wanted_terms = csv(terms)
-    if min_comp is not None and (comp_currency is None or comp_period is None):
-        raise refuse(
-            422, "COMP_UNITS_REQUIRED", "a compensation minimum requires currency and period"
-        )
-    expression = _SORT_EXPRESSIONS[sort]
-    cursor_value, cursor_id = _decode_cursor(cursor, sort, dir) if cursor else (None, None)
+def _viewer_filters(
+    *,
+    q: str | None,
+    wanted_terms: list[str],
+    location: str | None,
+    remote: bool | None,
+    min_comp: Decimal | None,
+    comp_currency: str | None,
+    comp_period: PayPeriodParam | None,
+    hide_restricted: bool,
+) -> tuple[list[str], dict[str, object]]:
+    """The SQL clauses and parameters for the filters a viewer chose."""
     filters: list[str] = []
-    params: dict[str, object] = {"fetch_limit": limit + 1}
+    params: dict[str, object] = {}
     if q:
         filters.append("AND (j.company ILIKE %(q)s OR j.title ILIKE %(q)s OR j.url ILIKE %(q)s)")
         params["q"] = f"%{q}%"
@@ -341,6 +331,45 @@ def get_public_job_list(
         filters.append(
             f"AND {verdict_reads.latest_status('j.url', 'clearance')} IS DISTINCT FROM 'rejected'"
         )
+    return filters, params
+
+
+@router.get("/{slug}", response_model=PublicJobList)
+def get_public_job_list(
+    slug: str,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = None,
+    sort: PublicSort = "posted",
+    dir: SortDirection = "desc",
+    q: str | None = Query(default=None, max_length=200),
+    terms: str | None = None,
+    location: str | None = Query(default=None, max_length=200),
+    remote: bool | None = None,
+    min_comp: Decimal | None = Query(default=None, ge=0, le=100000000),
+    comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
+    comp_period: PayPeriodParam | None = None,
+    hide_restricted: bool = False,
+    if_none_match: str | None = Header(default=None),
+) -> PublicJobList | Response:
+    wanted_terms = csv(terms)
+    if min_comp is not None and (comp_currency is None or comp_period is None):
+        raise refuse(
+            422, "COMP_UNITS_REQUIRED", "a compensation minimum requires currency and period"
+        )
+    expression = _SORT_EXPRESSIONS[sort]
+    cursor_value, cursor_id = _decode_cursor(cursor, sort, dir) if cursor else (None, None)
+    filters, params = _viewer_filters(
+        q=q,
+        wanted_terms=wanted_terms,
+        location=location,
+        remote=remote,
+        min_comp=min_comp,
+        comp_currency=comp_currency,
+        comp_period=comp_period,
+        hide_restricted=hide_restricted,
+    )
+    params["fetch_limit"] = limit + 1
     selection = " ".join(filters)
     if cursor:
         filters.append(_cursor_predicate(expression, dir, cursor_value))
@@ -402,11 +431,9 @@ def get_public_job_list(
             *(card.model_dump_json() for card in cards),
         ]
     )
-    unchanged = _not_modified(if_none_match, etag)
+    unchanged = _not_modified(if_none_match, etag, response)
     if unchanged is not None:
         return unchanged
-    response.headers["ETag"] = etag
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
     return PublicJobList(
         slug=board.slug,
         name=board.name,
@@ -440,7 +467,7 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
     row = db.query_one_as(_DetailRow, detail_sql, (slug, job_id))
     if row is None:
         raise refuse(404, "NOT_FOUND", "unknown job", headers={"Cache-Control": "no-store"})
-    response.headers["Cache-Control"] = "public, max-age=0, must-revalidate"
+    response.headers["Cache-Control"] = _REVALIDATE
     [page] = page_fetches.resolve(
         [{"content": row.content, "ref": row.content_ref}], "content", "ref"
     )
