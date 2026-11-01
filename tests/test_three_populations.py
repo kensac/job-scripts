@@ -12,6 +12,7 @@ import pytest
 from api import db
 from api.board import populations
 from api.board.person_state import PERSON_STATE
+from tests.factories import user_id_for_subject
 
 
 def _seed(f, uid: int) -> None:
@@ -33,7 +34,7 @@ def _seed(f, uid: int) -> None:
 
 
 def test_person_stats_name_visible_and_acted_on_beside_the_old_counts(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     _seed(f, uid)
 
     totals = client.get("/v1/user/stats", headers=user_headers).json()["totals"]
@@ -44,7 +45,7 @@ def test_person_stats_name_visible_and_acted_on_beside_the_old_counts(client, us
 
 
 def test_admin_surfaces_name_all_three(client, admin_headers, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     _seed(f, uid)
 
     users = client.get("/v1/admin/users", headers=admin_headers).json()["users"]

@@ -9,7 +9,8 @@ import pytest
 from api import db
 from api.board import visibility
 from tasks import board as board_tasks
-from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe
 
 
 def _board(client, headers, source):
@@ -19,7 +20,7 @@ def _board(client, headers, source):
 @pytest.mark.asyncio
 @pytest.mark.no_board_recompute
 async def test_membership_is_computed_by_the_task_and_read_as_a_lookup(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     a = _insert_job("src-bm", "https://x.test/bm1", locations=["Austin, TX"])
     b = _insert_job("src-bm", "https://x.test/bm2", locations=["Singapore"])
     _pass_closed("https://x.test/bm1")
@@ -66,7 +67,7 @@ async def test_membership_is_computed_by_the_task_and_read_as_a_lookup(client, u
 
 
 def test_uploaded_and_acted_on_postings_never_wait(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     mine = _insert_job("src-own", "https://x.test/own1", uploaded_by=uid)
     acted = _insert_job("src-own", "https://x.test/own2")
     _subscribe(uid, "src-own")
@@ -78,7 +79,7 @@ def test_uploaded_and_acted_on_postings_never_wait(client, user_headers):
 
 
 def test_full_and_fast_agree_after_a_recompute(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     for i in range(3):
         _insert_job("src-eq", f"https://x.test/eq{i}")
         _pass_closed(f"https://x.test/eq{i}")
