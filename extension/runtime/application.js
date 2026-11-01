@@ -19,24 +19,10 @@ import { createPanelShell } from "./panel-shell";
 // The report button sends the page as the extension saw it, with a note.
 export async function startApplication(adapter, adapterContext, lifecycle) {
   const operation = adapterContext.operation;
-  // THE PANEL IS NOT ALWAYS IN THIS FRAME.
-  //
-  // panel.js owns the panel's DOM, and says there why it is a shadow root in
-  // the top layer. This file owns the flow, and the flow cannot leave the
-  // form's own document: the reader hands back DOM nodes, capture() walks the
-  // markup around each field, and the fill types into the controls.
-  //
-  // When the form is embedded in a cross-origin iframe, those two want
-  // different frames. An employer's careers page embeds the application
-  // (Greenhouse's embed is one: 6084px tall inside an 805px window on
-  // app.careerpuck.com), and position: fixed inside an iframe pins to that
-  // FRAME's viewport, so a panel mounted beside the form rides the page down
-  // and out of sight. The top layer does not help, being per-document.
-  //
-  // So the flow stays here beside the form and the panel goes to the top
-  // frame, where a window overlay is possible at all. `surface` is the same
-  // object either way, and every call is one way: paint, region, mark,
-  // ensure, remove. Nothing is read back across a frame.
+  // THE PANEL IS NOT ALWAYS IN THIS FRAME. The flow stays beside the form,
+  // whose DOM it reads and fills; an embedded form's panel goes to the top
+  // frame (README, "Where the panel sits"). `surface` is the same object
+  // either way, and every call is one way. Nothing is read back across a frame.
   const embedded = window.top !== window.self;
 
   const reader = adapter || { ready: () => false, submitButton: () => null, submitted: () => false };
@@ -408,9 +394,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     const f = filled.get(entry.key);
     return !!(f && f.ok && f.value != null && f.value !== "");
   };
-  // A repeated group is a field the model is never asked about.
-  const ASKABLE_KINDS = ASKABLE;
-  ASKABLE_KINDS.delete("group");
 
   // One call for everything still blank. The answers land in the form
   // like any other rung, marked "ai" so the panel and the ledger say so.
