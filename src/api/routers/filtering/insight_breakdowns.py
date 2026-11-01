@@ -304,12 +304,14 @@ def _group_rejections_by_prompt(
     return grouped, per_hash
 
 
-def _prompt_totals(row: dict[str, Any], missing: PromptEvidenceAccumulator) -> PromptTotals:
+def _prompt_totals(
+    row: dict[str, Any], missing: PromptEvidenceAccumulator, rejected_with_reason: int
+) -> PromptTotals:
     return PromptTotals(
         evaluated=row["evaluated"],
         passed=row["passed"],
         rejected=row["rejected"],
-        rejected_with_reason=row["rejected_with_reason"],
+        rejected_with_reason=rejected_with_reason,
         distinct_jobs_evaluated=row["distinct_jobs_evaluated"],
         distinct_jobs_rejected=row["distinct_jobs_rejected"],
         evidence_missing_decisions=missing.decisions,
