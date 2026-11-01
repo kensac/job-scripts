@@ -21,8 +21,8 @@ from core import catalog, query_instructions, verdict_reads
 router = APIRouter()
 
 
-def _count(sql: str) -> int:
-    row = db.query_one(sql)
+def _count(sql: str, params: dict | None = None) -> int:
+    row = db.query_one(sql, params)
     return row["c"] if row else 0
 
 
@@ -219,6 +219,29 @@ _RECENT_POSTINGS = f"""
 _URL_STREAK = verdicts.FETCH_STREAK.format(url="ledger_rows.url")
 
 
+# The grouped list's verdict filter: _VERDICT_HOLDS as a HAVING clause.
+_VERDICT_HAVING = {
+    "rejected": "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0",
+    "passed": (
+        "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
+        "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
+    ),
+}
+
+
+def _checked_posting(row: dict, give_up: int) -> CheckedPosting:
+    unfetchable = row["content_failures"] >= give_up
+    if row["rejected"] > 0:
+        verdict = "rejected"
+    elif row["passed"] > 0:
+        verdict = "passed"
+    elif unfetchable:
+        verdict = "unfetchable"
+    else:
+        verdict = "other"
+    return CheckedPosting(**row, verdict=verdict, unfetchable=unfetchable)
+
+
 @router.get("/jobs")
 def list_jobs(
     q: str | None = None,
@@ -249,14 +272,7 @@ def list_jobs(
     if config:
         sub.append("config_name = %(config)s")
         params["config"] = config
-    having = ""
-    if verdict == "rejected":
-        having = "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0"
-    elif verdict == "passed":
-        having = (
-            "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
-            "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
-        )
+    having = _VERDICT_HAVING.get(verdict or "", "")
     # The count below wraps this, and the planner drops a subquery output
     # nobody reads, so the streak is paid for only on the page.
     base = f"""
@@ -276,37 +292,23 @@ def list_jobs(
         # The id tiebreaker selects one row when a URL has equal timestamps;
         # every check still contributes to that URL's reported totals.
         known = verdict if verdict in _VERDICT_HOLDS else None
-        total_row = {
-            "c": _checked_urls.get()
+        total = (
+            _checked_urls.get()
             if known is None
             else _verdict_totals.get(known, lambda: _verdict_total(known))
-        }
+        )
         urls = _newest_urls(paging.offset, paging.size, known)
         rows = db.query(_RECENT_POSTINGS, {"urls": urls}) if urls else []
     else:
-        total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
+        total = _count(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
         rows = db.query(
             f"{base} ORDER BY {sorting.clause(sorts, _POSTING_SORT_EXPRESSIONS)}, url "
             "LIMIT %(limit)s OFFSET %(offset)s",
             page_params,
         )
-    total = total_row["c"] if total_row else 0
     give_up = int(db.get_config("fetch_give_up_after_failures"))
     return CheckedPostings(
-        rows=[
-            CheckedPosting(
-                **r,
-                verdict="rejected"
-                if r["rejected"] > 0
-                else "passed"
-                if r["passed"] > 0
-                else "unfetchable"
-                if r["content_failures"] >= give_up
-                else "other",
-                unfetchable=r["content_failures"] >= give_up,
-            )
-            for r in rows
-        ],
+        rows=[_checked_posting(r, give_up) for r in rows],
         **paging.metadata(total),
         # Echoed so the UI can render the active sort without duplicating the
         # default, and sortable so it never has to guess the accepted keys.
@@ -422,8 +424,7 @@ def list_catalog_jobs(
     total = None
     if with_total:
         # Exact count, 0.23 s warm unfiltered on 1.48M rows (2026-11-01); opt-in for that reason.
-        row = db.query_one(f"SELECT COUNT(*) AS c FROM {tables} WHERE TRUE {where}", params)
-        total = row["c"] if row else 0
+        total = _count(f"SELECT COUNT(*) AS c FROM {tables} WHERE TRUE {where}", params)
     return CatalogPostings(
         rows=[CatalogPosting(**r) for r in rows[:limit]],
         has_more=len(rows) > limit,
