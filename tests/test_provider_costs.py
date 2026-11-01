@@ -51,7 +51,7 @@ def _serve(monkeypatch, pages):
     calls = []
 
     def get(url, **kwargs):
-        calls.append((url, {**kwargs, "params": dict(kwargs["params"])}))
+        calls.append((url, {**kwargs, "params": dict(kwargs.get("params") or {})}))
         value = pages[len(calls) - 1]
         if isinstance(value, Exception):
             raise value
@@ -172,3 +172,131 @@ def test_repeated_cursor_discards_all_partial_results(monkeypatch):
     result = provider_costs.fetch_costs(3)
     assert result["reason"] == "INVALID_RESPONSE" and result["total_usd"] is None
     assert len(calls) == 2
+
+
+# Anthropic's cost report as its reference documents it (fetched 2026-11-01,
+# platform.claude.com/docs/en/api/beta/organization/cost_report/retrieve):
+# amounts are decimal text in cents, buckets are RFC 3339 days.
+def _anthropic_bucket(day, results):
+    return {
+        "starting_at": f"2026-09-{day:02d}T00:00:00Z",
+        "ending_at": f"2026-09-{day + 1:02d}T00:00:00Z",
+        "results": results,
+    }
+
+
+_ANTHROPIC_RESULT = {
+    "amount": "123.78912",
+    "context_window": "0-200k",
+    "cost_type": "tokens",
+    "currency": "USD",
+    "description": "Claude Opus 5.5 Usage - Input Tokens",
+    "inference_geo": "global",
+    "model": "claude-opus-5-5",
+    "service_tier": "standard",
+    "speed": "standard",
+    "token_type": "cache_creation.ephemeral_1h_input_tokens",
+    "workspace_id": "wrkspc_01JwQvzr7rXLA5AGx3HKfFUJ",
+}
+
+
+@pytest.fixture
+def anthropic(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_ADMIN_KEY", "test-anthropic-admin")
+
+
+def test_anthropic_cost_report_reads_cents_by_model_over_pages(monkeypatch, anthropic):
+    web_search = {**_ANTHROPIC_RESULT, "amount": "1", "cost_type": "web_search", "model": None}
+    calls = _serve(
+        monkeypatch,
+        [
+            {
+                "data": [_anthropic_bucket(7, [_ANTHROPIC_RESULT, web_search])],
+                "has_more": True,
+                "next_page": "page_MjAyNS0wNS0xNFQwMDowMDowMFo=",
+            },
+            {"data": [_anthropic_bucket(8, [])], "has_more": False, "next_page": None},
+        ],
+    )
+    result = provider_costs.fetch_anthropic_costs(2)
+    assert result["status"] == "available" and result["provider"] == "anthropic"
+    assert result["total_usd"] == Decimal("1.2478912")
+    first = result["daily"][0]["items"][0]
+    assert first["amount_usd"] == Decimal("1.2378912") and first["model"] == "claude-opus-5-5"
+    assert first["line_item"] == "Claude Opus 5.5 Usage - Input Tokens"
+    assert result["daily"][1]["total_usd"] == 0
+    params = calls[0][1]["params"]
+    assert params["starting_at"] == "2026-09-07T00:00:00Z"
+    assert params["ending_at"] == "2026-09-09T00:00:00Z"
+    assert params["group_by[]"] == ["description"] and params["limit"] == 31
+    assert calls[0][1]["headers"]["x-api-key"] == "test-anthropic-admin"
+    assert calls[1][1]["params"]["page"] == "page_MjAyNS0wNS0xNFQwMDowMDowMFo="
+    assert "test-anthropic-admin" not in str(result)
+
+
+def test_anthropic_without_its_admin_key_never_asks(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_ADMIN_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ordinary-key")
+    calls = _serve(monkeypatch, [])
+    result = provider_costs.fetch_anthropic_costs(7)
+    assert result["status"] == "not_configured" and result["total_usd"] is None
+    assert not calls
+
+
+@pytest.mark.parametrize("defect", ["number_amount", "currency", "offset", "two_days", "outside"])
+def test_anthropic_invalid_shape_never_becomes_a_total(monkeypatch, anthropic, defect):
+    bucket = _anthropic_bucket(8, [dict(_ANTHROPIC_RESULT)])
+    if defect == "number_amount":
+        bucket["results"][0]["amount"] = 12
+    elif defect == "currency":
+        bucket["results"][0]["currency"] = "EUR"
+    elif defect == "offset":
+        bucket["starting_at"] = "2026-09-08T00:00:00+02:00"
+    elif defect == "two_days":
+        bucket["ending_at"] = "2026-09-10T00:00:00Z"
+    elif defect == "outside":
+        bucket = _anthropic_bucket(9, [])
+    _serve(monkeypatch, [{"data": [bucket], "has_more": False, "next_page": None}])
+    result = provider_costs.fetch_anthropic_costs(2)
+    assert result["reason"] == "INVALID_RESPONSE" and result["total_usd"] is None
+
+
+# OpenAI's spend limit as its reference documents it (fetched 2026-11-01,
+# developers.openai.com/api/reference/resources/admin/subresources/organization/
+# subresources/spend_limit): cents, and the provider's enforcement word.
+_SPEND_LIMIT = {
+    "object": "organization.spend_limit",
+    "threshold_amount": 10000,
+    "currency": "USD",
+    "interval": "month",
+    "enforcement": {"status": "enforcing"},
+}
+
+
+def test_openai_spend_limit_reads_dollars_and_enforcement(monkeypatch):
+    calls = _serve(monkeypatch, [_SPEND_LIMIT])
+    result = provider_costs.fetch_openai_spend_limit()
+    assert result == {
+        "status": "available",
+        "reason": None,
+        "threshold_usd": Decimal(100),
+        "interval": "month",
+        "enforcement": "enforcing",
+    }
+    assert calls[0][0].endswith("/v1/organization/spend_limit")
+
+
+@pytest.mark.parametrize("defect", ["object", "float", "currency", "enforcement", 403])
+def test_openai_spend_limit_failure_is_unavailable_not_zero(monkeypatch, defect):
+    body = dict(_SPEND_LIMIT)
+    if defect == "object":
+        body["object"] = "organization.spend_limit.deleted"
+    elif defect == "float":
+        body["threshold_amount"] = 100.5
+    elif defect == "currency":
+        body["currency"] = "EUR"
+    elif defect == "enforcement":
+        body["enforcement"] = "enforcing"
+    _serve(monkeypatch, [defect if isinstance(defect, int) else body])
+    result = provider_costs.fetch_openai_spend_limit()
+    assert result["status"] == "unavailable" and result["threshold_usd"] is None
