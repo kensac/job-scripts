@@ -19684,7 +19684,7 @@
     "/v1/admin/managed-boards/bootstrap": {
       "post": {
         "summary": "Bootstrap Managed Boards",
-        "description": "Create the two versioned starter boards as drafts for this sponsor.",
+        "description": "Create the versioned starter boards as drafts for this sponsor.",
         "operationId": "bootstrap_managed_boards_v1_admin_managed_boards_bootstrap_post",
         "parameters": [
           {
