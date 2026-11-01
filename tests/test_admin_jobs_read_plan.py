@@ -45,7 +45,9 @@ def test_recent_postings_page_does_not_aggregate_unselected_history(monkeypatch)
     assert examined < 10000, plan
 
 
-def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client, admin_headers):
+def _seed_three_checked_postings() -> None:
+    """Three urls, two of them checked twice (b's two checks tie on time),
+    and an orphan check with no url that the page must leave out."""
     db.execute(
         "INSERT INTO ai_queries(url,created_at,status,company,config_name) VALUES "
         "('https://x.test/a','2026-01-03','passed','Alpha','recent'), "
@@ -75,6 +77,10 @@ def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client
         UPDATE ai_queries q SET model_call_id = calls.id FROM calls WHERE q.id = calls.source_id
         """
     )
+
+
+def test_a_recent_postings_row_rolls_up_every_check_on_its_url(client, admin_headers):
+    _seed_three_checked_postings()
     first = client.get("/v1/admin/jobs", params={"page_size": 1}, headers=admin_headers)
     assert first.status_code == 200
     body = first.json()
@@ -95,23 +101,35 @@ def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client
         "content_failures": 0,
         "unfetchable": False,
     }
+
+
+def test_the_next_recent_postings_page_keeps_both_tied_checks(client, admin_headers):
+    _seed_three_checked_postings()
     second = client.get(
         "/v1/admin/jobs", params={"page_size": 1, "page": 2}, headers=admin_headers
     ).json()
     assert second["rows"][0]["url"] == "https://x.test/b"
     assert second["rows"][0]["checks"] == 2
     assert second["rows"][0]["total_tokens"] == 5
+
+
+def test_a_recent_postings_page_past_the_end_is_empty_and_keeps_the_total(client, admin_headers):
+    _seed_three_checked_postings()
     empty = client.get(
         "/v1/admin/jobs", params={"page_size": 1, "page": 4}, headers=admin_headers
     ).json()
     assert empty["total"] == 3
     assert empty["rows"] == []
     assert empty["has_more"] is False
-    # Filters select URLs, then the ledger reports every check on those URLs.
+
+
+def test_a_config_filter_selects_urls_and_reports_every_check_on_them(client, admin_headers):
+    _seed_three_checked_postings()
+    unfiltered = client.get("/v1/admin/jobs", params={"page_size": 1}, headers=admin_headers).json()
     filtered = client.get(
         "/v1/admin/jobs", params={"config": "older"}, headers=admin_headers
     ).json()
-    assert filtered["rows"] == body["rows"]
+    assert filtered["rows"] == unfiltered["rows"]
 
 
 def test_verdict_tabs_walk_the_window_and_match_the_grouped_read():
