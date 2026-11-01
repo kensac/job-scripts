@@ -43973,7 +43973,7 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 5000,
+            "maxItems": 20000,
             "title": "Sources"
           }
         },
@@ -44054,7 +44054,7 @@
             ]
           },
           "sources": {
-            "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_20000_____"
           },
           "published": {
             "$ref": "#/components/schemas/NonNullUpdate_bool_"
@@ -45241,12 +45241,12 @@
         "maximum": 168.0,
         "minimum": 1.0
       },
-      "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____": {
+      "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_20000_____": {
         "items": {
           "type": "string"
         },
         "type": "array",
-        "maxItems": 5000
+        "maxItems": 20000
       },
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____": {
         "type": "string",
