@@ -31,9 +31,10 @@ class BrassRing(AtsResolver):
     """
 
     name = "brassring"
-    # No host marker: the posting sits on sjobs.brassring.com or the
-    # employer's own host, and a marker would make that host a mail domain.
-    markers = ()
+    # matches() reads the path, since the posting sits on sjobs.brassring.com
+    # or the employer's own host. The slash keeps the marker out of the mail
+    # domains, which inherit resolver markers.
+    markers = ("brassring.com/",)
     _PAGE = "/tgnewui/search/home/homewithpreload"
     _INPUT = re.compile(r'<input id="preLoadJSON" type="hidden" value="([^"]*)"')
 

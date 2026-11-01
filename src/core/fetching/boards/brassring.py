@@ -7,6 +7,7 @@ import json
 import re
 from urllib.parse import parse_qs, urlparse
 
+from core.env import comma_list
 from core.fetching.boards.common import PartialPull, _get, _post, posting_from_listing
 from core.fetching.posting import JobPosting
 
@@ -58,9 +59,7 @@ def _brassring(url: str, company: str) -> list[JobPosting]:
     shown = settings.get("JobFieldsToDisplay") or {}
     title_field = (shown.get("JobTitle") or "jobtitle").lower()
     summary_field = (shown.get("Summary") or "jobdescription").lower()
-    place_fields = [
-        f.strip().lower() for f in (settings.get("LocationCustomSolrFields") or "").split(",")
-    ]
+    place_fields = [f.lower() for f in comma_list(settings.get("LocationCustomSolrFields") or "")]
 
     parsed = urlparse(url)
     search = f"{parsed.scheme}://{parsed.netloc}/TgNewUI/Search/Ajax/ProcessSortAndShowMoreJobs"
