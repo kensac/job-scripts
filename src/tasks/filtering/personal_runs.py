@@ -263,7 +263,14 @@ async def _run_filters(
                 "scheduled": batched,
             },
         )
-    park_waiting(task_id, total, f"{len(units)} chunks across the fleet")
+    # Shown to the person on their filters page, beside done/total.
+    park_waiting(
+        task_id,
+        total,
+        "answers arrive in batches, which can take hours"
+        if batch_lists
+        else f"checked in {len(units)} parts",
+    )
 
 
 async def handle_run_filter_chunk(task_id: int, payload: dict[str, Any]) -> None:
