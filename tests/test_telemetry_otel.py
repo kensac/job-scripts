@@ -43,7 +43,7 @@ def traced(monkeypatch):
 def test_without_a_key_init_is_a_no_op_that_says_so(monkeypatch, caplog):
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
     monkeypatch.setattr(telemetry, "_client", None)
-    with caplog.at_level(logging.WARNING, logger="jobtracker_telemetry"):
+    with caplog.at_level(logging.WARNING, logger=telemetry.__name__):
         telemetry.init("jobtracker-worker", "test-worker")
     assert telemetry._client is None and telemetry._tracer is None
     assert any("DISABLED" in r.message for r in caplog.records)
@@ -92,7 +92,7 @@ def test_a_shipped_log_record_is_scrubbed_and_the_exporter_never_ships_its_own()
 
     own = _logging.LogRecord("opentelemetry.exporter.otlp", 30, "x", 1, "export failed", (), None)
     assert telemetry.shipped_form(own) is None
-    mine = _logging.LogRecord("jobtracker_telemetry", 30, "x", 1, "capture failed", (), None)
+    mine = _logging.LogRecord(telemetry.__name__, 30, "x", 1, "capture failed", (), None)
     assert telemetry.shipped_form(mine) is None
 
     try:
