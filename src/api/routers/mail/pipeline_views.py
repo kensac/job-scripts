@@ -22,7 +22,7 @@ from api.routers.mail.pipeline_rows import (
     application_rows_for_user,
     correction_actor_label,
 )
-from api.routers.mail.shared import Evidence, _evidence_for
+from api.routers.mail.shared import Evidence, evidence_for
 
 router = APIRouter()
 
@@ -93,7 +93,10 @@ def pipeline_summary(user: AuthedUser = Depends(require_user)) -> PipelineSummar
     progress regardless of arrival order and a stage is recomputed rather than
     advanced, so nothing flows through anything.
     """
-    rows = application_rows_for_user(user.id)
+    return _summary(application_rows_for_user(user.id))
+
+
+def _summary(rows: list[PipelineApplication]) -> PipelineSummary:
     live = [r for r in rows if r.dismissed_at is None]
     counts: dict[str, int] = {}
     for row in live:
@@ -147,6 +150,10 @@ class Pipeline(BaseModel):
     has_more: bool
     filters: dict[str, list[str]]
     actions: list[PipelineAction]
+    # The summary of every application, before any filter. The page loads
+    # both at once, and each derivation is 400-580 ms of Python on
+    # production, so the list carries the one it already did.
+    summary: PipelineSummary
 
 
 @router.get("/user/pipeline")
@@ -172,6 +179,7 @@ def pipeline(
     are.
     """
     rows = application_rows_for_user(user.id)
+    summary = _summary(rows)
     # Comma-separated, because every lens worth having is multi-valued:
     # "waiting" is applied AND acknowledged, "over" is rejected AND closed AND
     # withdrawn. A single-valued filter makes a lens either impossible or a
@@ -247,6 +255,7 @@ def pipeline(
         has_more=offset + len(page) < len(rows),
         filters=params_.applied(provenance=provenances, tier=tiers),
         actions=[PipelineAction(**action) for action in actions],
+        summary=summary,
     )
 
 
@@ -346,7 +355,7 @@ def pipeline_detail(
     # Every match carries what it was decided FROM, not just what it decided.
     # Without this a person has to open their mail client to check a match,
     # which is the same as not being able to check it.
-    evidence = _evidence_for(sorted({m.message_id for m in matches}))
+    evidence = evidence_for(sorted({m.message_id for m in matches}))
     # Both additions kept: #227 wraps actions in their settling state, this
     # branch adds who corrected each match. Independent answers to the same
     # question - what does this row let a person question.

@@ -58,13 +58,118 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     opens = hosts.take(host)
     if opens is not None:
         raise Deferred(opens)
-    complete = True
+    listed, complete = await _pull(source, host)
+    hosts.succeeded(host)
+    fetched = len(listed)
+    pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
+    if source["title_pattern"]:
+        keep = re.compile(source["title_pattern"], re.IGNORECASE)
+        pattern_matched = [p for p in listed if keep.search(p.title)]
+    else:
+        pattern_matched = listed
+    admitted = pattern_matched if pattern_enforced else listed
+    # Everything the board returned stays on record, admitted or not, with
+    # the text the listing carried: a candidate pattern is judged against the
+    # titles the board actually listed, a posting a better pattern admits
+    # arrives here on the next pull, and a backfill reads the text from here
+    # instead of scraping the page again.
+    listings_inline = catalog.record_listings(
+        listed,
+        source["name"],
+        source["title_pattern"] or "",
+        {p.url for p in pattern_matched},
+        int(db.get_config("listings_seen_refresh_hours")),
+    )
+    if listings_inline:
+        # Object storage was unavailable, so this pull's new text and raw
+        # records went inline. Nothing is lost and the next pull moves them,
+        # but an outage that lasts is a table growing back, so it is said.
+        telemetry.capture(
+            "listings_stored_inline",
+            properties={"source": source["name"], "values": listings_inline},
+        )
+    upserted = catalog.upsert_postings(admitted, source["name"])
+    # What the pull says, as facts: availability is read from them
+    # (catalog.AVAILABLE, stored in jobs.available). A complete pull of a
+    # board that lists every open posting (boards.AUTHORITATIVE) records the
+    # rows it left out as unlisted, which makes them unavailable; an
+    # aggregator's absence never closes anything; and a pull that cannot show
+    # it saw everything (partial, or empty, which is a broken fetch rather
+    # than an empty board) records no absence. jobs.active is frozen and not
+    # written (docs/agents/architecture-migration.md, the jobs.active
+    # contract).
+    authoritative = boards.format_for_url(source["listings_url"]).authoritative
+    observed = catalog.observe(
+        source["name"],
+        task_id,
+        listed,
+        {p.url for p in pattern_matched},
+        None if not (fetched and complete) else "unlisted" if authoritative else "not_listed",
+    )
+    retired = observed.get("unlisted", 0)
+    metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
+    metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
+    metrics.INGEST_JOBS.labels(source["name"], "title_pattern_missed").inc(
+        fetched - len(pattern_matched)
+    )
+    metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(admitted))
+    metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
+    logger.info(
+        f"Ingest {source['name']}: fetched {fetched}, "
+        f"pattern missed {fetched - len(pattern_matched)}, "
+        f"admitted {len(admitted)}, upserted {upserted}"
+    )
+
+    # Ingest caches pages but runs NO AI. It reached here through the task
+    # queue, which makes it scheduled work, and the rule for scheduled work is
+    # that it batches: the hourly verify_new task settles closed+clearance as
+    # one half-price call per job.
+    #
+    # Caching the page stays here on purpose. verify_new can only batch a job
+    # whose text is already stored, and leaving that to fetch_missing_content
+    # (100/cycle) would throttle verification far below the ingest rate.
+    # refresh_content also tags where the text came from, which is what keeps
+    # the ats_text_collapse detector fed with live-ingest data.
+    candidates = [p for p in admitted if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS]
+    cache_counts = await _cache_pages(task_id, source["name"], candidates)
+    if cache_counts is None:
+        return
+    # The counts the health detectors read: a feed that returned nothing, a
+    # pattern that admits nothing, a worker whose fetches stopped landing.
+    # Kept on the task because nothing else records what one ingest saw.
+    set_progress(
+        task_id,
+        len(candidates),
+        len(candidates),
+        source["name"],
+        extra={
+            "fetched": fetched,
+            "kept": len(pattern_matched),
+            "admitted": len(admitted),
+            "pattern_enforced": pattern_enforced,
+            **cache_counts,
+            "retired": retired,
+            "complete": complete,
+            "observed": observed,
+            "listings_inline": listings_inline,
+        },
+    )
+
+    schedule_filter_runs(payload.get("cycle", "manual"))
+
+
+async def _pull(source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
+    """The board's postings and whether the pull saw all of them. A refusal
+    defers the task; any other failure is recorded and raised."""
+    from core.fetching import boards
+
     try:
-        postings = await asyncio.to_thread(
+        listed = await asyncio.to_thread(
             boards.fetch_listings, source["listings_url"], source["company"]
         )
+        return listed, True
     except boards.PartialPull as partial:
-        postings, complete = partial.postings, False
+        return partial.postings, False
     except Exception as exc:
         response = getattr(exc, "response", None)
         # An AWS WAF challenge is the same refusal in another shape: Eightfold
@@ -96,86 +201,15 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         )
         _switch_off_if_given_up(source["name"], exc)
         raise
-    hosts.succeeded(host)
-    fetched = len(postings)
-    listed = postings
-    pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
-    if source["title_pattern"]:
-        keep = re.compile(source["title_pattern"], re.IGNORECASE)
-        pattern_matched = [p for p in listed if keep.search(p.title)]
-    else:
-        pattern_matched = listed
-    postings = pattern_matched if pattern_enforced else listed
-    # Everything the board returned stays on record, admitted or not, with
-    # the text the listing carried: a candidate pattern is judged against the
-    # titles the board actually listed, a posting a better pattern admits
-    # arrives here on the next pull, and a backfill reads the text from here
-    # instead of scraping the page again.
-    listings_inline = catalog.record_listings(
-        listed,
-        source["name"],
-        source["title_pattern"] or "",
-        {p.url for p in pattern_matched},
-        int(db.get_config("listings_seen_refresh_hours")),
-    )
-    if listings_inline:
-        # Object storage was unavailable, so this pull's new text and raw
-        # records went inline. Nothing is lost and the next pull moves them,
-        # but an outage that lasts is a table growing back, so it is said.
-        telemetry.capture(
-            "listings_stored_inline",
-            properties={"source": source["name"], "values": listings_inline},
-        )
-    upserted = catalog.upsert_postings(postings, source["name"])
-    # What the pull says, as facts: availability is read from them
-    # (catalog.AVAILABLE, stored in jobs.available). A complete pull of a
-    # board that lists every open posting (boards.AUTHORITATIVE) records the
-    # rows it left out as unlisted, which makes them unavailable; an
-    # aggregator's absence never closes anything; and a pull that cannot show
-    # it saw everything (partial, or empty, which is a broken fetch rather
-    # than an empty board) records no absence. jobs.active is frozen and not
-    # written (docs/agents/architecture-migration.md, the jobs.active
-    # contract).
-    authoritative = boards.format_for_url(source["listings_url"]).authoritative
-    observed = catalog.observe(
-        source["name"],
-        task_id,
-        listed,
-        {p.url for p in pattern_matched},
-        None if not (fetched and complete) else "unlisted" if authoritative else "not_listed",
-    )
-    retired = observed.get("unlisted", 0)
-    metrics.INGEST_JOBS.labels(source["name"], "retired").inc(retired)
-    metrics.INGEST_JOBS.labels(source["name"], "fetched").inc(fetched)
-    metrics.INGEST_JOBS.labels(source["name"], "title_pattern_missed").inc(
-        fetched - len(pattern_matched)
-    )
-    metrics.INGEST_JOBS.labels(source["name"], "title_excluded").inc(fetched - len(postings))
-    metrics.INGEST_JOBS.labels(source["name"], "upserted").inc(upserted)
-    logger.info(
-        f"Ingest {source['name']}: fetched {fetched}, "
-        f"pattern missed {fetched - len(pattern_matched)}, "
-        f"admitted {len(postings)}, upserted {upserted}"
-    )
 
-    # Ingest caches pages but runs NO AI. It reached here through the task
-    # queue, which makes it scheduled work, and the rule for scheduled work is
-    # that it batches: the hourly verify_new task settles closed+clearance as
-    # one half-price call per job. Checking inline here bypassed that. It was
-    # why ~90% of closed/clearance verdicts were still full-price sync calls,
-    # since verify_new only ever saw the jobs ingest had not already reached.
-    #
-    # Caching the page stays here on purpose. verify_new can only batch a job
-    # whose text is already stored, and leaving that to fetch_missing_content
-    # (100/cycle) would throttle verification far below the ingest rate.
-    # refresh_content also tags where the text came from, which is what keeps
-    # the ats_text_collapse detector fed with live-ingest data.
-    candidates = [p for p in postings if p.active and p.url and p.date_posted >= FALLBACK_CUTOFF_TS]
+
+async def _cache_pages(task_id: int, source: str, candidates: list[Any]) -> dict[str, int] | None:
+    """Store the page text of every candidate that has none, and count what
+    happened. None when the task was cancelled part way."""
     # One query to learn which postings already have text, instead of a
     # round trip per posting. The largest source carries ~2,800 active jobs
     # and almost all of them are already cached, so the per-posting form was
     # ~2,800 sequential queries pulling ~15MB to compute a boolean, hourly.
-    total = len(candidates)
     have_content = content_ready_urls([p.url for p in candidates])
     # A posting whose fetch keeps coming back empty waits longer each time
     # and is eventually given up on (verdicts.fetch_parked_sql).
@@ -186,7 +220,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     for i, p in enumerate(candidates):
         if i % 10 == 0 and cancelled(task_id):
             logger.info(f"Task {task_id} cancelled mid-ingest")
-            return
+            return None
         if p.url in have_content or p.url in tried_recently:
             continue
         if p.description:
@@ -196,7 +230,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             # worker blocked.
             page_fetches.record(p.url, "passed", "listing text", p.description)
             cached += 1
-            metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
+            metrics.INGEST_JOBS.labels(source, "cached").inc()
             continue
         try:
             content, closure = await verdicts.refresh_content(
@@ -204,11 +238,11 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             )
         except Exception as exc:
             fetch_failed += 1
-            logger.warning(f"Ingest {source['name']}: content fetch failed for {p.url}")
+            logger.warning(f"Ingest {source}: content fetch failed for {p.url}")
             # Swallowed on purpose so one page cannot fail the pull, which is
             # exactly why it must be recorded somewhere else.
             telemetry.capture_exception(
-                exc, properties={"source": source["name"], "url": p.url, "context": "ingest"}
+                exc, properties={"source": source, "url": p.url, "context": "ingest"}
             )
             continue
         if closure:
@@ -218,35 +252,16 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
             fetch_failed += 1
             continue
         cached += 1
-        metrics.INGEST_JOBS.labels(source["name"], "cached").inc()
+        metrics.INGEST_JOBS.labels(source, "cached").inc()
         if cached % 5 == 0:
-            set_progress(task_id, i + 1, total, source["name"])
-    # The counts the health detectors read: a feed that returned nothing, a
-    # pattern that admits nothing, a worker whose fetches stopped landing.
-    # Kept on the task because nothing else records what one ingest saw.
-    set_progress(
-        task_id,
-        total,
-        total,
-        source["name"],
-        extra={
-            "fetched": fetched,
-            "kept": len(pattern_matched),
-            "admitted": len(postings),
-            "pattern_enforced": pattern_enforced,
-            "already_cached": len(have_content),
-            "skipped_recent_failure": len(tried_recently),
-            "cached": cached,
-            "fetch_failed": fetch_failed,
-            "gone": gone,
-            "retired": retired,
-            "complete": complete,
-            "observed": observed,
-            "listings_inline": listings_inline,
-        },
-    )
-
-    schedule_filter_runs(payload.get("cycle", "manual"))
+            set_progress(task_id, i + 1, len(candidates), source)
+    return {
+        "already_cached": len(have_content),
+        "skipped_recent_failure": len(tried_recently),
+        "cached": cached,
+        "fetch_failed": fetch_failed,
+        "gone": gone,
+    }
 
 
 def schedule_filter_runs(cycle: str) -> None:

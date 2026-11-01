@@ -311,7 +311,13 @@ def verdict_reach(
         """,
         params,
     )
-    by_source_reach = [VerdictSourceReachSpend(**row) for row in reach_rows]
+    # Per source, only the unreachable rows: they name where wasted spend came
+    # from, and they are all a client shows. The reachable rows were two
+    # thirds of a 845 kB response (3,325 rows, 2026-11-01) and the reach
+    # totals below already count them.
+    by_source_reach = [
+        VerdictSourceReachSpend(**row) for row in reach_rows if row["reach"] == "unreachable"
+    ]
     rolled: dict[str, dict[str, Any]] = {}
     for row in reach_rows:
         acc = rolled.setdefault(

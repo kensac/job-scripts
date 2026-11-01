@@ -287,7 +287,26 @@ class ModelCall(Base):
             postgresql_where=text("source_id IS NOT NULL"),
         ),
         Index("idx_model_calls_created", "created_at"),
-        Index("idx_model_calls_user_created", "user_id", "created_at"),
+        # A person's usage, the admin's view of a person and the weekly
+        # budget read these columns for every call the person made (610k for
+        # the owner). INCLUDEd, the scans are index-only instead of reading
+        # the heap: 4.2 s cold for the all-time spend by purpose.
+        Index(
+            "idx_model_calls_user_created",
+            "user_id",
+            "created_at",
+            postgresql_include=[
+                "purpose",
+                "model",
+                "key_source",
+                "total_tokens",
+                "requests",
+                "cost_usd",
+                "cached_tokens",
+                "cache_write_tokens",
+            ],
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
         Index("idx_model_calls_managed_board_created", "managed_board_id", "created_at"),
         CheckConstraint(
             "user_id IS NULL OR managed_board_id IS NULL", name="ck_model_calls_single_payer"

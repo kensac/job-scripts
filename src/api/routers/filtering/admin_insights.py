@@ -26,11 +26,11 @@ from api.routers.filtering.insight_breakdowns import (
     ReasonGroup,
     RejectionReasons,
     Taxonomy,
-    _evidence_criterion,
-    _example_selection,
-    _group_rejections_by_prompt,
-    _named_group_breakdowns,
-    _prompt_totals,
+    evidence_criterion,
+    example_selection,
+    group_rejections_by_prompt,
+    named_group_breakdowns,
+    prompt_totals,
 )
 from core import reason_taxonomy
 from core.reason_taxonomy import GROUP_LABELS, GROUPS
@@ -52,7 +52,7 @@ def groups(user: AuthedUser = Depends(require_admin)) -> Taxonomy:
     """
     return Taxonomy(
         groups=[ReasonGroup(key=g.key, label=GROUP_LABELS[g.key]) for g in GROUPS],
-        evidence_missing_criterion=_evidence_criterion(),
+        evidence_missing_criterion=evidence_criterion(),
     )
 
 
@@ -199,8 +199,8 @@ def rejection_reasons(
         return RejectionReasons(
             window_days=days,
             min_decisions=min_decisions,
-            examples_selection=_example_selection(),
-            evidence_missing_criterion=_evidence_criterion(),
+            examples_selection=example_selection(),
+            evidence_missing_criterion=evidence_criterion(),
             prompt_versions=[],
             filters=applied,
             filterable=filterable,
@@ -247,7 +247,7 @@ def rejection_reasons(
         for name in row["filter_names"]:
             by_name[name].add(row["prompt_hash"])
 
-    grouped, per_hash = _group_rejections_by_prompt(hashes, rejections)
+    grouped, per_hash = group_rejections_by_prompt(hashes, rejections)
 
     out = []
     for row in totals:
@@ -285,8 +285,8 @@ def rejection_reasons(
                     filters=current,
                 ),
                 sufficient=row["rejected"] >= min_decisions,
-                totals=_prompt_totals(row, missing, reasoned[h]),
-                groups=_named_group_breakdowns(buckets, examples),
+                totals=prompt_totals(row, missing, reasoned[h]),
+                groups=named_group_breakdowns(buckets, examples),
                 ungrouped=buckets.get(
                     UNGROUPED_REASON_KEY, ReasonBreakdownAccumulator()
                 ).to_breakdown(examples),
@@ -297,8 +297,8 @@ def rejection_reasons(
     return RejectionReasons(
         window_days=days,
         min_decisions=min_decisions,
-        examples_selection=_example_selection(),
-        evidence_missing_criterion=_evidence_criterion(),
+        examples_selection=example_selection(),
+        evidence_missing_criterion=evidence_criterion(),
         prompt_versions=out,
         filters=applied,
         filterable=filterable,
