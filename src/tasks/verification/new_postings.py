@@ -12,6 +12,7 @@ from api.ai.batch_results import progress_counts
 from api.verdict_equivalence import answering_models
 from core import catalog, near_copy, page_fetches, verdict_reads
 from core.answers import VERIFICATION_REQUEST, FilterDecision, joint_question_key
+from core.batch import BatchResult, BatchSpec
 from core.shapes import VERIFY_TASK
 from core.store import (
     CONTENT_LATERAL,
@@ -23,6 +24,7 @@ from core.store import (
 from tasks.runtime import consume_result, has_batch_work, run_batched, set_progress
 from tasks.verification.questions import (
     _joint_spec,
+    _row_context,
     _submission_model,
     _verification_spec,
     question_sha256,
@@ -273,27 +275,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
     picked up by the next cycle's sweep."""
     specs = []
     if not has_batch_work(task_id):
-        from api import verification_candidates
-
-        if "urls" in payload:
-            # A requested backfill: the named postings, past the gate and cap.
-            rows = db.query(
-                listed_sql(), {"urls": payload["urls"], "in_flight": _in_flight(task_id)}
-            )
-        else:
-            candidate_params = {
-                **verification_candidates.params(),
-                "cap": int(db.get_config("verify_new_per_cycle")),
-                "in_flight": _in_flight(task_id),
-            }
-            # Without JIT. Its cost estimate is in the millions, so JIT compiles
-            # the whole plan, and on production (2026-10-10) the same plan took
-            # 78 s with it and 24 s without: 38 s went to hashing the
-            # 16,000 targets.
-            with db.transaction():
-                db.execute("SET LOCAL jit = off")
-                rows = db.query(candidates_sql(), candidate_params)
-        rows = page_fetches.resolve(rows)
+        rows = page_fetches.resolve(_select_postings(task_id, payload))
         if not rows:
             set_progress(task_id, 0, 0, "nothing to verify")
             return
@@ -302,143 +284,156 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
             if not rows:
                 set_progress(task_id, 0, 0, "every candidate reused a twin's verdicts")
                 return
-        model, effort = _submission_model()
-        questions = (
-            managed_boards.verification_questions(rows, model, effort)
-            if db.get_config("verify_answers_board_questions")
-            else {}
-        )
-        specs = [
-            _joint_spec(r, questions[r["url"]], model, effort)
-            if questions.get(r["url"])
-            else _verification_spec(
-                r["url"],
-                r["input_content"],
-                {
-                    key: r[key]
-                    for key in (
-                        "company",
-                        "title",
-                        "needs_closed",
-                        "needs_clearance",
-                        "page_fetch_id",
-                    )
-                },
-            )
-            for r in rows
-        ]
+        specs = _build_specs(rows)
         set_progress(task_id, 0, len(specs), "verify batch submitted")
     results, _ = await run_batched(task_id, VERIFY_TASK, specs)
     for res in results:
         with consume_result(task_id, res) as receipt:
-            if not receipt.pending:
-                continue
-            job = res.request.context if res.request else None
-            if not job:
-                receipt.outcome = "unknown_request"
-                continue
-            if res.error or not res.text:
-                receipt.outcome = "failed"
-                continue
-            boards = job.get("boards") or []
-            decisions: dict[int, FilterDecision] = {}
-            try:
-                if boards:
-                    answer = json.loads(res.text)
-                    parsed = VERIFICATION_REQUEST.response_model.model_validate(
-                        answer["verification"]
-                    )
-                    decisions = {
-                        board["board_id"]: FilterDecision.model_validate(
-                            answer[joint_question_key(board["board_id"])]
-                        )
-                        for board in boards
-                    }
-                else:
-                    parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
-            except ValueError, KeyError, TypeError:
-                logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
-                receipt.outcome = "invalid_output"
-                continue
-            if boards:
-                parsed_json = parsed.model_dump_json()
-                # The question verification answered, as if it had been asked alone,
-                # so reverify's unchanged-page reuse still recognises it.
-                question = job.get("verify_question") if res.model == job.get("model") else None
-            else:
-                parsed_json = res.text
-                question = question_sha256(res.model, res.request)
-            # A verdict settled after submission takes precedence over this
-            # missing-check request, even if its original snapshot asked for it.
-            settled = {
-                row["check_type"]
-                for row in db.query(
-                    "SELECT DISTINCT check_type FROM verdicts WHERE url = %s "
-                    "AND check_type IN ('closed', 'clearance')",
-                    (res.custom_id,),
-                )
-            }
-            usage = ai.batch_usage(res.usage)
-            written = False
-            for check, rejected, reason in (
-                ("closed", parsed.is_closed, parsed.closed_reason),
-                ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
-            ):
-                if job.get(f"needs_{check}") and check not in settled:
-                    verdicts.record_ai_verdict(
-                        verdicts.Verdict(
-                            url=res.custom_id,
-                            check_type=check,
-                            rejected=rejected,
-                            reason=reason,
-                            parsed_json=parsed_json,
-                            model=res.model,
-                            company=job["company"],
-                            job_title=job["title"],
-                            page_fetch_id=job.get("page_fetch_id"),
-                            context="verify-batch",
-                            usage=usage,
-                            shared_call=written,
-                            batched=True,
-                            batch_id=res.batch_id,
-                            request_sha256=question,
-                        )
-                    )
-                    usage = {}
-                    written = True
-            for board in boards:
-                # A verdict is keyed by the model that gave it; one the board did not
-                # ask for, or that its own run has bought meanwhile, is not written.
-                if res.model != board["model"] or decided_custom_urls(
-                    [res.custom_id],
-                    board["prompt_hash"],
-                    answering_models("custom", board["model"]),
-                ):
-                    continue
-                verdicts.record_ai_verdict(
-                    verdicts.Verdict(
-                        url=res.custom_id,
-                        check_type="custom",
-                        rejected=decisions[board["board_id"]].should_filter,
-                        reason=None,
-                        parsed_json=decisions[board["board_id"]].model_dump_json(),
-                        model=res.model,
-                        company=job["company"],
-                        job_title=job["title"],
-                        instructions=res.request.instructions if res.request else None,
-                        page_fetch_id=job.get("page_fetch_id"),
-                        filter_name=f"managed-board:{board['board_id']}",
-                        prompt_hash=board["prompt_hash"],
-                        context="verify-batch",
-                        usage=usage,
-                        shared_call=written,
-                        batched=True,
-                        batch_id=res.batch_id,
-                        reasoning_effort=job.get("effort"),
-                    )
-                )
-                usage = {}
-                written = True
-            receipt.outcome = "written" if written else "superseded"
+            if receipt.pending:
+                receipt.outcome = _record_result(res)
     done, total = progress_counts(task_id)
     set_progress(task_id, done, total, "verified")
+
+
+def _select_postings(task_id: int, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The postings this sweep asks about: the named ones for a requested
+    backfill, past the gate and cap, or the capped candidates otherwise."""
+    from api import verification_candidates
+
+    if "urls" in payload:
+        return db.query(listed_sql(), {"urls": payload["urls"], "in_flight": _in_flight(task_id)})
+    candidate_params = {
+        **verification_candidates.params(),
+        "cap": int(db.get_config("verify_new_per_cycle")),
+        "in_flight": _in_flight(task_id),
+    }
+    # Without JIT. Its cost estimate is in the millions, so JIT compiles
+    # the whole plan, and on production (2026-10-10) the same plan took
+    # 78 s with it and 24 s without: 38 s went to hashing the
+    # 16,000 targets.
+    with db.transaction():
+        db.execute("SET LOCAL jit = off")
+        return db.query(candidates_sql(), candidate_params)
+
+
+def _build_specs(rows: list[dict[str, Any]]) -> list[BatchSpec]:
+    """One request per posting: joint with the boards' questions where a
+    board asks one, verification alone otherwise."""
+    model, effort = _submission_model()
+    questions = (
+        managed_boards.verification_questions(rows, model, effort)
+        if db.get_config("verify_answers_board_questions")
+        else {}
+    )
+    return [
+        _joint_spec(r, questions[r["url"]], model, effort)
+        if questions.get(r["url"])
+        else _verification_spec(r["url"], r["input_content"], _row_context(r))
+        for r in rows
+    ]
+
+
+def _record_result(res: BatchResult) -> str:
+    """Write the verdicts one collected result settles; return its receipt outcome."""
+    job = res.request.context if res.request else None
+    if not job:
+        return "unknown_request"
+    if res.error or not res.text:
+        return "failed"
+    boards = job.get("boards") or []
+    decisions: dict[int, FilterDecision] = {}
+    try:
+        if boards:
+            answer = json.loads(res.text)
+            parsed = VERIFICATION_REQUEST.response_model.model_validate(answer["verification"])
+            decisions = {
+                board["board_id"]: FilterDecision.model_validate(
+                    answer[joint_question_key(board["board_id"])]
+                )
+                for board in boards
+            }
+        else:
+            parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
+    except ValueError, KeyError, TypeError:
+        logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
+        return "invalid_output"
+    if boards:
+        parsed_json = parsed.model_dump_json()
+        # The question verification answered, as if it had been asked alone,
+        # so reverify's unchanged-page reuse still recognises it.
+        question = job.get("verify_question") if res.model == job.get("model") else None
+    else:
+        parsed_json = res.text
+        question = question_sha256(res.model, res.request)
+    # A verdict settled after submission takes precedence over this
+    # missing-check request, even if its original snapshot asked for it.
+    settled = {
+        row["check_type"]
+        for row in db.query(
+            "SELECT DISTINCT check_type FROM verdicts WHERE url = %s "
+            "AND check_type IN ('closed', 'clearance')",
+            (res.custom_id,),
+        )
+    }
+    usage = ai.batch_usage(res.usage)
+    written = False
+    for check, rejected, reason in (
+        ("closed", parsed.is_closed, parsed.closed_reason),
+        ("clearance", parsed.requires_clearance_or_restrictions, parsed.clearance_reason),
+    ):
+        if job.get(f"needs_{check}") and check not in settled:
+            verdicts.record_ai_verdict(
+                verdicts.Verdict(
+                    url=res.custom_id,
+                    check_type=check,
+                    rejected=rejected,
+                    reason=reason,
+                    parsed_json=parsed_json,
+                    model=res.model,
+                    company=job["company"],
+                    job_title=job["title"],
+                    page_fetch_id=job.get("page_fetch_id"),
+                    context="verify-batch",
+                    usage=usage,
+                    shared_call=written,
+                    batched=True,
+                    batch_id=res.batch_id,
+                    request_sha256=question,
+                )
+            )
+            usage = {}
+            written = True
+    for board in boards:
+        # A verdict is keyed by the model that gave it; one the board did not
+        # ask for, or that its own run has bought meanwhile, is not written.
+        if res.model != board["model"] or decided_custom_urls(
+            [res.custom_id],
+            board["prompt_hash"],
+            answering_models("custom", board["model"]),
+        ):
+            continue
+        verdicts.record_ai_verdict(
+            verdicts.Verdict(
+                url=res.custom_id,
+                check_type="custom",
+                rejected=decisions[board["board_id"]].should_filter,
+                reason=None,
+                parsed_json=decisions[board["board_id"]].model_dump_json(),
+                model=res.model,
+                company=job["company"],
+                job_title=job["title"],
+                instructions=res.request.instructions if res.request else None,
+                page_fetch_id=job.get("page_fetch_id"),
+                filter_name=f"managed-board:{board['board_id']}",
+                prompt_hash=board["prompt_hash"],
+                context="verify-batch",
+                usage=usage,
+                shared_call=written,
+                batched=True,
+                batch_id=res.batch_id,
+                reasoning_effort=job.get("effort"),
+            )
+        )
+        usage = {}
+        written = True
+    return "written" if written else "superseded"
