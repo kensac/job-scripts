@@ -143,8 +143,7 @@ def ensure_answer_rows(
 def auto_draft(user_id: int) -> bool:
     """Whether the sweep drafts for this person. On unless they turned it off
     (prefs.auto_draft = false); the resume is what opts a person in."""
-    # JSON false and the string "false" both read 'false' through ->>, which
-    # is what this asked before it read prefs through the owner.
+    # Both JSON false and the string "false" turn it off.
     value = user_settings.prefs(user_id).get("auto_draft")
     return value is not False and value != "false"
 

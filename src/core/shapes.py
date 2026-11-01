@@ -47,9 +47,8 @@ COMP_TASK = TaskShape(
 
 # --- requirements extraction ---
 
-# The former fleet default was unsuitable here. Audited over 60 real postings
-# against whether the page even
-# mentions the fact: nano at "low" effort invented a clearance level for 12 of
+# Audited over 60 real postings against whether the page even mentions the
+# fact: nano at "low" effort invented a clearance level for 12 of
 # 55 postings that never mention clearance, and lost 5 of 60 responses to the
 # output cap; nano at "minimal" filled 0 and "none" wherever the honest answer
 # was "unstated", which is the one distinction this schema exists to keep.
@@ -103,10 +102,11 @@ EXTRACT_REQUIREMENTS_PER_CYCLE = 2179
 
 
 # The same declaration every other batched extraction makes. The model is the
-# caller's judgment - the note above is why mini and not nano - and the router
-# checks it can do what this task needs rather than choosing it for cost.
-# est_prompt_tokens is the fitted figure from the pilot below, not the
-# conservative chunking estimate: it ranks candidates and never becomes a bill.
+# caller's judgment - the evidence and notes below are why luna and not nano or
+# mini - and the router checks it can do what this task needs rather than
+# choosing it for cost. est_prompt_tokens is the fitted figure from the pilot
+# above, not the conservative chunking estimate: it ranks candidates and never
+# becomes a bill.
 REQUIREMENTS_TASK = TaskShape(
     purpose="requirements",
     label="Requirements extraction",

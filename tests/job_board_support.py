@@ -5,10 +5,6 @@ from core.store import add_ai_result
 from tests import factories
 
 
-def _uid(headers: dict) -> int:
-    return db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))["id"]
-
-
 def _insert_job(
     source: str,
     url: str,

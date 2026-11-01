@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from api import db, grouped, ledger_rollup
 from api.auth import AuthedUser
-from api.routers.admin.query_ledger import _distinct_query_values
+from api.routers.admin.query_ledger import distinct_query_values
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale
 
@@ -30,9 +30,9 @@ class QueryVocabulary(BaseModel):
 @router.get("/options")
 def options(user: AuthedUser = Depends(require_admin)) -> QueryVocabulary:
     return QueryVocabulary(
-        check_types=_distinct_query_values("check_type"),
-        statuses=_distinct_query_values("status"),
-        configs=_distinct_query_values("config_name"),
+        check_types=distinct_query_values("check_type"),
+        statuses=distinct_query_values("status"),
+        configs=distinct_query_values("config_name"),
     )
 
 
