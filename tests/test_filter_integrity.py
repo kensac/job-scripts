@@ -21,21 +21,14 @@ def test_database_refuses_multiple_enabled_filters(f):
 
 
 @pytest.mark.parametrize("status", ["pending", "running", "waiting", "awaiting_batch"])
-@pytest.mark.parametrize("admin", [False, True])
-def test_run_all_refuses_existing_individual(
-    client, user_headers, admin_headers, f, status, admin, runs_permitted
-):
+def test_run_all_refuses_existing_individual(client, user_headers, f, status, runs_permitted):
     uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
     flt = f.make_filter(uid, enabled=True)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('run_filter', %s, %s) RETURNING id",
         (db.jsonb({"user_id": uid, "filter_id": flt["id"]}), status),
     )
-    response = (
-        client.post("/v1/admin/filters/run", json={"user_id": uid}, headers=admin_headers)
-        if admin
-        else client.post("/v1/user/filters/run-all", headers=user_headers)
-    )
+    response = client.post("/v1/user/filters/run-all", headers=user_headers)
     assert response.status_code == 409
     assert response.json()["detail"]["task_id"] == task["id"]
     assert db.query_one("SELECT count(*) AS n FROM tasks WHERE kind = 'run_all_filters'")["n"] == 0

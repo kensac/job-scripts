@@ -261,3 +261,68 @@ def test_a_submit_records_the_application_it_made(client, user_headers):
     assert (
         db.query_one("SELECT count(*) AS n FROM applications WHERE user_id = %s", (uid,))["n"] == 2
     )
+
+
+def _resume(uid: int, filename: str | None) -> int:
+    row = db.query_one(
+        "INSERT INTO user_resumes (user_id, name, filename) VALUES (%s, 'cv', %s) RETURNING id",
+        (uid, filename),
+    )
+    assert row is not None
+    return row["id"]
+
+
+def _resume_field(value: str, **rest) -> dict:
+    return {
+        "key": "resume",
+        "label": "Resume/CV",
+        "kind": "file",
+        "rung": "resume",
+        "value": value,
+        **rest,
+    }
+
+
+def test_an_attached_resume_submits_unchanged(client, user_headers):
+    """A resume field holds the resume's id and its final is the attached
+    file name. Every submitted resume field on production was recorded as
+    changed because the two were compared as strings."""
+    uid = _uid(user_headers)
+    rid = _resume(uid, "resume.pdf")
+    fill = db.query_one(
+        "INSERT INTO application_fills (user_id, url, host, fields) "
+        "VALUES (%s, 'https://jobs.ashbyhq.com/files/abc/application', 'jobs.ashbyhq.com', %s) "
+        "RETURNING id",
+        (uid, db.jsonb([_resume_field(str(rid))])),
+    )
+    assert fill is not None
+    resp = client.post(
+        f"/v1/user/apply/fills/{fill['id']}/submitted",
+        json={"fields": [{"key": "resume", "final": "resume.pdf"}]},
+        headers=user_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["fields"][0]["changed"] is False
+
+
+def test_the_report_judges_resume_fields_by_file_name(client, user_headers):
+    """Rows submitted before the comparison knew file names say changed.
+    The report decides again: the resume's own name is unchanged, another
+    name is changed, and an unread final or an unknown resume is neither."""
+    uid = _uid(user_headers)
+    # No stored filename: the PDF route serves it as resume.pdf.
+    rid = _resume(uid, None)
+    fields = [
+        _resume_field(str(rid), final="resume.pdf", changed=True),
+        _resume_field(str(rid), key="r2", label="CV", final="other.pdf", changed=True),
+        _resume_field(str(rid), key="r3", label="Resume upload", final=None, changed=True),
+        _resume_field("999999", key="r4", label="Resume file", final="resume.pdf", changed=True),
+    ]
+    db.execute(
+        "INSERT INTO application_fills (user_id, url, host, fields, submitted_at) "
+        "VALUES (%s, 'https://jobs.ashbyhq.com/r/abc/application', 'jobs.ashbyhq.com', %s, now())",
+        (uid, db.jsonb(fields)),
+    )
+    report = client.get("/v1/user/apply/report", headers=user_headers).json()
+    assert report["filled_unchanged"] == 1
+    assert [c["label"] for c in report["most_often_corrected"]] == ["cv"]

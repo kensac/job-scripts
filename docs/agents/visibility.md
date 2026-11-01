@@ -145,9 +145,10 @@ under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
 **"Is this person an admin" has one answer: `api.auth.is_admin(groups)`.**
-It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`), and
-`require_admin` is that test as a route dependency. Code never names the
-group outside seeded defaults.
+It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`) through
+`api.admin_groups`, and `require_admin` is that test as a route dependency.
+Code never names the group: the seeds that need it (the uncapped group
+budget, the default `gmail_connect_groups`) read `api.admin_groups` too.
 
 **A non-admin's board keeps postings at most 30 days old.** The age window
 (`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
@@ -158,15 +159,13 @@ the full range. Checked at the write only; a stored value is what applies. `GET 
 allowance, so the Usage page states every limit in one place instead of
 each surfacing only as a refusal.
 
-**A run may go past the shared cap without the cap moving.** `POST
-/admin/filters/run` `{user_id, filter_id?, ignore_budget}` queues a
-`run_filter` (or `run_all_filters`) task for any person; with
-`ignore_budget: true` the task, and the chunks it splits into, load their
-entitlement with the weekly cap lifted for that run alone, the spend still
-recorded in `model_calls`. Only an admin can queue it (the person's own run
-endpoints never set the flag), and the same flag on a task row written by
-hand works the same way. Raising `group_budgets.weekly_token_budget` for a
-run and putting it back is not the tool for this.
+**A run may go past the shared cap without the cap moving.** A
+`run_filter` or `run_all_filters` task row written by hand with
+`ignore_budget: true` in its payload, and the chunks it splits into, load
+their entitlement with the weekly cap lifted for that run alone, the spend
+still recorded in `model_calls`. No route sets the flag. Raising
+`group_budgets.weekly_token_budget` for a run and putting it back is not the
+tool for this.
 
 **A filter save does not re-judge the board unless the person's group is in
 `filter_rejudge_on_change_groups`** (app_config, seeded `[]`, `"*"` for

@@ -41,10 +41,25 @@ def _insert(table: str, rows: list[dict[str, Any]]) -> None:
         return
     names = list(rows[0])
     collist = ", ".join(f'"{c}"' for c in names)
-    placeholders = ", ".join(f"%({c})s" for c in names)
-    sql = f"INSERT INTO {table} ({collist}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
+    # COPY into a constraint-free copy of the columns, then one INSERT that
+    # keeps ON CONFLICT DO NOTHING. A statement per row was most of the
+    # build: about 120,000 of them.
     with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.executemany(sql, rows)
+        cur.execute(
+            db._as_query(
+                f"CREATE TEMP TABLE corpus_rows ON COMMIT DROP AS "
+                f"SELECT {collist} FROM {table} WITH NO DATA"
+            )
+        )
+        with cur.copy(db._as_query(f"COPY corpus_rows ({collist}) FROM STDIN")) as copy:
+            for row in rows:
+                copy.write_row([row[c] for c in names])
+        cur.execute(
+            db._as_query(
+                f"INSERT INTO {table} ({collist}) SELECT {collist} FROM corpus_rows "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
 
 
 def _parent_columns(schema: _Schema) -> dict[str, set[str]]:
@@ -74,7 +89,7 @@ def build(*, target_jobs: int = TARGET_JOBS) -> dict[str, int]:
 
     everything = [t for t in schema.columns if t not in SKIP]
     db.execute(f"TRUNCATE TABLE {', '.join(everything)} RESTART IDENTITY CASCADE")
-    db.init_schema()  # re-seeds sources, source_groups, app_config, group_budgets
+    db.seed_defaults()  # the TRUNCATE emptied app_config and group_budgets
 
     for table in SEEDED:
         for column in wanted.get(table, set()):
