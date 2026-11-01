@@ -286,12 +286,11 @@ class TaskModel(BaseModel):
     recent_changes: list[TaskModelChange]
 
 
-def _view(purpose: str) -> TaskModel:
+def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
     shape = configured_shape(SHAPES[purpose])
     latest = _current(purpose)
     override = latest.model if latest else None
     candidacies = candidates_for(shape)
-    health = _model_health()
     current_model = override or (shape.candidates[0] if shape.candidates else None)
     current_cycle = next(
         (c.est_cycle_cost_usd for c in candidacies if c.model == current_model), None
@@ -424,14 +423,16 @@ def list_task_models(_: AuthedUser = Depends(require_admin)) -> TaskModelList:
     produces a confident wrong total, which is worse on a spending screen than
     an honest small one.
     """
-    return TaskModelList(tasks=[_view(p) for p in sorted(SHAPES)])
+    # Health spans every model, so one read serves every task.
+    health = _model_health()
+    return TaskModelList(tasks=[_view(p, health) for p in sorted(SHAPES)])
 
 
 @router.get("/task-models/{purpose}")
 def get_task_model(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModel:
     if purpose not in SHAPES:
         raise refuse(404, "NOT_FOUND", "unknown task")
-    return _view(purpose)
+    return _view(purpose, _model_health())
 
 
 @router.put("/task-models/{purpose}")
@@ -469,7 +470,7 @@ def put_task_model(
             user.id,
         ),
     )
-    return _view(purpose)
+    return _view(purpose, _model_health())
 
 
 @router.get("/task-models/{purpose}/history")

@@ -142,6 +142,11 @@ export function createAdapter(context) {
     for (const f of api) {
       if (f.byLabel || SKIP.has(f.name) || out.some((o) => o.key === f.name)) continue;
       const ctl = control(f.name);
+      const uploaded = !ctl && f.type === "input_file" && uploadGroup(f.name);
+      if (uploaded) {
+        out.push({ key: f.name, label: f.label, kind: "file", required: f.required, options: [], _box: uploaded });
+        continue;
+      }
       if (!ctl || seen.has(ctl)) continue;
       seen.add(ctl);
       const kind = widgetKind(ctl);
@@ -153,10 +158,16 @@ export function createAdapter(context) {
   const boxes = (name) => [...document.querySelectorAll(`${FORM} input[name="${CSS.escape(name)}"]`)].filter((b) => b.type === "checkbox" || b.type === "radio");
   const boxLabel = (box) => clean(document.querySelector(`label[for="${CSS.escape(box.id)}"]`)?.innerText);
 
+  // Once a file uploads, Greenhouse replaces the file input with the file's
+  // name and a Remove button inside the same labelled group.
+  const uploadGroup = (name) => document.querySelector(`${FORM} [aria-labelledby="upload-label-${CSS.escape(name)}"]`);
+  const uploadedName = (name) => uploadGroup(name)?.querySelector(".file-upload__filename p")?.innerText.trim() || "";
+
   function current(field) {
     const ctl = field._ctl;
+    if (field.kind === "file" && !ctl?.files?.length) return uploadedName(field.key);
     if (!ctl) return "";
-    if (ctl.type === "file") return ctl.files && ctl.files.length ? ctl.files[0].name : "";
+    if (ctl.type === "file") return ctl.files[0].name;
     if (isReactSelect(ctl)) {
       const shell = shellOf(ctl);
       const chips = shell ? [...shell.querySelectorAll('[class*="select__multi-value__label"]')].map((c) => c.innerText.trim()) : [];

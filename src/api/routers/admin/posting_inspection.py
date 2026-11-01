@@ -320,6 +320,13 @@ def list_catalog_jobs(
         )
     sorts = sorting.parse(sort, dir, _CATALOG_SORT_EXPRESSIONS, "added_at")
     where = "\n".join(extra)
+    # job_comp is joined only for a pay filter. The planner removes an unused
+    # LEFT JOIN but still keeps j.url, so the unfiltered count read the 256 MB
+    # url index instead of the 23 MB company index: 0.72-0.83 s against
+    # 0.23 s warm on 1.48M rows (production, 2026-11-01).
+    tables = "jobs j" + (
+        " LEFT JOIN job_comp pay ON pay.url = j.url" if column_filters_.reads_pay(rules) else ""
+    )
     rows = db.query(
         f"""
         SELECT j.id AS job_id, j.url, j.company, j.title, j.source,
@@ -330,7 +337,7 @@ def list_catalog_jobs(
                     ELSE EXISTS (SELECT 1 FROM board_visible bv
                                  WHERE bv.user_id = %(board_user)s AND bv.job_id = j.id) END
                  AS on_board
-        FROM jobs j LEFT JOIN job_comp pay ON pay.url = j.url
+        FROM {tables}
         WHERE TRUE {where}
         ORDER BY {sorting.clause(sorts, _CATALOG_SORT_EXPRESSIONS, not_null={"added_at"})}, j.id DESC
         LIMIT %(limit)s OFFSET %(offset)s
@@ -339,12 +346,8 @@ def list_catalog_jobs(
     )
     total = None
     if with_total:
-        # ponytail: exact count, ~1.3 s unfiltered on 1.1M rows (2026-10-15); opt-in for that reason.
-        row = db.query_one(
-            f"SELECT COUNT(*) AS c FROM jobs j LEFT JOIN job_comp pay ON pay.url = j.url "
-            f"WHERE TRUE {where}",
-            params,
-        )
+        # Exact count, 0.23 s warm unfiltered on 1.48M rows (2026-11-01); opt-in for that reason.
+        row = db.query_one(f"SELECT COUNT(*) AS c FROM {tables} WHERE TRUE {where}", params)
         total = row["c"] if row else 0
     return CatalogPostings(
         rows=[CatalogPosting(**r) for r in rows[:limit]],

@@ -16,7 +16,7 @@ def test_location_budget_setting_reaches_task_pricing():
         "INSERT INTO app_config(key,value) VALUES ('classify_locations_max_output_tokens','4096') "
         "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value"
     )
-    assert _view("locations").cost_basis.max_output_tokens == 4096
+    assert _view("locations", {}).cost_basis.max_output_tokens == 4096
 
 
 @pytest.mark.asyncio
