@@ -2,6 +2,8 @@
 
 
 class BoardResponse:
+    status_code = 200
+
     def __init__(self, body):
         self.body = body
 
@@ -13,4 +15,8 @@ class BoardResponse:
 
     @property
     def text(self):
+        return self.body
+
+    @property
+    def content(self):
         return self.body

@@ -128,6 +128,7 @@ def test_brassring_reads_every_page_with_the_tenants_own_title_and_place(monkeyp
     )
     # The summary is one section of the posting, not its text.
     assert first.description == ""
+    assert first.raw is not None
     assert "jobdescription" not in first.raw
     assert first.raw["autoreq"] == "58685BR"
 

@@ -139,6 +139,14 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "gem",
         "rippling",
         "brassring",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -171,6 +179,14 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "taleo",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.needs_company} == {
         "amazon",
@@ -192,6 +208,14 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "taleo",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.authoritative} == {
         "amazon",
@@ -216,6 +240,14 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "taleo",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert all(board_format.fetcher is not None for board_format in formats.values())
     assert boards.format_for_url("https://airtable.com/appX/shrY").fetcher is None
