@@ -17,6 +17,7 @@ from tasks.mail.classification.identity import (
     identities_for,
 )
 from tests import mail_log
+from tests.factories import user_id_for_subject
 
 
 class TestDerivingTheIdentitySet:
@@ -243,7 +244,7 @@ def test_the_guard_runs_off_the_mailbox_with_nothing_confirmed(client, user_head
     the guard decides - which is what this asserts, rather than asserting the
     endpoints 404, though it does that too so a reintroduced route is noticed.
     """
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     for i in range(60):
         db.execute(
             "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "

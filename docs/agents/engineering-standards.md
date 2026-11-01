@@ -192,7 +192,7 @@ disk.
 stages, cheapest first, each a `MATERIALIZED` CTE.** Written as one predicate,
 an `EXISTS` under an `OR` becomes a subplan run per row, and the planner
 orders the remaining checks by its own row estimates, which are wrong across
-CTE boundaries. The verify sweep's candidate query (`tasks/verification/new_postings.candidates_sql`
+CTE boundaries. The verify sweep's candidate query (`tasks/verification/selection.candidates_sql`
 and `api/verification_candidates.reachable`) ran past 14 minutes on
 production on 2026-10-10 and held locks a deploy's `DROP VIEW` queued behind.
 Staged, it read 21 s warm and 35 to 43 s with a cold cache. Three rules came out of it:

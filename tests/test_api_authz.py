@@ -12,18 +12,13 @@ import pytest
 
 from api import db
 from tests import factories
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
+from tests.factories import user_id_for_subject
 
 
 @pytest.fixture
 def private_upload(user_headers):
     """A job user A uploaded privately - not in any shared source."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     row = db.query_one(
         "INSERT INTO jobs (url, raw_url, company, title, source, active) "
         "VALUES (%s, %s, %s, %s, %s, TRUE) RETURNING id",
@@ -67,7 +62,7 @@ def test_cannot_pin_another_users_private_upload(client, other_user_headers, pri
     assert (
         db.query_one(
             "SELECT 1 AS x FROM user_jobs WHERE job_id = %s AND user_id = %s",
-            (private_upload, _uid(other_user_headers)),
+            (private_upload, user_id_for_subject("test-user-2")),
         )
         is None
     )
@@ -120,7 +115,7 @@ def test_task_of_another_user_is_404(client, user_headers, other_user_headers):
         "INSERT INTO tasks (kind, payload, status, error) VALUES (%s, %s, %s, %s) RETURNING id",
         (
             "run_all_filters",
-            db.jsonb({"user_id": _uid(user_headers)}),
+            db.jsonb({"user_id": user_id_for_subject("test-user")}),
             "failed",
             "boom: SQL detail",
         ),

@@ -35,58 +35,95 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
         or payload.get("inference_transport") is not None
     ):
         raise ValueError("versioned managed board work requires the batch task kind")
-    await _handle_managed_filter(task_id, payload, legacy_live=True)
+    payload = _checked_snapshot(payload)
+    cfg = _server_config(payload, _provider(payload))
+    snapshot, jobs, hooks = _prepare_run(task_id, payload)
+    await execute_live(task_id, cfg, snapshot, jobs, hooks)
 
 
 async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) -> None:
     """Receive only versioned managed-filter work admitted after the cutover."""
     if payload.get("execution_mode") != "managed_filter":
         raise ValueError("managed board batch task must use managed_filter execution")
-    await _handle_managed_filter(task_id, payload, legacy_live=False)
-
-
-async def _handle_managed_filter(
-    task_id: int, payload: dict[str, Any], *, legacy_live: bool
-) -> None:
-    execution_version = payload.get("execution_version")
-    transport = payload.get("inference_transport")
-    if legacy_live:
-        if execution_version is not None or transport is not None:
-            raise ValueError("legacy managed board task cannot carry a batch execution contract")
-    elif (
-        execution_version != runs.MANAGED_FILTER_EXECUTION_VERSION
-        or transport != runs.MANAGED_FILTER_TRANSPORT
+    if (
+        payload.get("execution_version") != runs.MANAGED_FILTER_EXECUTION_VERSION
+        or payload.get("inference_transport") != runs.MANAGED_FILTER_TRANSPORT
         or not isinstance(payload.get("reasoning_effort"), str)
     ):
         raise ValueError("managed board task snapshot has an unsupported execution contract")
+    payload = _checked_snapshot(payload)
+    # A resumed run collects what it already submitted, so it needs no key.
+    resumed = has_batch_work(task_id)
+    provider = _provider(payload)
+    if provider != "openai":
+        raise ValueError("managed board batch snapshot names an unsupported provider")
+    cfg = None if resumed else _server_config(payload, provider)
+    snapshot, jobs, hooks = _prepare_run(task_id, payload)
+    decided = (
+        set()
+        if resumed
+        else decided_custom_urls(
+            [job["url"] for job in jobs],
+            snapshot.prompt_hash,
+            model=answering_models("custom", payload["requested_model"]),
+        )
+    )
+    inference_jobs = [job for job in jobs if job["url"] not in decided]
+    await execute_batch(
+        task_id,
+        cfg,
+        snapshot,
+        inference_jobs,
+        hooks,
+        contents={
+            job["url"]: page for job in inference_jobs if (page := frozen_page(job)) is not None
+        },
+        unavailable=sum(not job["content"] for job in inference_jobs),
+        purpose="managed_board",
+        # No max_output_tokens, so execute_batch's default applies, as it does
+        # for tasks/filtering/personal_runs.py: a boolean verdict has never
+        # needed more than 1,050.
+        complete_without_submission=True,
+    )
+
+
+def _checked_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     payload = run_configs.with_board_settings(payload)
     if compute_filter_hash(payload["prompt"], payload["on_ambiguous"]) != payload["prompt_hash"]:
         raise ValueError("managed board task snapshot has an invalid prompt hash")
-    existing = has_batch_work(task_id) if not legacy_live else False
+    return payload
+
+
+def _provider(payload: dict[str, Any]) -> str:
     provider = providers.provider_of(payload["requested_model"])
     if provider is None:
         raise LookupError("managed board task snapshot names an unknown model")
-    if not legacy_live and provider != "openai":
-        raise ValueError("managed board batch snapshot names an unsupported provider")
-    key = routing.server_key(provider) if not existing else ""
-    if not key and not existing:
+    return provider
+
+
+def _server_config(payload: dict[str, Any], provider: str) -> ai.AIConfig:
+    key = routing.server_key(provider)
+    if not key:
         raise LookupError("managed board task model has no server key")
-    cfg = (
-        None
-        if existing
-        else ai.AIConfig(
-            provider=provider,
-            api_key=key,
-            key_source="owner",
-            model=payload["requested_model"],
-            # No output cap, matching the user-filter path, which sets none.
-            # A cap here truncated the JSON mid-string and the verdict was
-            # recorded as `failed`; a board with fail_closed then drops it
-            # silently. `FILTER_OUTPUT_RESERVATION_TOKENS` is the budget
-            # estimate, not an instruction to the model.
-            params={"reasoning_effort": payload.get("reasoning_effort") or "medium"},
-        )
+    return ai.AIConfig(
+        provider=provider,
+        api_key=key,
+        key_source="owner",
+        model=payload["requested_model"],
+        # No output cap, matching the user-filter path, which sets none.
+        # A cap here truncated the JSON mid-string and the verdict was
+        # recorded as `failed`; a board with fail_closed then drops it
+        # silently. `FILTER_OUTPUT_RESERVATION_TOKENS` is the budget
+        # estimate, not an instruction to the model.
+        params={"reasoning_effort": payload.get("reasoning_effort") or "medium"},
     )
+
+
+def _prepare_run(
+    task_id: int, payload: dict[str, Any]
+) -> tuple[FilterSnapshot, list[dict[str, Any]], ExecutionHooks]:
+    """The run's filter, its jobs with their frozen page text, and the hooks
+    that charge the board and project the run once no batch is pending."""
     board_id = int(payload["managed_board_id"])
     # Read once per run or resume: the reference costs one object GET.
     all_jobs = runs.run_jobs(payload)
@@ -131,32 +168,4 @@ async def _handle_managed_filter(
         progress=lambda done, total, label: set_progress(task_id, done, total, label),
         complete=complete,
     )
-    if legacy_live:
-        assert cfg is not None
-        await execute_live(task_id, cfg, snapshot, jobs, hooks)
-        return
-    decided = (
-        set()
-        if existing
-        else decided_custom_urls(
-            [job["url"] for job in jobs],
-            snapshot.prompt_hash,
-            model=answering_models("custom", payload["requested_model"]),
-        )
-    )
-    inference_jobs = [job for job in jobs if job["url"] not in decided]
-    await execute_batch(
-        task_id,
-        cfg,
-        snapshot,
-        inference_jobs,
-        hooks,
-        contents={
-            job["url"]: page for job in inference_jobs if (page := frozen_page(job)) is not None
-        },
-        unavailable=sum(not job["content"] for job in inference_jobs),
-        purpose="managed_board",
-        # No cap, exactly as tasks/filtering/personal_runs.py submits: execute_batch defaults
-        # to 6000, and a boolean verdict has never needed more than 1,050.
-        complete_without_submission=True,
-    )
+    return snapshot, jobs, hooks
