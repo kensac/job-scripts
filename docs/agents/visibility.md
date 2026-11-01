@@ -32,9 +32,9 @@ branch. Deleting a pair removes nothing from anybody's board.
 
 `user_jobs` is what a person did: a status, a note, a date, a hide, or a
 tracking stamp (`person_touched_at`). A row with a status, a note or a date
-applied is visible whatever the criteria or the verdicts say. The worker
-wrote empty machine rows here too until 2026-10-10 (phase 2b); a legacy
-all-default row is working-set membership, not person state.
+applied is visible whatever the criteria or the verdicts say. Nothing writes
+an empty machine row here; a legacy all-default row is working-set
+membership, not person state.
 
 Reading the first as the second is how a board question was answered wrongly
 on 2026-09-10. `tests/test_worker_board.py` pins the two apart.
