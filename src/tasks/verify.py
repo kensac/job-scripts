@@ -2,14 +2,8 @@
 
 from core.routing import resolve as resolve
 from core.shapes import VERIFY_TASK as VERIFY_TASK
-from tasks.verification.new_postings import (
-    _in_flight as _in_flight,
-)
-from tasks.verification.new_postings import (
+from tasks.verification.near_copies import (
     _reuse_near_copies as _reuse_near_copies,
-)
-from tasks.verification.new_postings import (
-    candidates_sql as candidates_sql,
 )
 from tasks.verification.new_postings import (
     handle_verify_new as handle_verify_new,
@@ -31,4 +25,10 @@ from tasks.verification.reverification import (
 )
 from tasks.verification.reverification import (
     handle_reverify_open as handle_reverify_open,
+)
+from tasks.verification.selection import (
+    _in_flight as _in_flight,
+)
+from tasks.verification.selection import (
+    candidates_sql as candidates_sql,
 )

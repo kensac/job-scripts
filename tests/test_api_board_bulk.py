@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from api import db
 from api.mail import applications
-from tests.factories import make_job
-
-
-def _user_id() -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
-    assert row is not None
-    return row["id"]
+from tests.factories import make_job, user_id_for_subject
 
 
 def _rows(uid: int) -> dict[int, dict]:
@@ -25,7 +19,7 @@ def _rows(uid: int) -> dict[int, dict]:
 
 
 def test_bulk_patch_applies_one_patch_to_every_selected_row(client, user_headers):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     ids = [make_job(url=f"https://x.test/{i}") for i in range(3)]
     status = "Application Submitted"
     r = client.patch(
@@ -49,7 +43,7 @@ def test_bulk_patch_applies_one_patch_to_every_selected_row(client, user_headers
 def test_bulk_patch_skips_what_the_caller_may_not_touch_and_refuses_an_empty_patch(
     client, user_headers, other_user_headers
 ):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     mine = make_job(url="https://x.test/mine")
     other = db.query_one("SELECT id FROM users WHERE sub != 'test-user' ORDER BY id LIMIT 1")
     assert other is not None
@@ -68,7 +62,7 @@ def test_bulk_patch_skips_what_the_caller_may_not_touch_and_refuses_an_empty_pat
 
 
 def test_bulk_delete_drops_only_the_callers_rows(client, user_headers, other_user_headers):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     ids = [make_job(url=f"https://x.test/d{i}") for i in range(2)]
     for i in ids:
         client.patch(f"/v1/user/jobs/{i}", json={"notes": "keep"}, headers=user_headers)

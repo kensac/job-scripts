@@ -3,7 +3,7 @@
 from api.routers.filtering.insight_breakdowns import (
     PromptEvidenceAccumulator,
     ReasonBreakdownAccumulator,
-    _group_rejections_by_prompt,
+    group_rejections_by_prompt,
 )
 
 
@@ -24,7 +24,7 @@ def test_reason_breakdown_counts_decisions_and_distinct_jobs():
 
 def test_overlapping_groups_do_not_double_count_prompt_evidence():
     reason = "Requires 5 years experience and no pay disclosed."
-    grouped, evidence = _group_rejections_by_prompt(
+    grouped, evidence = group_rejections_by_prompt(
         ["prompt-a"],
         [
             {"prompt_hash": "prompt-a", "url": "https://jobs.test/1", "reason": reason},

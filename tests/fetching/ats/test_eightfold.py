@@ -10,6 +10,7 @@ import pytest
 from api import db
 from api.ai import verdicts
 from core.fetching import ats
+from tests.fetching.ats.responses import AtsResponse
 
 NGC_LISTING = "https://jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com"
 NGC_URL = "https://jobs.northropgrumman.com/careers/job/1340074245409"
@@ -52,19 +53,10 @@ NFLX_DETAIL = {
 }
 
 
-class _Resp:
-    def __init__(self, body, status_code=200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-
 def _serve(monkeypatch, body, status_code=200):
     asked: list[str] = []
     monkeypatch.setattr(
-        ats.EIGHTFOLD, "get", lambda url: asked.append(url) or _Resp(body, status_code)
+        ats.EIGHTFOLD, "get", lambda url: asked.append(url) or AtsResponse(body, status_code)
     )
     return asked
 

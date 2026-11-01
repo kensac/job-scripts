@@ -1,4 +1,5 @@
 import { commitControl, setNative } from "./dom";
+import { alternatives } from "./alternatives";
 // Lever's hosted application form (jobs.lever.co/<company>/<id>/apply).
 // Plain HTML, measured 2026-09-07: one .application-question per field
 // with a .application-label; text and email inputs by name (name, email,
@@ -124,7 +125,7 @@ export function createAdapter(context) {
   }
   function put(ctl, value) {
     if (!ctl || value == null || value === "") return false;
-    const wants = String(value).split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     if (ctl.tagName === "SELECT") return chooseSelect(ctl, wants);
     if (ctl.type === "radio" || ctl.type === "checkbox") {
       const row = [...ctl.closest(".application-question")?.querySelectorAll(`input[name="${CSS.escape(ctl.name)}"]`) || [ctl]];
@@ -201,7 +202,7 @@ export function createAdapter(context) {
   // Without the click the hidden selected-location stays empty and the
   // form counts the field as blank.
   async function pickLocation(ctl, value) {
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     const root = ctl.closest(".application-question") || ctl.parentElement;
     for (const want of wants) {
       ctl.focus();
@@ -226,7 +227,7 @@ export function createAdapter(context) {
     const ctls = controls(field._box);
     const first = ctls[0];
     if (!first) return false;
-    const wants = String(value ?? "").split("|").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const wants = alternatives(value).map((s) => s.toLowerCase());
     if (first.type === "file") {
       if (!file) return false;
       const dt = new DataTransfer();
