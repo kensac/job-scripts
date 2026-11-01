@@ -19,9 +19,6 @@ from core import screening
 router = APIRouter()
 
 
-_CONFIG_KEYS = CONFIG_KEYS
-
-
 class Tunable(BaseModel):
     """One registry entry, as `api.config.ConfigKey` holds it. `type` is the
     name of a Python type rather than the type, because it travels as JSON and
@@ -63,7 +60,7 @@ def get_config(user: AuthedUser = Depends(require_admin)) -> Tunables:
                 help=spec.help,
                 choices=list(spec.choices),
             )
-            for key, spec in _CONFIG_KEYS.items()
+            for key, spec in CONFIG_KEYS.items()
         },
     )
 
@@ -164,9 +161,9 @@ class TunableWritten(BaseModel):
 def put_config(
     key: str, body: ConfigPut, user: AuthedUser = Depends(require_admin)
 ) -> TunableWritten:
-    spec = _CONFIG_KEYS.get(key)
+    spec = CONFIG_KEYS.get(key)
     if spec is None:
-        raise refuse(400, "UNKNOWN_KEY", f"key must be one of {sorted(_CONFIG_KEYS)}")
+        raise refuse(400, "UNKNOWN_KEY", f"key must be one of {sorted(CONFIG_KEYS)}")
     try:
         value = spec.validate(body.value)
     except ValueError as exc:
