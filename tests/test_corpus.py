@@ -33,10 +33,8 @@ def _profile() -> dict:
 
 
 def test_every_table_production_populates_has_rows_in_the_corpus():
-    """The copy's exact failure, asserted against. `sync_testdb.py` copied 20
-    tables and production had 31; the 11 it missed were 345,032 rows including
-    the entire mail corpus, and nothing reported it. A corpus with the same
-    hole would be no better, so the hole is what this looks for."""
+    """A table production populates and the corpus leaves empty is a hole
+    every assertion over that table passes through."""
     empty = [
         table
         for table, shape in _profile()["tables"].items()

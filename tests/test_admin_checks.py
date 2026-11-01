@@ -23,10 +23,11 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
     # No cached content for this job, so it stops at the content guard rather
     # than the addressing, which is what proves the hash resolved.
     assert resp.status_code == 409 and resp.json()["detail"]["code"] == "NO_CONTENT"
-    bad = client.post(
-        "/v1/admin/checks/run", json={"job_id": jid, "check": "nonsense"}, headers=admin_headers
-    )
-    assert bad.status_code == 400 and bad.json()["detail"]["code"] == "INVALID_CHECK"
+    for check in ("nonsense", "filter:abc"):
+        bad = client.post(
+            "/v1/admin/checks/run", json={"job_id": jid, "check": check}, headers=admin_headers
+        )
+        assert bad.status_code == 400 and bad.json()["detail"]["code"] == "INVALID_CHECK", check
 
 
 def test_manual_check_addresses_a_managed_board_by_hash(client, admin_headers):

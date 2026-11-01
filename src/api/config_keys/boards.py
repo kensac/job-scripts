@@ -7,6 +7,7 @@ from pydantic import PositiveInt
 from api.config_types import ColumnState, ConfigKey, SortKey
 from core.pay_screen import PayRecipe
 from core.screening import Recipe
+from core.verdict_equivalence import ModelEquivalence
 from core.volume_gate import VolumeGate
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
@@ -51,6 +52,19 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "their postings, so a source or title that starts producing keeps returns by itself. Also "
         "skips titles naming a listed occupation with no technical word. A posting someone "
         "tracks is always read. A new prompt hash is not listed until added here.",
+    ),
+    # Read by api.verdict_equivalence. Empty is the keyed-by-model behavior.
+    "verdict_model_equivalence": ConfigKey(
+        section="Boards",
+        default=ModelEquivalence().model_dump(mode="json"),
+        value_type=ModelEquivalence,
+        kind="json",
+        help="Groups of models whose verdicts count as each other's, so switching between them "
+        "keeps the answers already held instead of judging every posting again. Each group is "
+        '{"kind": "custom" or "verify", "models": [...]}: custom covers filter and managed-board '
+        "verdicts; verify covers closed and clearance re-checks of an unchanged page. Each verdict still records the model that gave it. Add a group only "
+        "after measuring the two models agree about as often as one model agrees with itself "
+        "across two runs. Removing a group makes the next runs ask again.",
     ),
     # Seeded from filter_review_gate's enforced title scopes by acbc00862b2b.
     "title_screens": ConfigKey(

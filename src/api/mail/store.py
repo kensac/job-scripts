@@ -97,6 +97,9 @@ def store_messages(user_id: int, messages: Iterable[ImportedMessage]) -> int:
                     thread_topic = COALESCE(
                         email_messages.thread_topic, EXCLUDED.thread_topic
                     ),
+                    -- A stored name is kept; a missing one is filled, which
+                    -- is how a re-import repairs .olm rows stored without one.
+                    from_name = COALESCE(email_messages.from_name, EXCLUDED.from_name),
                     prefilter_hit = EXCLUDED.prefilter_hit,
                     prefilter_reason = EXCLUDED.prefilter_reason,
                     -- Same only-ever-improve rule: an archive that carried the
