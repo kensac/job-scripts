@@ -313,9 +313,8 @@ them ([migrations.md](migrations.md)).
 `api.orm.catalog_postings` owns the posting, upload and page-fetch facts;
 `api.orm.catalog_derivations` owns extracted answers and classified places;
 `api.orm.catalog_sources` owns source settings, listing evidence and source
-observations. `api.orm.catalog` re-exports their models for existing imports,
-while `api.orm.__init__` imports the groups to register every table on one
-`Base.metadata` for Alembic. A model move preserves its mapped table, columns,
+observations. `api.orm.__init__` imports the groups to register every table
+on one `Base.metadata` for Alembic. A model move preserves its mapped table, columns,
 constraints and indexes exactly. Compare the full metadata before and after,
 then run `migrations-check`; moving a class alone needs no migration.
 
