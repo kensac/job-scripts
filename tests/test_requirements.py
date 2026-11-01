@@ -14,6 +14,7 @@ from tasks.derivations.requirements import (
     _store,
     _years,
 )
+from tests.factories import user_id_for_subject
 
 CONTENT = "a long job description " * 20
 
@@ -237,7 +238,7 @@ class TestMarketEndpoint:
         source = f.make_source()
         mine, my_url = f.make_ready_job(source=source, content=CONTENT)
         _, their_url = f.make_ready_job(source=f.make_source(), content=CONTENT)
-        f.subscribe(_uid(user_headers), source)
+        f.subscribe(user_id_for_subject("test-user"), source)
         f.make_requirements(my_url, skills_required=["Python"])
         f.make_requirements(their_url, skills_required=["Python", "Rust"])
 
@@ -253,7 +254,7 @@ class TestMarketEndpoint:
 
     def test_pages_that_state_nothing_are_excluded_from_the_market(self, client, user_headers, f):
         source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
+        f.subscribe(user_id_for_subject("test-user"), source)
         _, stated = f.make_ready_job(source=source, content=CONTENT)
         _, silent = f.make_ready_job(source=source, content=CONTENT)
         f.make_requirements(stated, skills_required=["Python"])
@@ -263,7 +264,7 @@ class TestMarketEndpoint:
 
     def test_slices_by_seniority(self, client, user_headers, f):
         source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
+        f.subscribe(user_id_for_subject("test-user"), source)
         _, junior = f.make_ready_job(source=source, content=CONTENT)
         _, senior = f.make_ready_job(source=source, content=CONTENT)
         f.make_requirements(junior, seniority="entry", skills_required=["Python"])
@@ -276,7 +277,7 @@ class TestMarketEndpoint:
 
     def test_unstated_is_reported_apart_from_stated(self, client, user_headers, f):
         source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
+        f.subscribe(user_id_for_subject("test-user"), source)
         _, with_degree = f.make_ready_job(source=source, content=CONTENT)
         _, without = f.make_ready_job(source=source, content=CONTENT)
         f.make_requirements(with_degree, degree_min="bachelors", degree_required=True)
@@ -308,12 +309,6 @@ class TestVocabularies:
     def test_levels_are_ordered_floors(self):
         assert DEGREE_LEVELS.index("bachelors") < DEGREE_LEVELS.index("phd")
         assert CLEARANCE_LEVELS.index("secret") < CLEARANCE_LEVELS.index("ts_sci")
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 class TestRescrapedPages:

@@ -6,6 +6,7 @@ import sqlalchemy.exc
 from psycopg.errors import UniqueViolation
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,7 @@ def test_database_refuses_multiple_enabled_filters(f):
 
 @pytest.mark.parametrize("status", ["pending", "running", "waiting", "awaiting_batch"])
 def test_run_all_refuses_existing_individual(client, user_headers, f, status, runs_permitted):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     flt = f.make_filter(uid, enabled=True)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload, status) VALUES ('run_filter', %s, %s) RETURNING id",
@@ -68,7 +69,7 @@ def test_scheduler_refuses_pending_individual_run(f):
 
 
 def test_save_defers_when_an_overlapping_run_exists(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     flt = f.make_filter(uid, enabled=True)
     db.execute(
         "UPDATE app_config SET value = %s WHERE key = %s",
@@ -88,7 +89,7 @@ def test_save_defers_when_an_overlapping_run_exists(client, user_headers, f):
 
 
 def test_filter_list_reports_run_all_admission(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     flt = f.make_filter(uid, enabled=True)
     task = db.query_one(
         "INSERT INTO tasks (kind, payload) VALUES ('run_filter', %s) RETURNING id",
@@ -115,7 +116,7 @@ def test_concurrent_run_all_requests_have_one_winner(client, user_headers, runs_
 
 
 def test_concurrent_enable_and_adopt_have_one_winner(client, user_headers, admin_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     flt = f.make_filter(uid, enabled=False)
     preset = client.post(
         "/v1/admin/filter-presets",
@@ -200,7 +201,7 @@ def test_migration_refuses_ambiguous_choices_without_changing_them(f):
 
 
 def test_repeating_enabled_filter_save_does_not_queue_another_judgement(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     flt = f.make_filter(uid, enabled=True)
     db.execute(
         "UPDATE app_config SET value = %s WHERE key = 'filter_rejudge_on_change_groups'",

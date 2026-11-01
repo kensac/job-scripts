@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from tests.application_support import _available_owner_key as _available_owner_key
-from tests.application_support import _job_for, _user_id
+from tests.application_support import _job_for
+from tests.factories import user_id_for_subject
 from tests.resume_support import create_text_resume
 
 
@@ -11,7 +12,7 @@ class TestRefining:
     ):
         from api import ai, budget
 
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/4")
         create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         key = client.post(
@@ -65,7 +66,7 @@ class TestRefining:
     def test_refining_without_a_key_is_a_402_not_a_500(self, client, user_headers, f, monkeypatch):
         from api import budget
 
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/5")
         create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         key = client.post(

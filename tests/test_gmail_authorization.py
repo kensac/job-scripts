@@ -11,16 +11,14 @@ import pytest
 from cryptography.fernet import Fernet
 
 from api import crypto, db, oauth
+from tests.factories import user_id_for_subject
 from tests.gmail_support import (
     CLIENT_ID,
     CLIENT_SECRET,
     REDIRECT_URI,
     allow_gmail_connection_for_groups,
-    user_id_for_subject,
 )
-from tests.gmail_support import (
-    google as google,
-)
+from tests.gmail_support import google as google
 
 # --- the scope, which must never widen -----------------------------------
 
