@@ -443,10 +443,10 @@ def record_parse_failures(user_id: int, key_source: str, purpose: str, model: st
 
 def load_config(user_id: int, ignore_budget: bool = False) -> tuple[Entitlement, ai.AIConfig]:
     """The person's entitlement and model config for a task. With
-    ignore_budget the shared weekly cap is lifted for this task only (an
-    admin queued it that way): the spend is still recorded, the cap itself
-    does not move (Kanishk, 2026-09-08: raising it and putting it back for
-    one run was the wrong tool)."""
+    ignore_budget the shared weekly cap is lifted for this task only (a
+    hand-written task row, or a managed board's sponsor): the spend is still
+    recorded, the cap itself does not move (Kanishk, 2026-09-08: raising it
+    and putting it back for one run was the wrong tool)."""
     user = db.query_one("SELECT id, sub, email, name, groups FROM users WHERE id = %s", (user_id,))
     if not user:
         raise LookupError("unknown user")
