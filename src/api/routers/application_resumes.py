@@ -16,6 +16,7 @@ from api import db
 from api.auth import AuthedUser, require_user
 from api.models import Ok
 from api.problem import ProblemResponse, refuse
+from api.resumes import attached_name
 from api.resumes.revisions import archive_resume, lock_owner
 from core.payloads.blob_parts import BlobPart, BlobPartStore
 
@@ -109,7 +110,7 @@ def resume_pdf(resume_id: int, user: AuthedUser = Depends(require_user)) -> Resp
         raise refuse(404, "NOT_FOUND", "unknown resume")
     if row["pdf_upload_id"] is None:
         raise refuse(404, "NO_FILE", "this resume was pasted; upload the PDF to attach it")
-    name = (row["filename"] or "resume.pdf").replace('"', "")
+    name = attached_name(row["filename"])
     upload = db.query_one(
         "SELECT size, next_part FROM resume_uploads WHERE id = %s AND status = 'ready'",
         (row["pdf_upload_id"],),

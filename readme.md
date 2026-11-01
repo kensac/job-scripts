@@ -21,7 +21,7 @@ where each user tracks their applications.
 
 - **API** (`uvicorn api.app:app`): multi-tenant REST API. Identity arrives via
   trusted headers from an authenticating proxy (`X-Service-Token`,
-  `X-User-Sub`, `X-User-Groups`); Authentik groups drive entitlements and
+  `X-User-Sub`, `X-User-Groups`, and `X-User-Email` to provision a new user); Authentik groups drive entitlements and
   weekly AI-token budgets (`group_budgets` table).
 - **Workers** (`python -m api.worker`): claim tasks from a Postgres queue
   (`FOR UPDATE SKIP LOCKED`), safe across any number of machines. Handle
@@ -91,8 +91,7 @@ named like a disposable one.
   `DATABASE_URL`, `JOBTRACKER_SERVICE_TOKEN`, `APP_ENCRYPTION_KEY`,
   `OPENAI_API_KEY` and the rest. Locally the Makefile's dev targets set
   `DATABASE_URL`.
-- `.env` holds production's DSN as `PRODUCTION_DATABASE_URL`, never as
-  `DATABASE_URL`. Only `make profile` and `make profile-check` read it. See
+- Production's DSN is never `DATABASE_URL`. See
   [docs/agents/reading-production.md](docs/agents/reading-production.md).
 - Fleet-wide tunables (cycle cadence, per-cycle sizes, chunk sizes, retry
   limits) are rows in `app_config`, changed from the admin config page, not
