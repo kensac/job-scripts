@@ -34,6 +34,14 @@ def test_a_person_sees_format_employer_and_bundle_on_every_board(client, user_he
     assert rows["ashby_ramp"]["kind"] == "ashby"
 
 
+def test_a_large_list_travels_compressed(client, user_headers, f):
+    for _ in range(20):
+        f.make_source()
+    listed = client.get("/v1/sources", headers={**user_headers, "Accept-Encoding": "gzip"})
+    assert listed.headers["content-encoding"] == "gzip"
+    assert len(listed.json()["sources"]) >= 20
+
+
 def test_a_subscription_changes_by_delta_not_by_replacing_the_whole_set(client, user_headers, f):
     """One toggle used to PUT every enabled name; with 389 boards two toggles
     in flight overwrote each other. A delta touches only what it names, and

@@ -20,18 +20,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from api import ai, budget, db, hosts, user_settings
+from api import ai, budget, db, user_settings
 from api.apply import writes as application_writes
 from api.apply.drafting import Draft, instructions, question_input, resume_text, writing_style
 from api.board import visibility
 from api.budget import load_config
 from api.model_calls import Payer
 from core import catalog
-from core.fetching import forms
-from core.fetching.hosts import pace_key
 from core.shapes import APPLICATION_TASK
 from core.store import get_content
 from tasks import batch_policy
+from tasks.application_forms import read_form, sync_form_questions
 from tasks.runtime import (
     Deferred,
     consume_result,
@@ -46,63 +45,6 @@ logger = logging.getLogger(__name__)
 _AVAILABLE = catalog.IS_AVAILABLE.format(job="j")
 
 PURPOSE = application_writes.PURPOSE
-
-
-def store_form(url: str, questions: list[forms.Question] | None, error: str | None = None) -> None:
-    """One row per url: the questions as read, NULL for a host that cannot be
-    read, and the error text when the read failed (questions kept as they
-    were, so a transient failure does not blank a form already read)."""
-    if error is not None:
-        db.execute(
-            "INSERT INTO application_forms (url, questions, error, fetched_at) "
-            "VALUES (%s, NULL, %s, now()) ON CONFLICT (url) DO UPDATE "
-            "SET error = EXCLUDED.error, fetched_at = now()",
-            (url, error),
-        )
-        return
-    payload = None if questions is None else [q.as_dict() for q in questions]
-    db.execute(
-        "INSERT INTO application_forms (url, questions, error, fetched_at) "
-        "VALUES (%s, %s, NULL, now()) ON CONFLICT (url) DO UPDATE "
-        "SET questions = EXCLUDED.questions, error = NULL, fetched_at = now()",
-        (url, db.jsonb(payload) if payload is not None else None),
-    )
-
-
-def read_form(url: str) -> list[dict[str, Any]] | None:
-    """Read the form under the host's budget and store it. Returns the
-    questions, or None for a host that cannot be read. Raises Deferred when
-    the host's slot is closed or the host refused, and re-raises a failed
-    read after recording it."""
-    if not forms.supported(url):
-        store_form(url, None)
-        return None
-    host = pace_key(url)
-    opens = hosts.take(host)
-    if opens:
-        raise Deferred(opens)
-    try:
-        questions = forms.fetch(url)
-    except Exception as exc:
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        if status == 429:
-            hosts.refused(host)
-            raise Deferred(hosts.soon()) from exc
-        store_form(url, None, error=str(exc))
-        raise
-    hosts.succeeded(host)
-    store_form(url, questions or [])
-    return [q.as_dict() for q in questions or []]
-
-
-def sync_form_questions(url: str, *, refresh: bool = False) -> list[dict[str, Any]] | None:
-    """The form's questions for this url, read once and cached. None when the
-    host cannot be read. Raises Deferred when the host's slot is closed."""
-    if not refresh:
-        row = db.query_one("SELECT questions, error FROM application_forms WHERE url = %s", (url,))
-        if row and row["error"] is None:
-            return row["questions"]
-    return read_form(url)
 
 
 def ensure_answer_rows(
@@ -232,24 +174,21 @@ async def draft_rows(
     specs = []
     reserved = application_writes.reserve_task(task_id, user_id, rows)
     for r in rows:
-        if f"{r['job_id']}|{r['key']}" not in reserved:
+        # job first, then the key: a key never carries a bar.
+        request = reserved.get(f"{r['job_id']}|{r['key']}")
+        if request is None:
             continue
         if r["url"] not in postings:
             postings[r["url"]] = get_content(r["url"]) or ""
         specs.append(
             structured_response_spec(
-                # job first, then the key: a key never carries a bar.
                 f"{r['job_id']}|{r['key']}",
                 text,
                 question_input(
-                    reserved[f"{r['job_id']}|{r['key']}"]["question"],
-                    r["company"],
-                    r["title"],
-                    postings[r["url"]],
-                    resume,
+                    request["question"], r["company"], r["title"], postings[r["url"]], resume
                 ),
                 Draft,
-                context=reserved[f"{r['job_id']}|{r['key']}"],
+                context=request,
             )
         )
     if not specs:
@@ -339,27 +278,7 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
         await draft_rows(task_id, user_id, [], kind="sweep", scheduled=True)
         _set_draft_progress(task_id, "drafts collected", 0)
         return
-    # One sweep per person at a time. A parked sweep frees its worker, so
-    # the next hourly one was claimed while a manual full-board sweep sat on
-    # its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
-    # and only the order the batches landed in kept them from drafting the
-    # same answers twice. The later one waits for the next cycle instead.
-    # Bounded to a day: the batch poll resumes a parked task once its batch
-    # is past the provider's completion window (24 h) whatever state it is
-    # in, so an earlier sweep older than that is a stuck task, not a live
-    # one, and must not turn one stuck sweep into no sweeps forever.
-    other = db.query_one(
-        """
-        SELECT id FROM tasks
-        WHERE kind = 'application_sweep' AND id <> %(tid)s
-          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
-          AND (payload->>'user_id')::bigint = %(uid)s
-          AND id < %(tid)s
-          AND created_at > now() - interval '1 day'
-        LIMIT 1
-        """,
-        {"tid": task_id, "uid": user_id},
-    )
+    other = _earlier_sweep(task_id, user_id)
     if other:
         set_progress(task_id, 0, 0, f"sweep {other['id']} for this person is still in flight")
         return
@@ -375,6 +294,47 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     reads_cap = int(db.get_config("application_form_reads_per_cycle"))
     drafts_cap = int(db.get_config("application_drafts_per_cycle"))
 
+    note = _read_unread_forms(task_id, user_id, reads_cap)
+    _open_answer_rows(user_id)
+    rows = _undrafted_rows(user_id, drafts_cap)
+    if not rows:
+        set_progress(task_id, 0, 0, "nothing new to draft" + note)
+        return
+    await draft_rows(task_id, user_id, rows, kind="sweep", scheduled=True)
+    _set_draft_progress(task_id, "drafts written ahead of need" + note, len(rows))
+
+
+def _earlier_sweep(task_id: int, user_id: int) -> dict[str, Any] | None:
+    """An earlier sweep for this person that is still in flight.
+
+    One sweep per person at a time. A parked sweep frees its worker, so
+    the next hourly one was claimed while a manual full-board sweep sat on
+    its batch (2026-09-07 00:00Z): both selected the same undrafted rows,
+    and only the order the batches landed in kept them from drafting the
+    same answers twice. The later one waits for the next cycle instead.
+    Bounded to a day: the batch poll resumes a parked task once its batch
+    is past the provider's completion window (24 h) whatever state it is
+    in, so an earlier sweep older than that is a stuck task, not a live
+    one, and must not turn one stuck sweep into no sweeps forever.
+    """
+    return db.query_one(
+        """
+        SELECT id FROM tasks
+        WHERE kind = 'application_sweep' AND id <> %(tid)s
+          AND status IN ('pending', 'running', 'awaiting_batch', 'waiting')
+          AND (payload->>'user_id')::bigint = %(uid)s
+          AND id < %(tid)s
+          AND created_at > now() - interval '1 day'
+        LIMIT 1
+        """,
+        {"tid": task_id, "uid": user_id},
+    )
+
+
+def _read_unread_forms(task_id: int, user_id: int, cap: int) -> str:
+    """Read up to `cap` unread forms of postings on this person's board,
+    newest first. Returns the form-phase note for the task's labels, empty
+    when there was nothing to read."""
     # "On their board" is the board's own membership predicate
     # (api.board.visibility.FAST), not a fresh spelling of it.
     unread = db.query(
@@ -386,8 +346,10 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
                 "ORDER BY j.created_at DESC LIMIT %(n)s"
             ),
         ),
-        {"uid": user_id, "n": reads_cap},
+        {"uid": user_id, "n": cap},
     )
+    if not unread:
+        return ""
     read = skipped = failed = 0
     for r in unread:
         try:
@@ -400,12 +362,14 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
     # Kept on the final label too: the form phase is the part that can
     # quietly stall (every host busy, every read failing), and its count
     # is the one thing a person reads off the task afterwards.
-    note = f" (forms: {read} read, {skipped} host busy, {failed} failed)" if unread else ""
-    if unread:
-        set_progress(task_id, 0, 0, note.strip(" ()"))
+    summary = f"forms: {read} read, {skipped} host busy, {failed} failed"
+    set_progress(task_id, 0, 0, summary)
+    return f" ({summary})"
 
-    # A row for every paragraph question on a board posting whose form is
-    # read and that this person has no rows for yet.
+
+def _open_answer_rows(user_id: int) -> None:
+    """A row for every paragraph question on a board posting whose form is
+    read and that this person has no rows for yet."""
     for r in db.query(
         visibility.FAST.format(
             columns=(
@@ -426,6 +390,10 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
             user_id, r["job_id"], [q for q in r["questions"] if q.get("kind") == "long"]
         )
 
+
+def _undrafted_rows(user_id: int, cap: int) -> list[dict[str, Any]]:
+    """Up to `cap` answer rows without a draft on postings still on this
+    person's board, newest posting first."""
     on_board = [
         r["id"]
         for r in db.query(
@@ -439,17 +407,12 @@ async def handle_application_sweep(task_id: int, payload: dict[str, Any]) -> Non
             {"uid": user_id},
         )
     ]
-    rows = db.query(
+    return db.query(
         """
         SELECT a.job_id, a.key, a.question, j.url, j.company, j.title
         FROM application_answers a JOIN jobs j ON j.id = a.job_id
         WHERE a.user_id = %s AND a.job_id = ANY(%s) AND a.draft IS NULL
         ORDER BY j.created_at DESC, a.id LIMIT %s
         """,
-        (user_id, on_board, drafts_cap),
+        (user_id, on_board, cap),
     )
-    if not rows:
-        set_progress(task_id, 0, 0, "nothing new to draft" + note)
-        return
-    await draft_rows(task_id, user_id, rows, kind="sweep", scheduled=True)
-    _set_draft_progress(task_id, "drafts written ahead of need" + note, len(rows))
