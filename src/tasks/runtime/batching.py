@@ -352,7 +352,9 @@ async def _submit(
         sent = len(specs) - len(unsent)
         if accepted:
             provider = providers.provider_of(model)
-            if provider:
+            # Only a submission accepted whole clears the mark: waves accepted
+            # before a refusal predate it.
+            if provider and refused is None:
                 model_fallback.clear(provider)
             if model != primary and purpose:
                 model_fallback.record(purpose, primary, model, sent)

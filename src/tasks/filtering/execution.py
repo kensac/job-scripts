@@ -60,10 +60,15 @@ def fallback_config(cfg: ai.AIConfig, purpose: str = FILTER_PURPOSE) -> ai.AICon
     for the model that will answer and the sweep does not re-buy postings a
     fallback already decided.
     """
-    if cfg.key_source != "owner":
+    # Only while the provider is exhausted: otherwise the run's own model goes
+    # on to the transport checks that refuse an unsupported one by name.
+    if cfg.key_source != "owner" or cfg.provider not in model_fallback.blocked_providers():
         return cfg
     effort = filter_effort(cfg)
-    choice = model_fallback.route(custom_filter_shape(cfg.model, effort, purpose))
+    try:
+        choice = model_fallback.route(custom_filter_shape(cfg.model, effort, purpose))
+    except routing.NoEligibleModel:
+        return cfg
     if choice.fallback_from is None:
         return cfg
     params = {k: v for k, v in cfg.params.items() if k not in ("reasoning_effort", "effort")}

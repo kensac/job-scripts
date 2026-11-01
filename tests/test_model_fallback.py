@@ -456,7 +456,7 @@ def test_the_admin_view_lists_every_purpose_its_chain_and_the_exhaustion(
     )
     set_config("verdict_model_equivalence", LUNA_HAIKU)
     model_fallback.mark("openai", "Billing hard limit has been reached", model=None, purpose=None)
-    r = client.get("/admin/model-fallback", headers=admin_headers)
+    r = client.get("/v1/admin/model-fallback", headers=admin_headers)
     assert r.status_code == 200, r.text
     body = r.json()
     assert [p["provider"] for p in body["providers"]] == ["openai"]
