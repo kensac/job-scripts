@@ -259,6 +259,20 @@ to the same model, and 5,776 got back the answer already held. A new purpose
 that re-asks on a timer gets the same treatment rather than a second
 mechanism.
 
+**A verdict counts for the model that gave it, unless two models are grouped.**
+Every reuse check (filter and board candidates, board membership, near-copy
+reuse, reverify's unchanged page) asks for the model it will call, so a model
+switch re-pays for the corpus. `app_config.verdict_model_equivalence`
+(`core/verdict_equivalence.py`) lists groups of models whose answers count as
+each other's, per kind: `custom` for filter and board verdicts, `verify` for
+closed and clearance. Readers go through `api.verdict_equivalence.answering_models`
+and match `model = ANY(...)`; reverify accepts an answer to the same question
+asked of a grouped model. It changes reads only: each verdict still records the
+model that answered, and clearing a group makes the next runs ask again. Add a
+group only after measuring that the two models agree about as often as one
+model agrees with itself across two runs, on the same kind of check. A new
+reuse check takes its model list from `answering_models`, never `model = %s`.
+
 **A re-listing re-asks a closure; it is not a first read.** The sweep's
 re-listing branch takes only postings that already hold a closed verdict. A
 re-listed posting never checked is `verify_new`'s, because only its gate knows

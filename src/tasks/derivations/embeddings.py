@@ -188,7 +188,6 @@ EMBEDDINGS = Derivation(
     requests=_requests,
     store=_store_result,
     input_chars=EMBEDDING_INPUT_CHARS,
-    recipe=None,
     model=EMBEDDING_MODEL,
     context_keys=("rows",),
     skip_unchanged=True,

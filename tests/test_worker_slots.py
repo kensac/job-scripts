@@ -227,6 +227,7 @@ def test_host_task_slots_set_the_ceiling_and_the_start(
 def test_host_task_slots_still_back_off_on_memory(monkeypatch, set_config, f):
     monkeypatch.setattr(worker, "TASK_SLOTS", 4)
     monkeypatch.setattr(worker, "THREADED_KINDS", frozenset({KIND}))
+    monkeypatch.setattr(worker, "POLL_SECONDS", 0.02)
     monkeypatch.setattr(worker, "available_memory_mb", lambda: None)
     running = [f.make_task(KIND) for _ in range(2)]
     waiting = f.make_task(KIND)
