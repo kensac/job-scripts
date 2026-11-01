@@ -408,9 +408,6 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     const f = filled.get(entry.key);
     return !!(f && f.ok && f.value != null && f.value !== "");
   };
-  // A repeated group is a field the model is never asked about.
-  const ASKABLE_KINDS = ASKABLE;
-  ASKABLE_KINDS.delete("group");
 
   // One call for everything still blank. The answers land in the form
   // like any other rung, marked "ai" so the panel and the ledger say so.
