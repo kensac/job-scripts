@@ -164,8 +164,9 @@ _POSTING_TOTALS = """
 # are cheap (each arm walks its created_at index), so read a window of them,
 # keep each url's first appearance, and widen the window until the page is
 # full or the ledger runs out. The two arms of ledger_rows are named here
-# because the view's fetch arm is not flattened, so through the view it is a
-# sort of every fetch (4.3 s) rather than a walk of its index.
+# because the view's fetch arm was not flattened then (before 58e4e8b6b54d),
+# so through the view it was a sort of every fetch (4.3 s) rather than a walk
+# of its index.
 _NEWEST_ROWS = """
     (SELECT url, created_at FROM ai_queries WHERE url IS NOT NULL
      ORDER BY created_at DESC LIMIT %(n)s)

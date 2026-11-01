@@ -40,18 +40,24 @@ in full is returned and not cached: raise from the compute so the next visit
 asks again rather than serving the failure for the cache window.
 
 Lifetime sums never read `ledger_rows`: the view's per-row lookups took 116 s
-at p90 for /admin/stats. They read the hourly sums (below). A newest-first
-page of urls reads each table's `created_at` index directly, because the
-view's fetch arm is not flattened and sorts every fetch (4.3 s) instead of
-walking its index. The Passed and Rejected tabs read the same window and keep
-the urls whose history holds the verdict, checked per url. Grouping the whole
-ledger under a HAVING took 66 s for the count alone on production
-(2026-11-01), and the tab answered 503. Their totals are served stale. Passed
-is counted as checked less rejected less the few with no verdict, because a
-direct count took 3 to 4.5 min.
+at p90 for /admin/stats. They read the hourly sums (below). The Passed and
+Rejected tabs read the newest-first window of urls and keep the urls whose
+history holds the verdict, checked per url. Grouping the whole ledger under a
+HAVING took 66 s for the count alone on production (2026-11-01), and the tab
+answered 503. Their totals are served stale. Passed is counted as checked less
+rejected less the few with no verdict, because a direct count took 3 to 4.5
+min.
 
-The filter vocabularies skip-scan `ai_queries` and `page_fetches` separately
-for the same reason (30 s through the view, 1.1 s per table). /admin/spend
+Both arms of `ledger_rows` are flattened into the query that reads the view,
+so a filter or an order on it reaches each table's indexes. An arm with a
+WHERE of its own is not flattened: it is planned sealed, and a newest-first
+page sorted every fetch (2.0 s on production) instead of walking
+`page_fetches_pkey`. So the view filters out verification copies in its outer
+query, by arm (58e4e8b6b54d), and a new arm filter goes there too.
+`tests/test_admin_queries.py` fails if the fetch arm stops walking its index.
+The newest-first page of urls and the filter vocabularies read the two tables
+directly; they were written while the arm was sealed (4.3 s and 30 s through
+the view then). /admin/spend
 reads its window's answers once into the temporary table `spend_window`
 (`api.spend.verdicts.window_table`) and computes every cut from it, rather
 than rebuilding the answer-to-call join per cut. The review-gate report runs

@@ -168,7 +168,7 @@ def _skip_scan(table: str, col: str) -> str:
     """
 
 
-def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
+def distinct_query_values(col: str, recent: bool = False) -> list[str]:
     """`SELECT DISTINCT col FROM ledger_rows WHERE col IS NOT NULL ORDER BY
     col`, as a skip scan: each step asks the index for the next value above the
     last, so the cost is one descent per distinct value instead of a read of
@@ -178,8 +178,9 @@ def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
     it on ai_queries, and on page_fetches when the fetch arm reads a column.
 
     The two arms of ledger_rows are scanned on their own tables: through the
-    view the fetch arm is not flattened, so each step sorted every fetch and
-    the four vocabularies took 30 s on production (2026-10-13). A fetch value
+    view, while its fetch arm was not flattened (before 58e4e8b6b54d), each
+    step sorted every fetch and the four vocabularies took 30 s on production
+    (2026-10-13). A fetch value
     counts only if a fetch other than a verification copy carries it, as in
     the view. Measured before that, against 2.07M rows (2026-10-04, warm):
     DISTINCT check_type 2.0 s became 66 ms, status 0.3 s became 3 ms. `col` is
@@ -226,12 +227,12 @@ def _compute_options() -> QueryFilterOptions:
     sources = [r["name"] for r in db.query("SELECT name FROM sources WHERE active ORDER BY name")]
     return QueryFilterOptions(
         sources=[v for v in sources if v],
-        check_types=[v for v in _distinct_query_values("check_type") if v],
-        statuses=[v for v in _distinct_query_values("status") if v],
+        check_types=[v for v in distinct_query_values("check_type") if v],
+        statuses=[v for v in distinct_query_values("status") if v],
         # Pipeline context (which code path decided), not the dead legacy
         # config names: only values seen in the last 30 days.
-        contexts=[v for v in _distinct_query_values("config_name", recent=True) if v],
-        workers=[v for v in _distinct_query_values("worker", recent=True) if v],
+        contexts=[v for v in distinct_query_values("config_name", recent=True) if v],
+        workers=[v for v in distinct_query_values("worker", recent=True) if v],
     )
 
 
