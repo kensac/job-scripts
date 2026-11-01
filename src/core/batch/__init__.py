@@ -151,6 +151,7 @@ async def submit_batches(
     chunks = _chunk_specs(specs, max_output_tokens)
     logger.info(f"Submitting {len(specs)} requests as {len(chunks)} batch(es)")
     ids: list[str] = []
+    refusal: Exception | None = None
     for index, chunk in enumerate(chunks, start=1):
         try:
             submit = anthropic.submit_chunk if vendor == "anthropic" else _submit_chunk
@@ -166,8 +167,14 @@ async def submit_batches(
             # A failed submission must not discard the waves already created
             # and paid for; the unsubmitted specs fall to the next sweep.
             logger.warning(f"Batch wave {index}/{len(chunks)} submission failed: {exc}")
+            refusal = exc
             continue
         ids.append(batch)
+    if not ids and refusal is not None:
+        # Nothing to keep, so the task fails; the provider's reason is the
+        # task's error. On 2026-10-31 it was a billing hard limit, for 374
+        # filter chunks over four hours, and only a log line said so.
+        raise RuntimeError(f"no batches were accepted by the provider: {refusal}") from refusal
     return ids
 
 

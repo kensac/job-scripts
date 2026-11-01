@@ -2,11 +2,6 @@
 
 Whether the live fleet has a stalled task or batch is the health detectors'
 job (api.health), not a test's.
-
-The original test rationale recorded 14,196 verdicts with no matching job and
-10,342 active jobs awaiting a first closed verdict on 2026-09-01. Those were
-backlogs, not zero-count invariants. The counts are historical and are not
-asserted by this module.
 """
 
 from __future__ import annotations

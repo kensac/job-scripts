@@ -75,9 +75,9 @@ Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
 **Keep each mail derivation with its owner.** `api.mail.pipeline.events` reads
-current events and matches and derives stage; `pipeline_proposals` derives board
-status suggestions and records a person's answer; `pipeline_actions` derives
-asks and reads the append-only answer log; `pipeline_senders` reads sender
+current events and matches and derives stage; `proposals` derives board
+status suggestions and records a person's answer; `actions` derives
+asks and reads the append-only answer log; `senders` reads sender
 evidence. `api.mail.pipeline` is the stable import surface for their callers.
 A split must preserve the same current-event and current-match precedence,
 user scope, and event answer writes. Sender signals only suggest review and
@@ -212,7 +212,7 @@ of the skills, most of the rest being wording. Turning it on is a config
 row, not a deploy; choosing an arm worth paying for is the experiment
 (luna at none gets seniority to 74 percent of the reference for about 70
 cents a day at the current verification rate). Comp and
-requirements select on `core.store.VERIFIED_OPEN`: the posting's latest
+requirements select on `core.verdict_reads.verified_open`: the posting's latest
 closed and clearance verdicts both passed.
 
 **An arm that answers nothing is re-bought every sweep.** Comp leaves a row
@@ -258,6 +258,20 @@ for the week to 2026-10-04: 5,780 of 7,244 re-checks sent byte-identical text
 to the same model, and 5,776 got back the answer already held. A new purpose
 that re-asks on a timer gets the same treatment rather than a second
 mechanism.
+
+**A verdict counts for the model that gave it, unless two models are grouped.**
+Every reuse check (filter and board candidates, board membership, near-copy
+reuse, reverify's unchanged page) asks for the model it will call, so a model
+switch re-pays for the corpus. `app_config.verdict_model_equivalence`
+(`core/verdict_equivalence.py`) lists groups of models whose answers count as
+each other's, per kind: `custom` for filter and board verdicts, `verify` for
+closed and clearance. Readers go through `api.verdict_equivalence.answering_models`
+and match `model = ANY(...)`; reverify accepts an answer to the same question
+asked of a grouped model. It changes reads only: each verdict still records the
+model that answered, and clearing a group makes the next runs ask again. Add a
+group only after measuring that the two models agree about as often as one
+model agrees with itself across two runs, on the same kind of check. A new
+reuse check takes its model list from `answering_models`, never `model = %s`.
 
 **A re-listing re-asks a closure; it is not a first read.** The sweep's
 re-listing branch takes only postings that already hold a closed verdict. A

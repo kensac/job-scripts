@@ -539,10 +539,10 @@ refinement from overwriting a newer edit.
 ## Filter route ownership
 
 `api.routers.filters` assembles the person's filter CRUD routes, run controls,
-shared presets and prompt assistance in that order. `filter_crud` owns the
-person-scoped filter rows and writes. `filter_run_routes` owns manual run
-permission, budget admission and in-flight task lookup. `filter_presets` owns
-current coverage and adoption. A preset is adopted through the same filter
-write rules as a hand-written filter. Keep permission to start a run separate
-from admission right now, so a person who cannot start one can still see a run
-already in flight. Keep every filter read and write scoped to the caller's id.
+shared presets and prompt assistance in that order, from
+`api.routers.filtering`. `saved_filters` owns the person-scoped filter rows
+and writes. `run_controls` owns manual run permission, budget admission and
+in-flight task lookup. `presets` owns current coverage and adoption. A preset
+is adopted through the same filter write rules as a hand-written filter. Keep
+permission to start a run separate from admission right now, so a person who
+cannot start one can still see a run already in flight. Keep every filter read and write scoped to the caller's id.

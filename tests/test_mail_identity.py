@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from api import db
 from core.identity import MAX_IDENTITIES, AddressCount, derive_identities
-from tasks.mail.classification.handler import _SELF_SENT, _heal_self_sent, identities_for
+from tasks.mail.classification.identity import (
+    _SELF_SENT,
+    _heal_self_sent,
+    identities_by_owner,
+    identities_for,
+)
 from tests import mail_log
 
 
@@ -93,9 +98,11 @@ class TestTheGuard:
         return row["id"], uid
 
     def _is_self_sent(self, mid: int, identities: list[str]) -> bool:
+        owner = db.query_one("SELECT user_id FROM email_messages WHERE id = %s", (mid,))
+        assert owner is not None
         row = db.query_one(
             f"SELECT {_SELF_SENT} AS s FROM email_messages m WHERE m.id = %(mid)s",
-            {"mid": mid, "identities": identities},
+            {"mid": mid, "identities": db.jsonb({owner["user_id"]: identities})},
         )
         assert row is not None
         return row["s"]
@@ -146,6 +153,10 @@ class TestHealing:
         )
         return row["id"]
 
+    def _heal(self, identities: list[str]) -> int:
+        owners = db.query("SELECT DISTINCT user_id FROM email_messages")
+        return _heal_self_sent({row["user_id"]: identities for row in owners})
+
     def _latest(self, mid: int):
         return db.query_one(
             "SELECT kind, detail FROM email_events WHERE message_id = %s ORDER BY id DESC LIMIT 1",
@@ -156,7 +167,7 @@ class TestHealing:
         """Widening the guard stops new errors; the existing ones stand until
         something retracts them."""
         mid = self._classified(f, "kqs6171@psu.edu", "interview_invite")
-        assert _heal_self_sent(["kqs6171@psu.edu"]) == 1
+        assert self._heal(["kqs6171@psu.edu"]) == 1
         latest = self._latest(mid)
         assert latest is not None
         assert latest["kind"] == "not_job_related"
@@ -166,7 +177,7 @@ class TestHealing:
         """Append-only: what was retracted stays readable, which is what makes
         the admin view able to say what changed and why."""
         mid = self._classified(f, "kqs6171@psu.edu", "offer")
-        _heal_self_sent(["kqs6171@psu.edu"])
+        self._heal(["kqs6171@psu.edu"])
         kinds = [
             r["kind"]
             for r in db.query(
@@ -177,7 +188,7 @@ class TestHealing:
 
     def test_inbound_mail_is_left_alone(self, f):
         mid = self._classified(f, "recruiter@company.com", "interview_invite")
-        assert _heal_self_sent(["kqs6171@psu.edu"]) == 0
+        assert self._heal(["kqs6171@psu.edu"]) == 0
         latest = self._latest(mid)
         assert latest is not None and latest["kind"] == "interview_invite"
 
@@ -185,16 +196,16 @@ class TestHealing:
         """A correction that re-fires forever would grow the table without
         bound and make 'what changed' unreadable."""
         self._classified(f, "kqs6171@psu.edu", "interview_invite")
-        assert _heal_self_sent(["kqs6171@psu.edu"]) == 1
-        assert _heal_self_sent(["kqs6171@psu.edu"]) == 0
+        assert self._heal(["kqs6171@psu.edu"]) == 1
+        assert self._heal(["kqs6171@psu.edu"]) == 0
 
     def test_a_widened_identity_set_heals_its_own_history(self, f):
         """The reason this is a sweep and not a one-off backfill: the set is
         derived, so a new address should correct its own past without anyone
         running anything."""
         mid = self._classified(f, "kqs6171@psu.edu", "interview_scheduled")
-        assert _heal_self_sent(["kanishksachdev@gmail.com"]) == 0
-        assert _heal_self_sent(["kanishksachdev@gmail.com", "kqs6171@psu.edu"]) == 1
+        assert self._heal(["kanishksachdev@gmail.com"]) == 0
+        assert self._heal(["kanishksachdev@gmail.com", "kqs6171@psu.edu"]) == 1
         latest = self._latest(mid)
         assert latest is not None and latest["kind"] == "not_job_related"
 
@@ -203,6 +214,24 @@ def test_identities_fall_back_to_the_configured_address(f):
     """A mailbox with too little mail to judge must not switch the guard off."""
     uid = f.make_user(email="only@known.com")
     assert identities_for(uid) == ["only@known.com"]
+
+
+def test_a_user_with_no_address_has_no_identity(f):
+    """An empty identity would make every sender the owner: position('' IN x)
+    is 1, so the guard and the heal would treat all inbound mail as sent."""
+    uid = f.make_user()
+    db.execute("UPDATE users SET email = NULL WHERE id = %s", (uid,))
+    assert identities_for(uid) == []
+    db.execute(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+        "to_emails, subject) VALUES (%s, 'inbound', 'gmail', 'recruiter@corp.com', %s, 's')",
+        (uid, ["someone@corp.com"]),
+    )
+    row = db.query_one(
+        f"SELECT {_SELF_SENT} AS s FROM email_messages m WHERE m.user_id = %(uid)s",
+        {"uid": uid, "identities": identities_for(uid)},
+    )
+    assert row is not None and row["s"] is False
 
 
 def test_the_guard_runs_off_the_mailbox_with_nothing_confirmed(client, user_headers, f):
@@ -236,3 +265,29 @@ def test_the_guard_runs_off_the_mailbox_with_nothing_confirmed(client, user_head
         ).status_code
         == 404
     )
+
+
+def test_each_message_is_judged_by_its_own_owners_addresses(f):
+    """Two mailboxes. Mail one owner sent to the other is sent mail in the
+    first and inbound mail in the second. One owner's identities applied to
+    every message, as the sweep once did, judges both copies the same way."""
+    alice, bob = f.make_user(email="alice@x.com"), f.make_user(email="bob@y.com")
+    ids = {}
+    for owner, name in ((alice, "alice"), (bob, "bob")):
+        row = db.query_one(
+            "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+            "to_emails, subject) VALUES (%s, %s, 'gmail', 'alice@x.com', %s, 's') RETURNING id",
+            (owner, f"copy-{name}", ["bob@y.com"]),
+        )
+        assert row is not None
+        ids[name] = row["id"]
+    identities = identities_by_owner()
+    assert identities == {alice: ["alice@x.com"], bob: ["bob@y.com"]}
+    judged = {
+        row["id"]: row["s"]
+        for row in db.query(
+            f"SELECT m.id, {_SELF_SENT} AS s FROM email_messages m",
+            {"identities": db.jsonb(identities)},
+        )
+    }
+    assert judged == {ids["alice"]: True, ids["bob"]: False}

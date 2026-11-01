@@ -43,6 +43,31 @@ def test_a_thread_of_one_assigns_one(client, user_headers):
     assert body["messages_assigned"] == 1
 
 
+def test_a_group_over_the_cap_assigns_only_the_message(client, user_headers):
+    """A key holding more messages than one assignment may carry is a mailing
+    list reusing a thread id, not a conversation. Moving the first forty of
+    them by id attached unrelated mail to the application."""
+    from api.routers.mail.conversation_identity import MAX_THREAD_FANOUT
+
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    app_id = insert_application(uid, company="Acme", title="Engineer")
+    ids = insert_gmail_thread(uid, "thread-list", MAX_THREAD_FANOUT + 1)
+    body = client.post(
+        f"/v1/user/messages/{ids[-1]}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == 1
+
+    at_cap = insert_gmail_thread(uid, "thread-full", MAX_THREAD_FANOUT)
+    body = client.post(
+        f"/v1/user/messages/{at_cap[0]}/assign",
+        headers=user_headers,
+        json={"application_id": app_id},
+    ).json()
+    assert body["messages_assigned"] == MAX_THREAD_FANOUT
+
+
 def test_threadless_mail_never_drags_a_lookalike_along(client, user_headers):
     """The measured danger: grouping threadless mail by normalised subject and
     sender would treat 49 'thank you for applying!' messages from myworkday.com

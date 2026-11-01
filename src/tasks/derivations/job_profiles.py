@@ -85,7 +85,6 @@ PROFILES = Derivation(
     requests=_requests,
     store=_store_result,
     input_chars=JOB_PROFILE_INPUT_CHARS,
-    recipe=CLASSIFIER_VERSION,
     shape=JOB_PROFILE_TASK,
     model=JOB_PROFILE_MODEL,
     answer=JobProfileAnswer,
