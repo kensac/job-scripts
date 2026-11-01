@@ -41087,13 +41087,6 @@
             "type": "array",
             "title": "Title Recipes"
           },
-          "profile_recipes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Profile Recipes"
-          },
           "filters": {
             "additionalProperties": {
               "items": {
@@ -41116,7 +41109,6 @@
         "required": [
           "scopes",
           "title_recipes",
-          "profile_recipes",
           "filters",
           "filterable"
         ],
