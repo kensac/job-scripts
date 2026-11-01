@@ -34,6 +34,9 @@ ACTIVE_SQL = (
     f"SELECT id FROM tasks WHERE {_KINDS_SQL} AND {_BOARD_SQL} = %s "
     "AND status = ANY(%s) ORDER BY id DESC LIMIT 1"
 )
+# Advisory lock class for a sponsor's allowance, keyed (class, user id) like
+# api.board.visibility's 7001.
+_SPONSOR_LOCK = 7002
 
 
 class ManagedBoardRunQueued(BaseModel):
@@ -222,6 +225,12 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
     run inside a transaction, so everything the plan read that a concurrent
     writer can change (the board, an active run, the sponsor's reservations)
     is checked again under the lock before the insert.
+
+    The allowance is the sponsor's, shared by every board they sponsor, so the
+    recheck holds the sponsor's lock as well as the board's: under the board
+    lock alone, two of one sponsor's boards could each pass the check without
+    seeing the other's reservation. Sponsor first, then board, in every
+    admission.
     """
     if in_transaction():
         raise RuntimeError("Managed board admission uploads outside a database transaction")
@@ -235,6 +244,9 @@ def admit(board_id: int, *, dedupe_key: str | None = None) -> ManagedBoardRunQue
         raise RunRefusal("STORAGE_UNAVAILABLE", "run candidates could not be stored") from exc
     payload = {**plan.payload, **task_jobs.reference(task_jobs.MANAGED_BOARD_RUNS, plan.jobs, ref)}
     with db.transaction():
+        db.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)", (_SPONSOR_LOCK, plan.board.sponsor_user_id)
+        )
         if _board(board_id, lock=True) != plan.board:
             raise RunRefusal("BOARD_CHANGED", "the board changed while its run was planned")
         _refuse_active(board_id)
