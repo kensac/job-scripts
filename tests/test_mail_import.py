@@ -280,7 +280,7 @@ def test_an_mbox_is_read_from_inside_a_takeout_zip():
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("Takeout/Mail/All mail Including Spam and Trash.mbox", _mbox_bytes())
 
-    msgs = list(read_mbox(path))
+    msgs = list(read_archive(path))
     assert [m.provider_message_id for m in msgs] == ["<z1@acme.com>", "<z2@acme.com>"]
     assert msgs[0].headers["references"] == "<z0@acme.com>"
 

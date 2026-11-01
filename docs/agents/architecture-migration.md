@@ -415,6 +415,9 @@ different model is not this model's verdict." The cost cliff that follows is
 named there too. Switching to a better model and keeping the old model's
 answers is not a saving, it is a stale corpus, and the phase was written
 without reading the rationale that was already in the file.
+What replaced it keeps model identity and lets measured pairs share answers
+by explicit, revertable groups (architecture.md, "A verdict counts for the
+model that gave it").
 
 **Reframed as staleness, it was measured and it is small.** The valuable half
 of the idea was that a verdict should record the page it judged, so a changed

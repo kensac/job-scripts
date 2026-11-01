@@ -31,7 +31,7 @@ def test_a_posting_on_a_board_shows_each_stage_it_passed(f):
     source = f.make_source("path-src")
     board = _board(f, source, slug="path-board")
     job_id, url = f.make_ready_job(source=source, title="Software Engineer")
-    f.make_verdict(url, "custom", "passed", prompt_hash=board["prompt_hash"])
+    f.make_verdict(url, "custom", "passed", prompt_hash=board["prompt_hash"], reason="A role.")
     db.execute(
         "UPDATE ai_queries SET model = 'gpt-6-luna', config_name = 'verify-batch' "
         "WHERE url = %s AND check_type = 'custom'",
@@ -51,7 +51,11 @@ def test_a_posting_on_a_board_shows_each_stage_it_passed(f):
     assert stages["criteria"].outcome == "passed" and stages["criteria"].basis == "evaluated_now"
     assert stages["structural"].outcome == "passed"
     assert stages["verdict"].label == "Kept"
-    assert "answered when the posting was verified" in stages["verdict"].detail
+    assert stages["verdict"].detail == (
+        "A role; answered when the posting was verified; gpt-6-luna"
+    )
+    content = next(s for s in path.steps if s.stage == "content")
+    assert content.detail == "Read from the posting page in a browser"
     assert stages["membership"].outcome == "passed" and stages["membership"].basis == "recorded"
     assert {s.check for s in path.steps if s.stage == "verification"} == {"closed", "clearance"}
 
