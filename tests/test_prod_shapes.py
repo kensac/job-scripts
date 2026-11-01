@@ -25,8 +25,8 @@ def test_the_catalog_is_big_enough_to_assert_anything_over():
     analytics assertions need a denominator for."""
     jobs = _count("SELECT count(*) FROM jobs")
     verdicts = _count("SELECT count(*) FROM ai_queries")
-    assert jobs > 1000, f"only {jobs} jobs - did the sync run?"
-    assert verdicts > 1000, f"only {verdicts} verdicts - did the sync run?"
+    assert jobs > 1000, f"only {jobs} jobs - did the corpus build?"
+    assert verdicts > 1000, f"only {verdicts} verdicts - did the corpus build?"
 
 
 @pytest.mark.corpus
