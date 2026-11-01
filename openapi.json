@@ -24438,7 +24438,7 @@
     "/v1/admin/task-models": {
       "get": {
         "summary": "List Task Models",
-        "description": "Every configurable task, with its eligible models and what each costs.\n\nCosts are per CALL at the shape's own declared token profile, not per\ncycle. A cycle figure would need each handler's per-cycle cap, which lives\nin its own module and moves; multiplying a real number by a guessed one\nproduces a confident wrong total, which is worse on a spending screen than\nan honest small one.",
+        "description": "Every configurable task, with its eligible models and what each costs.\n\n`est_cost_usd` is per call at the shape's declared token profile.\n`est_cycle_cost_usd` is that times the task's per-cycle cap, read from\napp_config through configured_shape, the same value the sweep reads. A\ntask with no cap has no cycle figure: None, never a guessed total.",
         "operationId": "list_task_models_v1_admin_task_models_get",
         "parameters": [
           {

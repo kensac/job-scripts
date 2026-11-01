@@ -15,20 +15,73 @@ from api.board import column_filters as column_filters_
 from api.problem import refuse
 from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord, _held_input
 from api.routers.admin.shared import require_admin
-from api.stale_cache import Stale
+from api.stale_cache import Stale, StaleByKey
 from core import catalog, query_instructions, verdict_reads
 
 router = APIRouter()
 
+
+def _count(sql: str) -> int:
+    row = db.query_one(sql)
+    return row["c"] if row else 0
+
+
 # Every url the ledger has checked, for the unfiltered page's total: a
 # distinct count over both arms of ledger_rows, ~40 s on production under load
 # (2026-10-13), and it moves by a few hundred an hour.
+_CHECKED_URLS_COUNT = "SELECT COUNT(DISTINCT url) AS c FROM ledger_rows WHERE url IS NOT NULL"
 _checked_urls = Stale(
-    lambda: (
-        db.query_one("SELECT COUNT(DISTINCT url) AS c FROM ledger_rows WHERE url IS NOT NULL")
-        or {"c": 0}
-    )["c"],
+    lambda: _count(_CHECKED_URLS_COUNT),
     lambda: int(db.get_config("admin_stats_cache_seconds")),
+)
+
+# A posting's verdict is the roll-up of its checks: one rejection anywhere
+# makes it rejected, and passed is a pass with no rejection. page_fetches
+# rows are only ever passed or failed (its CHECK constraint), so a rejection
+# lives in ai_queries alone. These are the list's HAVING clauses, read for
+# one url at a time (u.url) instead of grouping the whole ledger.
+_REJECTED = "EXISTS (SELECT 1 FROM ai_queries q WHERE q.url = u.url AND q.status = 'rejected')"
+_PASSED = """(EXISTS (SELECT 1 FROM ai_queries q WHERE q.url = u.url AND q.status = 'passed')
+    OR EXISTS (SELECT 1 FROM page_fetches f WHERE f.url = u.url AND f.status = 'passed'
+               AND f.method <> 'verification'))"""
+_VERDICT_HOLDS = {"rejected": _REJECTED, "passed": f"NOT {_REJECTED} AND {_PASSED}"}
+
+# Postings with neither verdict: every check failed or has no status. They
+# are few (5,870 of 1,279,002 on 2026-11-01), found from the rows that are
+# neither.
+_NO_VERDICT_COUNT = f"""
+    SELECT COUNT(*) AS c FROM (
+        SELECT url FROM ai_queries
+        WHERE url IS NOT NULL
+          AND status IS DISTINCT FROM 'passed' AND status IS DISTINCT FROM 'rejected'
+        UNION
+        SELECT url FROM page_fetches
+        WHERE status = 'failed' AND url IS NOT NULL AND method <> 'verification'
+    ) u
+    WHERE NOT {_REJECTED} AND NOT {_PASSED}
+"""
+_REJECTED_COUNT = (
+    "SELECT COUNT(DISTINCT url) AS c FROM ai_queries WHERE status = 'rejected' AND url IS NOT NULL"
+)
+
+
+def _verdict_total(verdict: str) -> int:
+    """Rejected is counted. Passed is every checked url less the rejected and
+    the ones with no verdict: counting it directly took 3 to 4.5 min on
+    production, against 11.6 s and 17 s for the two it subtracts, and the
+    three add up exactly (1,279,002 = 517,274 + 755,858 + 5,870 on
+    2026-11-01). Each count is read here, in one call, so they agree."""
+    rejected = _count(_REJECTED_COUNT)
+    if verdict == "rejected":
+        return rejected
+    return _count(_CHECKED_URLS_COUNT) - rejected - _count(_NO_VERDICT_COUNT)
+
+
+# The Passed and Rejected tabs' totals, lifetime counts like _checked_urls.
+# Through the list's HAVING the rejected count alone took 66 s on production
+# (2026-11-01), so the tab answered 503 before its page query started.
+_verdict_totals: StaleByKey[str, int] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
 )
 
 
@@ -124,12 +177,29 @@ _NEWEST_ROWS = """
 """
 
 
-def _newest_urls(offset: int, limit: int) -> list[str]:
+def _newest_urls(offset: int, limit: int, verdict: str | None = None) -> list[str]:
+    """With a verdict, a url is kept only when it holds that verdict, checked
+    against its whole history; the window widens until the page is full."""
     want = offset + limit
     n = max(want * 4, 200)
+    checked: set[str] = set()
+    held: set[str] = set()
     while True:
         rows = db.query(_NEWEST_ROWS, {"n": n})
         urls = list(dict.fromkeys(r["url"] for r in rows))
+        if verdict is not None:
+            # A wider window repeats the narrower one; each url is checked once.
+            unchecked = [url for url in urls if url not in checked]
+            held.update(
+                r["url"]
+                for r in db.query(
+                    "SELECT u.url FROM unnest(%(urls)s::text[]) AS u(url) "
+                    f"WHERE {_VERDICT_HOLDS[verdict]}",
+                    {"urls": unchecked},
+                )
+            )
+            checked.update(unchecked)
+            urls = [url for url in urls if url in held]
         if len(urls) >= want or len(rows) < n:
             return urls[offset:want]
         n *= 4
@@ -199,14 +269,19 @@ def list_jobs(
     """
     sorts = sorting.parse(sort, dir, _POSTING_SORT_EXPRESSIONS, "last_seen")
     page_params = {**params, "limit": paging.size, "offset": paging.offset}
-    if len(sub) == 1 and not having and sorts == [{"key": "last_seen", "dir": "desc"}]:
+    if len(sub) == 1 and sorts == [{"key": "last_seen", "dir": "desc"}]:
         # Walk the time index to find the page, then read history only for
         # those URLs. created_at is NOT NULL, so DESC has the same ordering
         # as DESC NULLS LAST and can use the existing index backwards.
         # The id tiebreaker selects one row when a URL has equal timestamps;
         # every check still contributes to that URL's reported totals.
-        total_row = {"c": _checked_urls.get()}
-        urls = _newest_urls(paging.offset, paging.size)
+        known = verdict if verdict in _VERDICT_HOLDS else None
+        total_row = {
+            "c": _checked_urls.get()
+            if known is None
+            else _verdict_totals.get(known, lambda: _verdict_total(known))
+        }
+        urls = _newest_urls(paging.offset, paging.size, known)
         rows = db.query(_RECENT_POSTINGS, {"urls": urls}) if urls else []
     else:
         total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
