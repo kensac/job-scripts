@@ -23,6 +23,28 @@ def _extract_output_text(body: dict) -> str | None:
     return None
 
 
+def _line_error(obj: dict) -> str | None:
+    """The provider's reason for a failed result line, wherever it sits.
+
+    A request the provider refused over HTTP carries `error: null` and the
+    reason in `response.body.error`. Reading only the top-level field stored
+    all 33,365 request errors of 2026-10-31 as "batch error", during the
+    hours the provider was refusing submissions for a billing hard limit.
+    """
+    if obj.get("error"):
+        return str(obj["error"])
+    resp = obj.get("response") or {}
+    if resp.get("status_code") == 200:
+        return None
+    body = resp.get("body")
+    detail = body.get("error") if isinstance(body, dict) else None
+    message = detail.get("message") if isinstance(detail, dict) else detail
+    status = resp.get("status_code")
+    if message:
+        return f"{status}: {message}" if status else str(message)
+    return str(status) if status else None
+
+
 async def _collect_batch(
     client: AsyncOpenAI,
     batch: Batch,
@@ -41,10 +63,9 @@ async def _collect_batch(
                 if not create_missing or not custom_id:
                     continue
                 result = results.setdefault(custom_id, BatchResult(custom_id))
-            err = obj.get("error")
             resp = obj.get("response")
-            if err or not resp or resp.get("status_code") != 200:
-                result.error = str(err or (resp or {}).get("status_code") or "unknown")
+            if obj.get("error") or not resp or resp.get("status_code") != 200:
+                result.error = _line_error(obj) or "unknown"
                 continue
             body = resp.get("body", {})
             result.usage = body.get("usage")
@@ -91,7 +112,7 @@ async def _collect_batch(
                 if result is None and create_missing and custom_id:
                     result = results.setdefault(custom_id, BatchResult(custom_id))
                 if result is not None and result.text is None and result.embedding_vectors is None:
-                    result.error = str(obj.get("error") or "batch error")
+                    result.error = _line_error(obj) or "batch error"
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
 
