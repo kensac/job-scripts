@@ -236,6 +236,14 @@ more than the query itself: 78 s with JIT, 24 s without, most of the
 difference inside one hash aggregate of 16,000 rows. Such a statement runs
 in a transaction with `SET LOCAL jit = off`.
 
+**The most common value per group over a large table is counted, not
+`mode()`.** `mode()` is an ordered-set aggregate: it needs every row of the
+group in order, so it sorts or walks an index through the heap. Count each
+(group, value) in a hash aggregate, then keep the top value per group with
+`DISTINCT ON (group) ... ORDER BY group, n DESC, value`, which breaks ties as
+`mode()` does. The company page's display names took 2.7-3.2 s this way
+against 3.6-4.2 s, identical on all 10,751 rows (production, 2026-11-01).
+
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
 quality or savings. Keep evaluation costs explicitly bounded. `api.run_experiment`
