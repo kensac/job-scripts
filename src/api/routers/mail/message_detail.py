@@ -16,8 +16,8 @@ from api.routers.mail.shared import (
     Reclassification,
     Reclassified,
     Reverted,
-    _apply_classification,
-    _apply_revert,
+    apply_classification,
+    apply_revert,
 )
 from core.answers import EVENT_KINDS
 from core.mail.html import sanitise
@@ -153,7 +153,7 @@ def correct_classification(
     restating it - the same property that makes detaching work.
     """
     message = owned_message(message_id, user.id)
-    return _apply_classification(message, body, actor_user_id=user.id)
+    return apply_classification(message, body, actor_user_id=user.id)
 
 
 class MessageKinds(BaseModel):
@@ -180,7 +180,7 @@ def revert_classification(message_id: int, user: AuthedUser = Depends(require_us
     never classified this message, because there is nothing to restore.
     """
     owned_message(message_id, user.id)
-    return _apply_revert(message_id, actor_user_id=user.id)
+    return apply_revert(message_id, actor_user_id=user.id)
 
 
 def readable_message_fields(row: dict[str, Any]) -> dict[str, Any]:

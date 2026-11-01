@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from api import db, health
 from api.auth import AuthedUser
 from api.routers.admin.shared import require_admin
+from api.stale_cache import Stale
 
 router = APIRouter()
 
@@ -76,6 +77,26 @@ def _annotated(sql: str) -> list[HealthAlert]:
     ]
 
 
+# A week of fetches joined to their jobs: 137k probes, 2.1 s of SQL on
+# production (2026-11-01), and the dashboard refetches /health on every live
+# tick. It is a week's mix, so a value a few minutes old reads the same.
+_content_mix = Stale(
+    lambda: db.query_as(
+        ContentMix,
+        """
+        SELECT j.source,
+               COUNT(*) FILTER (WHERE q.method = 'ats text') AS ats_text,
+               COUNT(*) FILTER (WHERE q.method = 'scraped') AS scraped,
+               COUNT(*) AS total
+        FROM page_fetches q JOIN jobs j ON j.url = q.url
+        WHERE q.created_at > now() - interval '7 days'
+        GROUP BY j.source ORDER BY total DESC
+        """,
+    ),
+    lambda: int(db.get_config("admin_stats_cache_seconds")),
+)
+
+
 @router.get("/health")
 def data_health(user: AuthedUser = Depends(require_admin)) -> DataHealth:
     """Open data-health alerts plus recently resolved ones, so an upstream
@@ -86,18 +107,7 @@ def data_health(user: AuthedUser = Depends(require_admin)) -> DataHealth:
         recently_resolved=_annotated(
             "WHERE resolved_at > now() - interval '7 days' ORDER BY resolved_at DESC LIMIT 20"
         ),
-        content_mix=db.query_as(
-            ContentMix,
-            """
-            SELECT j.source,
-                   COUNT(*) FILTER (WHERE q.method = 'ats text') AS ats_text,
-                   COUNT(*) FILTER (WHERE q.method = 'scraped') AS scraped,
-                   COUNT(*) AS total
-            FROM page_fetches q JOIN jobs j ON j.url = q.url
-            WHERE q.created_at > now() - interval '7 days'
-            GROUP BY j.source ORDER BY total DESC
-            """,
-        ),
+        content_mix=_content_mix.get(),
     )
 
 

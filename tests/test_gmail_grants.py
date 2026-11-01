@@ -11,16 +11,14 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from api import crypto, db, health, oauth
+from tests.factories import user_id_for_subject
 from tests.gmail_support import (
     CLIENT_SECRET,
     FakeResponse,
     connect_gmail_account,
     expire_access_token,
-    user_id_for_subject,
 )
-from tests.gmail_support import (
-    google as google,
-)
+from tests.gmail_support import google as google
 
 # --- the exchange --------------------------------------------------------
 

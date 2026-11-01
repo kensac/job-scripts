@@ -7,19 +7,18 @@ from dataclasses import dataclass
 
 from fastapi import Header
 
-from api import db, metrics, params
+from api import admin_groups, db, metrics, params
 from api.problem import refuse
-from core.env import env_list
 
 logger = logging.getLogger(__name__)
 
 SERVICE_TOKEN = os.environ.get("JOBTRACKER_SERVICE_TOKEN", "")
 
 # The one admin test. `require_admin` gates routes with it; anything else that
-# asks "is this person an admin" calls `is_admin`. Two callers had hard-coded
-# 'infra-admins' and ignored this variable, so a deployment that renamed the
-# group got admin routes for one set and signup and alert mail for another.
-ADMIN_GROUPS = frozenset(env_list("JOBTRACKER_ADMIN_GROUPS", "infra-admins"))
+# asks "is this person an admin" calls `is_admin`. The groups are
+# api.admin_groups.ADMIN_GROUPS, read here as a module global so a test can
+# replace them.
+ADMIN_GROUPS = admin_groups.ADMIN_GROUPS
 
 
 def is_admin(groups: list[str] | None) -> bool:

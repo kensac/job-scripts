@@ -16,14 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from core.mail.importer import (
-    ImportedMessage,
-    _olm_entries,
-    _olm_parse,
-    read_archive,
-    read_mbox,
-    read_olm,
-)
+from core.mail.importer import ImportedMessage, read_archive, read_mbox, read_olm
+from core.mail.importer.olm import _olm_entries, _olm_parse
 
 MBOX = """From bounce@x Mon Sep  1 10:00:00 2026
 From: Careers <no-reply@greenhouse.io>
