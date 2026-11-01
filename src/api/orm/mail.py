@@ -37,9 +37,14 @@ class EmailMessage(Base):
             "current_event_id",
             postgresql_where=text("current_event_id IS NOT NULL"),
         ),
+        # The pipeline, the funnel and the sender signal read every matched
+        # message through this index. With the columns they read INCLUDEd
+        # the scan is index-only; without them each row is a heap fetch of a
+        # row that also holds the mail body, ~5,800 pages read cold.
         Index(
             "idx_email_messages_current_match",
             "current_match_id",
+            postgresql_include=["current_event_id", "sent_at", "from_email", "subject"],
             postgresql_where=text("current_match_id IS NOT NULL"),
         ),
     )
