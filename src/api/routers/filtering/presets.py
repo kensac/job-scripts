@@ -13,10 +13,10 @@ from api.routers.filtering.saved_filters import (
     Filter,
     SavedFilter,
     _after_filter_change,
-    _filter_prompt_hash,
     _refuse_second_enabled,
 )
 from core import catalog, verdict_reads
+from core.filters import compute_filter_hash
 
 router = APIRouter()
 
@@ -120,7 +120,7 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         "SELECT id, name, description, prompt, on_ambiguous, fail_closed "
         "FROM filter_presets WHERE active ORDER BY name",
     )
-    hashes = {p.id: _filter_prompt_hash(p.prompt, p.on_ambiguous) for p in presets}
+    hashes = {p.id: compute_filter_hash(p.prompt, p.on_ambiguous) for p in presets}
     coverage = {
         row["prompt_hash"]: row
         for row in db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
@@ -190,7 +190,7 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> Sa
                 preset.prompt,
                 preset.on_ambiguous,
                 preset.fail_closed,
-                _filter_prompt_hash(preset.prompt, preset.on_ambiguous),
+                compute_filter_hash(preset.prompt, preset.on_ambiguous),
                 preset_id,
             ),
         )

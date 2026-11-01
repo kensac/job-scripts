@@ -350,6 +350,7 @@ async def test_full_sweep_finds_mail_older_than_recent_window(monkeypatch, f, se
     monkeypatch.setattr(mail_sync, "set_progress", lambda *_args, **_kw: None)
     monkeypatch.setattr(mail_sync, "enqueue", lambda *_args, **_kw: None)
 
+    cursor = None
     for _ in range(5):
         await mail_sync.handle_sync_gmail(1, {"user_id": uid})
         cursor = db.query_one(

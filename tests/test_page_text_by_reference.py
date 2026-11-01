@@ -94,6 +94,15 @@ def test_the_admin_detail_rebuilds_an_answer_from_held_text(client, admin_header
     fetch = client.get(f"/v1/admin/queries/{fetch_id}", headers=admin_headers).json()
     assert fetch["input_content"] == TEXT
 
+    # The job drawer reads the same rows through /jobs/responses.
+    drawer = client.get(
+        "/v1/admin/jobs/responses", params={"url": URL}, headers=admin_headers
+    ).json()["rows"]
+    assert {r["id"]: r["input_content"] for r in drawer} == {
+        fetch_id: TEXT,
+        answer_id: before["input_content"],
+    }
+
 
 def test_the_comp_hash_is_the_one_sql_computed():
     text = "Pay: $150,000 to $180,000 a year. Ünïcode survives. " * 400

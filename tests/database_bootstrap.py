@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
+from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 _stop_scratch_pg = None
@@ -115,7 +116,7 @@ def _worker_database(dsn: str, worker: str) -> str:
     with psycopg.connect(dsn, autocommit=True) as conn:
         if not conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone():
             with contextlib.suppress(psycopg.errors.DuplicateDatabase):
-                conn.execute(f'CREATE DATABASE "{name}"')
+                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     # As a URL when it arrived as one: db.py hands this string to SQLAlchemy
     # for the migrations, and SQLAlchemy cannot parse libpq's keyword form.
     parsed = urlparse(dsn)
