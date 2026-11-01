@@ -179,6 +179,41 @@ one for one on Function Health (29) and Bilt (19) on 2026-10-16, so a pull is
 authoritative. The posting page is a 7 KB script shell, so a re-check reads
 `/job_posts/<id>` through the Gem resolver.
 
+**A small-company system with one public feed is read in that one call.**
+Each of these answers every open posting in one unpaged reply, states no
+count (BambooHR excepted), and matched the employer's careers page one for
+one on 2026-11-01, so each pull is authoritative. The listings URL is the
+feed, never the careers page, except for Jobvite:
+
+| Kind | Listings URL | Text | Matched on |
+|---|---|---|---|
+| `jazzhr` | `https://app.jazz.co/feeds/export/jobs/<subdomain>` | listing | Space Dynamics Laboratory (23) |
+| `jobvite` | `https://jobs.jobvite.com/<slug>/jobs` | listing | Nutanix (270) |
+| `bamboohr` | `https://<tenant>.bamboohr.com/careers/list` | browser | its own `totalCount` |
+| `pinpoint` | `https://<tenant>.pinpointhq.com/postings.json` | listing | Impulse Space (216) |
+| `breezy` | `https://<tenant>.breezy.hr/json` | static page | JND (25), NucleusTeq (28), Reveleer (17) |
+| `teamtailor` | `https://<tenant>.teamtailor.com/jobs.rss` | listing | Oatly (20), Polestar (13) |
+| `pageup` | `https://careers.pageuppeople.com/<instance>/cw/<language>/rss` | listing | Mutual of Omaha (68) |
+| `recruitee` | `https://<tenant>.recruitee.com/api/offers/` | listing | Hard Rock Digital (62) |
+
+Jobvite's XML feed (`app.jobvite.com/CompanyJobs/Xml.aspx?c=<company id>`) is
+keyed by a company id that only the careers page names, and its rows link
+app.jobvite.com, so `_jobvite` reads the id off the page and builds
+`jobs.jobvite.com/<slug>/job/<id>` from the listings URL's slug. A Jobvite
+posting open in several places is one feed row per place, `<id>-<suffix>`
+with a `parentId`; the rows fold into one posting with every place. The feed
+also names each posting's hiring team, which is not stored. A missing
+BambooHR tenant redirects to bamboohr.com, so `_bamboohr` refuses the
+redirect rather than read a marketing page. Pinpoint rows can link the
+employer's own domain (careers.wolve.com); the posting is kept on the tenant
+host, which serves the same path and is what the aggregators link. A
+BambooHR posting page is a script shell under 10 characters of text, so the
+static gate rejects it and the browser reads it; a Breezy posting page is
+server rendered and the static tier reads it whole. PageUp's `/ci/` feed is
+the internal careers site and is not a board. A Teamtailor site on the
+employer's own domain is not matched; store its `<tenant>.teamtailor.com`
+feed, which serves the same postings.
+
 ## A posting has one URL, whichever feed spelled it
 
 `jobs.url` is the posting's identity, and every row, verdict and link keys on
@@ -255,12 +290,13 @@ carries it (`ats.goldman_text`), and its resolver reads the same text back
 from the site's GraphQL `role`. Google's feed carries it, and has no resolver:
 the static tier reads an open posting's page whole (10,388 characters with
 every section, 2026-10-16), and a closed id answers the same 200 search page
-as a made-up one, so no answer means GONE. Workday,
+as a made-up one, so no answer means GONE. JazzHR, Jobvite, Pinpoint,
+Teamtailor, PageUp and Recruitee carry it whole and have no resolver. Workday,
 SmartRecruiters, Oracle Recruiting, Workable, Rippling and Apple list without the text,
 so their postings get it from the matching resolver, one call each, when a
 check needs it. An iCIMS portal card holds a snippet, which is not
 the text and is not stored; the iCIMS resolver reads the text from the
-posting's frame. Taleo, IBM and Avature list without the text and
+posting's frame. Taleo, IBM, Avature, BambooHR and Breezy list without the text and
 no resolver returns it, so their postings get it from the page fetch tiers
 below. Every careers.ibm.com page answers the static tier with an AWS WAF
 challenge (202), so IBM's text always comes from the browser (7 of 7 listed
