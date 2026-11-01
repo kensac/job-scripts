@@ -20,7 +20,7 @@ from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
 from api.model_calls import FLEET, Payer
 from api.task_config import configured_model, configured_shape
-from core.batch import BatchEventCounts, BatchResult
+from core.batch import BatchEventCounts, BatchEventHook, BatchResult
 from core.routing import Choice, TaskShape, resolve
 from tasks.runtime.lifecycle import claim_guard
 
@@ -68,8 +68,7 @@ def park_awaiting_batch(task_id: int, batch_ids: list[str]) -> bool:
     """Records the batches a task is waiting on and releases the worker.
 
     The ids go in the payload so a resumed run reattaches to work already paid
-    for instead of resubmitting - the same guarantee pending_batch_ids gave a
-    crashed worker, now used as the normal path rather than as recovery.
+    for instead of resubmitting.
 
     Returns False when the task was no longer claimable (cancelled, or reaped
     out from under us). That matters: the batches are already submitted and
@@ -119,7 +118,7 @@ def batch_event_hook(
     model: str | None,
     *,
     payer: Payer = FLEET,
-):
+) -> BatchEventHook:
     """Register provider progress and who pays for the batch.
 
     The batch row records the payer, so the receipt checkpoint can write each
@@ -246,7 +245,7 @@ async def submit_or_collect(
     model: str,
     reasoning_effort: str,
     max_output_tokens: int,
-    hook,
+    hook: BatchEventHook,
 ) -> list[BatchResult]:
     """Submit frozen requests and park, or return persisted results for consumption.
 
@@ -310,7 +309,7 @@ def has_batch_work(task_id: int) -> bool:
     )
 
 
-async def collect_pending(task_id: int, hook) -> list[BatchResult]:
+async def collect_pending(task_id: int, hook: BatchEventHook) -> list[BatchResult]:
     """Checkpoint paid responses before clearing provider IDs; replay until consumed."""
     from core.batch import collect_finished_batches
 
