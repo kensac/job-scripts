@@ -11,6 +11,7 @@ from api.ai import verdicts
 from api.budget import load_config
 from api.model_calls import Payer
 from api.task_jobs import run_jobs
+from api.verdict_equivalence import answering_models
 from core import pay_screen, verdict_reads
 from core.payloads.objects import MAX_CONNECTIONS, PayloadStore
 from core.screening import screen
@@ -141,7 +142,7 @@ def _take_twin_verdicts(
                 "j.source, j.near_copy_key, v.status, v.reason, v.filter_name, v.parsed_json",
                 "(j.source, j.near_copy_key) IN (SELECT * FROM unnest(%s::text[], %s::text[])) "
                 "AND NOT (j.url = ANY(%s::text[])) AND v.check_type = 'custom' "
-                "AND v.prompt_hash = %s AND v.model = %s",
+                "AND v.prompt_hash = %s AND v.model = ANY(%s)",
                 join="JOIN jobs j ON j.url = v.url",
             ),
             (
@@ -149,7 +150,7 @@ def _take_twin_verdicts(
                 [key for _, key in wanted],
                 [job["url"] for job in todo],
                 flt["prompt_hash"],
-                model,
+                answering_models("custom", model),
             ),
         )
     }
@@ -201,7 +202,9 @@ async def _run_filters(
     batch_chunk_size = int(db.get_config("filter_batch_chunk_size"))
     recipes = db.get_config("title_screens")
     for flt in filters:
-        decided = decided_custom_urls(urls, flt["prompt_hash"], cfg.model)
+        decided = decided_custom_urls(
+            urls, flt["prompt_hash"], answering_models("custom", cfg.model)
+        )
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         # A screened posting has no verdict, so without this every run chunked
