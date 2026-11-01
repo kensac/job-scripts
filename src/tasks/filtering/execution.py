@@ -250,6 +250,11 @@ async def execute_batch(
         ):
             cache_policy = "no_cache"
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
+    # One value, sent and recorded. OpenAI settings name it reasoning_effort
+    # and Anthropic settings name it effort; the batch transport takes either.
+    effort = (
+        cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium" if cfg else None
+    )
     specs, by_url = [], {}
     for job in jobs:
         if existing:
@@ -270,10 +275,7 @@ async def execute_batch(
                     "job": job,
                     "page_fetch_id": page.fetch_id,
                     "filter": snapshot.__dict__,
-                    "reasoning_effort": cfg.params.get("reasoning_effort")
-                    or cfg.params.get("effort")
-                    if cfg
-                    else None,
+                    "reasoning_effort": effort,
                 },
             )
         )
@@ -297,12 +299,12 @@ async def execute_batch(
         logger.info("Task %s: collecting previously submitted results", task_id)
         results = await collect(task_id, hook)
     else:
-        assert cfg is not None
+        assert cfg is not None and effort is not None
         results = await submit(
             task_id,
             specs,
             cfg.model,
-            cfg.params.get("reasoning_effort", "medium"),
+            effort,
             max_output_tokens,
             hook,
         )
