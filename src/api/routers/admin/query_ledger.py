@@ -288,6 +288,33 @@ class QueryPage(BaseModel):
     filterable: list[str]
 
 
+# The ledger's default page, newest first with no filter. Through the view it
+# was a seq scan and sort of every fetch: the fetch arm has a WHERE, so it is
+# not flattened (1.6 s warm, 3.1 s cold on production, 2026-11-01). Both arms
+# draw ids from ai_queries_id_seq, so the page's ids are the newest of each
+# primary key merged, and the rows are then read by id: 7 ms + 65 ms, same
+# rows. Same arms as posting_inspection._NEWEST_ROWS. The ids go in as an
+# array: `id IN (SELECT ...)` is not pushed into the fetch arm (11.5 s).
+_NEWEST_IDS = """
+    (SELECT id FROM ai_queries ORDER BY id DESC LIMIT %(n)s)
+    UNION ALL
+    (SELECT id FROM page_fetches WHERE method <> 'verification' ORDER BY id DESC LIMIT %(n)s)
+    ORDER BY id DESC LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+
+def _newest_page(offset: int, limit: int) -> list[QueryListing]:
+    ids = [
+        r["id"]
+        for r in db.query(_NEWEST_IDS, {"n": offset + limit, "limit": limit, "offset": offset})
+    ]
+    return db.query_as(
+        QueryListing,
+        f"SELECT {_LIST_COLS} FROM ledger_rows WHERE id = ANY(%(ids)s) ORDER BY id DESC",
+        {"ids": ids},
+    )
+
+
 @router.get("/queries")
 def list_queries(
     check_type: str | None = None,
@@ -336,12 +363,15 @@ def list_queries(
     total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ledger_rows {where}", params)
     sortable = {key: key for key in _QUERY_SORT_COLUMNS}
     sorts = sorting.parse(sort, dir, sortable, "id")
-    rows = db.query_as(
-        QueryListing,
-        f"SELECT {_LIST_COLS} FROM ledger_rows {where} "
-        f"ORDER BY {sorting.clause(sorts, sortable, _QUERY_NON_NULL_SORT_COLUMNS)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
-        {**params, "limit": paging.size, "offset": paging.offset},
-    )
+    if not where and sorts == [{"key": "id", "dir": "desc"}]:
+        rows = _newest_page(paging.offset, paging.size)
+    else:
+        rows = db.query_as(
+            QueryListing,
+            f"SELECT {_LIST_COLS} FROM ledger_rows {where} "
+            f"ORDER BY {sorting.clause(sorts, sortable, _QUERY_NON_NULL_SORT_COLUMNS)}, id DESC LIMIT %(limit)s OFFSET %(offset)s",
+            {**params, "limit": paging.size, "offset": paging.offset},
+        )
     total = total_row["c"] if total_row else 0
     return QueryPage(
         sorts=sorts,

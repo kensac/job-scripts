@@ -109,3 +109,27 @@ def test_query_options_read_both_ledger_arms_like_the_view(client, admin_headers
     assert got["statuses"] == view["status"] == ["failed", "passed", "rejected"]
     assert got["contexts"] == view["config_name"] == ["content-cache", "verify-batch"]
     assert got["workers"] == view["worker"] == ["w-answer", "w-fetch"]
+
+
+def test_newest_page_matches_the_view_across_both_arms(client, admin_headers):
+    """The unfiltered newest-first page is read by id off each arm's primary
+    key; every page must be what ledger_rows itself gives, verification
+    copies excluded."""
+    for i in range(4):
+        db.execute(
+            "INSERT INTO ai_queries (url, check_type, status) VALUES (%s, 'closed', 'passed')",
+            (f"https://n.test/q{i}",),
+        )
+        db.execute(
+            "INSERT INTO page_fetches (url, status, method) VALUES (%s, 'passed', %s)",
+            (f"https://n.test/f{i}", "verification" if i % 2 else "scraped"),
+        )
+    view = [r["id"] for r in db.query("SELECT id FROM ledger_rows ORDER BY id DESC")]
+    got = []
+    for page in (1, 2, 3, 4):
+        body = client.get(
+            f"/v1/admin/queries?page_size=2&page={page}", headers=admin_headers
+        ).json()
+        assert body["total"] == len(view)
+        got += [r["id"] for r in body["rows"]]
+    assert got == view
