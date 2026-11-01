@@ -1,4 +1,5 @@
-"""Admin spend routes for recorded calls, verdict diagnostics, and provider costs.
+"""Admin spend routes for recorded calls, verdict diagnostics, provider costs and
+balances.
 
 A verification request can produce several verdicts. The recorded call ledger
 and posting verdict diagnostics remain separate populations in the response.
@@ -16,6 +17,7 @@ from api import budget, db, scoping
 from api import params as params_
 from api.auth import AuthedUser
 from api.routers.admin import require_admin
+from api.spend import balance
 from api.spend.ledger import (
     LedgerPurpose,
     LedgerWithTotals,
@@ -360,3 +362,112 @@ def _available_costs(days: int) -> ProviderCosts:
     if costs.status != "available":
         raise _ProviderUnavailable(costs)
     return costs
+
+
+class ProviderSpendItem(BaseModel):
+    item: str
+    amount_usd: float
+
+
+class ProviderSpendDay(BaseModel):
+    day: datetime.date
+    total_usd: float
+
+
+class ProviderSpend(BaseModel):
+    """Provider-reported spend over completed UTC days."""
+
+    yesterday_usd: float
+    last_7_days_usd: float
+    last_30_days_usd: float
+    month_to_date_usd: float
+    daily_rate_usd: float
+    item_basis: str
+    by_item: list[ProviderSpendItem]
+    daily: list[ProviderSpendDay]
+
+
+class ProviderLimit(BaseModel):
+    """OpenAI's hard spend limit, as the provider reports it."""
+
+    status: str
+    reason: str | None
+    threshold_usd: float | None
+    interval: str | None
+    enforcement: str | None
+
+
+class ProviderHeadroom(BaseModel):
+    """Money left on one basis. Always derived, never provider-reported:
+    `derivation` names how, and `unavailable` says why a basis that applies
+    has no figure."""
+
+    basis: str
+    label: str | None = None
+    derivation: str | None = None
+    amount_usd: float | None
+    spent_usd: float | None = None
+    granted_usd: float | None = None
+    granted_on: datetime.date | None = None
+    limit_usd: float | None = None
+    runway_days: float | None = None
+    ends_on: datetime.date | None = None
+    unavailable: str | None
+    alert: dict[str, str] | None
+
+
+class ProviderBalance(BaseModel):
+    provider: str
+    status: str
+    reason: str | None
+    scope: str
+    fetched_at: str
+    spend: ProviderSpend | None
+    limit: ProviderLimit | None
+    headrooms: list[ProviderHeadroom]
+
+
+class ProviderBalances(BaseModel):
+    providers: list[ProviderBalance]
+    alert_usd: int
+    alert_days: int
+
+
+@router.get("/admin/spend/balance")
+def provider_balances(user: AuthedUser = Depends(require_admin)) -> ProviderBalances:
+    """Each provider's reported spend and its derived money left.
+
+    The provider reads are served stale like /admin/spend/provider, keyed on
+    the UTC day and the read window; an unreadable read is answered and never
+    cached. The derivation reads the admin's settings on every request, so a
+    changed grant or threshold shows at once."""
+    today = datetime.datetime.now(datetime.UTC).date()
+    providers = []
+    for provider in balance.PROVIDERS:
+        granted_on = (balance.prepaid_for(provider) or {}).get("granted_on")
+        try:
+            raw = _balance_reads.get(
+                (provider, granted_on, today), lambda p=provider, g=granted_on: _readable(p, g)
+            )
+        except _BalanceUnreadable as unreadable:
+            raw = unreadable.raw
+        providers.append(ProviderBalance(**balance.report(provider, raw)))
+    alert_usd, alert_days = balance.thresholds()
+    return ProviderBalances(providers=providers, alert_usd=alert_usd, alert_days=alert_days)
+
+
+_balance_reads: StaleByKey[tuple[str, str | None, datetime.date], dict[str, Any]] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+class _BalanceUnreadable(Exception):
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.raw = raw
+
+
+def _readable(provider: str, granted_on: str | None) -> dict[str, Any]:
+    raw = balance.read(provider, granted_on)
+    if not balance.readable(raw):
+        raise _BalanceUnreadable(raw)
+    return raw
