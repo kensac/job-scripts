@@ -55750,7 +55750,8 @@
             "enum": [
               "internship_v1",
               "new_grad_v1",
-              "aero_major_v1"
+              "aero_major_v1",
+              "finance_new_grad_v1"
             ],
             "title": "Recipe"
           },
