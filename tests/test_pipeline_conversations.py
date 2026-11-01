@@ -327,6 +327,23 @@ def test_conversations_sort_on_the_set(client, user_headers):
     assert newest["threads"][0]["thread_id"] == "new-convo"
 
 
+def test_conversations_page_in_one_order_when_the_sort_ties(client, user_headers):
+    """Equal message counts are the common case. Without a tiebreak, offset
+    paging could repeat one conversation and skip another."""
+    uid = db.query_one("SELECT id FROM users WHERE email = %s", ("user@example.com",))["id"]
+    for key in ("tie-b", "tie-c", "tie-a"):
+        insert_gmail_thread(uid, key, 2)
+
+    pages = [
+        client.get(
+            f"/v1/user/threads?sort=message_count&limit=1&offset={offset}",
+            headers=user_headers,
+        ).json()["threads"][0]["thread_id"]
+        for offset in range(3)
+    ]
+    assert pages == ["tie-a", "tie-b", "tie-c"]
+
+
 def test_the_unmatched_queue_is_work_not_the_whole_mailbox(client, user_headers):
     """It shipped showing 63,598 messages - essentially the entire mailbox -
     because personal mail correctly has no application and always will. A queue

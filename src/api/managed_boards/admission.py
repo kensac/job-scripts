@@ -72,10 +72,6 @@ class _UsagePosition:
     reserved: int
 
 
-def _allowance(sponsor: _Sponsor) -> tuple[bool, int | None]:
-    return budget.owner_budget(sponsor.groups)
-
-
 def _usage_position(sponsor_id: int) -> _UsagePosition:
     row = db.query_one_as(
         _UsagePosition,
@@ -148,7 +144,7 @@ def _plan(board_id: int) -> _Plan:
         resolved_model = config.model
         candidates = _reuse_candidates(sponsor.id, resolved_model)
     else:
-        owner, cap = _allowance(sponsor)
+        owner, cap = budget.owner_budget(sponsor.groups)
         provider = providers.provider_of(board.requested_model)
         if not owner or provider is None or not routing.server_key(provider):
             raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")

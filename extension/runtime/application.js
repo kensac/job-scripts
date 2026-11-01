@@ -187,6 +187,10 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // Underscore keys are the reader's DOM handles; the API never sees them.
   const plain = (f) => Object.fromEntries(Object.entries(f).filter(([k]) => !k.startsWith("_")));
   const boxOf = (f) => f._box || (f._ctl && (f._ctl.closest("fieldset, .field, .application-question, .select-shell") || f._ctl.parentElement)) || null;
+  const onScreen = (f) => {
+    const node = f._el || f._ctl || f._box;
+    return !!node?.isConnected && node.getClientRects().length > 0;
+  };
   const fieldByKey = (key) => fields.find((f) => f.key === key);
   const entryByKey = (key) => fill.fields.find((e) => e.key === key);
   const readFields = async () => {
@@ -216,8 +220,9 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   // without a reload.
   // The controls on the page by id or name: it changes when the form moves
   // to its next page under the same url (Workday), not when the person
-  // types. Recorded after a fill pass; a change means a page the person
-  // moved to by hand, and the panel offers Autofill for it.
+  // types. Recorded after a fill pass; a change with none of the filled
+  // controls left on screen means a page the person moved to by hand, and
+  // the panel offers Autofill for it.
   const pageSignature = () =>
     // The #jt-apply filter is belt and braces now rather than the mechanism: a
     // document query does not cross a shadow boundary, so the panel's own
@@ -242,6 +247,14 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
       // did not render; put it back rather than believing it is there.
       surface.ensure();
       if (mountedFor === here && panelUp && fill && pageSig && pageSignature() !== pageSig) {
+        // A control coming or going beside the filled ones is the same page:
+        // a required react-select drops its hidden input once the person
+        // answers it (Greenhouse's location). Treating that as a new page
+        // dropped the fill, and the Submit that followed recorded an empty one.
+        if (fields.some(onScreen)) {
+          pageSig = pageSignature();
+          return;
+        }
         pageSig = null;
         step += 1;
         fields = [];

@@ -54,7 +54,6 @@ class Derivation:
     receipt outcome; only "written" counts as done. When `answer` is None,
     the store reads the raw result, as embeddings do.
 
-    `recipe` versions instructions and schema when the table stores a version.
     `shape` uses core.routing and the person's model setting; `model` pins one.
     Without a shape, `model` selects the request endpoint directly.
     """
@@ -68,7 +67,6 @@ class Derivation:
     requests: Callable[[list[Row]], list[BatchSpec]]
     store: Callable[[BatchResult, dict[str, Any], Any], str]
     input_chars: int | None
-    recipe: str | None
     shape: TaskShape | None = None
     model: str | None = None
     answer: type[BaseModel] | None = None

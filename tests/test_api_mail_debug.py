@@ -364,7 +364,7 @@ def test_refusing_to_match_is_filterable_apart_from_failing_to(client, admin_hea
 def test_never_attempted_has_a_name_rather_than_being_an_absence(client, admin_headers, f):
     """A third state, and the one worth filtering for when hunting failures.
     Reachable only as a gap in a list is not reachable."""
-    from api.routers.mail.debug import NEVER_ATTEMPTED
+    from api.routers.mail.debug_inspection import NEVER_ATTEMPTED
 
     uid = f.make_user()
     _msg_with(f, uid, "rejection", None, "e")
