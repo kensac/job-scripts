@@ -52,6 +52,26 @@ async def test_per_request_errors_are_stored_as_the_provider_wrote_them():
     assert "minimal is not supported" in stored[0]["error"]
 
 
+HTTP_REFUSED_LINE = (
+    '{"custom_id": "u1", "error": null, "response": {"status_code": 400, '
+    '"body": {"error": {"message": "Billing hard limit has been reached", '
+    '"type": "invalid_request_error"}}}}'
+)
+
+
+@pytest.mark.asyncio
+async def test_a_request_refused_over_http_keeps_the_reason_from_its_response_body():
+    """The line's top-level error is null; the reason sits in the response.
+    On 2026-10-31 all 33,365 such rows were stored as "batch error"."""
+    fake = SimpleNamespace(
+        id="b-http", status="completed", output_file_id=None, error_file_id="e1", errors=None
+    )
+    results = {"u1": batch.BatchResult("u1")}
+    await batch._collect_batch(_Client(HTTP_REFUSED_LINE), fake, results)  # type: ignore[arg-type]
+    assert results["u1"].error == "400: Billing hard limit has been reached"
+    assert [e["error"] for e in _errors("b-http")] == ["400: Billing hard limit has been reached"]
+
+
 @pytest.mark.asyncio
 async def test_a_batch_rejected_before_any_request_ran_keeps_its_reason():
     """No output file, no error file: the reason is on the batch object and
