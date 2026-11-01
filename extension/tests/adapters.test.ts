@@ -8,6 +8,7 @@ import { createAdapter as greenhouse } from "../adapters/greenhouse.js";
 import { createRecipeAdapter } from "../adapters/recipe.js";
 import { releaseAutomationFocus } from "../runtime/focus";
 import { commitControl } from "../adapters/dom";
+import { createRecipeControls } from "../adapters/recipe-controls.js";
 import type { Adapter, AdapterContext } from "../adapters/types";
 
 function dom(markup: string, url = "https://jobs.lever.co/example/apply") {
@@ -119,5 +120,23 @@ for (const focused of [false, true]) test(`field commit emits one blur and focus
   assert.deepEqual(seen, ["blur", "focusout"]);
   assert.notEqual(document.activeElement, input);
   operation.finish();
+  await window.happyDOM.close();
+});
+
+test("a rich-text editor receives an answer as text, not markup", async () => {
+  const { window, context, operation } = dom('<textarea id="cover"></textarea><iframe id="cover_ifr"></iframe>');
+  // happy-dom gives an iframe no document, so the editor's frame gets one.
+  const editor = new Window({ url: "about:blank" });
+  Object.defineProperty(window.document.getElementById("cover_ifr"), "contentDocument", { value: editor.document });
+  const controls = createRecipeControls(context, () => ({}), (ms: number) => operation.sleep(ms), () => {});
+  operation.start();
+  await controls.runMethod("tinyMCE", window.document.getElementById("cover"), 'a <b>bold</b> & b\nline two\n\nnext', null, {});
+  operation.finish();
+  const body = editor.document.body;
+  assert.equal(body.querySelector("b"), null);
+  assert.equal(body.querySelectorAll("p").length, 2);
+  assert.equal(body.querySelectorAll("br").length, 1);
+  assert.equal(body.querySelector("p")!.textContent, 'a <b>bold</b> & bline two');
+  await editor.happyDOM.close();
   await window.happyDOM.close();
 });

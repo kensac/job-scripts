@@ -106,7 +106,7 @@ test('an event carries the id and every input value with it', () => {
   // Through JSON because the event is built inside the vm context, whose
   // Object.prototype is not this one's.
   assert.deepEqual(JSON.parse(JSON.stringify(events)), [
-    { type: 'click', id: 'jt-send', ai: null, values: { 'jt-note': 'the select would not open' } },
+    { type: 'click', id: 'jt-send', values: { 'jt-note': 'the select would not open' } },
   ]);
 });
 
