@@ -450,8 +450,8 @@ schema values and does not import a live contract.
 answer a model derives from data we already hold (pay, requirements, job
 profiles, embeddings, locations), each a `tasks.derivations.sweep.Derivation` naming its
 table, its input (page text cut to `input_chars`, or not page text), its
-recipe version, its model routing, its staleness rule (`select`) and its
-store. `tasks.derivations.sweep` owns one execution path: switch, one pass in flight,
+model routing, its staleness rule (`select`) and its store. A recipe version
+lives in the request context and the stored row, where the store checks it. `tasks.derivations.sweep` owns one execution path: switch, one pass in flight,
 selection, the unchanged-page skip, batch submit and collect through
 `tasks.runtime`, the page-currency check, parse, store. The worker schedules
 and dispatches every entry from the list, so a new derivation touches neither.
