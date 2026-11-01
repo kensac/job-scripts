@@ -205,6 +205,24 @@ def test_identities_fall_back_to_the_configured_address(f):
     assert identities_for(uid) == ["only@known.com"]
 
 
+def test_a_user_with_no_address_has_no_identity(f):
+    """An empty identity would make every sender the owner: position('' IN x)
+    is 1, so the guard and the heal would treat all inbound mail as sent."""
+    uid = f.make_user()
+    db.execute("UPDATE users SET email = NULL WHERE id = %s", (uid,))
+    assert identities_for(uid) == []
+    db.execute(
+        "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
+        "to_emails, subject) VALUES (%s, 'inbound', 'gmail', 'recruiter@corp.com', %s, 's')",
+        (uid, ["someone@corp.com"]),
+    )
+    row = db.query_one(
+        f"SELECT {_SELF_SENT} AS s FROM email_messages m WHERE m.user_id = %(uid)s",
+        {"uid": uid, "identities": identities_for(uid)},
+    )
+    assert row is not None and row["s"] is False
+
+
 def test_the_guard_runs_off_the_mailbox_with_nothing_confirmed(client, user_headers, f):
     """The confirmation screen is gone (#301) and the guard is not.
 

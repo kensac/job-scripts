@@ -67,5 +67,5 @@ export function createApplicationContext(api, lifecycle, esc, onLoaded) {
   const matchedTitle = () =>
     context && context.job ? [context.job.title, context.job.company].filter(Boolean).join(" · ") : "";
 
-  return { get current() { return context; }, get state() { return contextState; }, reset() { context = null; contextState = "idle"; contextGeneration += 1; }, markIdle() { contextState = "idle"; }, load: loadContext, previousApplicationNotice, sources, matchedTitle };
+  return { get current() { return context; }, reset() { context = null; contextState = "idle"; contextGeneration += 1; }, markIdle() { contextState = "idle"; }, load: loadContext, previousApplicationNotice, sources, matchedTitle };
 }
