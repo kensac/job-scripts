@@ -156,6 +156,28 @@ def test_olm_reads_a_zip(tmp_path):
     assert msgs[0].source == "olm"
 
 
+def test_olm_sender_name_is_read_from_its_attribute(tmp_path):
+    """Outlook writes the sender's display name as an attribute beside the
+    address. The holder element has no text, so the name was never stored."""
+    xml = (
+        b"<emails><email>"
+        b"<OPFMessageCopyMessageID>n1@x</OPFMessageCopyMessageID>"
+        b"<OPFMessageCopyFromAddresses><emailAddress "
+        b'OPFContactEmailAddressAddress="hr@acme.com" '
+        b'OPFContactEmailAddressName="Acme Recruiting" '
+        b'OPFContactEmailAddressType="0"/></OPFMessageCopyFromAddresses>'
+        b"</email></emails>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("Accounts/x/Message/1.xml", xml)
+    path = tmp_path / "named.olm"
+    path.write_bytes(buf.getvalue())
+
+    [msg] = list(read_olm(path))
+    assert (msg.from_email, msg.from_name) == ("hr@acme.com", "Acme Recruiting")
+
+
 def test_read_archive_dispatches_on_extension(tmp_path):
     assert isinstance(next(read_archive(_write(tmp_path, "a.mbox", MBOX))), ImportedMessage)
     with pytest.raises(ValueError, match="unsupported archive"):
@@ -280,7 +302,7 @@ def test_an_mbox_is_read_from_inside_a_takeout_zip():
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("Takeout/Mail/All mail Including Spam and Trash.mbox", _mbox_bytes())
 
-    msgs = list(read_mbox(path))
+    msgs = list(read_archive(path))
     assert [m.provider_message_id for m in msgs] == ["<z1@acme.com>", "<z2@acme.com>"]
     assert msgs[0].headers["references"] == "<z0@acme.com>"
 
