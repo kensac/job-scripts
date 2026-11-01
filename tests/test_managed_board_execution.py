@@ -10,7 +10,7 @@ from core import pricing
 from core.filters import compute_filter_hash
 from core.store import add_ai_result
 from tasks import managed_boards as managed_task
-from tests.factories import board_config
+from tests.factories import board_config, user_id_for_subject
 
 
 def test_worker_registry_declares_managed_board_handler():
@@ -310,7 +310,7 @@ async def test_sponsor_filter_reuse_projects_only_exact_machine_results_without_
 
     source = f.make_source("personal-source")
     other_source = f.make_source("person-only-source")
-    sponsor = db.query_one("SELECT id FROM users WHERE sub = 'test-admin'")["id"]
+    sponsor = user_id_for_subject("test-admin")
     f.subscribe(sponsor, source)
     flt = f.make_filter(sponsor, prompt="backend only", enabled=True)
     included_id, included_url = f.make_ready_job(source=source)

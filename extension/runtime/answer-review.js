@@ -110,5 +110,5 @@ export function createApplicationReview({ state, render, on, api, surface, opera
     });
   }
 
-  return { show, loadReview, drawReview, reviewAction };
+  return { show, drawReview, reviewAction };
 }

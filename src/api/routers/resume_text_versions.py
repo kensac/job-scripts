@@ -116,12 +116,7 @@ def start_text_version(
     resume_id: int, user: AuthedUser = Depends(require_user)
 ) -> TextVersionStart:
     _resume(resume_id, user.id)
-    version_id = uuid.uuid4()
-    db.execute(
-        "INSERT INTO resume_text_versions (id, user_id) VALUES (%s, %s)",
-        (version_id, user.id),
-    )
-    return TextVersionStart(id=version_id)
+    return start_new_text_version(user)
 
 
 @router.post("/user/resume-text-versions", status_code=201)

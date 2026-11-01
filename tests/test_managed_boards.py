@@ -4,6 +4,7 @@ import pytest
 
 from api import db
 from core.filters import compute_filter_hash
+from tests.factories import user_id_for_subject
 
 
 def _source(name: str) -> None:
@@ -32,7 +33,7 @@ def test_managed_board_create_get_and_list_are_typed_and_deterministic(client, a
     response = _create(client, admin_headers, on_ambiguous="filter")
     assert response.status_code == 200, response.text
     board = response.json()
-    sponsor = db.query_one("SELECT id FROM users WHERE sub = 'test-admin'")["id"]
+    sponsor = user_id_for_subject("test-admin")
     assert board == {
         "id": board["id"],
         "slug": "software-engineering",

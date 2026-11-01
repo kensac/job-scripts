@@ -198,7 +198,7 @@ class RejectionReasons(BaseModel):
     filterable: list[str]
 
 
-def _evidence_criterion() -> EvidenceCriterion:
+def evidence_criterion() -> EvidenceCriterion:
     return EvidenceCriterion(
         method="phrase_match",
         description=EVIDENCE_MISSING_DESCRIPTION,
@@ -206,7 +206,7 @@ def _evidence_criterion() -> EvidenceCriterion:
     )
 
 
-def _example_selection() -> ExamplesSelection:
+def example_selection() -> ExamplesSelection:
     """How the examples were chosen, published for the same reason the
     evidence-missing criterion is: a caller that has to narrate a number will
     narrate it from somewhere, and if the derivation is not in the payload it
@@ -279,7 +279,7 @@ class PromptEvidenceAccumulator:
         return len(self._jobs)
 
 
-def _group_rejections_by_prompt(
+def group_rejections_by_prompt(
     hashes: list[str], rejections: list[dict[str, Any]]
 ) -> tuple[dict[str, dict[str, ReasonBreakdownAccumulator]], dict[str, PromptEvidenceAccumulator]]:
     """One classification pass, shared by the admin and user views.
@@ -304,7 +304,7 @@ def _group_rejections_by_prompt(
     return grouped, per_hash
 
 
-def _prompt_totals(
+def prompt_totals(
     row: dict[str, Any], missing: PromptEvidenceAccumulator, rejected_with_reason: int
 ) -> PromptTotals:
     return PromptTotals(
@@ -319,7 +319,7 @@ def _prompt_totals(
     )
 
 
-def _named_group_breakdowns(
+def named_group_breakdowns(
     buckets: dict[str, ReasonBreakdownAccumulator], examples: int
 ) -> list[GroupBreakdown]:
     return sorted(

@@ -8,19 +8,14 @@ import datetime
 from api import db
 from tasks import runtime as tasks_runtime
 from tests import factories
+from tests.factories import user_id_for_subject
 from tests.job_board_support import _insert_job
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def test_reports_tasks_batches_scope_by_user(
     client, admin_headers, user_headers, other_user_headers
 ):
-    me, other = _uid(user_headers), _uid(other_user_headers)
+    me, other = user_id_for_subject("test-user"), user_id_for_subject("test-user-2")
     j1 = _insert_job("src-sc", "https://x.test/sc1")
     j2 = _insert_job("src-sc", "https://x.test/sc2")
     # A report addresses a job the person can see, like every per-job route.
@@ -73,7 +68,7 @@ def test_reports_tasks_batches_scope_by_user(
 def test_mail_spend_and_queries_scope_by_user(
     client, admin_headers, user_headers, other_user_headers
 ):
-    me, other = _uid(user_headers), _uid(other_user_headers)
+    me, other = user_id_for_subject("test-user"), user_id_for_subject("test-user-2")
     sent = datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC)
     for uid, key in ((me, "sc-a"), (other, "sc-b")):
         db.execute(

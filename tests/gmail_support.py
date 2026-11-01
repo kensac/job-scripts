@@ -85,12 +85,6 @@ def google(monkeypatch) -> FakeGoogle:
     return fake
 
 
-def user_id_for_subject(sub: str) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
-    assert row is not None
-    return row["id"]
-
-
 def allow_gmail_connection_for_groups(*groups: str) -> None:
     db.execute(
         "INSERT INTO app_config (key, value) VALUES (%s, %s) "

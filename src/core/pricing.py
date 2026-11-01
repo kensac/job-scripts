@@ -163,9 +163,8 @@ def cost_sql(
     and tested against each other.
 
     Every rate is a placeholder the caller binds, including the cached rate and
-    the batch multiplier that used to be module-level constants. That is the
-    point: there is no longer a universal discount to hardcode on either side.
-    A caller whose model has no batch lane binds 1.
+    the batch multiplier, because no discount is universal across models. A
+    caller whose model has no batch lane binds 1.
 
     Wall-clock discounts are NOT rendered here either: estimate_cost_usd
     applies them from `at`, and no bulk caller prices a provider that has them.
@@ -180,32 +179,26 @@ def cost_sql(
     k = f"COALESCE({cached}, 0)"
     cached_part = f"LEAST(GREATEST({k}, 0), {p})"
     remaining = f"GREATEST({p} - {cached_part}, 0)"
+    unknown = ""
     if cache_write is None:
         write_part = "0"
         write_rate = model_rate_in
-        unknown_guard = ""
     else:
         write_part = f"LEAST(GREATEST(COALESCE({cache_write}, 0), 0), {remaining})"
-        write_rate = (
-            f"COALESCE({model_rate_cache_write_in}, {model_rate_in})"
-            if model_rate_cache_write_in is not None
-            else model_rate_in
-        )
-        unknown_conditions = []
-        if model_rate_cache_write_in is not None:
-            unknown_conditions.append(
-                f"{cache_write} IS NULL AND {model_rate_cache_write_in} IS NOT NULL "
-                f"AND {model_rate_cache_write_in} <> {model_rate_in}"
+        if model_rate_cache_write_in is None:
+            # No write rate to bind, so any reported write is unpriced.
+            write_rate = model_rate_in
+            unknown = f"{write_part} > 0"
+        else:
+            # Unknown, as in estimate_cost_usd, when a receipt omits writes on a
+            # model with a premium write rate, or reports writes on a model with
+            # no published write rate.
+            rate = model_rate_cache_write_in
+            write_rate = f"COALESCE({rate}, {model_rate_in})"
+            unknown = (
+                f"({cache_write} IS NULL AND {rate} IS NOT NULL AND {rate} <> {model_rate_in})"
+                f" OR ({write_part} > 0 AND {rate} IS NULL)"
             )
-        unknown_conditions.append(
-            f"{write_part} > 0"
-            + (
-                f" AND {model_rate_cache_write_in} IS NULL"
-                if model_rate_cache_write_in is not None
-                else ""
-            )
-        )
-        unknown_guard = f"CASE WHEN {' OR '.join(unknown_conditions)} THEN NULL ELSE "
     ordinary = f"({remaining} - {write_part})"
     expression = (
         f"(({ordinary} * {model_rate_in}"
@@ -214,4 +207,4 @@ def cost_sql(
         f" + {c} * {model_rate_out}) / {_PER_MTOK})"
         f" * CASE WHEN {batched} THEN {batch_rate} ELSE 1 END"
     )
-    return f"{unknown_guard}{expression} END" if unknown_guard else expression
+    return f"CASE WHEN {unknown} THEN NULL ELSE {expression} END" if unknown else expression
