@@ -238,7 +238,7 @@ async def test_verify_new_defers_to_a_verdict_settled_after_it_submitted(monkeyp
         }
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
 
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
@@ -284,7 +284,7 @@ async def test_verify_new_with_no_holes_to_fill_submits_nothing(monkeypatch, f):
         raise AssertionError("nothing was missing, so nothing should be submitted")
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("core.batch.submit_responses_batches", refuse)
+    monkeypatch.setattr("core.batch.submit_batches", refuse)
     source = f.make_source("complete-src")
     uid = f.make_user()
     f.subscribe(uid, source)
@@ -332,7 +332,7 @@ async def test_verify_new_writes_no_verdict_for_a_line_it_could_not_read(monkeyp
         }
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
 
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})

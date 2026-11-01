@@ -45,7 +45,7 @@ async def test_reverify_jobs_skips_urls_with_fresh_closed_verdicts(monkeypatch):
         }
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
 
     fresh_urls = ["https://x.example.com/fresh-1", "https://x.example.com/fresh-2"]
@@ -110,7 +110,7 @@ async def test_verify_new_records_both_verdicts(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
     await _run_batched(tid, lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
@@ -155,7 +155,7 @@ async def test_batched_verdicts_record_their_reason(monkeypatch):
         }
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     tid = tasks_runtime.enqueue("verify_new", {"cycle": "t"})
     await _run_batched(tid, lambda: tasks_verify.handle_verify_new(tid, {"cycle": "t"}))
@@ -193,7 +193,7 @@ async def test_reverify_records_batch_verdicts_and_reattaches(monkeypatch):
         return "job content here", False
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(fake_collect))
 
     rows = [{"url": "https://rv.example.com/1", "company": "Acme", "title": "SWE"}]
@@ -246,7 +246,7 @@ async def test_full_sweep_rechecks_even_fresh_verdicts(monkeypatch):
 
     monkeypatch.setattr(fetching, "fetch_page", fake_fetch)
     monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
-    monkeypatch.setattr("core.batch.submit_responses_batches", _submit_ids)
+    monkeypatch.setattr("core.batch.submit_batches", _submit_ids)
     monkeypatch.setattr("core.batch.collect_finished_batches", finished(_collect_from(fake_batch)))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 

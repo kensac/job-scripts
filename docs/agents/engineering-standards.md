@@ -12,8 +12,9 @@ When moving or renaming an environment reader, keep
 `tests/test_env_example.py` able to discover its reads so `.env.example`
 stays checked in both directions.
 
-Every module logs through `logging.getLogger(__name__)`. Telemetry attaches
-to the root logger, so a module needs no registration. Inside an `except`, use
+Every module logs through `logging.getLogger(__name__)`
+(`tests/test_logger_names.py`). Telemetry attaches to the root logger, so a
+module needs no registration. Inside an `except`, use
 `logger.exception`, which keeps the traceback.
 
 Preserve concurrency and locking semantics across refactors, and check them

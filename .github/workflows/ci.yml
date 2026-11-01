@@ -21,7 +21,7 @@ jobs:
     # tables: exported against a DSN pointing at a closed port it produces a
     # file identical to the committed one, byte for byte. Booting Postgres
     # for it cost the gate about 14 s (7.7 s pulling the image, 5.9 s waiting
-    # on a health check), and every other job waits on the gate. Migrations
+    # on a health check). Migrations
     # are still applied and checked for drift in `static`, on a real
     # database, and tests/test_openapi_current.py still compares the
     # committed schema against the live routes.
@@ -106,12 +106,12 @@ jobs:
         run: ruff check src tests
       - name: Format check
         run: ruff format --check src tests
-  # Everything the gate proved was not needed before the tests can start.
-  # It ran inside prepare, and the lanes waited about twenty seconds for
-  # checks none of them consume: the manifest below is read by `check` at
-  # the end, not by a lane. Now it runs beside them.
+  # No job waits on `gate`. Only `check` reads its result, so a run whose
+  # gate fails (an auto-fix push, an unfixable lint error) still ends red
+  # and judges nothing. Waiting cost every run about 18 s of wall time, the
+  # gate plus a second job hand-off, to save the lanes' runner time on the
+  # 1 run in 200 where the gate failed (measured 2026-11-01).
   static:
-    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,7 +182,6 @@ jobs:
           if-no-files-found: error
 
   extension:
-    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -211,7 +210,6 @@ jobs:
           include-hidden-files: true
 
   tests:
-    needs: gate
     strategy:
       fail-fast: false
       matrix:
