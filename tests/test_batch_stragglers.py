@@ -216,12 +216,14 @@ async def test_a_batch_row_nothing_will_collect_expires_after_the_window(monkeyp
     db.execute("UPDATE ai_batches SET task_id = %s WHERE provider_batch_id = %s", (live, "parked"))
     await tasks_batches.handle_poll_batches(poll, {})
     rows = {
-        r["provider_batch_id"]: r["status"]
-        for r in db.query("SELECT provider_batch_id, status FROM ai_batches")
+        r["provider_batch_id"]: (r["status"], r["completed_at"])
+        for r in db.query("SELECT provider_batch_id, status, completed_at FROM ai_batches")
     }
-    assert rows["orphan"] == "expired"
+    # Terminal in both columns: the model health view counts a row without
+    # completed_at as in flight.
+    assert rows["orphan"][0] == "expired" and rows["orphan"][1] is not None
     # Young, or still parked on by a live task: left to the poll.
-    assert rows["young"] == "in_progress" and rows["parked"] == "in_progress"
+    assert rows["young"] == ("in_progress", None) and rows["parked"] == ("in_progress", None)
     label = db.query_one("SELECT progress->>%s AS l FROM tasks WHERE id = %s", ("label", poll))["l"]
     assert "1 orphaned batch row(s) expired" in label
 
