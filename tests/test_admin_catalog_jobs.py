@@ -1,6 +1,7 @@
 import json
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def _catalog(client, headers, **params):
@@ -60,7 +61,7 @@ def test_catalog_refuses_a_persons_own_fields(client, admin_headers):
 
 
 def test_catalog_reports_and_filters_one_persons_board(client, admin_headers, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     shown, hidden = f.make_job(), f.make_job()
     db.execute("INSERT INTO board_visible (user_id, job_id) VALUES (%s, %s)", (uid, shown))
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_admin_source_requests_pagination(client, admin_headers, user_headers):
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     for i in range(3):
         db.execute(
             "INSERT INTO source_requests (user_id, url) VALUES (%s, %s)",
