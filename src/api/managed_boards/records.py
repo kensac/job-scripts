@@ -10,15 +10,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from api import budget, db, task_jobs
-from api.managed_boards.admission import _TaskId
+from api import budget, db
+from api.managed_boards.admission import _BOARD_SQL, _KINDS_SQL, _TaskId
 from api.task_admission import TaskProgress
 from api.task_jobs import run_jobs
 from api.verdict_equivalence import answering_models
 
-MANAGED_BOARD_RUN_KINDS = task_jobs.MANAGED_BOARD_RUNS.kinds
-_KINDS_SQL = task_jobs.MANAGED_BOARD_RUNS.kinds_sql
-_BOARD_SQL = "(payload->>'managed_board_id')::bigint"
 LATEST_SQL = (
     "SELECT id, status, progress, error, (payload->>'revision')::bigint AS snapshot_revision, "
     "payload->>'requested_model' AS requested_model, "
