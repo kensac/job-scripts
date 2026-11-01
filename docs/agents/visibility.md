@@ -92,8 +92,12 @@ oracle and checks a reader during an open rebuild.
 
 `api.managed_boards.selection` owns candidate and verification-question selection.
 `api.managed_boards.admission` plans a run, stores its verified candidates
-outside a transaction, then locks the board and rechecks the board revision,
-active task, and sponsor reservation before inserting the task. Publish only
+outside a transaction, then takes the sponsor's advisory lock (7002,
+sponsor_user_id), locks the board, and rechecks the board revision, active
+task, and sponsor reservation before inserting the task. The allowance is the
+sponsor's across all their boards, so the board lock alone let two of one
+sponsor's boards both pass; sponsor before board is the one order.
+`tests/test_managed_board_sponsor_budget.py` interleaves two admissions. Publish only
 after that transaction commits. `api.managed_boards.records` owns run summaries,
 token accounting, and the projection write. `api.managed_boards` keeps the
 public entry points stable. A moved check must retain its original transaction

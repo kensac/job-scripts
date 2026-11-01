@@ -49,6 +49,7 @@ def test_claim_task_claims_regular_tasks_in_enqueue_order():
 def _pull(source: str, *, age_hours: float = 0) -> int:
     """A scheduled pull as the scheduler writes it: its payload names a host."""
     task_id = tasks_runtime.enqueue("ingest_source", {"source": source, "host": "pull.test"})
+    assert task_id is not None
     db.execute(
         "UPDATE tasks SET created_at = now() - make_interval(secs => %s) WHERE id = %s",
         (age_hours * 3600, task_id),

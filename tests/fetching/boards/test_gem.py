@@ -38,4 +38,5 @@ def test_gem_reads_every_posting_with_its_text_in_one_call(monkeypatch):
         "Function Health is the AI operating system for health."
     )
     # Both copies of the text stay out of the raw record.
+    assert p.raw is not None
     assert "content" not in p.raw and "content_plain" not in p.raw

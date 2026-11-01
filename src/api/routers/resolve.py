@@ -29,6 +29,11 @@ from api.routers.admin import require_admin
 router = APIRouter()
 
 
+def _refuse_unknown_kinds(kind: list[str] | None) -> None:
+    if kind and set(kind) - set(ITEM_KINDS):
+        raise refuse(400, "UNKNOWN_KIND", f"kind must be one of {', '.join(ITEM_KINDS)}")
+
+
 @router.get("/user/resolve/queue", response_model=ResolveQueue, response_model_exclude_none=True)
 def resolve_queue(
     limit: int = Query(default=50, ge=1, le=200),
@@ -42,8 +47,7 @@ def resolve_queue(
     "what is waiting on me" is the question this answers, and four separate
     answers to it is the shape it replaced.
     """
-    if kind and set(kind) - set(ITEM_KINDS):
-        raise refuse(400, "UNKNOWN_KIND", f"kind must be one of {', '.join(ITEM_KINDS)}")
+    _refuse_unknown_kinds(kind)
     return queue_for(user.id, limit, offset, kind)
 
 
@@ -78,6 +82,7 @@ def admin_resolve_queue(
 ):
     """The same queue over another user's mail. Owner is a parameter; the
     caller's identity decides only whether they may ask."""
+    _refuse_unknown_kinds(kind)
     return queue_for(user_id, limit, offset, kind)
 
 

@@ -75,10 +75,6 @@ class SavedFilter(Filter):
     run_blocked_message: str | None
 
 
-def _filter_prompt_hash(prompt: str, on_ambiguous: str) -> str:
-    return compute_filter_hash(prompt, on_ambiguous)
-
-
 def _validate_ambiguous(value: str) -> str:
     if value not in ON_AMBIGUOUS_VALUES:
         raise refuse(
@@ -179,7 +175,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)) 
                 body.on_ambiguous,
                 body.fail_closed,
                 body.enabled,
-                _filter_prompt_hash(body.prompt, body.on_ambiguous),
+                compute_filter_hash(body.prompt, body.on_ambiguous),
             ),
         )
         assert row is not None
@@ -210,7 +206,7 @@ def patch_filter(
             _refuse_second_enabled(user.id, filter_id)
         prompt = fields.get("prompt", existing.prompt)
         on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
-        fields["prompt_hash"] = _filter_prompt_hash(prompt, on_ambiguous)
+        fields["prompt_hash"] = compute_filter_hash(prompt, on_ambiguous)
         cols = ", ".join(f"{k} = %({k})s" for k in fields)
         try:
             row = db.query_one_as(
