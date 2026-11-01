@@ -91,6 +91,23 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ("https://jobs.l3harris.com/services/rss/job/", "successfactors"),
         ("https://api.gem.com/job_board/v0/function-health/job_posts/", "gem"),
         ("https://ats.rippling.com/api/v2/board/loop/jobs", "rippling"),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        (
+            "https://recruiting2.ultipro.com/MES1003MFAC/JobBoard/69451223-cdce-4faf-9407-23a2cd5ac83b/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        # A UKG board page and its postings are not the listings.
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/",
+            "sheet_era",
+        ),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/OpportunityDetail?opportunityId=28745f89-de05-4f43-ac09-61693ca75353",
+            "sheet_era",
+        ),
         # Their public pages, and a Rippling posting, are not the listings.
         ("https://jobs.gem.com/function-health", "sheet_era"),
         ("https://ats.rippling.com/loop/jobs", "sheet_era"),
@@ -100,6 +117,49 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ),
         # A Career Site Builder search page is not its feed.
         ("https://jobs.l3harris.com/search/?q=", "sheet_era"),
+        (
+            "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/"
+            "job-requisitions?cid=91a10898-d8ce-4d8a-8e43-34624df15cff",
+            "adp",
+        ),
+        (
+            "https://workforcenow.cloud.adp.com/mascsr/default/careercenter/public/events/"
+            "staffing/v1/job-requisitions?cid=df63d239-d757-467d-9f34-72d69f021f8c",
+            "adp",
+        ),
+        # An ADP career center page, and a posting on it, are not the API.
+        (
+            "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
+            "?cid=91a10898-d8ce-4d8a-8e43-34624df15cff&ccId=19000101_000001",
+            "sheet_era",
+        ),
+        (
+            "https://recruiting.paylocity.com/recruiting/jobs/All/"
+            "5c109104-7c4d-415c-9ee4-54e3af55f9e7/XR-Trading-LLC",
+            "paylocity",
+        ),
+        (
+            "https://recruiting.paylocity.com/Recruiting/Jobs/All/acf634cc-bb17-43ff-950e-ad7dfb8b47de",
+            "paylocity",
+        ),
+        # A Paylocity posting, and its empty job feed, are not the board.
+        ("https://recruiting.paylocity.com/Recruiting/Jobs/Details/4476288", "sheet_era"),
+        (
+            "https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/"
+            "acf634cc-bb17-43ff-950e-ad7dfb8b47de",
+            "sheet_era",
+        ),
+        (
+            "https://sjobs.brassring.com/TGnewUI/Search/Home/Home?partnerid=25539&siteid=5313",
+            "brassring",
+        ),
+        ("https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5012", "brassring"),
+        # A BrassRing posting page is not its search page.
+        (
+            "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008"
+            "&siteid=5012&PageType=JobDetails&jobid=350625",
+            "sheet_era",
+        ),
         # A Career Portal's job export, on a SuccessFactors or SAP host.
         (
             "https://career8.successfactors.com/career?company=MoodysProd"
@@ -150,6 +210,18 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "avature",
         "gem",
         "rippling",
+        "adp",
+        "paylocity",
+        "ukg",
+        "brassring",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -159,10 +231,12 @@ def test_each_format_owns_its_fetcher_and_source_rules():
     formats = {board_format.name: board_format for board_format in boards.FORMATS}
     assert len(formats) == len(boards.FORMATS)
     assert set(formats) == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -175,20 +249,32 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "lever",
         "markdown",
         "oracle",
+        "paylocity",
         "phenom",
         "rippling",
         "smartrecruiters",
         "successfactors",
         "successfactors_portal",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.needs_company} == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -198,19 +284,31 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "icims",
         "lever",
         "oracle",
+        "paylocity",
         "phenom",
         "rippling",
         "successfactors",
         "successfactors_portal",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.authoritative} == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -222,14 +320,24 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "jibe",
         "lever",
         "oracle",
+        "paylocity",
         "phenom",
         "rippling",
         "smartrecruiters",
         "successfactors",
         "successfactors_portal",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert all(board_format.fetcher is not None for board_format in formats.values())
     assert boards.format_for_url("https://airtable.com/appX/shrY").fetcher is None
