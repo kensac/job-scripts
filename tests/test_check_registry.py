@@ -131,6 +131,39 @@ def test_the_refusal_names_what_is_registered(client, admin_headers, registered_
     assert "names_manager" in r.json()["detail"]["message"]
 
 
+@pytest.mark.parametrize(
+    ("check", "status"),
+    [("filter:abc", 404), ("filter:99999999999999999999", 404), ("not_a_check", 400)],
+)
+def test_the_job_route_refuses_a_bad_check_before_fetching(
+    client, user_headers, monkeypatch, check, status
+):
+    """A check that names nothing is refused before the posting is fetched.
+    A malformed filter id raised a 500 after the fetch had already run."""
+    from api.ai import verdicts
+
+    fetched: list[str] = []
+
+    async def fake_refresh(url, **kw):
+        fetched.append(url)
+        return Page(1, "A posting body long enough to check."), None
+
+    monkeypatch.setattr(verdicts, "refresh_page", fake_refresh)
+    monkeypatch.setattr("core.routing.server_key", lambda provider: "sk-test")
+    job_id = _a_job("https://registry.test/bad-check")
+    uid = db.query_one("SELECT id FROM users WHERE email = 'user@example.com'")["id"]
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, 'Interested') "
+        "ON CONFLICT (user_id, job_id) DO UPDATE SET status = 'Interested'",
+        (uid, job_id),
+    )
+
+    r = client.post(f"/v1/user/jobs/{job_id}/explain", json={"check": check}, headers=user_headers)
+
+    assert r.status_code == status, r.text
+    assert fetched == []
+
+
 def test_the_terse_schema_is_the_entry_s_own(registered_check):
     """A check with no cheaper form answers with its full schema either way,
     and one that has a cheaper form only uses it when the reason is not asked
