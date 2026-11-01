@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+from core.fetching.ats.adp import ADP_HOSTS, ADP_REQUISITIONS
+from core.fetching.boards.adp import _adp
 from core.fetching.boards.amazon import _amazon
 from core.fetching.boards.apple import _apple
 from core.fetching.boards.ashby import _ashby
@@ -22,6 +24,7 @@ from core.fetching.boards.jibe import _jibe
 from core.fetching.boards.lever import _lever
 from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
+from core.fetching.boards.paylocity import PAYLOCITY_BOARD, _paylocity
 from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
 from core.fetching.boards.successfactors import _successfactors
@@ -208,6 +211,20 @@ FORMATS = (
         "eightfold",
         lambda a: a.path.rstrip("/") in (EIGHTFOLD_PCSX, EIGHTFOLD_V2),
         _eightfold,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "adp",
+        lambda a: a.host in ADP_HOSTS and a.path == ADP_REQUISITIONS,
+        _adp,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "paylocity",
+        lambda a: a.host == "recruiting.paylocity.com" and bool(PAYLOCITY_BOARD.fullmatch(a.path)),
+        _paylocity,
         needs_company=True,
         authoritative=True,
     ),

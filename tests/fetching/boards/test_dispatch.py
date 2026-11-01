@@ -100,6 +100,38 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ),
         # A Career Site Builder search page is not its feed.
         ("https://jobs.l3harris.com/search/?q=", "sheet_era"),
+        (
+            "https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/"
+            "job-requisitions?cid=91a10898-d8ce-4d8a-8e43-34624df15cff",
+            "adp",
+        ),
+        (
+            "https://workforcenow.cloud.adp.com/mascsr/default/careercenter/public/events/"
+            "staffing/v1/job-requisitions?cid=df63d239-d757-467d-9f34-72d69f021f8c",
+            "adp",
+        ),
+        # An ADP career center page, and a posting on it, are not the API.
+        (
+            "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html"
+            "?cid=91a10898-d8ce-4d8a-8e43-34624df15cff&ccId=19000101_000001",
+            "sheet_era",
+        ),
+        (
+            "https://recruiting.paylocity.com/recruiting/jobs/All/"
+            "5c109104-7c4d-415c-9ee4-54e3af55f9e7/XR-Trading-LLC",
+            "paylocity",
+        ),
+        (
+            "https://recruiting.paylocity.com/Recruiting/Jobs/All/acf634cc-bb17-43ff-950e-ad7dfb8b47de",
+            "paylocity",
+        ),
+        # A Paylocity posting, and its empty job feed, are not the board.
+        ("https://recruiting.paylocity.com/Recruiting/Jobs/Details/4476288", "sheet_era"),
+        (
+            "https://recruiting.paylocity.com/recruiting/v2/api/feed/jobs/"
+            "acf634cc-bb17-43ff-950e-ad7dfb8b47de",
+            "sheet_era",
+        ),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -127,6 +159,8 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "avature",
         "gem",
         "rippling",
+        "adp",
+        "paylocity",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -136,6 +170,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
     formats = {board_format.name: board_format for board_format in boards.FORMATS}
     assert len(formats) == len(boards.FORMATS)
     assert set(formats) == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
@@ -152,6 +187,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "lever",
         "markdown",
         "oracle",
+        "paylocity",
         "rippling",
         "smartrecruiters",
         "successfactors",
@@ -160,6 +196,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "workday",
     }
     assert {name for name, board_format in formats.items() if board_format.needs_company} == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
@@ -173,6 +210,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "icims",
         "lever",
         "oracle",
+        "paylocity",
         "rippling",
         "successfactors",
         "taleo",
@@ -180,6 +218,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "workday",
     }
     assert {name for name, board_format in formats.items() if board_format.authoritative} == {
+        "adp",
         "amazon",
         "apple",
         "ashby",
@@ -195,6 +234,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "jibe",
         "lever",
         "oracle",
+        "paylocity",
         "rippling",
         "smartrecruiters",
         "successfactors",
