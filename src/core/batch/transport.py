@@ -12,7 +12,7 @@ from typing import TypedDict
 lazy from openai import AsyncOpenAI
 lazy from openai.types import Batch
 
-from core.batch.progress import TERMINAL_STATES
+from core.batch.progress import TERMINAL_STATES, BatchProgress, progress
 from core.batch.specs import BatchSpec, _build_line, _estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -30,22 +30,40 @@ class BatchEventCounts(TypedDict, total=False):
 BatchEventHook = Callable[[str, str, BatchEventCounts], None] | None
 
 
-def _emit(on_event: BatchEventHook, batch: Batch) -> None:
+def _notify(on_event: BatchEventHook, batch_id: str, status: str, counts: BatchEventCounts) -> None:
     if on_event is None:
         return
-    counts = getattr(batch, "request_counts", None)
     try:
-        on_event(
-            batch.id,
-            batch.status,
-            {
-                "requests": getattr(counts, "total", 0) or 0,
-                "completed": getattr(counts, "completed", 0) or 0,
-                "failed": getattr(counts, "failed", 0) or 0,
-            },
-        )
+        on_event(batch_id, status, counts)
     except Exception:
         logger.exception("batch event hook failed")
+
+
+def emit_progress(on_event: BatchEventHook, batch_id: str, snapshot: BatchProgress) -> None:
+    counts: BatchEventCounts = {
+        "requests": snapshot.total,
+        "completed": snapshot.completed,
+        "failed": snapshot.failed,
+    }
+    _notify(on_event, batch_id, snapshot.status, counts)
+
+
+def emit_submitted(
+    on_event: BatchEventHook,
+    batch_id: str,
+    status: str,
+    specs: list[BatchSpec],
+    max_output_tokens: int,
+) -> None:
+    """The estimate a new batch is recorded with, sent once on submission."""
+    if on_event is None:
+        return
+    est = sum(_estimate_tokens(spec, max_output_tokens) for spec in specs)
+    _notify(on_event, batch_id, status, {"est_tokens": est, "requests": len(specs)})
+
+
+def _emit(on_event: BatchEventHook, batch: Batch) -> None:
+    emit_progress(on_event, batch.id, progress(batch))
 
 
 async def _wait_for_batch(
@@ -92,10 +110,5 @@ async def _submit_chunk(
     )
     logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
     _emit(on_event, batch)
-    if on_event is not None:
-        est = sum(_estimate_tokens(spec, max_output_tokens) for spec in specs)
-        try:
-            on_event(batch.id, batch.status, {"est_tokens": est, "requests": len(specs)})
-        except Exception:
-            logger.exception("batch event hook failed")
+    emit_submitted(on_event, batch.id, batch.status, specs, max_output_tokens)
     return batch.id

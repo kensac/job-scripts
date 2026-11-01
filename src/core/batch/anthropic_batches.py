@@ -26,8 +26,8 @@ lazy from anthropic.types.messages import MessageBatch
 
 from core import providers, store
 from core.batch.progress import BatchProgress
-from core.batch.specs import BatchResult, BatchSpec, _estimate_tokens
-from core.batch.transport import BatchEventHook
+from core.batch.specs import BatchResult, BatchSpec
+from core.batch.transport import BatchEventHook, emit_progress, emit_submitted
 
 logger = logging.getLogger(__name__)
 
@@ -123,15 +123,7 @@ def progress(batch: MessageBatch) -> BatchProgress:
 
 
 def emit(on_event: BatchEventHook, batch: MessageBatch) -> None:
-    if on_event is None:
-        return
-    p = progress(batch)
-    try:
-        on_event(
-            batch.id, p.status, {"requests": p.total, "completed": p.completed, "failed": p.failed}
-        )
-    except Exception:
-        logger.exception("batch event hook failed")
+    emit_progress(on_event, batch.id, progress(batch))
 
 
 async def submit_chunk(
@@ -154,12 +146,7 @@ async def submit_chunk(
     batch = await anthropic.messages.batches.create(requests=requests)  # type: ignore[arg-type]
     logger.info(f"Submitted batch {batch.id} with {len(specs)} requests")
     emit(on_event, batch)
-    if on_event is not None:
-        est = sum(_estimate_tokens(spec, max_output_tokens) for spec in specs)
-        try:
-            on_event(batch.id, _status(batch), {"est_tokens": est, "requests": len(specs)})
-        except Exception:
-            logger.exception("batch event hook failed")
+    emit_submitted(on_event, batch.id, _status(batch), specs, max_output_tokens)
     return batch.id
 
 
