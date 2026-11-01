@@ -146,9 +146,8 @@ Measured against production on 2026-10-10, before the copies were dropped:
   batches recorded, which is why a cost is stored as recorded and never
   repriced.
 
-A sum over a window reads `model_calls.answers_with_usage` (one join and one
-aggregate), not `ledger_rows`: on 2026-10-10 the 30-day cuts took 6.6 s
-against 11 min 51 s. A page of rows reads the view.
+A sum over a window never reads `ledger_rows`, whose per-row lookups are
+built for a page of rows ([admin-query-reads.md](admin-query-reads.md)).
 
 ## What may be done unattended
 
