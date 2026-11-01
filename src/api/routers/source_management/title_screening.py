@@ -12,7 +12,7 @@ from api import db
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
-from api.routers.source_management.catalog import _check_pattern_length
+from api.routers.source_management.catalog import check_pattern_length
 from core import catalog
 
 router = APIRouter()
@@ -75,7 +75,7 @@ def pattern_preview(
     source = db.query_one("SELECT title_pattern FROM sources WHERE name = %s", (name,))
     if not source:
         raise refuse(404, "NOT_FOUND", "unknown source")
-    _check_pattern_length(body.title_pattern, source["title_pattern"])
+    check_pattern_length(body.title_pattern, source["title_pattern"])
     try:
         candidate = re.compile(body.title_pattern, re.IGNORECASE)
     except re.error as exc:

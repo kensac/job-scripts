@@ -207,7 +207,7 @@ def test_submission_failure_rolls_back_receipt_and_saved_answers(client, user_he
     def fail(*args, **kwargs):
         raise RuntimeError("board unavailable")
 
-    monkeypatch.setattr(router, "_write_board_row", fail)
+    monkeypatch.setattr(router, "write_board_row", fail)
     import pytest
 
     with pytest.raises(RuntimeError, match="board unavailable"):
