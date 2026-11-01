@@ -134,16 +134,15 @@ never in `prefs`. A count of a person's views is the length of
 `GET /user/views` with no `page`.
 
 **A config-driven reader's table can be published, and the bundled copy is
-the fallback.** Admin recipe uploads store 64 KiB byte chunks. Every chunk
-except the last must be exactly 64 KiB; the last must be nonempty. Completion
-queues one validation task per chunk and publishes only a complete recipe.
+the fallback.** `tools/publish_recipes.py` publishes a table as 64 KiB byte
+chunks, validates them in order, and publishes only a complete recipe.
 The revision chains the SHA-256 of each chunk with its index and length.
 `GET /v1/extension/recipe?schema_version=2&adapter=<id>` serves the current
 revision, digest algorithm and chunk count. Fetch each chunk with that
 revision and `chunk_index`; verify the named digest before parsing or
 caching them. The extension pins a revision per fill and keeps an unexpired
-verified copy through an outage. `POST /v1/admin/extension/recipes/{adapter}/rollback`
-re-enables the previous publish. Each published recipe row must point to an
+verified copy through an outage. Publishing an earlier table again
+re-enables its row. Each published recipe row must point to an
 upload; its bytes live only in stored chunks. The version 1 single-response
 read stays only while older clients use it. Remove it
 after the fleet and extension have moved to version 2. This channel is for a
