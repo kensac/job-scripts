@@ -9,6 +9,7 @@ from typing import Any
 from api import ai, ai_pause, db, managed_boards, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
+from api.verdict_equivalence import answering_models
 from core import catalog, near_copy, page_fetches, verdict_reads
 from core.answers import VERIFICATION_REQUEST, FilterDecision, joint_question_key
 from core.shapes import VERIFY_TASK
@@ -409,7 +410,9 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                 # A verdict is keyed by the model that gave it; one the board did not
                 # ask for, or that its own run has bought meanwhile, is not written.
                 if res.model != board["model"] or decided_custom_urls(
-                    [res.custom_id], board["prompt_hash"], model=res.model
+                    [res.custom_id],
+                    board["prompt_hash"],
+                    answering_models("custom", board["model"]),
                 ):
                     continue
                 verdicts.record_ai_verdict(
