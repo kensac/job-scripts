@@ -151,11 +151,11 @@ dev-worker:     ## run a worker against the dev database
 dev-headers:    ## print the identity headers a dev client must send
 	@echo '# API on http://127.0.0.1:$(DEV_API_PORT). Send:'
 	@echo '#   X-Service-Token: dev-token'
-	@echo '#   X-User-Sub: <the sub of a user in the copy>'
+	@echo '#   X-User-Sub: <the sub of a user in the corpus>'
 	@echo '#   X-User-Email: <their email>'
 	@echo '#   X-User-Groups: infra-admins,jobtracker-users-internal'
 	@echo '# Any authenticated request PROVISIONS a user row if the sub is new,'
-	@echo '# so use a sub that already exists in the copy unless you mean to.'
+	@echo '# so use a sub that already exists in the corpus unless you mean to.'
 
 # --- the generated corpus ------------------------------------------------
 # A catalog shaped like production and containing none of it, so the whole

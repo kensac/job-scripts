@@ -49,8 +49,8 @@ just to share it.
 Keep `tests/conftest.py` responsible for pytest hooks and fixture scopes. Its
 startup must validate the disposable database, set `DATABASE_URL` before
 importing `api.db`, claim exclusive database use, and provision the schema
-before importing `tests/database_reset.py`. That reset module snapshots the
-mutable tables and synced-copy stamp once, after provisioning. Keep scratch
+before importing `tests/database_reset.py`. That reset module reads the
+mutable tables once, after provisioning. Keep scratch
 Postgres creation in `tests/database_bootstrap.py`; it must not import `api.db`
 before the URL is set. Preserve the corpus-last collection hook so an unmarked
 test cannot empty the corpus after its final build.
@@ -111,8 +111,7 @@ first failure mode listed above. When a test needs an invariant the generator
 does not produce, it is not a test. Whether production still holds something
 (no wedged task, comp stored yearly, no orphaned batch row) is a question
 about live data, and its home is a health detector (`api.health`), which runs
-against production on the fleet and alerts. The synced copy of production
-these used to run against was retired on 2026-10-31.
+against production on the fleet and alerts.
 
 ## Keeping the corpus a measurement
 

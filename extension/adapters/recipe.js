@@ -439,7 +439,6 @@ export function createRecipeAdapter(configs, context) {
     nextButton,
     submitted,
     errors,
-    proxySubmit: !!recipeConfig.proxySubmit,
     // A published table for THIS adapter replaces the bundled one for the
     // fills that follow; any other table is refused and the bundled copy
     // stays. Returns whether the swap happened.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import os
 import smtplib
@@ -47,10 +48,13 @@ def send_invite(to: str, invite_url: str) -> None:
 
 def send_health_alert(to: str, alerts: list[dict[str, Any]]) -> None:
     lines = ["Job tracker data-health alerts:", ""]
-    html = []
+    items = []
     for a in alerts:
         lines.append(f"- [{a['severity'].upper()}] {a['message']}")
-        html.append(f"<li><strong>{a['severity'].upper()}</strong>: {a['message']}</li>")
+        items.append(
+            f"<li><strong>{html.escape(a['severity'].upper())}</strong>: "
+            f"{html.escape(a['message'])}</li>"
+        )
     lines += ["", f"Admin: {APP_URL.replace('/job-tracker', '/job-scripts')}/dashboard"]
     msg = EmailMessage()
     msg["Subject"] = (
@@ -62,7 +66,7 @@ def send_health_alert(to: str, alerts: list[dict[str, Any]]) -> None:
     msg.add_alternative(
         f"""<div style="font-family:Inter,system-ui,sans-serif;color:#0c0a08;max-width:640px">
 <p>Something upstream looks different than it did last week:</p>
-<ul>{"".join(html)}</ul>
+<ul>{"".join(items)}</ul>
 <p style="color:#64748d;font-size:12px">Alerts fire once when a condition starts and
 auto-resolve when it stops.</p>
 </div>""",
@@ -87,11 +91,13 @@ def send_digest(to: str, jobs: list[dict[str, Any]], unsubscribe_token: str) -> 
         loc = ", ".join(j.get("locations") or []) or "no location"
         comp = j.get("comp_text") or ""
         lines.append(f"- {j['company']}: {j['title']} ({loc}){' · ' + comp if comp else ''}")
+        # Company and title come from scraped boards: text, never markup.
+        cells = [html.escape(v) for v in (j["company"], j["title"], loc, comp)]
         html_rows.append(
-            f"<tr><td style='padding:6px 12px 6px 0'><strong>{j['company']}</strong></td>"
-            f"<td style='padding:6px 12px 6px 0'>{j['title']}</td>"
-            f"<td style='padding:6px 12px 6px 0;color:#64748d'>{loc}</td>"
-            f"<td style='padding:6px 0;color:#64748d'>{comp}</td></tr>"
+            f"<tr><td style='padding:6px 12px 6px 0'><strong>{cells[0]}</strong></td>"
+            f"<td style='padding:6px 12px 6px 0'>{cells[1]}</td>"
+            f"<td style='padding:6px 12px 6px 0;color:#64748d'>{cells[2]}</td>"
+            f"<td style='padding:6px 0;color:#64748d'>{cells[3]}</td></tr>"
         )
     if count > 50:
         lines.append(f"…and {count - 50} more.")

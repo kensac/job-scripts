@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, filter_runs
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import refuse
@@ -88,8 +88,6 @@ def admin_run_filter(
     the shared weekly cap for that run alone, so the cap never has to be
     raised and put back (Kanishk, 2026-09-08). The person's own run endpoint
     cannot set the flag."""
-    from api import filter_runs
-
     if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
         raise refuse(404, "NOT_FOUND", "unknown user")
     if body.filter_id is not None and not db.query_one(

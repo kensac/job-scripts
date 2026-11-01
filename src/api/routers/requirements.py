@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.auth import AuthedUser, require_user
-from api.board import eligibility, visibility
+from api.board import visibility
 from api.board.access import require_visible_job
 from api.problem import refuse
 from core.derivations.requirements import (
@@ -154,7 +154,7 @@ def _slice_sql(body: str) -> str:
 
 def _params(user: AuthedUser, seniority: str | None, employment_type: str | None) -> dict[str, Any]:
     return {
-        **eligibility.settings_params(user.id),
+        "uid": user.id,
         "seniority": seniority,
         "employment_type": employment_type,
     }

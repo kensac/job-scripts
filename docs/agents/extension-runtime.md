@@ -23,6 +23,9 @@ page or review action sees the current record. Build the modules before
 starting the submission watcher or offering the Autofill button. The extension
 never presses the employer's Submit control. The person's click or form submit
 arms tracking, and a confirmation signal or explicit confirmation records it.
+The page under one URL changes only when none of the filled controls remain on
+screen. A control appearing or leaving beside them is the same page and keeps
+the fill, so the submission records against it.
 
 Verify a runtime split with extension typecheck, build, unit tests, and the
 browser tests. The browser suite exercises startup, form filling, review,
@@ -41,13 +44,12 @@ page in the API process. Remove the local copy only after completion succeeds.
 ## Published recipes
 
 Fetch a version 2 manifest, then fetch each chunk for its named revision.
-Reject a missing or changed chunk. Check `digest_algorithm`: uploaded recipes
-chain the SHA-256 of each chunk with its index and length. Start with 32 zero
-bytes. For each chunk, hash the domain `recipe-chunk-v2\0`, the previous
-digest, its 8-byte big-endian index, its 8-byte big-endian length, and its
-SHA-256 digest. Accept raw-byte SHA-256 only for an older cached manifest
-until its cache age expires. Verify before parsing the table or saving it in
-local storage. A failed refresh may reuse
+Reject a missing or changed chunk. Accept only the `chunk-chain-sha256`
+`digest_algorithm`: it chains the SHA-256 of each chunk with its index and
+length. Start with 32 zero bytes. For each chunk, hash the domain
+`recipe-chunk-v2\0`, the previous digest, its 8-byte big-endian index, its
+8-byte big-endian length, and its SHA-256 digest. Verify before parsing the
+table or saving it in local storage. A failed refresh may reuse
 only an unexpired verified copy. Otherwise use the bundled table. The public
 chunk route remains readable by revision after a newer publish so a refresh can
 finish while an administrator changes the current recipe.
