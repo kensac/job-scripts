@@ -408,7 +408,10 @@ per paid verdict, reached 9.76M decisions (1.64 GB) by 2026-10-10, 93.6% of
 them repeating one already stored, and its only readers were admin reports.
 
 Distinguish submission rejection from per-request failure using the stored
-provider errors. Failure counts alone do not establish the cause.
+provider errors. Failure counts alone do not establish the cause. A submission
+the provider refuses outright has no batch id to store an error under, so
+when every wave is refused the task fails with the provider's reason in
+`tasks.error`.
 
 **Every error a batch returns is stored as the provider wrote it**
 (`ai_batch_errors`, one row per failed request, or one row under an empty

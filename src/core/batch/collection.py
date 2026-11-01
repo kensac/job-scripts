@@ -51,17 +51,6 @@ async def _collect_batch(
     results: dict[str, BatchResult],
     create_missing: bool = False,
 ) -> dict[str, BatchResult]:
-    if batch.status != "completed":
-        for result in results.values():
-            if result.text is None and result.embedding_vectors is None and result.error is None:
-                result.error = f"batch {batch.status}"
-        if not batch.output_file_id:
-            for result in results.values():
-                if result.batch_id is None:
-                    result.batch_id = batch.id
-            _record_errors(batch, results)
-            return results
-
     if batch.output_file_id:
         content = await client.files.content(batch.output_file_id)
         for line in content.text.splitlines():
@@ -126,6 +115,13 @@ async def _collect_batch(
                     result.error = _line_error(obj) or "batch error"
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
+
+    # An expired or cancelled batch still returns the requests it finished,
+    # so only a request with no answer and no error of its own is marked.
+    if batch.status != "completed":
+        for result in results.values():
+            if result.text is None and result.embedding_vectors is None and result.error is None:
+                result.error = f"batch {batch.status}"
 
     for result in results.values():
         if result.batch_id is None:

@@ -29,6 +29,12 @@ def _verdict_origin(config_name: str | None) -> str:
     return _ORIGIN.get(config_name or "", (config_name or "recorded").replace("-", " "))
 
 
+def _verdict_detail(*parts: str | None) -> str:
+    """A verdict's reason and where it came from, as one line. A model's
+    reason ends in a full stop, which the separator would follow (".;")."""
+    return "; ".join(part.rstrip(". ") for part in parts if part)
+
+
 def _latest_verdict(url: str, check: str) -> verdict_reads.LatestVerdict | None:
     key = (url, check)
     if key not in _LATEST.get():
