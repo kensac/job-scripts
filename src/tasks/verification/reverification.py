@@ -10,10 +10,9 @@ from api import ai, db, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.board.person_state import UNTOUCHED
+from api.verdict_equivalence import answering_models
 from core import catalog, routing, verdict_reads
 from core.answers import VERIFICATION_REQUEST
-from core.routing import resolve
-from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, Page, add_ai_results, ai_result_row
 from tasks.board import demote_closed
 from tasks.runtime import (
@@ -31,7 +30,11 @@ from tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from tasks.verification.questions import _EFFORT, _verification_spec, question_sha256
+from tasks.verification.questions import (
+    _submission_model,
+    _verification_spec,
+    question_sha256,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +53,21 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
     hash forward. The rows written are model-less like record_manual's, because
     no call was made, so spend and call counts stay true; they reset the
     staleness clock exactly as a paid verdict would.
+
+    An answer from a model grouped with this one (api.verdict_equivalence)
+    matches when it answered the same question asked of that model; the row
+    written carries this model's question, so the next check matches it
+    directly.
     """
-    questions = {
-        url: question_sha256(model, _verification_spec(url, text)) for url, text in fetched
-    }
+    specs = {url: _verification_spec(url, text) for url, text in fetched}
+    questions = {url: question_sha256(model, spec) for url, spec in specs.items()}
     if not questions:
         return set()
+    peers = [m for m in answering_models("verify", model) if m != model]
+    accepted = {
+        url: {question, *(question_sha256(m, specs[url]) for m in peers)}
+        for url, question in questions.items()
+    }
     latest = verdict_reads.latest_checks(list(questions))
     rows = [
         ai_result_row(
@@ -70,7 +82,7 @@ def _reuse_unchanged(model: str, fetched: list[tuple[str, str]], jobs: dict[str,
         )
         for url, checks in latest.items()
         if len(checks) == 2
-        and all(verdict.request_sha256 == questions[url] for verdict in checks.values())
+        and all(verdict.request_sha256 in accepted[url] for verdict in checks.values())
         for check, verdict in checks.items()
     ]
     add_ai_results(rows)
@@ -184,7 +196,8 @@ async def _reverify_jobs(
         return
     if not routing.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
-    model = resolve(VERIFY_TASK).model
+    # The model and effort verify_new submits with, configured override included.
+    model, effort = _submission_model()
     by_url = {r["url"]: r for r in rows}
     hook = batch_event_hook(task_id, "reverify", model)
 
@@ -278,7 +291,7 @@ async def _reverify_jobs(
             task_id,
             specs,
             model,
-            _EFFORT,
+            effort,
             VERIFICATION_REQUEST.max_output_tokens,
             hook,
         )

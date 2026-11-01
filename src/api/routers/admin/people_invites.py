@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
+import re
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from api import mail
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import PROVIDER_REFUSALS, refuse
@@ -37,8 +41,6 @@ def _invitation_service_is_configured() -> bool:
 
 
 def _invitation_api_client():
-    import httpx
-
     return httpx.Client(
         base_url=f"{AUTHENTIK_URL}/api/v3",
         headers={"Authorization": f"Bearer {AUTHENTIK_INVITE_TOKEN}"},
@@ -68,19 +70,14 @@ def create_invite(body: InviteBody, user: AuthedUser = Depends(require_admin)) -
     their own username/name/password during enrollment."""
     if not _invitation_service_is_configured():
         raise refuse(503, "INVITES_NOT_CONFIGURED", "authentik invite env missing")
-    import datetime as _dt
-    import re as _re
-
-    from api import mail
-
     email = body.email.strip().lower()
-    expires = (_dt.datetime.now(_dt.UTC) + _dt.timedelta(days=7)).isoformat()
-    slug = _re.sub(r"[^a-z0-9]+", "-", email).strip("-")
+    expires = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=7)).isoformat()
+    slug = re.sub(r"[^a-z0-9]+", "-", email).strip("-")
     with _invitation_api_client() as invitation_client:
         response = invitation_client.post(
             "/stages/invitation/invitations/",
             json={
-                "name": f"jobtracker-{slug}-{int(_dt.datetime.now(_dt.UTC).timestamp())}",
+                "name": f"jobtracker-{slug}-{int(datetime.datetime.now(datetime.UTC).timestamp())}",
                 "expires": expires,
                 "fixed_data": {"email": email},
                 "single_use": True,
