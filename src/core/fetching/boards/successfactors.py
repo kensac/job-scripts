@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import datetime
+import html
+import re
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qs, quote, urlparse, urlunparse
 
 from core.fetching.ats import (
     clean_html,
@@ -124,3 +127,97 @@ def _successfactors(url: str, company: str) -> list[JobPosting]:
     if not complete or listed - seen:
         raise PartialPull(out)
     return out
+
+
+# A Career Portal host, the SuccessFactors career site that predates Career
+# Site Builder: career8.successfactors.com, career012.successfactors.eu,
+# career41.sapsf.com. Every tenant on a host shares it, named by `company`.
+_PORTAL_HOSTS = re.compile(r"^career[0-9a-z-]*\.(?:successfactors|sapsf)\.(?:com|eu)$")
+# A custom field with no XML name is written as an element with no name,
+# "<>99</>" on every Moody's and A.O. Smith job, which no XML parser reads.
+_UNNAMED_FIELD = re.compile(rb"<>[^<]*</>")
+
+
+def is_successfactors_portal(host: str, path: str) -> bool:
+    return bool(_PORTAL_HOSTS.match(host)) and path == "/career"
+
+
+def _successfactors_portal(url: str, company: str) -> list[JobPosting]:
+    """GET https://{host}/career?company={tenant}&career_ns=job_listing_summary&resultType=XML
+
+    A Career Portal tenant (Moody's: careers.moodys.com is a Radancy site
+    whose apply links open career8.successfactors.com, company MoodysProd)
+    has no Career Site Builder feed. Its job search answers this XML export
+    of every open requisition with its whole description, in one call with
+    no paging and no count. Measured on 2026-11-01, it held one job per
+    requisition the Career Site Builder feed of the same tenant listed:
+    Halliburton 514 of 514, DTE 75 of 75, Norfolk Southern 54 of 54,
+    Dominion 80 of 80, and Hershey 316 of 333, the 17 left over being its
+    fr_CA, pt_BR and es_MX copies of requisitions it lists once. Moody's 324
+    equalled the /job/ urls in its Radancy sitemap. So, like Gem's, a pull
+    is the whole board. A tenant name the host does not know answers its
+    HTML login page, which fails the parse rather than reading as empty.
+
+    The export holds the requisitions posted in one language, the tenant's
+    default unless `lang` names another. Hershey posts every requisition in
+    en_US; Allianz posts most in one language only (en_US 1,098, fr_FR 305
+    with 2 of them in en_US, de_DE 176 with 18; 1,727 across 15 languages),
+    and a language the tenant does not use answers another one's list
+    (Hershey's fr_FR its en_US). So the listings URL names every language
+    the board is read in, `lang=en_US&lang=fr_FR`, and a requisition posted in
+    several is one posting.
+
+    Rows carry a title, the description, the requisition id, and on most
+    tenants a posting date; the place is in the description, or in a filter
+    the tenant labelled "Location". The posting is the requisition page the
+    employer's own site links to apply.
+    """
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    tenant = (query.get("company") or query.get("career_company") or [""])[0]
+    if not tenant:
+        raise ValueError(f"{url} names no SuccessFactors company")
+    langs = [lang for lang in query.get("lang", []) if lang]
+    export = (
+        f"https://{parsed.netloc}/career?company={quote(tenant)}"
+        "&career_ns=job_listing_summary&resultType=XML"
+    )
+    posting = f"https://{parsed.netloc}/sfcareer/jobreqcareer?jobId={{}}&company={quote(tenant)}"
+    out: dict[str, JobPosting] = {}
+    for lang in langs or [""]:
+        resp = _get(export + (f"&lang={quote(lang)}" if lang else ""))
+        resp.raise_for_status()
+        root = _xml(_UNNAMED_FIELD.sub(b"", resp.content))
+        if root.tag != "Job-Listing":
+            raise ValueError(f"not a Career Portal job export: {resp.content[:200]!r}")
+        for job in root.iterfind("Job"):
+            req = (job.findtext("ReqId") or "").strip()
+            if req in out:
+                continue
+            # Some tenants escape the title inside its CDATA ("R&amp;D").
+            title = html.unescape(job.findtext("JobTitle") or "").strip()
+            fields = {c.tag: c.text for c in job if c.tag != "Job-Description" and not len(c)}
+            filters = {f.findtext("label") or f.tag: f.findtext("value") for f in job if len(f)}
+            places = [(v or "").strip() for k, v in filters.items() if "location" in k.lower()]
+            p = posting_from_listing(
+                company,
+                title,
+                places,
+                posting.format(req) if req else None,
+                _portal_date(job.findtext("Posted-Date") or ""),
+                raw=fields | filters,
+                description=join(title, *places, clean_html(job.findtext("Job-Description") or "")),
+            )
+            if p:
+                out[req] = p
+    return list(out.values())
+
+
+def _portal_date(text: str) -> int:
+    """The posting date, month first: of 798 dates across five tenants on
+    2026-11-01, 585 had a second number above 12 and none a first."""
+    try:
+        day = datetime.datetime.strptime(f"{text.strip()} +0000", "%m/%d/%Y %z")
+    except ValueError:
+        return 0
+    return int(day.timestamp())

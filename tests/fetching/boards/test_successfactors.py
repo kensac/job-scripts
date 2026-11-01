@@ -176,3 +176,128 @@ def test_successfactors_refuses_a_document_that_declares_entities(monkeypatch):
 
 
 # jobs.northropgrumman.com/api/pcsx/search?domain=ngc.com, first row, 2026-10-05.
+
+
+# Career Portal job exports as career8.successfactors.com (MoodysProd) and
+# career4.successfactors.com (Hersheys) answered on 2026-11-01, descriptions
+# cut short. Moody's carries an unnamed custom field, "<>99</>", on every job.
+_PORTAL_MOODYS = """<Job>
+<JobTitle><![CDATA[Administrative Assistant]]></JobTitle>
+<Job-Description><![CDATA[<p>At Moody&#39;s, we unite the brightest minds.</p>]]></Job-Description>
+<ReqId>15174</ReqId>
+<Posted-Date>09/10/2026</Posted-Date>
+<>99</>
+</Job>"""
+_PORTAL_HERSHEY = """<Job>
+<JobTitle><![CDATA[Accountant II]]></JobTitle>
+<Job-Description><![CDATA[<p>Why Hershey.</p>]]></Job-Description>
+<ReqId>130882</ReqId>
+<Posted-Date>10/23/2026</Posted-Date>
+<filter5>
+<label>Location</label>
+<value>Johor</value>
+</filter5>
+</Job>"""
+_PORTAL_ESCAPED = """<Job>
+<JobTitle><![CDATA[Assoc Mgr R&amp;D US CMG Reese]]></JobTitle>
+<Job-Description><![CDATA[<p>Lead R&amp;D.</p>]]></Job-Description>
+<ReqId>129001</ReqId>
+</Job>"""
+_PORTAL_URL = "https://career8.successfactors.com/career?company=MoodysProd&career_ns=job_listing_summary&resultType=XML"
+
+
+def _portal_export(*jobs: str) -> bytes:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<Job-Listing>\n\n'
+        + "\n\n".join(jobs)
+        + "\n</Job-Listing>"
+    ).encode()
+
+
+def _portal_board(monkeypatch, exports: dict[str, bytes]):
+    """The export for each language the tenant posts in; any other language
+    answers the default, as Hershey's fr_FR answered its en_US."""
+    asked = []
+
+    def get(url, **kw):
+        asked.append(url)
+        lang = (parse_qs(urlparse(url).query).get("lang") or [""])[0]
+        return _Bytes(exports.get(lang, exports[""]))
+
+    monkeypatch.setattr(boards._session, "get", get)
+    return asked
+
+
+def test_a_career_portal_export_is_read_whole_in_one_call(monkeypatch):
+    asked = _portal_board(
+        monkeypatch, {"": _portal_export(_PORTAL_MOODYS, _PORTAL_HERSHEY, _PORTAL_ESCAPED)}
+    )
+    out = boards.fetch_listings(_PORTAL_URL, "Moody's")
+    assert asked == [_PORTAL_URL]
+    moodys, hershey, escaped = out
+    assert (moodys.title, moodys.locations, moodys.company) == (
+        "Administrative Assistant",
+        [],
+        "Moody's",
+    )
+    # The requisition page the employer's own site links to apply.
+    assert moodys.url == (
+        "https://career8.successfactors.com/sfcareer/jobreqcareer?jobId=15174&company=MoodysProd"
+    )
+    # Month first.
+    assert moodys.date_posted == int(
+        datetime.datetime(2026, 9, 10, tzinfo=datetime.UTC).timestamp()
+    )
+    assert (
+        moodys.description
+        == "Administrative Assistant\n\nAt Moody's, we unite the brightest minds."
+    )
+    assert (hershey.locations, hershey.raw["Location"]) == (["Johor"], "Johor")
+    assert (escaped.title, escaped.date_posted) == ("Assoc Mgr R&D US CMG Reese", 0)
+
+
+def test_a_career_portal_board_is_read_in_every_language_it_names(monkeypatch):
+    # Allianz posts most requisitions in one language only.
+    asked = _portal_board(
+        monkeypatch,
+        {
+            "": _portal_export(_PORTAL_MOODYS),
+            "en_US": _portal_export(_PORTAL_MOODYS),
+            "fr_FR": _portal_export(_PORTAL_HERSHEY, _PORTAL_MOODYS),
+        },
+    )
+    out = boards.fetch_listings(
+        "https://career5.successfactors.eu/career?company=AZGROUPPROD&lang=en_US&lang=fr_FR",
+        "Allianz",
+    )
+    # A requisition posted in both is one posting.
+    assert [p.title for p in out] == ["Administrative Assistant", "Accountant II"]
+    assert [parse_qs(urlparse(u).query)["lang"] for u in asked] == [["en_US"], ["fr_FR"]]
+
+
+def test_an_empty_career_portal_export_is_an_empty_board(monkeypatch):
+    _portal_board(monkeypatch, {"": _portal_export()})
+    assert boards.fetch_listings(_PORTAL_URL, "Moody's") == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A tenant the host does not know answers its HTML login page.
+        b'<html>\n<!-- verp-client(1.0.0): modules={\najaxservice:"1.0.7"} -->\n<meta id="PerfLog">',
+        # Cut off mid-transfer.
+        _portal_export(_PORTAL_MOODYS)[:150],
+        b'<?xml version="1.0"?><error>unavailable</error>',
+    ],
+)
+def test_a_career_portal_answer_that_is_not_an_export_fails_the_pull(monkeypatch, body):
+    _portal_board(monkeypatch, {"": body})
+    with pytest.raises(Exception) as raised:
+        boards.fetch_listings(_PORTAL_URL, "Moody's")
+    assert not isinstance(raised.value, boards.PartialPull)
+
+
+def test_a_career_portal_url_without_a_company_fails(monkeypatch):
+    _portal_board(monkeypatch, {"": _portal_export(_PORTAL_MOODYS)})
+    with pytest.raises(ValueError, match="names no SuccessFactors company"):
+        boards.fetch_listings("https://career8.successfactors.com/career?lang=en_US", "Moody's")

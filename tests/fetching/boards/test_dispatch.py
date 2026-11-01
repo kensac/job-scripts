@@ -160,6 +160,27 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
             "&siteid=5012&PageType=JobDetails&jobid=350625",
             "sheet_era",
         ),
+        # A Career Portal's job export, on a SuccessFactors or SAP host.
+        (
+            "https://career8.successfactors.com/career?company=MoodysProd"
+            "&career_ns=job_listing_summary&resultType=XML",
+            "successfactors_portal",
+        ),
+        ("https://career5.successfactors.eu/career?company=AZGROUPPROD", "successfactors_portal"),
+        ("https://career41.sapsf.com/career?company=hcollp", "successfactors_portal"),
+        # Its requisition page, and the newer /careers path, are not the export.
+        (
+            "https://career8.successfactors.com/sfcareer/jobreqcareer?jobId=15174&company=MoodysProd",
+            "sheet_era",
+        ),
+        ("https://career8.successfactors.com/careers?company=S003808746P", "sheet_era"),
+        # Phenom serves from each employer's own domain; its search page is the mark.
+        ("https://careers.franklintempleton.com/us/en/search-results", "phenom"),
+        ("https://careers.marsh.com/global/en/search-results", "phenom"),
+        ("https://career.lpl.com/search-results", "phenom"),
+        # A Phenom posting and its home page are not the listing.
+        ("https://careers.franklintempleton.com/us/en/job/869864", "sheet_era"),
+        ("https://careers.franklintempleton.com/us/en", "sheet_era"),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -183,6 +204,8 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "google",
         "amazon",
         "successfactors",
+        "successfactors_portal",
+        "phenom",
         "eightfold",
         "avature",
         "gem",
@@ -227,9 +250,11 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "markdown",
         "oracle",
         "paylocity",
+        "phenom",
         "rippling",
         "smartrecruiters",
         "successfactors",
+        "successfactors_portal",
         "taleo",
         "ukg",
         "workable",
@@ -260,8 +285,10 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "lever",
         "oracle",
         "paylocity",
+        "phenom",
         "rippling",
         "successfactors",
+        "successfactors_portal",
         "taleo",
         "ukg",
         "workable",
@@ -294,9 +321,11 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "lever",
         "oracle",
         "paylocity",
+        "phenom",
         "rippling",
         "smartrecruiters",
         "successfactors",
+        "successfactors_portal",
         "taleo",
         "ukg",
         "workable",

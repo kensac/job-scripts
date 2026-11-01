@@ -367,10 +367,10 @@ async def refresh_page(
             (url,),
         )
         ats_url = ats.source_posting_url(url, source["listings_url"] if source else None)
-    elif prefixes := ats.eightfold_listing_prefixes(url):
-        # An Eightfold tenant is known by a source listing it on this host,
-        # never by the posting URL's shape: a guessed endpoint on a host that
-        # is not Eightfold's would answer 404 and read as a closure.
+    elif prefixes := ats.listing_prefixes(url):
+        # An Eightfold or Phenom site is known by a source listing it on this
+        # host, never by the posting URL's shape: a guessed endpoint on a host
+        # that is not theirs would answer 404 and read as a closure.
         source = db.query_one(
             "SELECT listings_url FROM sources "
             "WHERE starts_with(listings_url, %s) OR starts_with(listings_url, %s) "
@@ -412,9 +412,9 @@ async def refresh_page(
     # the browser below, so the tier can save a browser fetch but never
     # replace one with a shell. The row says 'static', so the share each
     # engine serves is readable from the content rows.
-    # An Eightfold page fetched without a browser is a shell that clears the
-    # gate (see ats.Eightfold), so a posting whose resolver did not answer
-    # goes straight to the browser.
+    # An Eightfold or Phenom page fetched without a browser is a shell that
+    # clears the gate (see ats.Eightfold, ats.Phenom), so a posting whose
+    # resolver did not answer goes straight to the browser.
     if db.get_config("fetch_engine") == "static_first" and listings_url is None:
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:

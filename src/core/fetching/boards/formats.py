@@ -31,17 +31,22 @@ from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
 from core.fetching.boards.pageup import _PAGEUP_FEED, _pageup
 from core.fetching.boards.paylocity import PAYLOCITY_BOARD, _paylocity
+from core.fetching.boards.phenom import _phenom
 from core.fetching.boards.pinpoint import _pinpoint
 from core.fetching.boards.recruitee import _recruitee
 from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
-from core.fetching.boards.successfactors import _successfactors
+from core.fetching.boards.successfactors import (
+    _successfactors,
+    _successfactors_portal,
+    is_successfactors_portal,
+)
 from core.fetching.boards.taleo import _TALEO_SECTION, _taleo
 from core.fetching.boards.teamtailor import _teamtailor
 from core.fetching.boards.ukg import _UKG_HOST, _UKG_SEARCH, _ukg
 from core.fetching.boards.workable import _workable
 from core.fetching.boards.workday import _workday
-from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2, PHENOM_SEARCH
 from core.fetching.posting import JobPosting
 
 
@@ -223,6 +228,13 @@ FORMATS = (
         needs_company=True,
         authoritative=True,
     ),
+    BoardFormat(
+        "successfactors_portal",
+        lambda a: is_successfactors_portal(a.host, a.path),
+        _successfactors_portal,
+        needs_company=True,
+        authoritative=True,
+    ),
     # Eightfold's listing path is the marker across its tenant domains.
     BoardFormat(
         "eightfold",
@@ -306,6 +318,14 @@ FORMATS = (
         "recruitee",
         lambda a: a.host.endswith(".recruitee.com") and a.path.rstrip("/") == "/api/offers",
         _recruitee,
+        needs_company=True,
+        authoritative=True,
+    ),
+    # Phenom runs on employer domains. Its search page path is the marker.
+    BoardFormat(
+        "phenom",
+        lambda a: bool(PHENOM_SEARCH.match(a.path)),
+        _phenom,
         needs_company=True,
         authoritative=True,
     ),

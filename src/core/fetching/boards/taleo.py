@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import datetime
+import html
 import json
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from core.fetching.boards.common import (
     PartialPull,
@@ -25,7 +26,8 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     /careersection/{section}/jobsearch.ftl?lang=en&portal={portal}: the
     section names the public posting URL and the portal is what the search
     endpoint takes. A URL without the portal costs one GET of that page to
-    read it (`portalNo`). No cookie, session or CSRF token is needed; the
+    read it (`portalNo`); a page without one is a server-rendered list, read
+    by `_taleo_list`. No cookie, session or CSRF token is needed; the
     endpoint answers 500 unless a `tz` or `tzname` header is present, and its
     value changed nothing on Bell's board (2026-10-05).
 
@@ -58,9 +60,16 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     section = _TALEO_SECTION.match(parsed.path)
     if not section:
         raise ValueError(f"{url} is not a careersection search page")
-    portal = (query.get("portal") or [""])[0] or _taleo_portal(url)
-    endpoint = f"https://{parsed.netloc}/careersection/rest/jobboard/searchjobs"
     detail = f"https://{parsed.netloc}/careersection/{section.group(1)}/jobdetail.ftl?job="
+    portal = (query.get("portal") or [""])[0]
+    if not portal:
+        page = _get(url)
+        page.raise_for_status()
+        match = re.search(r"portalNo: '(\d+)'", page.text)
+        if not match:
+            return _taleo_list(page, detail, lang, company)
+        portal = match.group(1)
+    endpoint = f"https://{parsed.netloc}/careersection/rest/jobboard/searchjobs"
     seen: dict[str, JobPosting] = {}
     page_no = total = last = 1
     while True:
@@ -114,13 +123,89 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     return postings
 
 
-def _taleo_portal(url: str) -> str:
-    resp = _get(url)
-    resp.raise_for_status()
-    match = re.search(r"portalNo: '(\d+)'", resp.text)
-    if not match:
-        raise ValueError(f"{url} carries no portal: not a faceted-search careersection")
-    return match.group(1)
+# The size and length of a server-rendered list, in its page's state.
+_TALEO_LIST_SIZE = re.compile(
+    r"listRequisition\.size!\|!(\d+)!\|!listRequisition\.nbElements!\|!(\d+)"
+)
+# The cell "Submission for the position: <title> - (Job Number: <code>)", its
+# separators written "%5C:", ends on the code the posting URL takes.
+_TALEO_CODE = re.compile(r"%5C: ([^()]+)\)$")
+
+
+def _taleo_list(page, detail: str, lang: str, company: str) -> list[JobPosting]:
+    """A careersection with no faceted search: its page is a server-rendered
+    list, and the search endpoint answers careerSectionUnAvailable for it.
+
+    Kearney's jobsearch.ftl redirects to joblist.ftl (all jobs) and the Port
+    of Seattle's is a basic search. The page states the list's page size and
+    length ("listRequisition.size!|!10!|!listRequisition.nbElements!|!48"),
+    and the list's pager, a POST to the same page as .ajax with no session
+    or token, answers each page as one "!|!"-separated string of cells. Every
+    page is read from the pager, the first too: the page's own first page is
+    sorted by date and the pager's by something else, so mixing the two read
+    40 of Kearney's 48 postings, and the pager alone read 48 of 48 in two
+    pulls (2026-11-01). The length covers the whole list: Kearney's 48 and
+    the Port of Seattle's 10 equalled the postings in each section's
+    /careersection/sitemap.jss.
+
+    Cells are positional and the columns are per careersection, so a row is
+    found by its shape: the requisition number, the title, then both again
+    (Kearney and the Port of Seattle alike). The posting's code is the one
+    its "Job Number" cell names; the date is the cell that reads as one. The
+    location column cannot be told from the job type's, so rows carry no
+    place, as BAE's faceted rows do not.
+    """
+    pager = _TALEO_LIST_SIZE.search(page.text)
+    page_id = re.search(r'name="ftlpageid"[^>]*value="([^"]*)"', page.text)
+    if not pager or not page_id:
+        raise ValueError(f"{page.url} is neither a faceted search nor a job list")
+    size, total = int(pager.group(1)), int(pager.group(2))
+    ajax = page.url.split("?", 1)[0].rsplit(".ftl", 1)[0] + ".ajax"
+    seen: dict[str, JobPosting] = {}
+    for page_no in range(1, -(-total // size) + 1):
+        resp = _post(
+            ajax,
+            data={
+                "ftlpageid": page_id.group(1),
+                "ftlinterfaceid": "requisitionListInterface",
+                "ftlcompid": "rlPager",
+                "jsfCmdId": "rlPager",
+                "ftlcompclass": "PagerComponent",
+                "ftlcallback": "ftlPager_processResponse",
+                "ftlajaxid": "ftlx1",
+                "rlPager.currentPage": str(page_no),
+                "lang": lang,
+            },
+        )
+        resp.raise_for_status()
+        for row in _taleo_rows(html.unescape(resp.text).split("!|!")):
+            code = next((m.group(1) for c in row if (m := _TALEO_CODE.search(c))), None)
+            p = posting_from_listing(
+                company,
+                unquote(row[1]),
+                [],
+                detail + code if code else None,
+                next((d for c in row if (d := _taleo_date(c, lang))), 0),
+                raw={"requisitionNo": row[0], "cells": row},
+            )
+            if p:
+                seen[p.url] = p
+    postings = list(seen.values())
+    if len(postings) < total:
+        raise PartialPull(postings)
+    return postings
+
+
+def _taleo_rows(cells: list[str]) -> list[list[str]]:
+    """The list's rows, each from its leading number, title, number, title.
+    The number repeats five times more after them, hence a title that is not
+    the number."""
+    starts = [
+        i
+        for i in range(len(cells) - 3)
+        if cells[i].isdigit() and cells[i] == cells[i + 2] != cells[i + 1] == cells[i + 3]
+    ]
+    return [cells[a:b] for a, b in zip(starts, [*starts[1:], len(cells)], strict=True)]
 
 
 def _taleo_places(cell: str) -> list[str]:

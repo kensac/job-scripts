@@ -14,6 +14,7 @@ and the floor its pages waited on were different keys.
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 # Eightfold's two careers-site generations, as the path of a listings URL. A
@@ -22,6 +23,12 @@ from urllib.parse import urlparse
 # two paths to pick its fetcher, and core.fetching.ats to find a tenant.
 EIGHTFOLD_PCSX = "/api/pcsx/search"
 EIGHTFOLD_V2 = "/api/apply/v2/jobs"
+# A Phenom career site's search page, on the employer's own host, with the
+# site's country and language where it has them: /us/en/search-results,
+# /global/en/search-results, or /search-results (career.lpl.com). Its
+# postings are the same prefix and /job/<id>. core.fetching.boards reads
+# the listing from it, and core.fetching.ats the posting's text.
+PHENOM_SEARCH = re.compile(r"^((?:/[a-z]+/[a-z]{2})?)/search-results$")
 
 
 def hostname(url: str) -> str:
