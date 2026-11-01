@@ -6,13 +6,6 @@ because the signals only make sense beside them.
 
 ## The worker fleet
 
-`publish_extension_recipe` validates one stored recipe chunk per task. Each
-successful task saves the JSON parser state and ordered chunk digest, then
-queues the next chunk in the same transaction. A retry for an already saved
-chunk does nothing. The last task publishes the revision only if the whole
-recipe is valid. Invalid uploads remain stored and never become current. The
-completion route can retry a failed task from the last saved chunk.
-
 **Resume PDF extraction runs after durable transfer.** The API verifies each
 object part before recording it as received. Completion enqueues
 `process_resume_upload`. The worker reads parts into a disk-backed file and
