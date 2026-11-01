@@ -122,11 +122,18 @@ async def run_held(
         # beats whether or not the loop is free, which is what a heartbeat is
         # for.
         while not stop_beating.wait(heartbeat_seconds):
-            beat = db.execute_count(
-                "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running' "
-                "AND worker = %s AND attempts = %s",
-                (claim.task_id, claim.worker, claim.attempts),
-            )
+            try:
+                beat = db.execute_count(
+                    "UPDATE tasks SET last_heartbeat = now() WHERE id = %s AND status = 'running' "
+                    "AND worker = %s AND attempts = %s",
+                    (claim.task_id, claim.worker, claim.attempts),
+                )
+            except Exception:
+                # A failed beat is not a lost claim. Ending the thread here
+                # would stop every later beat, and the reaper would hand a
+                # live task to a second worker.
+                logger.warning(f"Task {claim.task_id}: heartbeat failed", exc_info=True)
+                continue
             if not beat:
                 # Reaped and re-claimed while we were still working. Beating on
                 # it now would vouch for the run that replaced ours.
