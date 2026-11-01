@@ -16,7 +16,6 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -141,7 +140,7 @@ class Listing(Base):
     source: Mapped[str] = mapped_column(Text)
     company: Mapped[str] = mapped_column(Text, server_default=text("''"))
     title: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    locations: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    locations: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     date_posted: Mapped[datetime.datetime | None]
     # The title pattern whose match set kept, stored once (TitlePattern).
     pattern_id: Mapped[int] = mapped_column(
@@ -149,7 +148,7 @@ class Listing(Base):
     )
     kept: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    raw: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    raw: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     # A value held by reference lives in a verified bundle object
     # (core.payloads.listings); the inline column then holds its default.
     description_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)

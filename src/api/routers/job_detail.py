@@ -14,10 +14,10 @@ from api.board.access import require_visible_job
 from api.mail import applications
 from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import CompBasis, CompPeriod
+from core.verdict_reads import Openness
 
 router = APIRouter()
 Verdict = Literal["passed", "rejected"]
-Openness = Literal["open", "closed"]
 
 
 class JobFacts(BaseModel):

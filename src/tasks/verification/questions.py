@@ -28,6 +28,14 @@ def _verification_spec(url: str, content: str, context: dict | None = None) -> B
     )
 
 
+def _row_context(row: dict[str, Any]) -> dict[str, Any]:
+    """What a new-posting request carries to the verdicts its answer writes."""
+    return {
+        key: row[key]
+        for key in ("company", "title", "needs_closed", "needs_clearance", "page_fetch_id")
+    }
+
+
 def _submission_model() -> tuple[str, str]:
     """The model and effort run_batched will submit the new-posting sweep with."""
     shape = configured_shape(VERIFY_TASK)
@@ -52,10 +60,7 @@ def _joint_spec(
         build_custom_input(row["company"], row["title"], content),
         response_model,
         context={
-            **{
-                key: row[key]
-                for key in ("company", "title", "needs_closed", "needs_clearance", "page_fetch_id")
-            },
+            **_row_context(row),
             "model": model,
             "effort": effort,
             "verify_question": question_sha256(

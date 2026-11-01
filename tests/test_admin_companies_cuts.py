@@ -6,13 +6,8 @@ from __future__ import annotations
 import datetime
 
 from api import db, signals
+from tests.factories import user_id_for_subject
 from tests.job_board_support import _insert_job
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def _names(body: dict) -> set[str]:
@@ -20,7 +15,7 @@ def _names(body: dict) -> set[str]:
 
 
 def test_applied_has_comp_and_repost_cut_the_list_and_the_total(client, admin_headers):
-    admin = _uid(admin_headers)
+    admin = user_id_for_subject("test-admin")
     paid = _insert_job("src-cc", "https://x.test/cc1", company="Payco")
     db.execute(
         "INSERT INTO job_comp (url, comp_min) SELECT url, 100000 FROM jobs WHERE id = %s", (paid,)

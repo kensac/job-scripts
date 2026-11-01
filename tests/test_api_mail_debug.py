@@ -13,6 +13,7 @@ import datetime
 
 from api import db
 from tests import mail_log
+from tests.factories import user_id_for_subject
 
 
 def _msg(uid: int, mid: str, **kw) -> int:
@@ -46,18 +47,12 @@ def _app(uid: int, company="Acme") -> int:
     return row["id"]
 
 
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
-
-
 def test_requires_admin(client, user_headers):
     assert client.get("/v1/admin/mail", headers=user_headers).status_code == 403
 
 
 def test_lists_with_the_current_verdict(client, admin_headers):
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg1@x>")
     mail_log.execute(
         "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
@@ -71,7 +66,7 @@ def test_lists_with_the_current_verdict(client, admin_headers):
 def test_only_the_newest_classification_shows(client, admin_headers):
     """Append-only: a correction is a newer row, and the list must not show
     the superseded one as if it were current."""
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg2@x>")
     mail_log.execute(
         "INSERT INTO email_events (message_id, kind) VALUES (%s, %s)", (mid, "rejection")
@@ -86,7 +81,7 @@ def test_only_the_newest_classification_shows(client, admin_headers):
 def test_unmatched_is_filterable(client, admin_headers):
     """A NULL application_id is a recorded outcome - 'we looked and found
     nothing' - so it is a value to filter ON, not an absence to skip."""
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg3@x>")
     mail_log.execute(
         "INSERT INTO application_matches (message_id, application_id, method) VALUES (%s, %s, %s)",
@@ -101,7 +96,7 @@ def test_unmatched_is_filterable(client, admin_headers):
 def test_detail_shows_full_history_not_just_current(client, admin_headers):
     """The history is the point: a match that changed when a posting reached
     the board is exactly what someone debugging a wrong answer needs."""
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg4@x>")
     app = _app(uid)
     mail_log.execute(
@@ -121,7 +116,7 @@ def test_detail_shows_full_history_not_just_current(client, admin_headers):
 def test_detail_exposes_what_tier_one_would_see(client, admin_headers):
     """So a missed exact-link match can be diagnosed without re-running the
     matcher and guessing at why it found nothing."""
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg5@x>", body="apply at https://job-boards.greenhouse.io/acme/jobs/9")
     body = client.get(f"/v1/admin/mail/{mid}", headers=admin_headers).json()
     assert any("greenhouse" in u for u in body["canonical_urls"])
@@ -130,7 +125,7 @@ def test_detail_exposes_what_tier_one_would_see(client, admin_headers):
 def test_override_appends_rather_than_edits(client, admin_headers):
     """The matcher's own attempt survives underneath. A systematically wrong
     tier stays visible instead of being corrected away one row at a time."""
-    uid = _uid(admin_headers)
+    uid = user_id_for_subject("test-admin")
     mid = _msg(uid, "<dbg6@x>")
     app = _app(uid)
     mail_log.execute(
@@ -153,7 +148,7 @@ def test_override_refuses_another_users_application(client, admin_headers, other
     """Would attribute one person's outcome to another's application. 404
     rather than 403: whether that application exists is not the caller's to
     learn."""
-    admin_uid, other_uid = _uid(admin_headers), _uid(other_user_headers)
+    admin_uid, other_uid = user_id_for_subject("test-admin"), user_id_for_subject("test-user-2")
     mid = _msg(admin_uid, "<dbg7@x>")
     theirs = _app(other_uid, company="TheirCo")
     resp = client.post(
@@ -164,7 +159,7 @@ def test_override_refuses_another_users_application(client, admin_headers, other
 
 
 def test_pipeline_hides_closed_by_default(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     live, dead = _app(uid, "LiveCo"), _app(uid, "DeadCo")
     mid = _msg(uid, "<dbg8@x>")
     mail_log.execute(

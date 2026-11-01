@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from api import budget, db
+from tests.factories import user_id_for_subject
 
 
 @pytest.fixture(autouse=True)
@@ -20,12 +21,6 @@ def _server_key(monkeypatch):
     """The substitution only happens on the owner key, so the allowlist is
     empty without one and every path raises before it can be reached."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-owner-test")
-
-
-def _user_id(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def _choose(user_id: int, model: str | None) -> None:
@@ -38,7 +33,7 @@ def _choose(user_id: int, model: str | None) -> None:
 
 class TestASubstitutionIsReported:
     def test_a_disallowed_choice_says_what_will_run_instead(self, client, user_headers, f):
-        _choose(_user_id(user_headers), "gpt-5.6-luna")
+        _choose(user_id_for_subject("test-user"), "gpt-5.6-luna")
         body = client.get("/v1/user/settings", headers=user_headers).json()
         assert body["ai_model"] == "gpt-5.6-luna"
         assert body["effective_model"] != "gpt-5.6-luna"
@@ -47,7 +42,7 @@ class TestASubstitutionIsReported:
     def test_the_reason_is_actionable_not_a_verdict(self, client, user_headers, f):
         """ "Not available" is useless. The user needs to know it is shared
         credits doing it and that their own key removes the limit."""
-        _choose(_user_id(user_headers), "gpt-5.6-luna")
+        _choose(user_id_for_subject("test-user"), "gpt-5.6-luna")
         reason = client.get("/v1/user/settings", headers=user_headers).json()["substitution_reason"]
         assert "shared credits" in reason
         assert "your own API key" in reason
@@ -57,7 +52,7 @@ class TestASubstitutionIsReported:
         kind of lie."""
         allowed = budget.owner_allowed_models(["jobtracker-users-internal"])
         assert allowed
-        _choose(_user_id(user_headers), allowed[0])
+        _choose(user_id_for_subject("test-user"), allowed[0])
         body = client.get("/v1/user/settings", headers=user_headers).json()
         assert body["effective_model"] == allowed[0]
         assert body["substituted_from"] is None
@@ -66,7 +61,7 @@ class TestASubstitutionIsReported:
     def test_choosing_nothing_is_not_a_substitution(self, client, user_headers, f):
         """A user who never chose has not had anything taken away, even though
         a default is filled in for them."""
-        _choose(_user_id(user_headers), None)
+        _choose(user_id_for_subject("test-user"), None)
         body = client.get("/v1/user/settings", headers=user_headers).json()
         assert body["effective_model"] is not None
         assert body["substituted_from"] is None
@@ -82,7 +77,7 @@ class TestItComesFromTheSamePlaceTheWorkDoes:
     def test_the_reported_model_is_the_one_resolve_returns(self, client, user_headers, f):
         """Re-deriving the rule in the router would drift and start describing
         a substitution that does not happen."""
-        user_id = _user_id(user_headers)
+        user_id = user_id_for_subject("test-user")
         _choose(user_id, "gpt-5.6-luna")
         from api.auth import AuthedUser
 

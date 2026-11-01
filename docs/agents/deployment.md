@@ -55,6 +55,15 @@ genuinely not an ancestor, so an unknown SHA fabricates a confident
 "not deployed" answer. Deployment records from an infrastructure repository
 refer to that repository's commits, not this one's.
 
+## The path a response travels
+
+The API runs in Nuremberg behind Cloudflare; the frontend proxy runs on Vercel
+in Virginia. Cloudflare compresses toward Vercel but fetches from this host as
+it is served, so the API compresses its own responses (`GZipMiddleware` in
+`api/app.py`). The transatlantic leg is where size costs time, and it is
+invisible in the API's own spans: a route that reads 400 ms in a trace can take
+1.1 s in the browser.
+
 ## The pin
 
 The pin is a snapshot, not a follow. Automation proposes pin updates, but its
