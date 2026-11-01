@@ -41,6 +41,33 @@ class Job(Base):
             "near_copy_key",
             postgresql_where=text("near_copy_key IS NOT NULL"),
         ),
+        # The admin catalog's search, `company ILIKE OR title ILIKE OR url
+        # ILIKE` (routers/admin/posting_inspection.py), read as a BitmapOr of
+        # these three: an OR is index-backed only when every arm is. Without
+        # them the count was a seq scan of 1.49M rows, 2.4 s warm (2026-11-01).
+        Index(
+            "idx_jobs_company_trgm",
+            "company",
+            postgresql_using="gin",
+            postgresql_ops={"company": "gin_trgm_ops"},
+        ),
+        Index(
+            "idx_jobs_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
+        Index(
+            "idx_jobs_url_trgm",
+            "url",
+            postgresql_using="gin",
+            postgresql_ops={"url": "gin_trgm_ops"},
+        ),
+        # The catalog sorted newest posted first, read in index order with its
+        # tiebreak instead of a top-N sort of every row (1.7 s warm,
+        # 2026-11-01). The ascending sort, NULLS LAST then id DESC, cannot
+        # read it in either direction.
+        Index("idx_jobs_date_posted", text("date_posted DESC NULLS LAST"), text("id DESC")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
