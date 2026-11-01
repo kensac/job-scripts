@@ -51,6 +51,19 @@ def test_display_name_is_the_most_common_spelling(client, admin_headers, f):
     assert _item(client, admin_headers, "acme")["company_name"] == "Acme"
 
 
+def test_display_name_breaks_a_tie_as_mode_does(client, admin_headers, f):
+    """The spelling count stands in for mode(), so a tie goes to the spelling
+    mode() returns: the first in the database's sort order."""
+    for spelling in ("ACME", "Acme", "acme"):
+        f.make_job(source="s", company=spelling, title=spelling)
+    reference = db.query_one(
+        "SELECT mode() WITHIN GROUP (ORDER BY company) AS m FROM jobs "
+        "WHERE lower(btrim(company)) = 'acme'"
+    )["m"]
+
+    assert _item(client, admin_headers, "acme")["company_name"] == reference
+
+
 def test_comp_separates_found_from_ran_and_found_nothing(client, admin_headers, f):
     """The distinction the whole comp block exists for: 'we looked and found
     no pay' is a different fact from 'we never looked', and neither is a claim
