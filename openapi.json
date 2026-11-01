@@ -24856,7 +24856,7 @@
     "/v1/admin/task-models/{purpose}/history": {
       "get": {
         "summary": "Task Model History",
-        "description": "Every decision ever made for this task, newest first.\n\nThe table is append-only and a cleared override is a NULL row rather than a\ndeletion, so this is the whole record and not a reconstruction. A monthly\nreview is looking for the switch that explains a regression noticed weeks\nlater, which only works if the switch is still here.",
+        "description": "This task's decisions, newest first, up to a read bound.\n\nThe table is append-only and a cleared override is a NULL row rather than a\ndeletion, so this is the record and not a reconstruction. A monthly\nreview is looking for the switch that explains a regression noticed weeks\nlater, which only works if the switch is still here.",
         "operationId": "task_model_history_v1_admin_task_models__purpose__history_get",
         "parameters": [
           {
