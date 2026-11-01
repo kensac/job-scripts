@@ -15,38 +15,16 @@ from typing import Any
 from api import db, telemetry
 from api.health.boards import _detect_boards
 from api.health.evidence import (
-    FRESH_CHECK_WINDOW as FRESH_CHECK_WINDOW,
-)
-from api.health.evidence import (
-    MAX_PER_COMPANY as MAX_PER_COMPANY,
-)
-from api.health.evidence import (
-    MIN_CONTENT_SAMPLES as MIN_CONTENT_SAMPLES,
-)
-from api.health.evidence import (
-    MIN_SAMPLES as MIN_SAMPLES,
-)
-from api.health.evidence import (
     WORKER_FRESH as WORKER_FRESH,
 )
 from api.health.evidence import (
     _int_from as _int_from,
 )
-from api.health.evidence import (
-    _pct as _pct,
-)
 from api.health.fleet import _detect_fleet
 from api.health.mail import _detect_mail
 from api.health.queue import _detect_queue
-from api.health.silent import SWEEP_KINDS as SWEEP_KINDS
 from api.health.silent import _detect_silent
 from api.health.sources import _detect_sources
-from api.health.subjects import (
-    SUBJECT_ATS as SUBJECT_ATS,
-)
-from api.health.subjects import (
-    SUBJECT_DETECTOR as SUBJECT_DETECTOR,
-)
 from api.health.subjects import (
     SUBJECT_HOST as SUBJECT_HOST,
 )
