@@ -75,9 +75,9 @@ Terminal outcomes beat progress regardless of arrival order. Withdrawal comes
 from the board, not from mail: no employer writes to say you withdrew.
 
 **Keep each mail derivation with its owner.** `api.mail.pipeline.events` reads
-current events and matches and derives stage; `pipeline_proposals` derives board
-status suggestions and records a person's answer; `pipeline_actions` derives
-asks and reads the append-only answer log; `pipeline_senders` reads sender
+current events and matches and derives stage; `proposals` derives board
+status suggestions and records a person's answer; `actions` derives
+asks and reads the append-only answer log; `senders` reads sender
 evidence. `api.mail.pipeline` is the stable import surface for their callers.
 A split must preserve the same current-event and current-match precedence,
 user scope, and event answer writes. Sender signals only suggest review and
@@ -212,7 +212,7 @@ of the skills, most of the rest being wording. Turning it on is a config
 row, not a deploy; choosing an arm worth paying for is the experiment
 (luna at none gets seniority to 74 percent of the reference for about 70
 cents a day at the current verification rate). Comp and
-requirements select on `core.store.VERIFIED_OPEN`: the posting's latest
+requirements select on `core.verdict_reads.verified_open`: the posting's latest
 closed and clearance verdicts both passed.
 
 **An arm that answers nothing is re-bought every sweep.** Comp leaves a row
