@@ -44613,7 +44613,7 @@
           "evidence"
         ],
         "title": "ModelCandidate",
-        "description": "One model this task could run on, eligible or not, carrying WHY.\n\nEvery dollar figure is a decimal string, never a number: these are\nDecimals and a float would round money on the way out. None means unknown\n- an ineligible model has no price and an unbounded sweep has no cycle\ncost - and rendering either as 0 would make an unknown look like a free\none."
+        "description": "One model this task could run on, eligible or not, carrying WHY.\n\nEvery dollar figure is a `_money` string, None when unknown."
       },
       "ModelChangeEffect": {
         "type": "string",
