@@ -20,7 +20,7 @@ from api.routers import analytics
 
 
 def _sources() -> list[BoardAnalytics]:
-    return analytics._collect(analytics.DEFAULT_MIN_SAMPLE)
+    return analytics.collect_source_analytics(analytics.DEFAULT_MIN_SAMPLE)
 
 
 @pytest.mark.corpus

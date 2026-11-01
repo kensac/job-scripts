@@ -168,7 +168,7 @@ def _skip_scan(table: str, col: str) -> str:
     """
 
 
-def _distinct_query_values(col: str, recent: bool = False) -> list[str]:
+def distinct_query_values(col: str, recent: bool = False) -> list[str]:
     """`SELECT DISTINCT col FROM ledger_rows WHERE col IS NOT NULL ORDER BY
     col`, as a skip scan: each step asks the index for the next value above the
     last, so the cost is one descent per distinct value instead of a read of
@@ -226,12 +226,12 @@ def _compute_options() -> QueryFilterOptions:
     sources = [r["name"] for r in db.query("SELECT name FROM sources WHERE active ORDER BY name")]
     return QueryFilterOptions(
         sources=[v for v in sources if v],
-        check_types=[v for v in _distinct_query_values("check_type") if v],
-        statuses=[v for v in _distinct_query_values("status") if v],
+        check_types=[v for v in distinct_query_values("check_type") if v],
+        statuses=[v for v in distinct_query_values("status") if v],
         # Pipeline context (which code path decided), not the dead legacy
         # config names: only values seen in the last 30 days.
-        contexts=[v for v in _distinct_query_values("config_name", recent=True) if v],
-        workers=[v for v in _distinct_query_values("worker", recent=True) if v],
+        contexts=[v for v in distinct_query_values("config_name", recent=True) if v],
+        workers=[v for v in distinct_query_values("worker", recent=True) if v],
     )
 
 
@@ -378,7 +378,7 @@ _QUERIES_FILTERABLE = [
 # Every column of ai_queries, named once. Two routes returned the whole row
 # through SELECT *, which cannot be typed and drifts from whatever reads it.
 # The instructions come from instructions_id through query_instructions.hydrate.
-_QUERY_DETAIL_COLUMNS = (
+QUERY_DETAIL_COLUMNS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "reasoning_effort, filter_name, prompt_hash, company, job_title, "
     "input_content, parsed_json, prompt_tokens, completion_tokens, total_tokens, "
@@ -429,17 +429,17 @@ class QueryRecord(BaseModel):
 @router.get("/queries/{query_id}")
 def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> QueryRecord:
     row = db.query_one(
-        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE id = %s",
+        f"SELECT {QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE id = %s",
         (query_id,),
     )
     if not row:
         raise refuse(404, "NOT_FOUND", "unknown query")
     if row["input_content"] is None:
-        row["input_content"] = _held_input(row)
+        row["input_content"] = held_input(row)
     return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
 
 
-def _held_input(row: dict) -> str | None:
+def held_input(row: dict) -> str | None:
     """The input of a row whose page text is held by reference, which
     ledger_rows cannot rebuild in SQL: a fetch row is its own text, and an
     answer's is core.answer_inputs over its fetch's text, as the view does."""
