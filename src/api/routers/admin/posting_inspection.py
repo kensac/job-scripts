@@ -45,6 +45,14 @@ _PASSED = """(EXISTS (SELECT 1 FROM ai_queries q WHERE q.url = u.url AND q.statu
     OR EXISTS (SELECT 1 FROM page_fetches f WHERE f.url = u.url AND f.status = 'passed'
                AND f.method <> 'verification'))"""
 _VERDICT_HOLDS = {"rejected": _REJECTED, "passed": f"NOT {_REJECTED} AND {_PASSED}"}
+# The same verdicts as HAVING clauses, for the list grouped over every row.
+_VERDICT_HAVING = {
+    "rejected": "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0",
+    "passed": (
+        "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
+        "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
+    ),
+}
 
 # Postings with neither verdict: every check failed or has no status. They
 # are few (5,870 of 1,279,002 on 2026-11-01), found from the rows that are
@@ -217,16 +225,6 @@ _RECENT_POSTINGS = f"""
 
 
 _URL_STREAK = verdicts.FETCH_STREAK.format(url="ledger_rows.url")
-
-
-# The grouped list's verdict filter: _VERDICT_HOLDS as a HAVING clause.
-_VERDICT_HAVING = {
-    "rejected": "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0",
-    "passed": (
-        "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
-        "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
-    ),
-}
 
 
 def _checked_posting(row: dict, give_up: int) -> CheckedPosting:
