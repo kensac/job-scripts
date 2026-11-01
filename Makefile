@@ -1,6 +1,6 @@
 export PYTHONPATH := src
 
-.PHONY: sync check prose migrations-check lint fmt types coverage test test-par dev-api dev-worker dev-headers testdb-up testdb-down testdb-url testdb-sync testdb-sync-fast integration corpus profile profile-check schema migrate migration
+.PHONY: sync check prose migrations-check lint fmt types coverage test test-par dev-api dev-worker dev-headers testdb-up testdb-down testdb-url corpus profile profile-check schema migrate migration
 
 sync:           ## install exactly the lockfile into .venv (then activate it)
 	uv sync --frozen
@@ -93,9 +93,9 @@ TESTPG_URL := postgresql://postgres:test@127.0.0.1:$(TESTPG_PORT)/jobtracker_tes
 # Local commands reach this checkout's throwaway database and nothing else.
 # The application reads DATABASE_URL from its environment only, never from
 # .env, and these targets set it from JOBTRACKER_DEV_DATABASE_URL, which
-# defaults to the test database above. Point it at the synced copy's dev role
-# to use real rows. Production's DSN is PRODUCTION_DATABASE_URL in .env, read
-# only by the targets that say production: profile, profile-check, testdb-sync.
+# defaults to the test database above. Production's DSN is
+# PRODUCTION_DATABASE_URL in .env, read only by the targets that say
+# production: profile and profile-check.
 dev-api dev-worker migrate: export JOBTRACKER_DEV_DATABASE_URL := $(or $(JOBTRACKER_DEV_DATABASE_URL),$(TESTPG_URL))
 # Refuses any database not named like a disposable one (*_test, *_dev, ...).
 DEV_DB_GUARD = python -m core.disposable_db --env JOBTRACKER_DEV_DATABASE_URL --allow-dev
@@ -128,39 +128,15 @@ migration:      ## generate a migration from the models (m="what changed")
 	DATABASE_URL='$(TESTPG_URL)' alembic revision --autogenerate -m "$(m)"
 
 # --- dev API ------------------------------------------------------------
-# A real API over a THROWAWAY COPY of production, so the frontend can build
-# against real shapes. The mock layer this replaces produced a 422 on every
-# resolve assignment, four envelope-key mismatches and an "infinite append"
-# bug, all because a fixture cannot falsify the assumption it was built from.
-# A copy cannot get the shape wrong, because it is the shape - including the
-# awkward cases nobody has found yet.
-#
-# THE ISOLATION IS A CREDENTIAL, NOT A NETWORK. jobtracker-db is deliberately
-# published on the public internet, which is how the oci and desktop workers
-# reach it, so "it runs locally" buys nothing: a process handed the production
-# DSN connects from anywhere. What keeps this off production is that the dev
-# role cannot log in to it.
-#
-# Setup, once (reads PRODUCTION_DATABASE_URL from .env):
-#   python scripts/sync_testdb.py --name jobtracker_test --dev-role jobtracker_dev
-#   # then export the JOBTRACKER_DEV_DATABASE_URL it prints
-#
-# Refreshing is DELIBERATELY a command and not a schedule. A copy that goes
-# stale without anyone noticing is the fixture problem again, one layer out,
-# so the staleness is at least attributable to the last time someone ran it.
-#
-# WITHOUT A PRODUCTION CREDENTIAL, which is what anyone working in
-# personal-portfolio actually wants:
+# A real API over the generated corpus, so the frontend builds against
+# production's measured shapes with no production data or credential:
 #
 #   make testdb-up && eval "$(make testdb-url)"
 #   make corpus
 #   make dev-api
 #
-# The corpus is generated from a committed measurement of production, so the
-# shapes are real without any of the data being. It also holds five users with
-# overlapping boards, which the synced copy never will - production has one
-# user, so a copy cannot show whether a screen renders the right person's
-# rows.
+# The corpus holds five users with overlapping boards, so a screen can be
+# checked for showing the right person's rows.
 DEV_API_PORT ?= 8000
 
 dev-api:        ## run the API against the dev database (migrates it on start)
@@ -181,35 +157,15 @@ dev-headers:    ## print the identity headers a dev client must send
 	@echo '# Any authenticated request PROVISIONS a user row if the sub is new,'
 	@echo '# so use a sub that already exists in the copy unless you mean to.'
 
-# --- test database -------------------------------------------------------
-# A copy of production on the same Postgres instance, refreshed on demand so
-# integration tests run against real shapes instead of invented ones. Manual
-# by design: prod data only moves when you ask it to.
-#
-# pg_dump must match the server major version and the local client is older,
-# so the dump runs inside a postgres:18 container rather than pinning a second
-# client install on every machine.
-TESTDB ?= jobtracker_test
-
-testdb-sync:    ## rebuild $(TESTDB) from production (destructive)
-	python scripts/sync_testdb.py --name $(TESTDB)
-
-testdb-sync-fast: ## same, minus the large text columns (~80% of the data)
-	python scripts/sync_testdb.py --name $(TESTDB) --fast
-
-integration:    ## the tests that need a synced copy of REAL production
-	pytest -q -m integration tests
-
 # --- the generated corpus ------------------------------------------------
 # A catalog shaped like production and containing none of it, so the whole
 # suite runs on a pull request with no production credential anywhere. The
 # shapes are measured, not invented: `make profile` reads production and
-# rewrites tests/production_profile.json, and the scheduled `--check` fails
-# when production grows a shape the generator cannot produce.
+# rewrites tests/production_profile.json, and `make profile-check` fails when
+# production grows a shape the generator cannot produce.
 #
 # The suite builds this on demand, so there is normally nothing to run here.
-# It is a target because a dev API over generated data needs no secret at all,
-# which the synced copy will always need.
+# It is a target because a dev API over generated data needs no secret at all.
 
 # One line of python, not a backslash-continued block: make passes the
 # continuation lines' leading TAB to the shell, and /bin/sh hands it to python

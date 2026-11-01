@@ -1,11 +1,9 @@
 """Fabricated rows shaped like production, for the tests that assert shapes.
 
-NOT the dev API's data source. That is a throwaway COPY of production
-(`scripts/sync_testdb.py --dev-role`, then `make dev-api`), because a copy
-cannot get the shape wrong - it IS the shape, including the awkward cases
-nobody has found yet. This module exists for the case a copy cannot serve: CI,
-which has no production credentials and must still be able to assert that the
-API's responses carry the shapes the frontend depends on.
+NOT the dev API's data source; that is the generated corpus (`make corpus`,
+then `make dev-api`). This module serves CI, which has no production
+credentials and must still be able to assert that the API's responses carry
+the shapes the frontend depends on.
 
 The tests over this seed read it back THROUGH THE API rather than out of the
 tables. That is the whole point. A fixture cannot falsify the assumption it

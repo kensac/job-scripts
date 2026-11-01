@@ -5,8 +5,7 @@ are built on still hold over a realistic population - specifically the two
 that invert the obvious reading of the numbers, and the ones that decide which
 metrics are honest to render at all.
 
-Most run on the generated corpus and therefore on every pull request; see
-tests/test_prod_shapes.py for what the two markers mean.
+They run on the generated corpus, and therefore on every pull request.
 """
 
 from __future__ import annotations
@@ -17,20 +16,6 @@ import pytest
 
 from api import db
 from api.routers import analytics
-
-# The spend metric reads ai_queries.cost_usd, which a fixture synced before that
-# migration does not have. Skipping loudly beats failing seven tests with an
-# UndefinedColumn that says nothing about what to do, and beats dropping the
-# column from the query to make a stale fixture pass.
-_COST_COLUMN = db.query_one(
-    "SELECT 1 AS present FROM information_schema.columns "
-    "WHERE table_name = 'ai_queries' AND column_name = 'cost_usd'"
-)
-if not _COST_COLUMN:
-    pytest.skip(
-        "synced fixture predates ai_queries.cost_usd - re-run `make testdb-sync`",
-        allow_module_level=True,
-    )
 
 
 def _sources() -> list[analytics.BoardAnalytics]:
@@ -54,29 +39,6 @@ def test_unconfigured_sources_are_reported_as_such_not_omitted():
         assert row.configured is (name in configured)
 
 
-@pytest.mark.integration
-def test_active_share_is_not_comparable_across_feeds():
-    """The finding the caveat rests on: some boards have zero inactive rows,
-    because their feed only ever lists live postings and the ingest never
-    clears the flag. If that ever stops being true the caveat is stale and
-    should be revisited rather than left in the response.
-
-    Real data only: the finding is that SOME feeds never clear the active flag. That is
-    per-feed ingest behaviour, a correlation between source and active that a
-    per-column distribution does not carry, so every source in the corpus reports
-    inactive rows.
-    """
-    rows = _sources()
-    with_postings = [r for r in rows if r.inventory.total > 0]
-    reporting = [r for r in with_postings if r.inventory.reports_inactive]
-    silent = [r for r in with_postings if not r.inventory.reports_inactive]
-    assert reporting, "no board reports inactive postings - the flag is meaningless"
-    assert silent, (
-        "every board now reports inactive postings; active_share may have "
-        "become comparable and the caveat needs re-deriving"
-    )
-
-
 @pytest.mark.corpus
 def test_a_job_belongs_to_exactly_one_source():
     """Why overlap is keyed on (company, title) rather than url."""
@@ -84,25 +46,6 @@ def test_a_job_belongs_to_exactly_one_source():
         "SELECT count(*) AS c FROM (SELECT url FROM jobs GROUP BY url HAVING count(*) > 1) t"
     )
     assert dupes is not None and dupes["c"] == 0
-
-
-@pytest.mark.integration
-def test_status_vocabulary_still_has_no_interview_or_offer_state():
-    """Interview and offer rates per board are not computable, and this is the
-    reason. If a status like that ever appears, the metric becomes available
-    and this test is the prompt to add it.
-
-    Real data only: the subject is what users actually typed into the status column.
-    Over the corpus it asserts the profile's measured vocabulary, which is already
-    checked by measure_profile.py --check.
-    """
-    statuses = {
-        (r["status"] or "").lower()
-        for r in db.query("SELECT DISTINCT status FROM user_jobs WHERE status IS NOT NULL")
-    }
-    outcome_words = {"interview", "offer", "onsite", "phone screen", "rejected"}
-    found = {s for s in statuses if any(w in s for w in outcome_words)}
-    assert not found, f"outcome statuses now exist ({found}); board outcome rates are computable"
 
 
 @pytest.mark.corpus

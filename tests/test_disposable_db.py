@@ -67,14 +67,3 @@ class DevApiGuardTests(unittest.TestCase):
                 result = self.run_dev_api(f"postgresql://user@localhost/{name}")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("API_STARTED", result.stdout)
-
-
-class SyncTargetTests(unittest.TestCase):
-    def test_database_swap_removes_query_override(self):
-        from psycopg.conninfo import conninfo_to_dict
-        from scripts.sync_testdb import _swap_db
-
-        dsn = "postgresql://user@localhost/original?dbname=production&application_name=sync"
-        target = conninfo_to_dict(_swap_db(dsn, "jobtracker_test"))
-        self.assertEqual(target["dbname"], "jobtracker_test")
-        self.assertEqual(target["application_name"], "sync")

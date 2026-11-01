@@ -103,22 +103,5 @@ def _reset_to_empty() -> None:
     _reseed()
 
 
-# Whether this database was a synced copy of production when the run started.
-#
-# Read ONCE, at import, because the answer must not depend on what the run has
-# already done to the database. `_mutable_tables()` excludes only
-# alembic_version, so app_config - where sync_testdb.py stamps
-# `testdb_synced_at` - is emptied by the first unmarked test, and `_reseed()`
-# does not put it back.
-#
-# Asked live, that made the whole arrangement fail silently. On a machine whose
-# TEST_DATABASE_URL held a synced copy, `pytest tests` truncated the copy in its
-# first test file, and from then on every `integration` test skipped with "this
-# database holds the generated corpus or nothing": a green run that checked
-# nothing, which is precisely the false negative _clean_db exists to prevent.
-# The guard in corpus.build() reads the same stamp, so it could not fire either.
-_SYNCED_AT = db.query_one("SELECT value FROM app_config WHERE key = 'testdb_synced_at'")
-
-
 def _reseed() -> None:
     db.seed_defaults()

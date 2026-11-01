@@ -11,7 +11,7 @@ therefore safe.
 nothing loads `.env` into it: the fleet sets it in its compose files, and
 `make dev-api`, `make dev-worker` and `make migrate` set it to the checkout's
 disposable database and refuse any other name. Only the commands that exist to
-read production (`make profile`, `make profile-check`, `make testdb-sync`)
+read production (`make profile`, `make profile-check`)
 read `PRODUCTION_DATABASE_URL`. Pointing anything else at production is a
 command that says so:
 

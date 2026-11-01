@@ -80,8 +80,7 @@ empties the database the dev API reads, so run `make corpus` again after one.
 
 `dev-api`, `dev-worker` and `migrate` use this checkout's test database unless
 `JOBTRACKER_DEV_DATABASE_URL` names another. They refuse any database not
-named like a disposable one. For a dev API over a synced copy of real rows,
-see the comment above `dev-api` in the `Makefile`.
+named like a disposable one.
 
 ## Environment
 
@@ -93,8 +92,7 @@ see the comment above `dev-api` in the `Makefile`.
   `OPENAI_API_KEY` and the rest. Locally the Makefile's dev targets set
   `DATABASE_URL`.
 - `.env` holds production's DSN as `PRODUCTION_DATABASE_URL`, never as
-  `DATABASE_URL`. Only `make profile`, `make profile-check` and
-  `make testdb-sync` read it. See
+  `DATABASE_URL`. Only `make profile` and `make profile-check` read it. See
   [docs/agents/reading-production.md](docs/agents/reading-production.md).
 - Fleet-wide tunables (cycle cadence, per-cycle sizes, chunk sizes, retry
   limits) are rows in `app_config`, changed from the admin config page, not
