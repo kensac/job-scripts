@@ -187,6 +187,11 @@ def schedule_ingest_cycle() -> None:
                 "managed_board_schedule_refused",
                 properties={"managed_board_id": board["id"], "code": exc.code},
             )
+        except Exception as exc:
+            # One board's failure must not starve the boards after it, nor
+            # the rest of the cycle below. Recorded because it is swallowed.
+            logger.exception("Managed board %s admission failed", board["id"])
+            telemetry.capture_exception(exc, properties={"managed_board_id": board["id"]})
         _managed_board_schedule_attempts.add(attempt)
     # Application answers ahead of need, hourly, for each person who has put
     # a resume in: the forms of the postings on their board are read and
