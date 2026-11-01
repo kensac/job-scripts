@@ -35796,7 +35796,8 @@
           "cache_write_tokens",
           "est_cost_usd"
         ],
-        "title": "BatchRecord"
+        "title": "BatchRecord",
+        "description": "One batch job at the provider.\n\n`requests` is what was submitted, `completed` and `failed_count` what came\nback. `est_tokens` is what submission estimated; `input_tokens` and\n`output_tokens` are what the provider billed, so the two disagreeing is\nthe estimate being wrong rather than anything being lost."
       },
       "BatchedCheck": {
         "properties": {
@@ -49688,6 +49689,28 @@
             "type": "string",
             "title": "Status"
           },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
           "est_tokens": {
             "type": "integer",
             "title": "Est Tokens"
@@ -49721,28 +49744,6 @@
               }
             ],
             "title": "Est Cost Usd"
-          },
-          "submitted_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Submitted At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
           },
           "task_kind": {
             "anyOf": [
@@ -49778,19 +49779,19 @@
           "completed",
           "failed_count",
           "status",
+          "submitted_at",
+          "updated_at",
+          "completed_at",
           "est_tokens",
           "input_tokens",
           "output_tokens",
           "cache_write_tokens",
           "est_cost_usd",
-          "submitted_at",
-          "updated_at",
-          "completed_at",
           "task_kind",
           "task_status"
         ],
         "title": "ProviderBatch",
-        "description": "One batch job at the provider, with the task it belongs to.\n\n`requests` is what was submitted, `completed` and `failed_count` what came\nback. `est_tokens` is what submission estimated; `input_tokens` and\n`output_tokens` are what the provider billed, so the two disagreeing is\nthe estimate being wrong rather than anything being lost."
+        "description": "A batch with the task it belongs to."
       },
       "ProviderBatches": {
         "properties": {
