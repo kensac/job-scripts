@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, JSONB, TIMESTAMP
+from sqlalchemy.dialects.postgresql import ARRAY, BYTEA, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -62,7 +62,7 @@ class EmailMessage(Base):
     from_name: Mapped[str | None] = mapped_column(Text)
     to_emails: Mapped[Any] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
     subject: Mapped[str | None] = mapped_column(Text)
-    sent_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    sent_at: Mapped[datetime.datetime | None]
     body_text: Mapped[str | None] = mapped_column(Text)
     # The markup the message actually arrived as, kept so a reader can render
     # mail as mail. body_text stays the derived plain text and remains what
@@ -76,9 +76,7 @@ class EmailMessage(Base):
     headers: Mapped[Any | None] = mapped_column(JSONB)
     prefilter_hit: Mapped[bool | None] = mapped_column(Boolean)
     prefilter_reason: Mapped[str | None] = mapped_column(Text)
-    imported_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    imported_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
     # The event and the match in force: the newest row of each log for this
     # message. Set by the one writer of each log (`mail.events.append`,
     # `mail.match.record`) in the statement that appends, so reading the
@@ -114,10 +112,8 @@ class GmailScanCursor(Base):
     )
     pending_ids: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     ranges: Mapped[Any] = mapped_column(JSONB, server_default=text("'[[null, null]]'::jsonb"))
-    completed_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    completed_at: Mapped[datetime.datetime | None]
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class EmailEvent(Base):
@@ -130,8 +126,8 @@ class EmailEvent(Base):
     )
     kind: Mapped[str] = mapped_column(Text)
     confidence: Mapped[str | None] = mapped_column(Text)
-    occurred_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
-    deadline_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    occurred_at: Mapped[datetime.datetime | None]
+    deadline_at: Mapped[datetime.datetime | None]
     deadline_inferred: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     detail: Mapped[Any | None] = mapped_column(JSONB)
     model: Mapped[str | None] = mapped_column(Text)
@@ -140,9 +136,7 @@ class EmailEvent(Base):
     actor_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class Application(Base):
@@ -171,18 +165,14 @@ class Application(Base):
     company_name: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
     source_provenance: Mapped[str] = mapped_column(Text, server_default="email")
-    applied_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    applied_at: Mapped[datetime.datetime | None]
     # A dismissal is a correction, not a delete: the application stays, stops
     # counting, and can be restored. Only mail-derived applications can be
     # dismissed - a tracker application exists because the user entered it.
-    dismissed_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    dismissed_at: Mapped[datetime.datetime | None]
     dismissed_reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    updated_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class ApplicationMatch(Base):
@@ -210,9 +200,7 @@ class ApplicationMatch(Base):
     actor_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
 class UserOAuthToken(Base):
@@ -275,6 +263,4 @@ class EventAnswer(Base):
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
     note: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True), server_default=_now
-    )
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

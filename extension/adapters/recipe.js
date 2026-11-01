@@ -1,4 +1,5 @@
 import { isStopped } from "../runtime/operation";
+import { alternatives } from "./alternatives";
 import { createRecipeSelectors } from "./recipe-selectors";
 import { createRecipeControls } from "./recipe-controls";
 import { createRecipeValues } from "./recipe-values";
@@ -185,7 +186,7 @@ export function createRecipeAdapter(configs, context) {
   }
 
   async function fillVariants(variants, value, file, root, ctx) {
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     for (const want of wants.length ? wants : [""]) {
       for (const v of variants) {
         if (isGroup(v) || v.manual) continue;
@@ -367,7 +368,7 @@ export function createRecipeAdapter(configs, context) {
       if (recipeConfig.fillInputInterval) await sleep(recipeConfig.fillInputInterval);
       return ok;
     }
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     if (field._q && field._q.fillActions && (field._options?.length || field._fillEmpty) && !field._el?.tagName?.match(/SELECT|TEXTAREA/)) {
       // A custom choice with its own recipe: open the list, click the option.
       // A recipe that needs no value (a "today" button) runs once with none.

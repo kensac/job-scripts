@@ -236,7 +236,7 @@ which the request itself rejected 5 of 5 times on re-asking).
 **A backfill names its postings and passes the screens.** A screened posting
 has no verdict, so its path records nothing. To buy one, name the postings:
 `verify_new` with a `urls` payload verifies them past the reachability gate
-and the per-cycle cap (`new_postings.listed_sql`). A `run_filter_batch_chunk`
+and the per-cycle cap (`tasks.verification.selection.listed_sql`). A `run_filter_batch_chunk`
 built from an explicit job list never meets the filter's title screen. Every
 other condition still applies: available, a verdict missing, not in flight,
 page text present.
@@ -521,7 +521,7 @@ Every board row carries `ats`, the applicant tracking system its url lives
 on (ashby, greenhouse, lever, workable, workday and a few more by host;
 anything else is "other", usually the employer's own careers site, of
 which a real board has a couple of hundred, so listing them would make
-the select useless). One SQL expression, `ATS_SQL` in `api.routers.job_board`, feeds the row,
+the select useless). One SQL expression, `ATS_SQL` in `api.board.ats`, feeds the row,
 the `ats=` filter on GET /user/jobs and the counted list in
 GET /user/jobs/options, so the filter offers what is on the board rather
 than a fixed list. It exists because assisted apply works one ATS at a

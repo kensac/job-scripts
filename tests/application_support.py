@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from api import db
 from tasks import application as drafts
 
 
@@ -140,12 +139,6 @@ WORKABLE = json.dumps(
         },
     ]
 )
-
-
-def _user_id(sub: str = "test-user") -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
-    assert row is not None
-    return row["id"]
 
 
 def _job_for(f, user_id: int, url: str) -> int:

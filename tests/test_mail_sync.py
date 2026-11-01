@@ -35,6 +35,18 @@ def _connect(user_id: int, *, invalid: bool = False) -> None:
     )
 
 
+def _stored_count(user_id: int) -> int:
+    row = db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (user_id,))
+    return row["c"]
+
+
+def _start_cursor(user_id: int, ranges: list[list[int]]) -> None:
+    db.execute(
+        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
+        (user_id, db.jsonb(ranges)),
+    )
+
+
 def test_connected_users_excludes_dead_credentials(f):
     live, dead = f.make_user(), f.make_user()
     _connect(live)
@@ -190,15 +202,13 @@ async def test_a_second_sync_re_fetches_but_stores_nothing(monkeypatch, f):
     calls = _gmail_stub(monkeypatch, messages)
 
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
-    first = db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
+    first = _stored_count(uid)
     assert first == 5
     assert len(calls["fetched"]) == 5
 
     fetched_before = len(calls["fetched"])
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
-    second = db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))[
-        "c"
-    ]
+    second = _stored_count(uid)
     assert second == 5, "a re-sync must not duplicate rows"
     # Fetched again, and that is the documented cost. Asserted so that the day
     # someone moves the `seen` check ahead of the fetch, this test notices the
@@ -298,16 +308,10 @@ async def test_a_sync_that_stops_short_resumes_rather_than_skipping(set_config, 
     _gmail_stub(monkeypatch, [_message(f"<m{i}@x>") for i in range(7)])
 
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 3
-    )
+    assert _stored_count(uid) == 3
 
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 6
-    ), "the next pass must pick up where the last one stopped"
+    assert _stored_count(uid) == 6, "the next pass must pick up where the last one stopped"
 
 
 @pytest.mark.asyncio
@@ -359,18 +363,12 @@ async def test_full_sweep_finds_mail_older_than_recent_window(monkeypatch, f, se
         if cursor and cursor["completed_at"] is not None:
             break
     assert len(page_calls) >= 4
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 3
-    )
+    assert _stored_count(uid) == 3
     assert cursor and cursor["completed_at"] is not None
 
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
     assert page_calls[-1] == (None, None)
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 3
-    )
+    assert _stored_count(uid) == 3
     assert fetched.count("old-one") == 1
 
 
@@ -414,10 +412,7 @@ async def test_reconciliation_keeps_unfinished_page_after_fetch_failure(monkeypa
     await mail_sync.handle_sync_gmail(1, {"user_id": uid})
     assert pages == 1
     assert attempts == 2
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 2
-    )
+    assert _stored_count(uid) == 2
 
 
 def test_reconciliation_search_ranges_overlap_exact_second_boundaries(monkeypatch):
@@ -439,10 +434,7 @@ async def test_reconciliation_refuses_unsplittable_provider_page(monkeypatch, f,
     uid = f.make_user()
     _connect(uid)
     set_config("mail_reconciliation_ranges_per_cycle", 1)
-    db.execute(
-        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
-        (uid, db.jsonb([[10, 11]])),
-    )
+    _start_cursor(uid, [[10, 11]])
     monkeypatch.setattr(mail_sync.gmail, "list_message_page", lambda *_args, **_kw: (["a"], "more"))
     with pytest.raises(mail_sync.gmail.GmailError, match="cannot safely advance"):
         mail_sync._reconcile_one(1, uid)
@@ -458,10 +450,7 @@ async def test_reconciliation_keeps_unfetched_ids_after_cycle_budget(monkeypatch
     _connect(uid)
     set_config("mail_reconciliation_ranges_per_cycle", 1)
     set_config("mail_reconciliation_messages_per_cycle", 1)
-    db.execute(
-        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
-        (uid, db.jsonb([[0, 20]])),
-    )
+    _start_cursor(uid, [[0, 20]])
     pages = 0
 
     def page(_user_id, **_kw):
@@ -483,20 +472,14 @@ async def test_reconciliation_keeps_unfetched_ids_after_cycle_budget(monkeypatch
     assert cursor == {"pending_ids": ["b"], "completed_at": None}
     mail_sync._reconcile_one(1, uid)
     assert pages == 1
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 2
-    )
+    assert _stored_count(uid) == 2
 
 
 def test_new_mail_in_completed_range_is_seen_on_next_sweep(monkeypatch, f, set_config):
     uid = f.make_user()
     set_config("mail_reconciliation_ranges_per_cycle", 1)
     set_config("mail_reconciliation_messages_per_cycle", 3)
-    db.execute(
-        "INSERT INTO gmail_scan_cursors (user_id, ranges) VALUES (%s, %s)",
-        (uid, db.jsonb([[0, 20]])),
-    )
+    _start_cursor(uid, [[0, 20]])
     at = {"older": 5, "recent": 15}
 
     def page(_user_id, *, after_epoch=None, before_epoch=None):
@@ -519,10 +502,7 @@ def test_new_mail_in_completed_range_is_seen_on_next_sweep(monkeypatch, f, set_c
     mail_sync._reconcile_one(1, uid)  # Finish [10,20].
     at["arrived-late"] = 16
     mail_sync._reconcile_one(1, uid)  # Finish [0,10].
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 2
-    )
+    assert _stored_count(uid) == 2
 
     # The next full traversal repeats completed ranges and finds the new ID.
     db.execute(
@@ -532,7 +512,4 @@ def test_new_mail_in_completed_range_is_seen_on_next_sweep(monkeypatch, f, set_c
     set_config("mail_reconciliation_ranges_per_cycle", 10)
     for _ in range(5):
         mail_sync._reconcile_one(1, uid)
-    assert (
-        db.query_one("SELECT count(*) AS c FROM email_messages WHERE user_id = %s", (uid,))["c"]
-        == 3
-    )
+    assert _stored_count(uid) == 3

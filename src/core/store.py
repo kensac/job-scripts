@@ -117,12 +117,19 @@ def ai_result_row(
     page_fetch_id: int | None = None,
     model_call_id: int | None = None,
 ) -> dict[str, Any]:
+    """One ai_queries row for add_ai_results.
+
+    created_at is left to the database clock: comparing an app-host time with
+    a batch's database time can discard a valid reverify as stale. What the
+    answer was asked and what its call cost are not stored here: page_fetch_id
+    names the fetch it read (core.answer_inputs rebuilds the input) and
+    model_call_id the call, which model_calls priced once when it was made.
+    ledger_rows reads both.
+    """
     if check_type == "content":
         # No view reads a fetch stored here; it would be lost.
         raise ValueError("a page fetch is written by core.page_fetches.record")
-    row = {
-        # Use the database clock for created_at. Comparing an app-host time
-        # with a batch's database time can discard a valid reverify as stale.
+    return {
         "config_name": config_name or os.environ.get("CONFIG_NAME"),
         "url": url,
         "check_type": check_type,
@@ -137,17 +144,12 @@ def ai_result_row(
         "instructions": instructions,
         "parsed_json": parsed_json,
         "error": error,
-        # What the answer was asked and what its call cost are not stored
-        # here: page_fetch_id names the fetch it read (core.answer_inputs
-        # rebuilds the input) and model_call_id the call, which model_calls
-        # priced once when it was made. ledger_rows reads both.
         "worker": WORKER,
         "batch_id": batch_id,
         "request_sha256": request_sha256,
         "page_fetch_id": page_fetch_id,
         "model_call_id": model_call_id,
     }
-    return row
 
 
 def _inserting[**P](build: Callable[P, dict[str, Any]]) -> Callable[P, int]:
@@ -381,7 +383,7 @@ def record_batch_errors(provider_batch_id: str, errors: dict[str, str]) -> None:
     was rejected (every request, one reason) or a few inputs were bad. It was
     read at collection and dropped by every handler that skips errored
     results, so 21,525 failed requirements requests on 2026-09-04 left no
-    reason anywhere. Stored whole; groom later.
+    reason anywhere. Stored whole.
     """
     rows = [(provider_batch_id, cid, err) for cid, err in errors.items() if err]
     if not rows:

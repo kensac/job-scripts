@@ -15,15 +15,14 @@ import pytest
 
 from api import db
 from api.devseed import DEV_SUB, seed
+from tests.factories import user_id_for_subject
 
 
 @pytest.fixture
 def seeded(client):
     counts = seed()
     assert counts["jobs"] and counts["messages"] and counts["applications"]
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (DEV_SUB,))
-    assert row is not None
-    return row["id"]
+    return user_id_for_subject(DEV_SUB)
 
 
 @pytest.fixture
@@ -156,8 +155,8 @@ def test_no_open_action_item_has_a_future_deadline(client, dev_headers):
     wrong on every real row."""
     from api.mail import pipeline as mail_pipeline
 
-    user = db.query_one("SELECT id FROM users WHERE sub = 'dev-user'")
-    rows = [{"due_at": i.due_at} for i in mail_pipeline.action_items(user["id"], open_only=True)]
+    user_id = user_id_for_subject("dev-user")
+    rows = [{"due_at": i.due_at} for i in mail_pipeline.action_items(user_id, open_only=True)]
     assert rows
     assert all(
         r["due_at"] is None

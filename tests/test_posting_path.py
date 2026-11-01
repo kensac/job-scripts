@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from api import db, posting_path
 from core import catalog
+from tests.factories import user_id_for_subject
 from tests.test_verify_board_questions import _board
-
-
-def _uid(email: str = "user@example.com") -> int:
-    return db.query_one("SELECT id FROM users WHERE email = %s", (email,))["id"]
 
 
 def _consumer(path, kind, name=None):
@@ -148,7 +145,7 @@ def test_a_near_copy_verdict_names_its_twin(f):
 def test_a_person_sees_their_filter_reject_it_and_why_it_is_off_their_board(
     client, user_headers, f
 ):
-    uid = _uid()
+    uid = user_id_for_subject("test-user")
     source = f.make_source("path-src-user")
     f.subscribe(uid, source)
     filt = f.make_filter(uid)
@@ -172,7 +169,7 @@ def test_a_person_sees_their_filter_reject_it_and_why_it_is_off_their_board(
 def test_a_person_cannot_read_the_path_of_a_posting_they_cannot_see(
     client, user_headers, other_user_headers, f
 ):
-    other = _uid("user2@example.com")
+    other = user_id_for_subject("test-user-2")
     job_id = f.make_job(source="upload", uploaded_by=other)
 
     assert client.get(f"/v1/user/jobs/{job_id}/path", headers=user_headers).status_code == 404
