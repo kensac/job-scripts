@@ -117,7 +117,7 @@ async def test_storage_outage_submits_nothing_and_recovers(f, objects, monkeypat
     async def handler(task_id, payload):
         await runtime.submit_or_collect(task_id, SPECS, "model", "", 100, None)
 
-    monkeypatch.setattr(batch, "submit_responses_batches", submit)
+    monkeypatch.setattr(batch, "submit_batches", submit)
     monkeypatch.setitem(worker.HANDLERS, "test_kind", handler)
     task_id = runtime.enqueue("test_kind", {})
     objects.client.fail_put = True

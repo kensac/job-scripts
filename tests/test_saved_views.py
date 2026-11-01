@@ -7,6 +7,7 @@ import pytest
 from psycopg.errors import UniqueViolation
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_views_are_per_page_ordered_with_one_default(client, user_headers, other_user_headers):
@@ -186,9 +187,12 @@ def test_concurrent_default_selection_serializes_on_owner(client, user_headers, 
 
     first = _create(client, user_headers, "First")
     second = _create(client, user_headers, "Second")
-    owner = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
     user = AuthedUser(
-        id=owner["id"], sub="test-user", email="user@example.com", name="Test", groups=[]
+        id=user_id_for_subject("test-user"),
+        sub="test-user",
+        email="user@example.com",
+        name="Test",
+        groups=[],
     )
 
     def select_default(index):
