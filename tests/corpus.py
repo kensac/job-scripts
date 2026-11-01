@@ -74,7 +74,7 @@ def build(*, target_jobs: int = TARGET_JOBS) -> dict[str, int]:
 
     everything = [t for t in schema.columns if t not in SKIP]
     db.execute(f"TRUNCATE TABLE {', '.join(everything)} RESTART IDENTITY CASCADE")
-    db.init_schema()  # re-seeds sources, source_groups, app_config, group_budgets
+    db.seed_defaults()  # the TRUNCATE emptied app_config and group_budgets
 
     for table in SEEDED:
         for column in wanted.get(table, set()):

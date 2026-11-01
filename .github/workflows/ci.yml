@@ -21,7 +21,7 @@ jobs:
     # tables: exported against a DSN pointing at a closed port it produces a
     # file identical to the committed one, byte for byte. Booting Postgres
     # for it cost the gate about 14 s (7.7 s pulling the image, 5.9 s waiting
-    # on a health check), and every other job waits on the gate. Migrations
+    # on a health check). Migrations
     # are still applied and checked for drift in `static`, on a real
     # database, and tests/test_openapi_current.py still compares the
     # committed schema against the live routes.
@@ -38,7 +38,11 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      # Bytecode at install, where uv compiles in parallel and the
+      # Postgres pull still has seconds to run. Left to import time, a
+      # lane compiled about 5,100 modules one by one: 4.7 s of pytest
+      # startup, measured 2026-11-01.
+      - run: uv sync --frozen --compile-bytecode
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       # Mechanical fixes are committed, not reported. Lint autofixes,
       # formatting and the generated openapi.json are the three things a
@@ -106,10 +110,11 @@ jobs:
         run: ruff check src tests
       - name: Format check
         run: ruff format --check src tests
-  # Everything the gate proved was not needed before the tests can start.
-  # It ran inside prepare, and the lanes waited about twenty seconds for
-  # checks none of them consume: the manifest below is read by `check` at
-  # the end, not by a lane. Now it runs beside them.
+  # No job waits on `gate`. Only `check` reads its result, so a run whose
+  # gate fails (an auto-fix push, an unfixable lint error) still ends red
+  # and judges nothing. Waiting cost every run about 18 s of wall time, the
+  # gate plus a second job hand-off, to save the lanes' runner time on the
+  # 1 run in 200 where the gate failed (measured 2026-11-01).
   static:
     runs-on: ubuntu-latest
     permissions:
@@ -135,7 +140,11 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      # Bytecode at install, where uv compiles in parallel and the
+      # Postgres pull still has seconds to run. Left to import time, a
+      # lane compiled about 5,100 modules one by one: 4.7 s of pytest
+      # startup, measured 2026-11-01.
+      - run: uv sync --frozen --compile-bytecode
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Type check
         run: pyright

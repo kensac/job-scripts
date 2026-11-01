@@ -50,7 +50,8 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      - run: uv sync --frozen
+      # Bytecode at install; see the same step in ci.yml.
+      - run: uv sync --frozen --compile-bytecode
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       # No `alembic upgrade head` here: conftest provisions the database it
       # is handed, so the step migrated an empty database that pytest then
@@ -87,7 +88,7 @@ jobs:
             shard-*) args+=(-m 'not corpus' --shard-count="$TEST_SHARDS" --shard-index="${TEST_LANE#shard-}") ;;
             *) echo "Unknown test lane: $TEST_LANE"; exit 1 ;;
           esac
-          if [ "$TEST_LANE" = profile ] || [ "$TEST_LANE" = corpus ]; then
+          if [ "$TEST_LANE" = profile ]; then
             python -m cProfile -o results/profile.pstats -m pytest "${args[@]}"
           else
             python -m pytest "${args[@]}"
