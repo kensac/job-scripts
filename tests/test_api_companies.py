@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from api import db, signals
 from api.companies.queries import OPEN_MIN_CHECKED
+from tests.factories import user_id_for_subject
 
 ENDPOINT = "/v1/admin/companies"
 
@@ -119,7 +120,7 @@ def test_applications_carry_their_status_breakdown(client, admin_headers, f):
     the user typed and only tracked postings have one."""
     # The caller's OWN applications. The endpoint is scoped to the requesting
     # user, so data written under some other user is correctly invisible here.
-    user_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("test-admin",))["id"]
+    user_id = user_id_for_subject("test-admin")
     job_id = f.make_job(source="s", company="Applied", title="a")
     f.make_board_row(user_id, job_id, status="Application Submitted")
     db.execute(
@@ -138,7 +139,7 @@ def test_an_application_only_email_knows_about_still_counts(client, admin_header
     """The reason for repointing this at `applications`: a 2022 application has
     no posting in the catalog and no board row, and the old query could not see
     it. That reported 605 companies when 1,283 had evidence."""
-    user_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("test-admin",))["id"]
+    user_id = user_id_for_subject("test-admin")
     f.make_job(source="s", company="Ghosted", title="a")
     db.execute(
         "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "
@@ -154,7 +155,7 @@ def test_an_application_only_email_knows_about_still_counts(client, admin_header
 def test_a_dismissed_application_stops_counting(client, admin_headers, f):
     """A dismissal says the row should never have existed. Counting it would be
     counting a known mistake."""
-    user_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("test-admin",))["id"]
+    user_id = user_id_for_subject("test-admin")
     f.make_job(source="s", company="Coursework", title="a")
     db.execute(
         "INSERT INTO applications (user_id, job_id, company_name, title, source_provenance, "

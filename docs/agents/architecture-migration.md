@@ -120,7 +120,7 @@ storage behind a kind changes the view and no reader.
   the first answer naming the call with zeros on its siblings. Each derived
   column is a correlated lookup in the select list, not a join, because a
   UNION ALL arm is flattened into the outer query only while its FROM is one
-  table, and the admin ledger's newest-first pages need it flattened
+  table and it has no WHERE of its own (admin-query-reads.md), and the admin ledger's newest-first pages need it flattened
   (`tests/test_admin_jobs_read_plan.py`).
 
 ### The ledger of paid model calls

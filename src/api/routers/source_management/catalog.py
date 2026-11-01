@@ -80,7 +80,7 @@ class SourceBody(BaseModel):
 TITLE_PATTERN_MAX = 500
 
 
-def _check_pattern_length(title_pattern: str | None, stored: str | None) -> None:
+def check_pattern_length(title_pattern: str | None, stored: str | None) -> None:
     if title_pattern and title_pattern != stored and len(title_pattern) > TITLE_PATTERN_MAX:
         raise refuse(
             400,
@@ -96,7 +96,7 @@ def _check_source(
     system that never names the company, and a pattern that ingest cannot
     compile. Both would surface only as a failed ingest an hour later.
     `stored` is the pattern the row holds now, which is valid as it is."""
-    _check_pattern_length(title_pattern, stored)
+    check_pattern_length(title_pattern, stored)
     board_format = boards.format_for_url(listings_url)
     if board_format.needs_company and not (company or "").strip():
         raise refuse(

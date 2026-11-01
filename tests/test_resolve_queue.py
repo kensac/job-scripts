@@ -16,6 +16,7 @@ from api.mail import match as mail_match
 from api.mail import pipeline as mail_pipeline
 from tests import mail_log
 from tests.conftest import _auth_headers
+from tests.factories import user_id_for_subject
 
 
 def _msg(uid: int, mid: str, kind: str, company: str | None, thread: str | None = None) -> int:
@@ -38,7 +39,7 @@ def _msg(uid: int, mid: str, kind: str, company: str | None, thread: str | None 
 def me(client):
     headers = _auth_headers("resolve-user", "resolve@example.com", ["jobtracker-users-internal"])
     assert client.post("/v1/users/bootstrap", headers=headers).status_code == 200
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", ("resolve-user",))["id"]
+    uid = user_id_for_subject("resolve-user")
     return headers, uid
 
 

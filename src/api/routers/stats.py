@@ -6,9 +6,10 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from api import db
+from api import db, grouped
 from api.auth import AuthedUser, require_user
-from api.board import populations, visibility
+from api.board import visibility
+from api.board.person_state import PERSON_STATE
 from api.mail import applications
 from api.mail.current import current_event, current_match
 
@@ -76,38 +77,42 @@ class Stats(BaseModel):
     applied_by_week: list[AppliedWeek]
 
 
+# The board grouped by every key the page's three cuts need, read once and
+# folded below. Status stays raw, so NULL and '' are separate groups as the
+# per-source cut has always shown them; the status cut merges them. The
+# ORDER BY keeps source in the database's collation, which Python's string
+# order is not.
+_BOARD_GROUPS = f"""
+SELECT v.source, v.status, COUNT(*) AS count,
+       COUNT(*) FILTER (WHERE v.date_applied IS NOT NULL) AS applied
+FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
+GROUP BY v.source, v.status ORDER BY v.source, count DESC
+"""
+
+
+def _by_status(groups: list[dict[str, Any]]) -> list[StatusCount]:
+    merged = grouped.by([{**g, "status": g["status"] or ""} for g in groups], "status")
+    counts = [StatusCount(status=s, count=sum(g["count"] for g in gs)) for s, gs in merged.items()]
+    return sorted(counts, key=lambda c: -c.count)
+
+
+def _by_source(groups: list[dict[str, Any]]) -> list[SourceCounts]:
+    sources = [
+        SourceCounts(
+            source=source,
+            total=sum(g["count"] for g in gs),
+            with_status=sum(g["count"] for g in gs if g["status"]),
+            applied=sum(g["applied"] for g in gs),
+        )
+        for source, gs in grouped.by(groups, "source").items()
+    ]
+    return sorted(sources, key=lambda s: -s.total)
+
+
 @router.get("/user/stats")
 def stats(user: AuthedUser = Depends(require_user)) -> Stats:
     params = {"uid": user.id}
-    by_status = db.query_as(
-        StatusCount,
-        f"""
-        SELECT COALESCE(v.status, '') AS status, COUNT(*) AS count
-        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
-        GROUP BY 1 ORDER BY count DESC
-        """,
-        params,
-    )
-    by_source = db.query_as(
-        SourceCounts,
-        f"""
-        SELECT v.source, COUNT(*) AS total,
-               COUNT(*) FILTER (WHERE v.status IS NOT NULL AND v.status != '') AS with_status,
-               COUNT(*) FILTER (WHERE v.date_applied IS NOT NULL) AS applied
-        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
-        GROUP BY v.source ORDER BY total DESC
-        """,
-        params,
-    )
-    by_source_status = db.query_as(
-        SourceStatusCount,
-        f"""
-        SELECT v.source, COALESCE(v.status, '') AS status, COUNT(*) AS count
-        FROM ({_BOARD}) v WHERE NOT COALESCE(v.hidden, FALSE)
-        GROUP BY v.source, v.status ORDER BY v.source, count DESC
-        """,
-        params,
-    )
+    groups = db.query(_BOARD_GROUPS, params)
     over_time = db.query_as(
         AppliedWeek,
         f"SELECT date_trunc('week', d.day)::date AS week, COUNT(*) AS applied "
@@ -116,25 +121,28 @@ def stats(user: AuthedUser = Depends(require_user)) -> Stats:
         "GROUP BY week ORDER BY week",
         (user.id,),
     )
-    totals = db.query_one_as(
-        Totals,
+    # `acted_on` is the rule populations.per_user_counts applies. That helper
+    # also counts the board, which the groups above have already read.
+    person = db.query_one(
         f"""
-        SELECT counts.visible, counts.acted_on, legacy.*
-        FROM (SELECT {populations.per_user_counts("%(uid)s")}) counts,
-             (SELECT COUNT(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
-                     COUNT(*) FILTER (WHERE uj.hidden) AS hidden
-              FROM user_jobs uj WHERE uj.user_id = %(uid)s) legacy
+        SELECT COUNT(*) FILTER (WHERE {PERSON_STATE}) AS acted_on,
+               COUNT(*) FILTER (WHERE {applications.applied_on("uj")} IS NOT NULL) AS applied,
+               COUNT(*) FILTER (WHERE uj.hidden) AS hidden
+        FROM user_jobs uj WHERE uj.user_id = %(uid)s
         """,
         params,
     )
     # An aggregate with no GROUP BY returns its row even for a person with
     # nothing tracked.
-    assert totals
+    assert person
     return Stats(
-        totals=totals,
-        by_status=by_status,
-        by_source=by_source,
-        by_source_status=by_source_status,
+        totals=Totals(visible=sum(g["count"] for g in groups), **person),
+        by_status=_by_status(groups),
+        by_source=_by_source(groups),
+        by_source_status=[
+            SourceStatusCount(source=g["source"], status=g["status"] or "", count=g["count"])
+            for g in groups
+        ],
         applied_by_week=over_time,
     )
 

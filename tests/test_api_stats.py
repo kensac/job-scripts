@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from api import db
 from api.board import visibility
-from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
 
 def _counts(client, headers) -> dict[str, int]:
     # The membership the recompute task writes, which is what the board and
     # these counts read.
-    visibility.recompute(_uid(headers))
+    visibility.recompute(user_id_for_subject(headers["X-User-Sub"]))
     body = client.get("/v1/user/stats", headers=headers).json()
     return {r["status"]: r["count"] for r in body["by_status"]}
 
@@ -20,7 +21,7 @@ def test_the_to_apply_count_is_the_board_not_every_untouched_row(client, user_he
     user_jobs rows with no status, and an untouched row outlives the posting's
     membership. A row the person acted on counts whatever the posting's
     verdicts say; an untouched one counts only while the posting is visible."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     on_board = _insert_job("src-st", "https://x.test/st1")
     fell_off = _insert_job("src-st", "https://x.test/st2")
     applied_but_closed = _insert_job("src-st", "https://x.test/st3")
