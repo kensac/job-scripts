@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -140,7 +140,7 @@ class JobProfile(Base):
     classifier_version: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text)
     primary_role_family: Mapped[str] = mapped_column(Text)
-    role_tracks: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    role_tracks: Mapped[list[str]] = mapped_column(server_default=text("'{}'"))
     career_stage: Mapped[str] = mapped_column(Text)
     employment_type: Mapped[str] = mapped_column(Text)
     organization_sector: Mapped[str] = mapped_column(Text)
