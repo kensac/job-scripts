@@ -127,12 +127,12 @@ def _release_all() -> None:
 
 # How often a busy worker proves it is alive.
 #
-# Bounded above by the two things that read the answer: the admin fleet view
-# calls a worker dead after 90 seconds without a beat, and the reaper requeues
-# a task after task_heartbeat_timeout_minutes without one. Sixty seconds keeps
-# the screen truthful with a beat of slack, and puts fifteen beats inside the
-# default reaper window so losing several in a row still cannot orphan a live
-# task. The config refuses a window under two beats.
+# Bounded above by the two things that read the answer: the admin views call
+# a worker gone after health.WORKER_FRESH (two minutes) without a beat, and
+# the reaper requeues a task after task_heartbeat_timeout_minutes without one.
+# Sixty seconds keeps the screen truthful with a beat of slack, and puts
+# fifteen beats inside the default reaper window so losing several in a row
+# still cannot orphan a live task. The config refuses a window under two beats.
 HEARTBEAT_SECONDS = 60
 
 # Captured at import, so the status upsert reports when this process came up,
