@@ -7,6 +7,7 @@ from typing import Any
 from api import ai, db, run_configs
 from api import managed_boards as runs
 from api.model_calls import Payer
+from api.verdict_equivalence import answering_models
 from core import page_fetches, providers, routing
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
@@ -138,7 +139,9 @@ async def _handle_managed_filter(
         set()
         if existing
         else decided_custom_urls(
-            [job["url"] for job in jobs], snapshot.prompt_hash, model=payload["requested_model"]
+            [job["url"] for job in jobs],
+            snapshot.prompt_hash,
+            model=answering_models("custom", payload["requested_model"]),
         )
     )
     inference_jobs = [job for job in jobs if job["url"] not in decided]
