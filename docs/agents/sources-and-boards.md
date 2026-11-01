@@ -304,7 +304,12 @@ below. Every careers.ibm.com page answers the static tier with an AWS WAF
 challenge (202), so IBM's text always comes from the browser (7 of 7 listed
 postings read on 2026-10-05); the static tier read Bloomberg's and Two Sigma's
 Avature posting pages whole the same day. Eightfold lists without the text,
-and its resolver reads it from the tenant's detail endpoint.
+and its resolver reads it from the tenant's detail endpoint. A BrassRing row
+carries one section of the posting as its summary, which is not the text and
+is not stored; the `BrassRing` resolver reads the text from the posting page,
+whose fields sit as JSON in its `preLoadJSON` input, which no page tier reads.
+A delisted id and a made-up one both answer that page with `Jobdetails` null
+(2026-11-01), so the resolver never says GONE.
 
 **A board on its employers' own domains is known by its sources, never by a
 URL's shape.** An Eightfold tenant posts on its own host
@@ -799,6 +804,34 @@ span, a field labelled Location, or an unlabelled span under the title, and
 Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
 challenge, also to a browser-fingerprinted client, so they are not sources
 (IBM is read through its own search API, `_ibm`).
+
+**A board whose sort ties is read in the order of its key.** A BrassRing site
+(IBM Kenexa, on `sjobs.brassring.com` or an employer host such as
+`jobs.ubs.com`) is listed by its own search page,
+`https://<host>/TGnewUI/Search/Home/Home?partnerid=<p>&siteid=<s>`, and read
+through the call its "show more" button makes,
+`POST /TgNewUI/Search/Ajax/ProcessSortAndShowMoreJobs`, which needs no cookie
+or token. It answers 50 rows a page, every page states `JobsCount`, and a page
+past the last is empty, with no window up to Walgreens' 22,525. Sorted by date,
+tied rows trade places between pages (Edward Jones: 654 distinct of 668), so
+`_brassring` sorts by `reqid` and raises `PartialPull` short of the count.
+A row is a list of the tenant's questions: which is the title
+(`JobFieldsToDisplay.JobTitle`, `formtext8` at General Atomics) and which are
+the place (`LocationCustomSolrFields`) is read off the search page each pull.
+A tenant that names no place field (Edward Jones, Walgreens) lists no place.
+Each site is its own board, and a posting's URL carries the site it was
+listed under: UBS's sites 5012 and 5155 list 565 of the same requisitions
+under different URLs, so add one of them.
+
+**Oleeo (`*.tal.net`) is not a board format.** Its Atom feed,
+`/vx/candidate/jobboard/vacancy/<n>/feed`, is public but carries only the
+title and link. On 2026-11-01 nine of eleven finance tenants answered their
+search page with a captcha ("Quick Check Needed", Oleeo Protect), and the
+posting pages their feeds link answered it too: Evercore's, Rothschild's and
+Perella Weinberg's on the first request, Jefferies' on three of seven requests
+spaced 20 seconds apart. No page tier reads past it, so those postings could
+not be checked. The two tenants with no captcha (Morgan Stanley's and
+BlackRock's campus sites) publish no feed.
 
 ## A switched-off source holds no posting available
 
