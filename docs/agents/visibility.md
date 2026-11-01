@@ -494,7 +494,7 @@ Every board row carries `ats`, the applicant tracking system its url lives
 on (ashby, greenhouse, lever, workable, workday and a few more by host;
 anything else is "other", usually the employer's own careers site, of
 which a real board has a couple of hundred, so listing them would make
-the select useless). One SQL expression, `ATS_SQL` in `api.routers.job_board`, feeds the row,
+the select useless). One SQL expression, `ATS_SQL` in `api.board.ats`, feeds the row,
 the `ats=` filter on GET /user/jobs and the counted list in
 GET /user/jobs/options, so the filter offers what is on the board rather
 than a fixed list. It exists because assisted apply works one ATS at a
