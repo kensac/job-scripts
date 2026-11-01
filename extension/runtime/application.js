@@ -132,7 +132,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
   const VERSION = (() => { try { return chrome.runtime.getManifest().version; } catch (_) { return "unknown"; } })();
   let mountedFor = null;
 
-  const { THEME_NEXT, themeLabel, render, operationControls } = createPanelShell({ prefs, surface, operation, esc, getPanelUp: () => panelUp, getSubmission: () => submission, getApplicationContext: () => applicationContext });
+  const { THEME_NEXT, themeIcon, themeTitle, render, operationControls } = createPanelShell({ prefs, surface, operation, esc, getPanelUp: () => panelUp, getSubmission: () => submission, getApplicationContext: () => applicationContext });
 
   operation.subscribe(() => { surface.region("jt-operation", operationControls()); drawReview(); });
   on("click", "jt-pause", () => operation.state === "paused" ? operation.resume() : operation.pause());
@@ -170,7 +170,7 @@ export async function startApplication(adapter, adapterContext, lifecycle) {
     prefs.theme = THEME_NEXT[String(prefs.theme)];
     savePref("theme", prefs.theme);
     surface.appearance({ theme: prefs.theme, collapsed: prefs.collapsed });
-    surface.mark("jt-theme", { text: prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐", label: `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}` });
+    surface.mark("jt-theme", { text: themeIcon(prefs.theme), label: themeTitle(prefs.theme) });
   });
   on("click", "jt-min", () => {
     prefs.collapsed = !prefs.collapsed;
