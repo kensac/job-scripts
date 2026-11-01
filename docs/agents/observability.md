@@ -241,6 +241,19 @@ one shape. Its rules:
   `canceling` is `cancelling`, anything else is `in_progress`. Its errored,
   canceled and expired requests count as failed, and none of them is billed.
 
+**A wave refused because the account cannot pay stops the submission.**
+`core.batch.submit_batches` raises `core.fallback.ProviderExhausted` with the
+waves already accepted and the requests never sent, since every later wave
+would be refused the same way. `tasks.runtime.submit_or_collect`, given the
+caller's shape as `fallback`, marks the provider, sends the unsent requests to
+the next chain entry in the same sweep with a batch hook for that model, and
+parks on every accepted wave. It stops and parks on what was accepted when no
+entry can run or the fallback would cross the fleet ceiling; with nothing
+accepted it fails with the provider's reason. Collection marks the provider
+too when an accepted batch's requests come back refused for exhaustion: on
+2026-10-31 batches accepted before the billing hard limit returned 33,365.
+A submission a provider accepts clears its mark.
+
 Another vendor's batches need their own module beside it and an entry in
 `core.batch_capabilities` and `tasks.batch_policy`. A vendor that offers
 batches is not one this application can collect.
@@ -819,6 +832,22 @@ delivery and acknowledgement can repeat a message. The unnotified detector
 counts overdue eligible incidents, not warnings waiting for their digest.
 Stall findings for tasks that stopped running resolve on the next successful
 detector run; other absent findings retain the existing recovery grace.
+
+**A provider out of credit is an open `provider_exhausted` alert, and the
+alert is the state.** `api.model_fallback.mark` upserts it (critical, subject
+the provider, the provider's reason in `detail`), so every worker reads one
+row and the notifier mails it. No detector owns the kind, so a detection run
+never resolves it; a submission the provider accepts does, and so does an
+admin resolving it, which means "try it again". Routing skips the provider
+for one scheduler cycle (`ingest_interval_minutes`) after its last refusal and
+then tries it again, because a refused submission costs nothing and without
+it nothing would observe the account paid. Each refusal counts in
+`jobtracker_provider_exhausted_total{provider}`, each fallback request in
+`jobtracker_model_fallback_requests_total{purpose,from_model,to_model}` with a
+`model_fallback` event, and a live call refused this way counts as
+`exhausted` in `jobtracker_ai_calls_total`. `GET /admin/model-fallback` shows
+the exhausted providers and, per purpose, the chain as routing judges it and
+the recent batches run on it.
 
 Each section of `health.detect()` runs on its own. One that raises opens
 `detector_failed` for itself, rather than taking the hour's run down and

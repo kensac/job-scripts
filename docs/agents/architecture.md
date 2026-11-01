@@ -245,6 +245,37 @@ to the same model, and 5,776 got back the answer already held. A new purpose
 that re-asks on a timer gets the same treatment rather than a second
 mechanism.
 
+**A provider out of credit moves work down the purpose's fallback chain, and
+nothing else moves it.** `core.fallback.exhaustion_reason` reads an error
+against the vendor's declared `Provider.exhaustion_markers`: out of credit, a
+billing hard limit, a quota used up. A rate limit, a 5xx or a timeout keeps its
+own retry. A vendor with no recorded shape (xAI) has no markers, so nothing it
+returns is exhaustion. `app_config.model_fallback_chains` lists, per purpose
+(`core.fallback.chain_purposes`: every `SHAPES` task but `job_profile`, whose
+model its stored profiles pin, the personal `filter` and `managed_board`), the
+models to try in order; it is empty by default, which is the old behavior
+exactly. Routing (`api.model_fallback.route`) skips an exhausted provider and
+takes the first chain entry that `resolve()` admits for the task's shape
+(batch endpoint, structured mode, effort, price) and that this host holds a
+key for. **A purpose whose verdicts are read through `answering_models`
+falls back only inside the primary's `verdict_model_equivalence` group**:
+`filter` and `managed_board` in the `custom` kind, `verify` (and so
+re-verification) in the `verify` kind. Any other model's verdicts would be
+paid for and counted by no board, filter or reuse check. A purpose that writes
+no verdicts (extractions, classifications) may use any chain entry; its rows
+mix by model by design. The filter and a managed board choose before they
+select jobs, so the decided-postings check asks for the model that will
+answer. A board's fallback keeps `no_cache` while
+`managed_board_cache_writes_enabled` is off, on either vendor's transport.
+Every row names the model that ran: the batch row's `model`, and
+`ai_batches.fallback_from` for the model it replaced; the ledger, verdicts and
+extractions take the batch row's model. Spend stays inside the same caps:
+a fleet submission is priced at the fallback's rate against the weekly
+ceiling, and a person's weekly token budget is model-blind. Live calls on the
+server's key mark the provider and fail; they do not switch models mid-call
+(28 owner-key live calls in the 30 days to 2026-11-01, against 805,000
+batched).
+
 **A verdict counts for the model that gave it, unless two models are grouped.**
 Every reuse check (filter and board candidates, board membership, near-copy
 reuse, reverify's unchanged page) asks for the model it will call, so a model

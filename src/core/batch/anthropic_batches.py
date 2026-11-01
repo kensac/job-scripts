@@ -189,7 +189,13 @@ async def collect(
         outcome = line.result
         if outcome.type != "succeeded":
             detail = getattr(getattr(outcome, "error", None), "error", None)
-            result.error = getattr(detail, "message", None) or f"request {outcome.type}"
+            message = getattr(detail, "message", None)
+            # The type is kept beside the message: billing_error is how this
+            # vendor says the account cannot pay (core.fallback).
+            kind = getattr(detail, "type", None)
+            result.error = (f"{kind}: {message}" if kind and message else message) or (
+                f"request {outcome.type}"
+            )
             continue
         message = outcome.message
         result.usage = receipt_usage(message.usage)

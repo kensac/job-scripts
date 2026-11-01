@@ -6,12 +6,11 @@ import hashlib
 import json
 from typing import Any
 
-from api import managed_boards
+from api import managed_boards, model_fallback
 from api.task_config import configured_model, configured_shape
 from core.answers import VERIFICATION_REQUEST, joint_verification
 from core.batch import BatchSpec, structured_response_spec
 from core.filters import build_custom_input
-from core.routing import resolve
 from core.shapes import VERIFY_TASK
 
 # The effort a question hash records: the shape's, with its fallback.
@@ -36,11 +35,13 @@ def _row_context(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _submission_model() -> tuple[str, str]:
-    """The model and effort run_batched will submit the new-posting sweep with."""
+def _submission_model() -> tuple[str, str, str | None]:
+    """The model and effort run_batched will submit the new-posting sweep with,
+    and the model routing chose when that one is a fallback from it."""
     shape = configured_shape(VERIFY_TASK)
-    chosen = resolve(shape, override=configured_model(VERIFY_TASK.purpose))
-    return chosen.model, str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or "")
+    chosen = model_fallback.route(shape, override=configured_model(VERIFY_TASK.purpose))
+    effort = str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or "")
+    return chosen.model, effort, chosen.fallback_from
 
 
 def _joint_spec(

@@ -9,6 +9,7 @@ from api import managed_boards as runs
 from api.model_calls import Payer
 from api.verdict_equivalence import answering_models
 from core import page_fetches, providers, routing
+from core.fallback import MANAGED_BOARD_PURPOSE
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
 from tasks.filtering.execution import (
@@ -16,6 +17,7 @@ from tasks.filtering.execution import (
     FilterSnapshot,
     execute_batch,
     execute_live,
+    fallback_config,
     frozen_page,
 )
 from tasks.runtime import cancelled, has_batch_work, pending_batch_ids, set_progress
@@ -57,7 +59,13 @@ async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) 
     provider = _provider(payload)
     if provider != "openai":
         raise ValueError("managed board batch snapshot names an unsupported provider")
-    cfg = None if resumed else _server_config(payload, provider)
+    # A board whose model's provider is out of credit runs on a model grouped
+    # with it for custom verdicts, whose answers the board reads as its own.
+    cfg = (
+        None
+        if resumed
+        else fallback_config(_server_config(payload, provider), MANAGED_BOARD_PURPOSE)
+    )
     snapshot, jobs, hooks = _prepare_run(task_id, payload)
     decided = (
         set()

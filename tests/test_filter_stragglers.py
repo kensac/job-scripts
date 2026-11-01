@@ -93,7 +93,7 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
     monkeypatch.setattr(fetching, "fetch_page", no_network)
     monkeypatch.setattr(ai, "parse", fake_parse)
 
-    async def fake_batch(task_id, specs, *args):
+    async def fake_batch(task_id, specs, *args, **_kwargs):
         from tests.factories import make_batch_result
 
         return [

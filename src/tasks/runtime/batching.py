@@ -14,13 +14,16 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from api import ai_pause, budget, db, events
+from api import ai_pause, budget, db, events, model_fallback
 from api.ai import batch_results
 from api.ai.batch_results import consume_result as consume_result
 from api.ai.batch_results import snapshot_specs as snapshot_specs
 from api.model_calls import FLEET, Payer
 from api.task_config import configured_model, configured_shape
+from core import providers
 from core.batch import BatchEventCounts, BatchEventHook, BatchResult
+from core.fallback import ProviderExhausted, exhaustion_reason
+from core.pricing import estimate_cost_usd
 from core.routing import Choice, TaskShape, resolve
 from tasks.runtime.lifecycle import claim_guard
 
@@ -118,8 +121,12 @@ def batch_event_hook(
     model: str | None,
     *,
     payer: Payer = FLEET,
+    fallback_from: str | None = None,
 ) -> BatchEventHook:
     """Register provider progress and who pays for the batch.
+
+    `fallback_from` is the model routing chose when `model` runs in its place
+    because its provider was out of credit; the batch row keeps it.
 
     The batch row records the payer, so the receipt checkpoint can write each
     item to the call ledger (api.model_calls) with it. Cost is the ledger's,
@@ -136,10 +143,10 @@ def batch_event_hook(
             """
             INSERT INTO ai_batches (provider_batch_id, task_id, purpose, model,
                                     requests, completed, failed_count, status, est_tokens,
-                                    payer, payer_id)
+                                    payer, payer_id, fallback_from)
             VALUES (%(bid)s, %(tid)s, %(purpose)s, %(model)s,
                     %(requests)s, %(completed)s, %(failed)s, %(status)s, %(est)s,
-                    %(payer)s, %(payer_id)s)
+                    %(payer)s, %(payer_id)s, %(fallback_from)s)
             ON CONFLICT (provider_batch_id) DO UPDATE SET
                 -- Deprecated shape: older batch rows have no payer. Use the
                 -- submitting task's payer on collection. Remove this branch
@@ -170,6 +177,7 @@ def batch_event_hook(
                 "est": counts.get("est_tokens", 0),
                 "payer": payer.kind,
                 "payer_id": payer.id,
+                "fallback_from": None if batch_id in resumed_ids else fallback_from,
             },
         )
         _record_batch_ids(task_id, [batch_id])
@@ -207,8 +215,11 @@ async def run_batched(
         return results, provenance
     specs = snapshot_specs(task_id, specs)
     shape = configured_shape(shape)
-    chosen = resolve(
-        shape, override=configured_model(purpose) if allow_configured_override else None
+    # A model pinned by its stored data takes neither an override nor a fallback.
+    chosen = (
+        model_fallback.route(shape, override=configured_model(purpose))
+        if allow_configured_override
+        else resolve(shape)
     )
     if payer == FLEET:
         # Only when about to SUBMIT. A resuming task is collecting work the
@@ -223,7 +234,9 @@ async def run_batched(
         per_call = chosen.est_cost_usd or Decimal(0)
         budget.check_fleet_budget(per_call * len(specs))
     logger.info(f"Task {task_id}: {purpose} on {chosen.model} - {chosen.reason}")
-    hook = batch_event_hook(task_id, purpose, chosen.model, payer=payer)
+    hook = batch_event_hook(
+        task_id, purpose, chosen.model, payer=payer, fallback_from=chosen.fallback_from
+    )
     results = await submit_or_collect(
         task_id,
         specs,
@@ -235,6 +248,10 @@ async def run_batched(
         str(chosen.params.get("reasoning_effort") or shape.resolved_effort() or ""),
         shape.max_output_tokens,
         hook,
+        fallback=shape if allow_configured_override else None,
+        purpose=purpose,
+        payer=payer,
+        routed=chosen.fallback_from,
     )
     return results, chosen
 
@@ -246,14 +263,22 @@ async def submit_or_collect(
     reasoning_effort: str,
     max_output_tokens: int,
     hook: BatchEventHook,
+    *,
+    fallback: TaskShape | None = None,
+    purpose: str | None = None,
+    payer: Payer = FLEET,
+    routed: str | None = None,
 ) -> list[BatchResult]:
     """Submit frozen requests and park, or return persisted results for consumption.
 
     A retry collects existing work before considering new submission. Request
     snapshots alone remain retryable when no provider batch was accepted.
-    """
-    from core.batch import submit_batches
 
+    `fallback` is the shape whose chain takes the requests a provider refuses
+    for exhaustion; `routed` is the model routing chose when `model` is
+    already a fallback from it. Without a shape a refusal still marks the
+    provider and keeps the accepted waves.
+    """
     existing = pending_batch_ids(task_id)
     if has_batch_work(task_id):
         logger.info(f"Task {task_id}: collecting {len(existing)} batch(es)")
@@ -265,7 +290,18 @@ async def submit_or_collect(
     specs = snapshot_specs(task_id, specs)
     if not specs:
         return []
-    ids = await submit_batches(specs, model, reasoning_effort, max_output_tokens, on_event=hook)
+    ids = await _submit(
+        task_id,
+        specs,
+        model,
+        reasoning_effort,
+        max_output_tokens,
+        hook,
+        fallback,
+        purpose or (fallback.purpose if fallback else None),
+        payer,
+        routed or model,
+    )
     if not ids:
         # Nothing was accepted by the provider; fail normally so the usual
         # retry path applies rather than parking forever.
@@ -279,6 +315,105 @@ async def submit_or_collect(
             f"claimable; ids recorded in ai_batches: {', '.join(ids)}"
         )
     raise AwaitingBatch()
+
+
+async def _submit(
+    task_id: int,
+    specs: list,
+    model: str,
+    effort: str,
+    max_output_tokens: int,
+    hook: BatchEventHook,
+    shape: TaskShape | None,
+    purpose: str | None,
+    payer: Payer,
+    primary: str,
+) -> list[str]:
+    """Submit, moving what a provider refuses for exhaustion along the chain.
+
+    Accepted waves are kept whatever happens after them: they are paid for
+    and their ids are already in the task payload. A fallback is priced
+    against the fleet ceiling with the accepted waves before it is sent, so a
+    dearer model is held to the same cap. When nothing further can run, the
+    task parks on what was accepted, or fails with the provider's reason.
+    """
+    from core.batch import submit_batches
+
+    ids: list[str] = []
+    tried = {model}
+    committed = Decimal(0)
+    while True:
+        try:
+            accepted = await submit_batches(specs, model, effort, max_output_tokens, on_event=hook)
+            refused, unsent = None, []
+        except ProviderExhausted as exc:
+            refused, accepted, unsent = exc, exc.accepted, exc.unsubmitted
+            model_fallback.mark(exc.provider, exc.reason, model=model, purpose=purpose)
+        sent = len(specs) - len(unsent)
+        if accepted:
+            provider = providers.provider_of(model)
+            # Only a submission accepted whole clears the mark: waves accepted
+            # before a refusal predate it.
+            if provider and refused is None:
+                model_fallback.clear(provider)
+            if model != primary and purpose:
+                model_fallback.record(purpose, primary, model, sent)
+            if shape is not None:
+                committed += _per_call(shape, model) * sent
+        ids += accepted
+        if refused is None:
+            return ids
+        blocked = model_fallback.blocked_providers() | {refused.provider}
+        choice = (
+            model_fallback.next_for(shape, primary, tried, blocked) if shape is not None else None
+        )
+        if choice is None:
+            if ids:
+                return ids
+            raise refused
+        if payer == FLEET:
+            try:
+                budget.check_fleet_budget(committed + _per_call(shape, choice.model) * len(unsent))
+            except budget.FleetBudgetExceeded:
+                if ids:
+                    logger.warning(f"Task {task_id}: fallback to {choice.model} over the ceiling")
+                    return ids
+                raise
+        logger.warning(
+            f"Task {task_id}: {refused.provider} refused {len(unsent)} request(s) for "
+            f"exhaustion; resubmitting on {choice.model}"
+        )
+        specs, model = unsent, choice.model
+        declared = providers.model(model)
+        param = declared.reasoning.param if declared else None
+        effort = str(choice.params.get(param) or "") if param else ""
+        tried.add(model)
+        hook = batch_event_hook(task_id, purpose or "", model, payer=payer, fallback_from=primary)
+
+
+def _per_call(shape: TaskShape | None, model: str) -> Decimal:
+    if shape is None:
+        return Decimal(0)
+    cost = estimate_cost_usd(
+        model, shape.est_prompt_tokens, shape.max_output_tokens, batched=shape.batched
+    )
+    return cost or Decimal(0)
+
+
+def _mark_exhausted_results(results: list[BatchResult]) -> None:
+    """An accepted batch whose requests came back refused for exhaustion
+    marks its provider, so the next sweep routes around it. On 2026-10-31
+    batches accepted before the billing hard limit returned 33,365 such
+    request errors."""
+    seen: set[str] = set()
+    for result in results:
+        provider = providers.provider_of(result.model)
+        if not result.error or provider is None or provider in seen:
+            continue
+        reason = exhaustion_reason(provider, result.error)
+        if reason:
+            seen.add(provider)
+            model_fallback.mark(provider, reason, model=result.model, purpose=None)
 
 
 def pending_batch_ids(task_id: int) -> list[str]:
@@ -322,6 +457,7 @@ async def collect_pending(task_id: int, hook: BatchEventHook) -> list[BatchResul
                 metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
             )
         batch_results.checkpoint(task_id, results, unfinished)
+        _mark_exhausted_results(results)
     return batch_results.unconsumed(task_id)
 
 

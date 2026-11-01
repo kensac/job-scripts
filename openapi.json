@@ -24993,6 +24993,137 @@
         }
       }
     },
+    "/v1/admin/model-fallback": {
+      "get": {
+        "summary": "Model Fallback View",
+        "description": "Which providers are out of credit, and per purpose its fallback chain\n(app_config model_fallback_chains) and the batches recently run on it.\n\nEvery purpose that can hold a chain is listed, an empty chain included, so\na purpose with nowhere to go is visible rather than absent.",
+        "operationId": "model_fallback_view_v1_admin_model_fallback_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelFallbackView"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/analytics/sources": {
       "get": {
         "summary": "Source Analytics",
@@ -39274,6 +39405,115 @@
         "title": "FailurePivot",
         "description": "Failures grouped by the worker that ran them and the host they were\nfetched from. `host` is read off the url, so a row with no url has none."
       },
+      "FallbackBatch": {
+        "properties": {
+          "provider_batch_id": {
+            "type": "string",
+            "title": "Provider Batch Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "fallback_from": {
+            "type": "string",
+            "title": "Fallback From"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_batch_id",
+          "task_id",
+          "purpose",
+          "model",
+          "fallback_from",
+          "requests",
+          "submitted_at"
+        ],
+        "title": "FallbackBatch"
+      },
+      "FallbackEntry": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "rejection": {
+            "type": "string",
+            "title": "Rejection"
+          },
+          "provider_exhausted": {
+            "type": "boolean",
+            "title": "Provider Exhausted"
+          },
+          "falls_back_for": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Falls Back For"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "provider",
+          "rejection",
+          "provider_exhausted",
+          "falls_back_for"
+        ],
+        "title": "FallbackEntry",
+        "description": "One model in a purpose's fallback chain, judged as routing would."
+      },
       "FeatureAvailability": {
         "properties": {
           "allowed": {
@@ -45029,6 +45269,30 @@
         "title": "ModelEvidence",
         "description": "A measured finding about one model on this task, carried as data so the\nclient renders it on the option it is about rather than holding its own\ncopy that rots at the next measurement."
       },
+      "ModelFallbackView": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderExhaustion"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "purposes": {
+            "items": {
+              "$ref": "#/components/schemas/PurposeFallback"
+            },
+            "type": "array",
+            "title": "Purposes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers",
+          "purposes"
+        ],
+        "title": "ModelFallbackView"
+      },
       "ModelHealth": {
         "properties": {
           "in_flight": {
@@ -48570,6 +48834,53 @@
         ],
         "title": "ProviderEntry"
       },
+      "ProviderExhaustion": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "reason",
+          "message",
+          "first_seen",
+          "last_seen",
+          "skipped"
+        ],
+        "title": "ProviderExhaustion"
+      },
       "ProviderHeadroom": {
         "properties": {
           "basis": {
@@ -49237,6 +49548,47 @@
           "updated_at"
         ],
         "title": "PublicJobListLink"
+      },
+      "PurposeFallback": {
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "title": "Purpose"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          },
+          "chain": {
+            "items": {
+              "$ref": "#/components/schemas/FallbackEntry"
+            },
+            "type": "array",
+            "title": "Chain"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/FallbackBatch"
+            },
+            "type": "array",
+            "title": "Recent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purpose",
+          "primary",
+          "chain",
+          "recent"
+        ],
+        "title": "PurposeFallback"
       },
       "QueriesDeleted": {
         "properties": {

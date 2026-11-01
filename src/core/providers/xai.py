@@ -156,6 +156,9 @@ PROVIDER = Provider(
     # Confirmed live: temperature=0.5 is accepted, unlike OpenAI's Responses API.
     supports_temperature=True,
     batch_endpoint="/v1/batches",
+    # No exhaustion_markers: the vendor documents no error shape for an
+    # account out of credit, and its 429 is a rate limit, so nothing here is
+    # read as exhaustion until a real refusal is recorded.
     source=_DOCS,
     models=(
         Model(

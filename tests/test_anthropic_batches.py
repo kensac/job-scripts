@@ -156,7 +156,7 @@ async def test_a_batch_round_trips_under_the_callers_ids(vendor):
     by_id = {r.custom_id: r for r in results}
     assert Verdict.model_validate_json(by_id[URL].text or "").keep is True
     assert by_id[URL].batch_id == BATCH_ID
-    assert by_id["plain_id"].error == "bad schema"
+    assert by_id["plain_id"].error == "invalid_request_error: bad schema"
 
     # Cache reads are counted inside the prompt, as an OpenAI receipt counts
     # them, and price at the cached rate.

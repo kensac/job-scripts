@@ -51,7 +51,7 @@ async def test_resume_prices_persisted_model_without_resolving_current_configura
     def no_current_configuration(*args, **kwargs):
         raise AssertionError("collection must not consult current model routing")
 
-    monkeypatch.setattr(batching, "resolve", no_current_configuration)
+    monkeypatch.setattr(batching.model_fallback, "route", no_current_configuration)
     results, provenance = await runtime.run_batched(
         task_id,
         application.APPLICATION_TASK,

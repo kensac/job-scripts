@@ -29,7 +29,7 @@ async def test_location_budget_reaches_new_batch_submission(f, monkeypatch):
     )
     sent = []
 
-    async def submit(task_id, specs, model, effort, max_tokens, hook):
+    async def submit(task_id, specs, model, effort, max_tokens, hook, **_kwargs):
         sent.append(max_tokens)
         return []
 
