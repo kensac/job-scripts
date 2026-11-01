@@ -44,12 +44,35 @@ def test_sources_shapes(client, admin_headers, f):
     assert by_name["acme"]["kind"] == "greenhouse" and by_name["acme"]["groups"] == ["boards"]
     assert by_name["dormant"]["active"] is False and by_name["dormant"]["groups"] == []
 
+    f.make_source("fresh")
+    f.make_source("old")
+    f.make_source("broken")
+    for name, status, hours_ago, error in (
+        ("acme", "failed", 30, "earlier failure"),
+        ("acme", "done", 1, None),
+        ("fresh", "done", 2, None),
+        ("old", "done", 30, None),
+        ("broken", "done", 1, None),
+        ("broken", "failed", 2, "HTTP 403"),
+        ("dormant", "failed", 1, "ignored, inactive"),
+    ):
+        task = f.make_task("ingest_source", {"source": name}, status=status)
+        db.execute(
+            "UPDATE tasks SET finished_at = now() - make_interval(hours => %s), error = %s "
+            "WHERE id = %s",
+            (hours_ago, error, task),
+        )
+
     counts = client.get(
         "/v1/admin/sources", params={"shape": "counts"}, headers=admin_headers
     ).json()
-    assert counts["sources"] >= 2 and counts["active"] == counts["sources"] - 1
+    assert counts["sources"] >= 5 and counts["active"] == counts["sources"] - 1
     assert counts["by_kind"]["greenhouse"] == 1
-    assert counts["bundles"] >= 1 and isinstance(counts["last_ingest"], dict)
+    assert counts["bundles"] >= 1
+    # The latest pull decides, by id: acme recovered, broken failed last.
+    assert counts["pulled_ok_24h"] == 2
+    assert counts["stale"] == counts["active"] - 3
+    assert [(p["name"], p["error"]) for p in counts["failing"]] == [("broken", "HTTP 403")]
 
     full = client.get("/v1/admin/sources", headers=admin_headers).json()
     assert "jobs" in full["sources"][0]

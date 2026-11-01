@@ -1,4 +1,5 @@
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_task_summary_uses_filters_but_not_page_cursor(client, admin_headers, f):
@@ -62,7 +63,7 @@ def test_admin_user_sort_applies_multiple_keys_and_echoes_them(client, admin_hea
 
 
 def test_board_total_does_not_change_when_page_becomes_empty(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     for _ in range(3):
         f.make_job(uploaded_by=uid)
     for offset, rows in [(2, 1), (3, 0)]:
@@ -116,7 +117,7 @@ def test_query_sort_uses_secondary_key(client, admin_headers):
 
 
 def test_board_set_filters_scope_rows_total_and_ats_facets(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     examples = [
         ("a", "greenhouse", "applied"),
         ("b", "lever", "interview"),
@@ -169,7 +170,7 @@ def test_board_set_filters_scope_rows_total_and_ats_facets(client, user_headers,
 def test_board_legacy_statuses_alias_merges_into_canonical_echo(client, user_headers, f):
     from api.routers.job_board import NOT_APPLIED
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     jobs = [f.make_job(uploaded_by=uid) for _ in range(3)]
     for job_id, status in zip(jobs, ["applied", None, "rejected"], strict=True):
         db.execute(
@@ -186,7 +187,7 @@ def test_board_legacy_statuses_alias_merges_into_canonical_echo(client, user_hea
 
 
 def test_board_exact_scalar_filters_preserve_commas_alongside_sets(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     ids = []
     for source, status in [
         ("Team, Inc", "Review, later"),

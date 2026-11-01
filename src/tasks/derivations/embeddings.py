@@ -150,8 +150,7 @@ def _store_result(result: BatchResult, context: dict[str, Any], _: None) -> str:
         )
     }
     # The packed request's usage is the call ledger's (model_calls), booked
-    # with its receipt. A posting's equal share of it was a guess nothing
-    # read, and it is no longer stored.
+    # with its receipt; no per-posting share is stored.
     rows = []
     for original, vector in zip(originals, vectors, strict=True):
         if len(vector) != context["dimensions"] or any(
