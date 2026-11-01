@@ -6,6 +6,29 @@ from api import db
 from tests.apply_support import ada_profile
 
 
+def _save_profile_with_ethnicity(client, user_headers) -> None:
+    client.put(
+        "/v1/user/profile",
+        json={**ada_profile(), "ethnicity": "South Asian | Asian"},
+        headers=user_headers,
+    )
+
+
+def test_a_whole_word_of_an_option_lands_by_rule(client, user_headers):
+    _save_profile_with_ethnicity(client, user_headers)
+    eth_options = ["White", "Asian (Not Hispanic or Latino)", "Decline"]
+    resolved = client.post(
+        "/v1/user/apply/resolve",
+        json={
+            "url": "https://x.test/apply",
+            "fields": [{"key": "eth", "label": "Race", "kind": "select", "options": eth_options}],
+        },
+        headers=user_headers,
+    ).json()["fields"][0]
+    # "Asian" is a whole word of that option, so the rule lands it directly.
+    assert resolved["rung"] == "profile" and resolved["value"] == "Asian (Not Hispanic or Latino)"
+
+
 def test_the_model_fills_what_the_rules_could_not_in_one_call(client, user_headers, monkeypatch):
     """A known fact whose option wording the matcher does not recognise goes
     to the model as a hint with the options; an unknown field goes with
@@ -29,22 +52,7 @@ def test_the_model_fills_what_the_rules_could_not_in_one_call(client, user_heade
         "api.budget.resolve_ai_config",
         lambda uid, ent: type("Cfg", (), {"model": "m", "key_source": "owner"})(),
     )
-    client.put(
-        "/v1/user/profile",
-        json={**ada_profile(), "ethnicity": "South Asian | Asian"},
-        headers=user_headers,
-    )
-    eth_options = ["White", "Asian (Not Hispanic or Latino)", "Decline"]
-    resolved = client.post(
-        "/v1/user/apply/resolve",
-        json={
-            "url": "https://x.test/apply",
-            "fields": [{"key": "eth", "label": "Race", "kind": "select", "options": eth_options}],
-        },
-        headers=user_headers,
-    ).json()["fields"][0]
-    # "Asian" is a whole word of that option, so the rule lands it directly.
-    assert resolved["rung"] == "profile" and resolved["value"] == "Asian (Not Hispanic or Latino)"
+    _save_profile_with_ethnicity(client, user_headers)
 
     res = client.post(
         "/v1/user/apply/suggest",

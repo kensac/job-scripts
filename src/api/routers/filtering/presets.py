@@ -82,6 +82,16 @@ _LATEST_JUDGED = verdict_reads.latest_per(
     "check_type = 'custom' AND prompt_hash = ANY(%(hashes)s)",
 )
 
+# One statement: the eligible count rides on every row, and the LEFT JOIN
+# keeps one row with a NULL hash when no preset has a verdict, so the count
+# arrives either way. It used to be two statements that each built `latest`,
+# 2.7 s apiece on production.
+#
+# The url join compares COLLATE "C". `eligible` is estimated at one row (the
+# HAVING), so the planner merge-joins and sorts its 233,208 urls by the
+# database collation, which took 5 s of a 9.7 s run. Byte order sorts them in
+# milliseconds and equality is the same under both (EXPLAIN ANALYZE,
+# 2026-11-01: 12.1 s + 2.7 s before, 3.6 s after, identical rows).
 _PRESET_COVERAGE_SQL = f"""
 WITH latest AS (
     {_LATEST_GATES}
@@ -94,22 +104,16 @@ WITH latest AS (
 ), judged AS (
     {_LATEST_JUDGED}
 )
-SELECT jd.prompt_hash,
-       count(*) AS judged,
-       count(*) FILTER (WHERE jd.status = 'passed') AS would_show,
-       (SELECT count(*) FROM eligible) AS eligible
-FROM eligible e JOIN judged jd ON jd.url = e.url
-GROUP BY jd.prompt_hash
-"""
-
-_ELIGIBLE_SQL = f"""
-WITH latest AS (
-    {_LATEST_GATES}
-)
-SELECT count(*) AS eligible FROM (
-    SELECT job_id FROM latest WHERE status = 'passed'
-    GROUP BY job_id HAVING count(*) = 2
-) both_gates
+SELECT (SELECT count(*) FROM eligible) AS eligible,
+       c.prompt_hash, c.judged, c.would_show
+FROM (SELECT 1) AS one
+LEFT JOIN (
+    SELECT jd.prompt_hash,
+           count(*) AS judged,
+           count(*) FILTER (WHERE jd.status = 'passed') AS would_show
+    FROM eligible e JOIN judged jd ON jd.url COLLATE "C" = e.url COLLATE "C"
+    GROUP BY jd.prompt_hash
+) c ON TRUE
 """
 
 
@@ -121,12 +125,9 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         "FROM filter_presets WHERE active ORDER BY name",
     )
     hashes = {p.id: compute_filter_hash(p.prompt, p.on_ambiguous) for p in presets}
-    coverage = {
-        row["prompt_hash"]: row
-        for row in db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
-    }
-    eligible_row = db.query_one(_ELIGIBLE_SQL)
-    eligible = int(eligible_row["eligible"]) if eligible_row else 0
+    rows = db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
+    eligible = int(rows[0]["eligible"])
+    coverage = {row["prompt_hash"]: row for row in rows if row["prompt_hash"] is not None}
     return PresetList(
         presets=[
             PresetOffer(
