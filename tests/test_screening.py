@@ -16,6 +16,7 @@ PINNED = {
     "levels_occupations_v1": "7502f5b4775e7de3",
     "levels_roles_occupations_v1": "d982585295f110b1",
     "finance_new_grad_v1": "a2ad2a46a1acf548",
+    "finance_new_grad_v2": "e405e39cbd660fab",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -239,3 +240,44 @@ def test_levels_roles_skips_a_role_bar_a_rejects_and_nothing_it_accepts(title, s
 )
 def test_finance_new_grad_keeps_early_career_finance_titles_only(title, skip):
     assert screen("finance_new_grad_v1", title=title, source=None).skip is skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("2027 Investment Banking Analyst Program", False),
+        ("Corporate Banking Analyst Program", False),
+        ("Commercial Banking Leadership Development Program", False),
+        ("Retail Banking Leadership Program - Branch Track", False),
+        ("Store Leadership Program", True),
+        ("Analyst, Restructuring", False),
+        ("Consultant - Deals Valuation", False),
+        ("Oliver Wyman - Core Consulting Group - Entry-level Consultant", False),
+        ("Associate Consultant", False),
+        ("Management Consultant - Retail", False),
+        ("Business Advisory Analyst", False),
+        ("2027 Audit Assistant", False),
+        ("Tax Associate", False),
+        ("Internal Audit Development Program Analyst/Associate", False),
+        ("Financial Analyst", False),
+        ("New Grad 2027: Junior Quantitative Trader", False),
+        ("Senior Consultant, Strategy", True),
+        ("Associate Managing Consultant, Advisors & Consulting Services", True),
+        ("Consult Associate Partner Banking", True),
+        ("Experienced Financial Analyst", True),
+        ("Apprentice, Wealth Management", True),
+        ("Summer Analyst - Global Markets", True),
+        ("SAP MM Associate Consultant", True),
+        ("Oracle Cloud Financials Consultant", True),
+        ("Smart Home Consultant", True),
+        ("Quality Assurance Associate", True),
+        ("Analyst - Payroll, Finance", True),
+        ("Treasury Sales Associate I", True),
+        ("Personal Banker - Main Street Branch", True),
+        ("Software Engineer, Trading Systems", True),
+        ("Night Auditor", True),
+        ("", True),
+    ],
+)
+def test_finance_new_grad_v2_adds_consulting_audit_and_tax(title, skip):
+    assert screen("finance_new_grad_v2", title=title, source=None).skip is skip
