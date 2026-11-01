@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from api import db
+from api import db, grouped
 from api.auth import AuthedUser, require_user
 from api.board import visibility
 from api.board.access import require_visible_job
@@ -152,6 +152,47 @@ def _slice_sql(body: str) -> str:
     return _visible_sql(_SLICE + body)
 
 
+# The slice grouped by every key the page's cuts need, read once and folded
+# by `market`. The flags are FILTERs inside each group, so a flag's rule stays
+# in SQL and the fold only adds counts.
+_MARKET_GROUPS = """
+SELECT yoe_min, degree_min, degree_required AS required, clearance, seniority, employment_type,
+       COUNT(*) AS postings,
+       COUNT(*) FILTER (WHERE yoe_min IS NOT NULL) AS states_years,
+       COUNT(*) FILTER (WHERE degree_min IS NOT NULL) AS states_degree,
+       COUNT(*) FILTER (WHERE degree_required) AS degree_required,
+       COUNT(*) FILTER (WHERE enrollment_required) AS enrollment_required,
+       COUNT(*) FILTER (WHERE clearance IS NOT NULL AND clearance != 'none') AS needs_clearance,
+       COUNT(*) FILTER (WHERE citizenship_required) AS citizenship_required,
+       COUNT(*) FILTER (WHERE sponsorship = 'offered') AS sponsorship_offered,
+       COUNT(*) FILTER (WHERE sponsorship = 'not_offered') AS sponsorship_refused
+FROM slice
+GROUP BY 1, 2, 3, 4, 5, 6
+"""
+
+
+def _tally(
+    groups: list[dict[str, Any]], *keys: str, order: tuple[str, ...] | None
+) -> list[tuple[tuple[Any, ...], int]]:
+    """Postings per value of `keys`, leaving out rows whose first key is
+    unstated. Sorted by the first key's place in `order` (unlisted last, as
+    `array_position` sorts), or by its own value without one, then by the
+    rest."""
+    counts: dict[tuple[Any, ...], int] = {}
+    for g in groups:
+        key = tuple(g[k] for k in keys)
+        if key[0] is not None:
+            counts[key] = counts.get(key, 0) + g["postings"]
+
+    def rank(key: tuple[Any, ...]) -> tuple[Any, ...]:
+        if order is None:
+            return key
+        first = order.index(key[0]) if key[0] in order else len(order)
+        return (first, *key[1:])
+
+    return sorted(counts.items(), key=lambda item: rank(item[0]))
+
+
 def _params(user: AuthedUser, seniority: str | None, employment_type: str | None) -> dict[str, Any]:
     return {
         "uid": user.id,
@@ -174,8 +215,8 @@ def market(
     same and mean very different things.
     """
     params = _params(user, seniority, employment_type)
-    total = db.query_one(_slice_sql("SELECT COUNT(*) AS postings FROM slice"), params)
-    postings = (total or {}).get("postings", 0)
+    groups = db.query(_slice_sql(_MARKET_GROUPS), params)
+    postings = sum(g["postings"] for g in groups)
     if not postings:
         return Market(
             postings=0,
@@ -205,83 +246,34 @@ def market(
         if len(bucket) < TOP_SKILLS:
             bucket.append(SkillCount(skill=row["skill"], postings=row["postings"]))
 
-    yoe = db.query_as(
-        YearsCount,
-        _slice_sql(
-            "SELECT yoe_min AS years, COUNT(*) AS postings FROM slice "
-            "WHERE yoe_min IS NOT NULL GROUP BY yoe_min ORDER BY yoe_min"
-        ),
-        params,
-    )
-    degree = db.query_as(
-        DegreeCount,
-        _slice_sql(
-            """
-            SELECT degree_min AS level, degree_required AS required, COUNT(*) AS postings
-            FROM slice WHERE degree_min IS NOT NULL
-            GROUP BY degree_min, degree_required
-            ORDER BY array_position(%(degrees)s::text[], degree_min), required
-            """
-        ),
-        {**params, "degrees": list(DEGREE_LEVELS)},
-    )
-    clearance = db.query_as(
-        LevelCount,
-        _slice_sql(
-            "SELECT clearance AS level, COUNT(*) AS postings FROM slice "
-            "WHERE clearance IS NOT NULL GROUP BY clearance "
-            "ORDER BY array_position(%(clearances)s::text[], clearance)"
-        ),
-        {**params, "clearances": list(CLEARANCE_LEVELS)},
-    )
-    seniorities = db.query_as(
-        LevelCount,
-        _slice_sql(
-            "SELECT seniority AS level, COUNT(*) AS postings FROM slice "
-            "WHERE seniority IS NOT NULL GROUP BY seniority "
-            "ORDER BY array_position(%(seniorities)s::text[], seniority)"
-        ),
-        {**params, "seniorities": list(SENIORITIES)},
-    )
-    employment = db.query_as(
-        TypeCount,
-        _slice_sql(
-            "SELECT employment_type AS type, COUNT(*) AS postings FROM slice "
-            "WHERE employment_type IS NOT NULL GROUP BY employment_type "
-            "ORDER BY array_position(%(types)s::text[], employment_type)"
-        ),
-        {**params, "types": list(EMPLOYMENT_TYPES)},
-    )
-    # Deliberately reported beside `postings` rather than as percentages: these
-    # are counts of postings that SAY something, and the silent majority is the
-    # finding as often as the stated minority is.
-    flags = db.query_one_as(
-        MarketFlags,
-        _slice_sql(
-            """
-            SELECT COUNT(*) FILTER (WHERE yoe_min IS NOT NULL) AS states_years,
-                   COUNT(*) FILTER (WHERE degree_min IS NOT NULL) AS states_degree,
-                   COUNT(*) FILTER (WHERE degree_required) AS degree_required,
-                   COUNT(*) FILTER (WHERE enrollment_required) AS enrollment_required,
-                   COUNT(*) FILTER (WHERE clearance IS NOT NULL
-                                      AND clearance != 'none') AS needs_clearance,
-                   COUNT(*) FILTER (WHERE citizenship_required) AS citizenship_required,
-                   COUNT(*) FILTER (WHERE sponsorship = 'offered') AS sponsorship_offered,
-                   COUNT(*) FILTER (WHERE sponsorship = 'not_offered') AS sponsorship_refused
-            FROM slice
-            """
-        ),
-        params,
-    )
+    years = [
+        YearsCount(years=years, postings=n) for (years,), n in _tally(groups, "yoe_min", order=None)
+    ]
     return Market(
         postings=postings,
         skills=by_kind,
-        years_experience=YearsExperience(stated=sum(r.postings for r in yoe), distribution=yoe),
-        degree=degree,
-        clearance=clearance,
-        seniority=seniorities,
-        employment_type=employment,
-        flags=flags,
+        years_experience=YearsExperience(stated=sum(y.postings for y in years), distribution=years),
+        degree=[
+            DegreeCount(level=level, required=required, postings=n)
+            for (level, required), n in _tally(
+                groups, "degree_min", "required", order=DEGREE_LEVELS
+            )
+        ],
+        clearance=[
+            LevelCount(level=level, postings=n)
+            for (level,), n in _tally(groups, "clearance", order=CLEARANCE_LEVELS)
+        ],
+        seniority=[
+            LevelCount(level=level, postings=n)
+            for (level,), n in _tally(groups, "seniority", order=SENIORITIES)
+        ],
+        employment_type=[
+            TypeCount(type=kind, postings=n)
+            for (kind,), n in _tally(groups, "employment_type", order=EMPLOYMENT_TYPES)
+        ],
+        flags=grouped.shaped(
+            MarketFlags, grouped.fold(groups, (), counts=tuple(MarketFlags.model_fields))
+        ),
     )
 
 

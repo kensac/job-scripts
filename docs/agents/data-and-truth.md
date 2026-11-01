@@ -97,8 +97,7 @@ and caveats together when changing a metric.
 `api.routers.filtering.insight_breakdowns` owns prompt-version response
 models, reason grouping, and sample thresholds.
 `api.routers.filtering.admin_insights` owns cross-user taxonomy, phrasing,
-and rejection views. `api.routers.filtering.person_insights` owns the
-caller's view. `api.routers.filter_insights` registers both routers.
+and rejection views. `api.routers.filter_insights` registers the router.
 Keep `prompt_hash` as the unit of aggregation: a filter name can span prompt edits, and an old hash may
 have no current owner. The owner state must say unknown when current filter
 rows cannot establish one. Group totals may overlap, so count each decision

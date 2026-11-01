@@ -21,7 +21,6 @@ from api.routers.admin import (
     catalog,
     checks,
     config,
-    extension,
     filters,
     fleet,
     health,
@@ -31,7 +30,6 @@ from api.routers.admin import (
     queries,
     review_gates,
     sources,
-    user_job_populations,
 )
 from api.routers.admin.shared import require_admin
 
@@ -46,10 +44,8 @@ router.include_router(checks.router)
 router.include_router(health.router)
 router.include_router(job_profiles.router)
 router.include_router(managed_boards.router)
-router.include_router(user_job_populations.router)
 router.include_router(config.router)
 router.include_router(queries.router)
 router.include_router(review_gates.router)
-router.include_router(extension.router)
 
 __all__ = ["require_admin", "router"]

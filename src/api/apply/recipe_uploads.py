@@ -1,11 +1,11 @@
-"""Validate one recipe chunk per task and publish only a complete revision."""
+"""Validate a stored recipe chunk by chunk and publish only a complete revision."""
 
 from __future__ import annotations
 
 import hashlib
 import uuid
 
-from api import db, queue
+from api import db
 from api.apply.recipe_json import InvalidRecipe, RecipeParser
 
 _SEED = bytes(32)
@@ -23,8 +23,8 @@ def advance_digest(previous: bytes, index: int, chunk: bytes) -> bytes:
     ).digest()
 
 
-def process(upload_id: uuid.UUID, index: int, *, enqueue_next: bool = True) -> None:
-    """Commit one chunk and enqueue the next step in the same transaction."""
+def process(upload_id: uuid.UUID, index: int) -> None:
+    """Validate one chunk and save the parser state and digest it leaves."""
     with db.transaction():
         upload = db.query_one(
             "SELECT adapter, chunk_count, published_by, status, next_chunk, validation_state "
@@ -82,10 +82,6 @@ def process(upload_id: uuid.UUID, index: int, *, enqueue_next: bool = True) -> N
                 upload_id,
             ),
         )
-        if enqueue_next:
-            queue.enqueue(
-                "publish_extension_recipe", {"upload_id": str(upload_id), "chunk_index": index + 1}
-            )
 
 
 def _load_frame(upload_id: uuid.UUID, depth: int) -> dict | None:
@@ -128,7 +124,3 @@ def _publish(upload_id: uuid.UUID, adapter: str, published_by: str | None, revis
         (revision, upload_id),
     )
     db.execute("DELETE FROM extension_recipe_frames WHERE upload_id = %s", (upload_id,))
-
-
-async def handle_publish_recipe(payload: dict[str, str]) -> None:
-    process(uuid.UUID(payload["upload_id"]), int(payload["chunk_index"]))

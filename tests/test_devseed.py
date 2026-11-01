@@ -117,25 +117,28 @@ def test_role_title_is_a_key_that_exists_and_is_null(client, dev_headers):
     assert any(r["detail"]["role_title"] for r in rows)
 
 
-def test_two_filters_share_one_prompt_hash(client, dev_headers):
+def _dev_rejection_reasons(client, dev_headers, seeded):
+    return client.get(
+        f"/v1/admin/filter-insights/rejection-reasons?min_decisions=1&user={seeded}",
+        headers=dev_headers,
+    ).json()
+
+
+def test_two_filters_share_one_prompt_hash(client, dev_headers, seeded):
     """The seed assigns default and general to one prompt version.
 
     A row per filter name would double-count their shared decisions.
     """
-    body = client.get(
-        "/v1/user/filter-insights/rejection-reasons?min_decisions=1", headers=dev_headers
-    ).json()
-    shared = [v for v in body["prompt_versions"] if len(v["filters"]) > 1]
+    body = _dev_rejection_reasons(client, dev_headers, seeded)
+    shared = [v for v in body["prompt_versions"] if len(v["owner"]["filters"]) > 1]
     assert shared, "the seed must carry two names on one prompt"
-    assert {f["name"] for f in shared[0]["filters"]} == {"default", "general"}
+    assert {f["name"] for f in shared[0]["owner"]["filters"]} == {"default", "general"}
 
 
-def test_a_rejection_can_carry_no_reason(client, dev_headers):
+def test_a_rejection_can_carry_no_reason(client, dev_headers, seeded):
     """The batched paths recorded none for weeks, so the share denominator is
     rejected_with_reason and not rejected."""
-    body = client.get(
-        "/v1/user/filter-insights/rejection-reasons?min_decisions=1", headers=dev_headers
-    ).json()
+    body = _dev_rejection_reasons(client, dev_headers, seeded)
     totals = body["prompt_versions"][0]["totals"]
     assert totals["rejected"] > totals["rejected_with_reason"]
 
