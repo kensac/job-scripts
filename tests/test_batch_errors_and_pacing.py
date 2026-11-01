@@ -158,3 +158,17 @@ async def test_a_deferred_fetch_writes_nothing_so_the_next_cycle_retries(monkeyp
         )["n"]
         == 0
     )
+
+
+@pytest.mark.asyncio
+async def test_a_submission_the_provider_refuses_fails_with_its_reason(monkeypatch):
+    """Every wave refused: the task's error carries the provider's reason.
+    On 2026-10-31 only a log line said "Billing hard limit has been reached"."""
+    monkeypatch.setattr(batch, "_client", object)
+
+    async def refuse(*args, **kwargs):
+        raise RuntimeError("Error code: 400 - Billing hard limit has been reached")
+
+    monkeypatch.setattr(batch, "_submit_chunk", refuse)
+    with pytest.raises(RuntimeError, match=r"accepted by the provider: .*Billing hard limit"):
+        await batch.submit_batches([batch.BatchSpec("one", "text")], "gpt-6-luna", "low", 256)
