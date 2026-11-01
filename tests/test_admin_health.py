@@ -109,3 +109,15 @@ def test_rate_spike_ignores_expiring_rechecks_but_catches_fresh_misclassificatio
     spike = [f for f in health.detect() if f["subject"] == "expsrc"]
     assert spike and spike[0]["kind"] == "closed_rate_spike"
     assert "newly-seen" in spike[0]["message"]
+
+
+def test_content_mix_counts_a_weeks_fetches_by_source(client, admin_headers):
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title) VALUES "
+        "('https://m.test/1', 'src-m', 'A', 'T'), ('https://m.test/2', 'src-m', 'A', 'T')"
+    )
+    _content_row("https://m.test/1", "ats text", 1)
+    _content_row("https://m.test/2", "scraped", 1)
+    _content_row("https://m.test/2", "scraped", 9)
+    mix = client.get("/v1/admin/health", headers=admin_headers).json()["content_mix"]
+    assert {"source": "src-m", "ats_text": 1, "scraped": 1, "total": 2} in mix

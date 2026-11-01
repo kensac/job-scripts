@@ -71,6 +71,14 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
     board_format = format_for_url(url)
     if board_format.fetcher is None:
         return fetch_job_postings(url)
-    postings = board_format.fetcher(url, company or "")
+    company = (company or "").strip()
+    # The source's company is the only company these rows get. Fetched without
+    # one, every posting is stored nameless and the pull reads as a success:
+    # 884 Lever and Ashby sources inserted without one on 2026-09-12 left
+    # 71,070 nameless jobs by 2026-11-01. Failing the pull puts the source on
+    # the failure path, which ends at a source_switched_off warning.
+    if board_format.needs_company and not company:
+        raise ValueError(f"a {board_format.name} board names no company; set the source's company")
+    postings = board_format.fetcher(url, company)
     logger.info(f"Fetched {len(postings)} postings from {url}")
     return postings

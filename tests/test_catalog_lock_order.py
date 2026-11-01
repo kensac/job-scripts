@@ -27,9 +27,9 @@ FIRST = "https://jobs.test/a"
 LAST = "https://jobs.test/z"
 
 
-def _posting(url: str, title: str) -> JobPosting:
+def _posting(url: str, title: str, company: str = "Acme") -> JobPosting:
     return JobPosting(
-        company="Acme",
+        company=company,
         locations=["Remote"],
         title=title,
         url=url,
@@ -101,6 +101,13 @@ def test_near_copy_keys_lock_in_url_order():
     catalog.upsert_postings([_posting(FIRST, "v1")], "board-a")
     _contend("jobs", lambda: catalog.set_near_copy_keys({LAST: "twin", FIRST: "twin"}))
     assert {r["near_copy_key"] for r in db.query("SELECT near_copy_key FROM jobs")} == {"twin"}
+
+
+def test_filling_a_source_company_locks_in_url_order():
+    catalog.upsert_postings([_posting(LAST, "v1", company="")], "board-a")
+    catalog.upsert_postings([_posting(FIRST, "v1", company="")], "board-a")
+    _contend("jobs", lambda: catalog.fill_source_company("board-a", "Acme"))
+    assert {r["company"] for r in db.query("SELECT company FROM jobs")} == {"Acme"}
 
 
 def test_refreshing_stored_availability_locks_in_url_order():

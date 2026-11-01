@@ -46,7 +46,7 @@ async def test_a_batch_is_not_submitted_but_paid_work_is_still_collected(set_con
     async def submit(*_args, **_kwargs):
         raise AssertionError("a batch was submitted while AI is paused")
 
-    monkeypatch.setattr("core.batch.submit_responses_batches", submit)
+    monkeypatch.setattr("core.batch.submit_batches", submit)
     monkeypatch.setattr(batching, "has_batch_work", lambda _task_id: False)
     with pytest.raises(ai_pause.AIPaused):
         await batching.submit_or_collect(1, [object()], "gpt-6-luna", "low", 100, None)

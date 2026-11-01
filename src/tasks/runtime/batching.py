@@ -253,7 +253,7 @@ async def submit_or_collect(
     A retry collects existing work before considering new submission. Request
     snapshots alone remain retryable when no provider batch was accepted.
     """
-    from core.batch import submit_responses_batches
+    from core.batch import submit_batches
 
     existing = pending_batch_ids(task_id)
     if has_batch_work(task_id):
@@ -266,9 +266,7 @@ async def submit_or_collect(
     specs = snapshot_specs(task_id, specs)
     if not specs:
         return []
-    ids = await submit_responses_batches(
-        specs, model, reasoning_effort, max_output_tokens, on_event=hook
-    )
+    ids = await submit_batches(specs, model, reasoning_effort, max_output_tokens, on_event=hook)
     if not ids:
         # Nothing was accepted by the provider; fail normally so the usual
         # retry path applies rather than parking forever.

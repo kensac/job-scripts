@@ -83,6 +83,22 @@ class AiQuery(Base):
             postgresql_include=["status"],
             postgresql_where=text("check_type = 'custom' AND status IN ('passed', 'rejected')"),
         ),
+        # The filter insight page reads a window of custom verdicts: its
+        # counts from the first, its reasoned rejections from the second, both
+        # as index-only scans (admin_insights.rejection_reasons). Through the
+        # heap the 30-day page took 23 to 37 s on production (2026-11-01).
+        Index(
+            "idx_ai_queries_custom_window",
+            "created_at",
+            postgresql_include=["prompt_hash", "status", "url", "filter_name"],
+            postgresql_where=text("check_type = 'custom'"),
+        ),
+        Index(
+            "idx_ai_queries_custom_reasons",
+            "created_at",
+            postgresql_include=["prompt_hash", "url", "reason"],
+            postgresql_where=text("check_type = 'custom' AND status = 'rejected' AND reason <> ''"),
+        ),
         # The reason-group regex. url, company and job_title had one each;
         # nothing scans them any more (the migrations dropping them say why),
         # so the admin search is a seq scan.
@@ -271,7 +287,26 @@ class ModelCall(Base):
             postgresql_where=text("source_id IS NOT NULL"),
         ),
         Index("idx_model_calls_created", "created_at"),
-        Index("idx_model_calls_user_created", "user_id", "created_at"),
+        # A person's usage, the admin's view of a person and the weekly
+        # budget read these columns for every call the person made (610k for
+        # the owner). INCLUDEd, the scans are index-only instead of reading
+        # the heap: 4.2 s cold for the all-time spend by purpose.
+        Index(
+            "idx_model_calls_user_created",
+            "user_id",
+            "created_at",
+            postgresql_include=[
+                "purpose",
+                "model",
+                "key_source",
+                "total_tokens",
+                "requests",
+                "cost_usd",
+                "cached_tokens",
+                "cache_write_tokens",
+            ],
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
         Index("idx_model_calls_managed_board_created", "managed_board_id", "created_at"),
         CheckConstraint(
             "user_id IS NULL OR managed_board_id IS NULL", name="ck_model_calls_single_payer"

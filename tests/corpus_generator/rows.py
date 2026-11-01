@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import functools
 import json
 import random
 from typing import Any
@@ -18,6 +19,12 @@ from tests.corpus_generator.config import (
     SEED,
 )
 from tests.corpus_generator.schema import _Schema
+
+
+@functools.cache
+def _byte_map(alphabet: str) -> bytes:
+    """Every byte value onto one character of an ASCII alphabet."""
+    return bytes(ord(alphabet[i % len(alphabet)]) for i in range(256))
 
 
 class _Generator:
@@ -43,11 +50,11 @@ class _Generator:
         alphabet = ""
         for symbol in self.rng.choice(classes) or "a":
             alphabet += {"A": _UPPER, "a": _LETTERS, "9": _DIGITS, " ": " ", "-": _PUNCT}[symbol]
-        # choices() in one call, not choice() per character. The profile keeps
-        # production's real lengths, and page_fetches.content reaches 32k
-        # characters, so per-character drawing spent 62 of the build's 78
-        # seconds inside random.choice alone.
-        return "".join(self.rng.choices(alphabet, k=max(0, int(length))))
+        # Random bytes mapped onto the alphabet, not a draw per character. The
+        # profile keeps production's real lengths, about 47 million characters
+        # a build, and choices() spent 16 of a profiled build's 42 seconds
+        # drawing them one random() at a time.
+        return self.rng.randbytes(max(0, int(length))).translate(_byte_map(alphabet)).decode()
 
     def _from_quantiles(self, quantiles: list[float]) -> float:
         """Uniform inside a randomly chosen quantile band, so the tails are

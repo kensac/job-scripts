@@ -187,6 +187,34 @@ def test_managed_board_patch_is_atomic_revisioned_and_publish_is_explicit(client
     assert projected["revision"] == 5 and projected["public_revision"] == 5
 
 
+def test_managed_board_patch_replaces_criteria_and_title_gate(client, admin_headers):
+    _source("source-a")
+    _source("source-b")
+    board = _create(client, admin_headers).json()
+    gated = client.patch(
+        f"/v1/admin/managed-boards/{board['id']}",
+        json={
+            "expected_revision": 1,
+            "criteria": {"max_age_days": 30, "included_terms": ["intern"]},
+            "title_gate": {"recipe": "internship_v1"},
+        },
+        headers=admin_headers,
+    )
+    assert gated.status_code == 200, gated.text
+    assert gated.json()["criteria"]["max_age_days"] == 30
+    assert gated.json()["criteria"]["included_terms"] == ["intern"]
+    assert gated.json()["title_gate"]["recipe"] == "internship_v1"
+
+    cleared = client.patch(
+        f"/v1/admin/managed-boards/{board['id']}",
+        json={"expected_revision": 2, "title_gate": None},
+        headers=admin_headers,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["title_gate"] is None
+    assert cleared.json()["criteria"]["max_age_days"] == 30
+
+
 def test_publishing_without_sources_rolls_back_revision(client, admin_headers):
     response = _create(client, admin_headers, sources=[])
     board = response.json()
