@@ -294,10 +294,9 @@ def digest(recipe: str) -> str:
 class TitleGateConfig(BaseModel):
     """A managed board's title gate (`managed_boards.title_gate`).
 
-    A gate that is set is enforced. A shadow mode used to judge every
-    candidate anyway and report what the gate would drop; that is a query over
-    the board's verdicts and `screen`, so a recipe is measured that way before
-    a board names it.
+    A gate that is set is enforced. What a gate would drop is a query over the
+    board's verdicts and `screen`, so a recipe is measured that way before a
+    board names it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
