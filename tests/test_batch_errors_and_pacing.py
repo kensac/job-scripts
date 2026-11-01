@@ -69,6 +69,24 @@ async def test_a_batch_rejected_before_any_request_ran_keeps_its_reason():
     assert {e["custom_id"] for e in _errors("b-whole")} == {"u1", "u2"}
 
 
+@pytest.mark.asyncio
+async def test_an_expired_batch_keeps_the_answers_it_returned():
+    """An expired batch's output file holds the requests it finished. Those
+    are answered; only the request with no line is marked expired."""
+    answered = (
+        '{"custom_id": "u1", "response": {"status_code": 200, "body": {"output": '
+        '[{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}]}}}'
+    )
+    fake = SimpleNamespace(
+        id="b-expired", status="expired", output_file_id="o1", error_file_id=None, errors=None
+    )
+    results = {"u1": batch.BatchResult("u1"), "u2": batch.BatchResult("u2")}
+    await batch._collect_batch(_Client(answered), fake, results)  # type: ignore[arg-type]
+    assert (results["u1"].text, results["u1"].error) == ("{}", None)
+    assert (results["u2"].text, results["u2"].error) == (None, "batch expired")
+    assert [e["custom_id"] for e in _errors("b-expired")] == ["u2"]
+
+
 def _batch(purpose: str, batch_id: str, requests: int, failed: int, minutes_ago: int) -> None:
     db.execute(
         "INSERT INTO ai_batches (provider_batch_id, purpose, model, requests, completed, "
