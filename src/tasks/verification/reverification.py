@@ -13,8 +13,6 @@ from api.board.person_state import UNTOUCHED
 from api.verdict_equivalence import answering_models
 from core import catalog, routing, verdict_reads
 from core.answers import VERIFICATION_REQUEST
-from core.routing import resolve
-from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, Page, add_ai_results, ai_result_row
 from tasks.board import demote_closed
 from tasks.runtime import (
@@ -32,7 +30,11 @@ from tasks.runtime import (
     submit_or_collect,
     update_parent_progress,
 )
-from tasks.verification.questions import _EFFORT, _verification_spec, question_sha256
+from tasks.verification.questions import (
+    _submission_model,
+    _verification_spec,
+    question_sha256,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +196,8 @@ async def _reverify_jobs(
         return
     if not routing.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
-    model = resolve(VERIFY_TASK).model
+    # The model and effort verify_new submits with, configured override included.
+    model, effort = _submission_model()
     by_url = {r["url"]: r for r in rows}
     hook = batch_event_hook(task_id, "reverify", model)
 
@@ -288,7 +291,7 @@ async def _reverify_jobs(
             task_id,
             specs,
             model,
-            _EFFORT,
+            effort,
             VERIFICATION_REQUEST.max_output_tokens,
             hook,
         )
