@@ -16,6 +16,7 @@ is required; sanctioned status is advice.
 from __future__ import annotations
 
 import datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -28,7 +29,14 @@ from api.routers.admin import require_admin
 from api.task_config import configured_shape
 from core import providers
 from core.providers.spec import StructuredOutput
-from core.routing import ModelChangeEffect, NoEligibleModel, candidates_for, resolve
+from core.routing import (
+    Candidacy,
+    ModelChangeEffect,
+    NoEligibleModel,
+    TaskShape,
+    candidates_for,
+    resolve,
+)
 from core.shapes import SHAPES
 
 router = APIRouter(prefix="/admin")
@@ -38,6 +46,8 @@ router = APIRouter(prefix="/admin")
 # decisions in context without turning a settings screen into a log viewer;
 # the full history is its own endpoint.
 RECENT_CHANGES = 10
+# A read bound on the history endpoint; every row stays stored.
+HISTORY_LIMIT = 200
 
 
 # How much dearer a model may be than the one running before the change has to
@@ -103,6 +113,11 @@ def _current(purpose: str) -> TaskModelChange | None:
     return rows[0] if rows else None
 
 
+def _running_model(shape: TaskShape, override: str | None) -> str | None:
+    """The model a task runs today: its override, else its first sanctioned model."""
+    return override or (shape.candidates[0] if shape.candidates else None)
+
+
 # How far back per-model health looks. Derived from the provider's own
 # completion window rather than picked: core.batch asks for 24 hours, so a
 # window of seven of those covers a week of full cycles and is long enough that
@@ -137,15 +152,9 @@ class ModelHealth(BaseModel):
 def _model_health() -> dict[str, BatchHealth]:
     """Per model: is it finishing work, and is the work coming back good.
 
-    The configuration screen priced models and said nothing about whether they
-    are doing the job, which makes it a price list rather than a decision. Both
-    halves are already in ai_batches and nothing read them.
-
     `failed_requests` over `requests` is the rate that matters - a model can
     complete every batch while failing lines inside them, which is what a
-    schema the model keeps breaking looks like. Reported as a numerator and a
-    denominator, never as a percentage: 1 of 3 and 3,000 of 9,000 are not the
-    same claim.
+    schema the model keeps breaking looks like.
     """
     rows = db.query_as(
         BatchHealth,
@@ -175,14 +184,7 @@ def _health_view(row: BatchHealth | None) -> ModelHealth | None:
     """
     if not row:
         return None
-    return ModelHealth(
-        in_flight=row.in_flight,
-        last_completed_at=row.last_completed_at,
-        oldest_in_flight_at=row.oldest_in_flight_at,
-        failed_requests=row.failed_requests,
-        requests=row.requests,
-        window_days=HEALTH_WINDOW_DAYS,
-    )
+    return ModelHealth(**row.model_dump(exclude={"model"}), window_days=HEALTH_WINDOW_DAYS)
 
 
 def _money(value: Any) -> str | None:
@@ -214,11 +216,7 @@ class ModelEvidence(BaseModel):
 class ModelCandidate(BaseModel):
     """One model this task could run on, eligible or not, carrying WHY.
 
-    Every dollar figure is a decimal string, never a number: these are
-    Decimals and a float would round money on the way out. None means unknown
-    - an ineligible model has no price and an unbounded sweep has no cycle
-    cost - and rendering either as 0 would make an unknown look like a free
-    one.
+    Every dollar figure is a `_money` string, and None means unknown.
     """
 
     model: str
@@ -286,12 +284,46 @@ class TaskModel(BaseModel):
     recent_changes: list[TaskModelChange]
 
 
+def _candidate_view(
+    c: Candidacy,
+    shape: TaskShape,
+    current_cycle: Decimal | None,
+    health: dict[str, BatchHealth],
+) -> ModelCandidate:
+    return ModelCandidate(
+        model=c.model,
+        provider=c.provider,
+        eligible=c.eligible,
+        rejection=c.rejection,
+        sanctioned=c.sanctioned,
+        est_cost_usd=_money(c.est_cost_usd),
+        est_cycle_cost_usd=_money(c.est_cycle_cost_usd),
+        est_cycle_cost_delta_usd=_money(
+            c.est_cycle_cost_usd - current_cycle
+            if c.est_cycle_cost_usd is not None and current_cycle is not None
+            else None
+        ),
+        price_varies_by_time=c.price_varies_by_time,
+        health=_health_view(health.get(c.model)),
+        evidence=[
+            ModelEvidence(
+                verdict=e.verdict,
+                finding=e.finding,
+                sample_size=e.sample_size,
+                measured_on=e.measured_on,
+            )
+            for e in shape.evidence
+            if e.model == c.model
+        ],
+    )
+
+
 def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
     shape = configured_shape(SHAPES[purpose])
     latest = _current(purpose)
     override = latest.model if latest else None
     candidacies = candidates_for(shape)
-    current_model = override or (shape.candidates[0] if shape.candidates else None)
+    current_model = _running_model(shape, override)
     current_cycle = next(
         (c.est_cycle_cost_usd for c in candidacies if c.model == current_model), None
     )
@@ -324,35 +356,7 @@ def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
         # list with the impossible options silently removed is how someone
         # concludes the missing model is a bug; the rejection reason is the
         # useful half.
-        candidates=[
-            ModelCandidate(
-                model=c.model,
-                provider=c.provider,
-                eligible=c.eligible,
-                rejection=c.rejection,
-                sanctioned=c.sanctioned,
-                est_cost_usd=_money(c.est_cost_usd),
-                est_cycle_cost_usd=_money(c.est_cycle_cost_usd),
-                est_cycle_cost_delta_usd=_money(
-                    c.est_cycle_cost_usd - current_cycle
-                    if c.est_cycle_cost_usd is not None and current_cycle is not None
-                    else None
-                ),
-                price_varies_by_time=c.price_varies_by_time,
-                health=_health_view(health.get(c.model)),
-                evidence=[
-                    ModelEvidence(
-                        verdict=e.verdict,
-                        finding=e.finding,
-                        sample_size=e.sample_size,
-                        measured_on=e.measured_on,
-                    )
-                    for e in shape.evidence
-                    if e.model == c.model
-                ],
-            )
-            for c in candidacies
-        ],
+        candidates=[_candidate_view(c, shape, current_cycle, health) for c in candidacies],
         cost_basis=CostBasis(
             per_cycle=shape.per_cycle,
             est_prompt_tokens=shape.est_prompt_tokens,
@@ -363,7 +367,7 @@ def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
     )
 
 
-def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> None:
+def _require_cost_acknowledgement(purpose: str, shape: TaskShape, body: TaskModelPut) -> None:
     """Refuse a large increase unless it was acknowledged, and say how large.
 
     At the moment of the decision, where the number is exactly known - not
@@ -378,9 +382,7 @@ def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> No
     candidacies = {c.model: c for c in candidates_for(shape)}
     new = candidacies.get(body.model or "")
     latest = _current(purpose)
-    current_name = (latest.model if latest else None) or (
-        shape.candidates[0] if shape.candidates else None
-    )
+    current_name = _running_model(shape, latest.model if latest else None)
     current = candidacies.get(current_name or "")
     if new is None or current is None:
         return
@@ -474,13 +476,13 @@ def put_task_model(
 
 @router.get("/task-models/{purpose}/history")
 def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModelHistory:
-    """Every decision ever made for this task, newest first.
+    """The newest HISTORY_LIMIT decisions for this task, newest first.
 
     The table is append-only and a cleared override is a NULL row rather than a
-    deletion, so this is the whole record and not a reconstruction. A monthly
+    deletion, so this is the record and not a reconstruction. A monthly
     review is looking for the switch that explains a regression noticed weeks
     later, which only works if the switch is still here.
     """
     if purpose not in SHAPES:
         raise refuse(404, "NOT_FOUND", "unknown task")
-    return TaskModelHistory(purpose=purpose, changes=_history(purpose, 200))
+    return TaskModelHistory(purpose=purpose, changes=_history(purpose, HISTORY_LIMIT))
