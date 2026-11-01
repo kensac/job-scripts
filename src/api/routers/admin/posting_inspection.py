@@ -14,7 +14,6 @@ from api.auth import AuthedUser
 from api.board import column_filters as column_filters_
 from api.problem import refuse
 from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord
-from api.routers.admin.review_gates import ReviewDecisions
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale
 from core import catalog, query_instructions, verdict_reads
@@ -403,7 +402,6 @@ class PostingTimeline(BaseModel):
     """`content_failures` and `unfetchable` mean what they do on the list."""
 
     rows: list[TimelineEntry]
-    decisions: ReviewDecisions
     content_failures: int
     unfetchable: bool
 
@@ -421,7 +419,6 @@ def job_timeline(url: str, user: AuthedUser = Depends(require_admin)) -> Posting
             "FROM ledger_rows WHERE url = %s ORDER BY id ASC",
             (url,),
         ),
-        decisions=ReviewDecisions(),
     )
 
 

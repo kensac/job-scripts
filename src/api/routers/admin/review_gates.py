@@ -12,7 +12,7 @@ import datetime
 import json
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel
 
 from api import db, model_calls, scoping
 from api.auth import AuthedUser
@@ -21,58 +21,6 @@ from api.stale_cache import StaleByKey
 from core import screening
 
 router = APIRouter()
-
-NOT_STORED = (
-    "Per-run review decisions are no longer stored. The posting's path shows each "
-    "board's and filter's title screen, evaluated now."
-)
-
-
-class ReviewOutcome(BaseModel):
-    query_id: int
-    batch_id: str | None
-    model: str | None
-    rejected: bool | None
-    outcome: str
-    recorded_cost_usd: float | None
-    created_at: datetime.datetime
-
-
-class ReviewDecision(BaseModel):
-    id: int
-    task_id: int
-    url: str
-    job_id: int | None
-    user_id: int | None
-    filter_id: int | None
-    managed_board_id: int | None
-    revision: int | None
-    prompt_hash: str
-    stage: str
-    mode: str
-    action: str
-    reason: str | None
-    profile_id: int | None
-    title: str
-    content_hash: str | None
-    policy: dict[str, JsonValue]
-    evidence: dict[str, JsonValue]
-    created_at: datetime.datetime
-    outcomes: list[ReviewOutcome] = []
-
-
-class ReviewDecisions(BaseModel):
-    """Always empty. The shape stays until the decision history panels that
-    read it are removed from the job drawers."""
-
-    rows: list[ReviewDecision] = []
-    page: int = 1
-    page_size: int = 25
-    total: int = 0
-    has_more: bool = False
-    filters: dict[str, list[str]] = {}
-    filterable: list[str] = []
-    coverage: str = NOT_STORED
 
 
 class GateFunnelRow(BaseModel):
