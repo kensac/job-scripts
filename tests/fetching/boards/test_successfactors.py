@@ -267,7 +267,8 @@ def test_a_career_portal_board_is_read_in_every_language_it_names(monkeypatch):
         },
     )
     out = boards.fetch_listings(
-        "https://career5.successfactors.eu/career?company=AZGROUPPROD&lang=en_US,fr_FR", "Allianz"
+        "https://career5.successfactors.eu/career?company=AZGROUPPROD&lang=en_US&lang=fr_FR",
+        "Allianz",
     )
     # A requisition posted in both is one posting.
     assert [p.title for p in out] == ["Administrative Assistant", "Accountant II"]

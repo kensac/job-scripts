@@ -164,7 +164,7 @@ def _successfactors_portal(url: str, company: str) -> list[JobPosting]:
     with 2 of them in en_US, de_DE 176 with 18; 1,727 across 15 languages),
     and a language the tenant does not use answers another one's list
     (Hershey's fr_FR its en_US). So the listings URL names every language
-    the board is read in, `lang=en_US,fr_FR`, and a requisition posted in
+    the board is read in, `lang=en_US&lang=fr_FR`, and a requisition posted in
     several is one posting.
 
     Rows carry a title, the description, the requisition id, and on most
@@ -177,7 +177,7 @@ def _successfactors_portal(url: str, company: str) -> list[JobPosting]:
     tenant = (query.get("company") or query.get("career_company") or [""])[0]
     if not tenant:
         raise ValueError(f"{url} names no SuccessFactors company")
-    langs = [lang for value in query.get("lang", []) for lang in value.split(",") if lang]
+    langs = [lang for lang in query.get("lang", []) if lang]
     export = (
         f"https://{parsed.netloc}/career?company={quote(tenant)}"
         "&career_ns=job_listing_summary&resultType=XML"

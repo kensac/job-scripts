@@ -760,7 +760,7 @@ sitemap, so a pull is authoritative. The export holds one language, the
 tenant's default unless `lang` names another, and some tenants post a
 requisition in one language only (Allianz: en_US 1,098, fr_FR 305 with 2 in
 en_US, 1,727 across 15 languages), so the listings URL names every language
-to read, `lang=en_US,fr_FR`, folded by requisition. A language the tenant does
+to read, `lang=en_US&lang=fr_FR`, folded by requisition. A language the tenant does
 not use answers another one's list, which the fold absorbs. Quirks: an unnamed custom field is written `<>99</>`,
 which no parser reads, and is removed first; an unknown tenant answers the
 HTML login page, a failed pull; the date is month first; the place is in the
