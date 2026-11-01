@@ -379,7 +379,7 @@ _QUERIES_FILTERABLE = [
 # Every column of ai_queries, named once. Two routes returned the whole row
 # through SELECT *, which cannot be typed and drifts from whatever reads it.
 # The instructions come from instructions_id through query_instructions.hydrate.
-QUERY_DETAIL_COLUMNS = (
+_QUERY_DETAIL_COLUMNS = (
     "id, created_at, config_name, url, check_type, status, reason, model, "
     "reasoning_effort, filter_name, prompt_hash, company, job_title, "
     "input_content, parsed_json, prompt_tokens, completion_tokens, total_tokens, "
@@ -427,20 +427,29 @@ class QueryRecord(BaseModel):
     batch_id: str | None
 
 
+def query_records(where: str, params: tuple) -> list[QueryRecord]:
+    """Whole model calls from ledger_rows, `where` being the WHERE clause and
+    any ORDER BY. A page held by reference is read back into input_content."""
+    rows = db.query(
+        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE {where}", params
+    )
+    # ponytail: one lookup per held row; batch it if a posting's history grows
+    # past a drawer's worth of calls.
+    for row in rows:
+        if row["input_content"] is None:
+            row["input_content"] = _held_input(row)
+    return [QueryRecord.model_validate(row) for row in query_instructions.hydrate(rows)]
+
+
 @router.get("/queries/{query_id}")
 def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> QueryRecord:
-    row = db.query_one(
-        f"SELECT {QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE id = %s",
-        (query_id,),
-    )
-    if not row:
+    records = query_records("id = %s", (query_id,))
+    if not records:
         raise refuse(404, "NOT_FOUND", "unknown query")
-    if row["input_content"] is None:
-        row["input_content"] = held_input(row)
-    return QueryRecord.model_validate(query_instructions.hydrate([row])[0])
+    return records[0]
 
 
-def held_input(row: dict) -> str | None:
+def _held_input(row: dict) -> str | None:
     """The input of a row whose page text is held by reference, which
     ledger_rows cannot rebuild in SQL: a fetch row is its own text, and an
     answer's is core.answer_inputs over its fetch's text, as the view does."""
