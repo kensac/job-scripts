@@ -266,10 +266,9 @@ applied_actalent.txt
 # instructions. The existing *.json / *.csv rules do not cover *.csv.gz.
 backups/
 
-# Local-only, deliberately untracked: sheet ids, filter prompts, a launchd
-# shim, and a defunct ECR workflow. configs.toml is read at API start to seed
-# sources, but core/configs.py returns {} when it is absent and prod is
-# already seeded, so its absence from the image is the intended state.
+# Local-only leftovers of the sheet era that may still sit in a checkout:
+# sheet ids, filter prompts, a launchd shim, and a defunct ECR workflow.
+# Nothing reads them.
 configs.toml
 filters.toml
 scripts/run_tracker_launch.sh
