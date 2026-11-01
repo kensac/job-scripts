@@ -20,11 +20,8 @@ set -a && . ./.env && set +a
 DATABASE_URL="$PRODUCTION_DATABASE_URL" python tools/publish_recipes.py
 ```
 
-Keep it that way. When modules loaded `.env` on import and `.env` named
-production `DATABASE_URL`, `make api`, `make migrate`, `make revision` and a
-tool's `--help` all connected to production, and the api and worker ran
-`init_schema` against it at startup. `.env.example` lists every variable the
-code reads.
+Keep it that way: no module loads `.env` on import. `.env.example` lists
+every variable the code reads.
 
 ## A long read blocks schema changes
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import threading
 
 from api import db
-from api.board import populations, visibility
+from api.board import visibility
 from api.db import pool
 from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
@@ -145,14 +145,19 @@ def test_a_recompute_whose_transaction_began_first_but_wrote_last_wins_as_before
     assert visibility.computed_at(uid) == began
     assert _stored(uid) == set(jobs)
     assert later not in _stored(uid)
-    _assert_populations_agree(uid)
+    _assert_every_row_reads_computed_at(uid)
 
 
-def _assert_populations_agree(uid: int) -> None:
-    row = populations.read(user_ids=[uid], sources=[])[0]  # the global row
+def _assert_every_row_reads_computed_at(uid: int) -> None:
+    row = db.query_one(
+        f"SELECT min({visibility.COMPUTED_AT}) AS lo, max({visibility.COMPUTED_AT}) AS hi "
+        f"FROM board_visible bv {visibility.RECOMPUTES_JOIN} WHERE bv.user_id = %s",
+        (uid,),
+    )
+    assert row is not None
     at = visibility.computed_at(uid)
-    assert row.visibility_computed_at_min == at
-    assert row.visibility_computed_at_max == at
+    assert row["lo"] == at
+    assert row["hi"] == at
 
 
 def test_old_and_new_writers_coexist(f):
@@ -168,7 +173,7 @@ def test_old_and_new_writers_coexist(f):
         _old_recompute(conn, uid, jobs)
     assert _stored(uid) == set(jobs)
     assert visibility.computed_at(uid) == old_at
-    _assert_populations_agree(uid)
+    _assert_every_row_reads_computed_at(uid)
 
     # old, then new: the new writer's now() wins, and the rows the old writer
     # left are diffed rather than rewritten.
@@ -180,11 +185,11 @@ def test_old_and_new_writers_coexist(f):
     assert set(after) == {*jobs, extra}
     assert {j: after[j] for j in jobs} == before
     assert visibility.computed_at(uid) == new_at
-    _assert_populations_agree(uid)
+    _assert_every_row_reads_computed_at(uid)
 
     # and old again on top of new.
     with pool.connection() as conn:
         old_at = conn.execute("SELECT now() AS at").fetchone()["at"]
         _old_recompute(conn, uid, jobs)
     assert visibility.computed_at(uid) == old_at
-    _assert_populations_agree(uid)
+    _assert_every_row_reads_computed_at(uid)

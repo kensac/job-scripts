@@ -1,4 +1,4 @@
-"""The shared preset library, and starting a person's filter run."""
+"""The shared preset library."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db, filter_runs
+from api import db
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import refuse
@@ -61,50 +61,6 @@ def admin_list_presets(user: AuthedUser = Depends(require_admin)) -> FilterPrese
             FilterPreset, f"SELECT {_PRESET_COLS} FROM filter_presets ORDER BY name"
         )
     )
-
-
-class FilterRunBody(BaseModel):
-    user_id: int
-    # One filter, or every enabled filter of the person when absent.
-    filter_id: int | None = None
-    # Past the shared weekly cap, for this run only; the spend is recorded.
-    ignore_budget: bool = False
-
-
-class FilterRunQueued(BaseModel):
-    """`ignore_budget` is echoed because it is the whole reason this route
-    exists beside the person's own: the run is going past the shared weekly
-    cap, and the answer says so rather than leaving it to the request."""
-
-    task_id: int
-    ignore_budget: bool
-
-
-@router.post("/filters/run")
-def admin_run_filter(
-    body: FilterRunBody, user: AuthedUser = Depends(require_admin)
-) -> FilterRunQueued:
-    """Queue a filter run for a person. With ignore_budget the run goes past
-    the shared weekly cap for that run alone, so the cap never has to be
-    raised and put back (Kanishk, 2026-09-08). The person's own run endpoint
-    cannot set the flag."""
-    if not db.query_one("SELECT 1 FROM users WHERE id = %s", (body.user_id,)):
-        raise refuse(404, "NOT_FOUND", "unknown user")
-    if body.filter_id is not None and not db.query_one(
-        "SELECT 1 FROM user_filters WHERE id = %s AND user_id = %s",
-        (body.filter_id, body.user_id),
-    ):
-        raise refuse(404, "NOT_FOUND", "unknown filter")
-    result = filter_runs.enqueue(
-        body.user_id, body.filter_id, policy="interactive", ignore_budget=body.ignore_budget
-    )
-    if result.conflict:
-        raise refuse(
-            409, "IN_PROGRESS", "this run is already in progress", task_id=result.conflict.id
-        )
-    # Not a conflict, so admission queued one and named it.
-    assert result.task_id is not None
-    return FilterRunQueued(task_id=result.task_id, ignore_budget=body.ignore_budget)
 
 
 @router.post("/filter-presets")

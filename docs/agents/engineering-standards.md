@@ -2,16 +2,6 @@
 
 ## Correctness
 
-Use the repository `.venv` for Pyright and editor diagnostics. Keep the
-interpreter selection in `pyrightconfig.json` and verify it with `pyright`.
-Keep Alembic's path separator explicit in `alembic.ini` so path parsing does
-not rely on its deprecated fallback.
-
-Keep `pyproject.toml` and `uv.lock` resolvable together. Do not pin
-`pydantic-core` separately from Pydantic; Pydantic requires a matching core
-version. After changing dependency pins, run `uv lock`, `uv sync --locked`,
-and the tests that exercise the affected runtime behavior.
-
 Keep OAuth consent state and authorization URL construction in
 `api.oauth.authorization`, provider settings and typed errors in
 `api.oauth.provider`, and grant storage, refresh, and revocation in the
@@ -22,8 +12,9 @@ When moving or renaming an environment reader, keep
 `tests/test_env_example.py` able to discover its reads so `.env.example`
 stays checked in both directions.
 
-Production-grade only. No patches, no hotfixes. If a design turns out wrong,
-rearchitect it rather than working around it.
+Every module logs through `logging.getLogger(__name__)`. Telemetry attaches
+to the root logger, so a module needs no registration. Inside an `except`, use
+`logger.exception`, which keeps the traceback.
 
 Preserve concurrency and locking semantics across refactors, and check them
 explicitly rather than assuming a refactor kept them.
@@ -52,20 +43,11 @@ across these modules and preserve each operation's transaction boundary.
 dev-only seed writes and fails once a listed file stops writing. The two
 catalog owner modules must each still contain a job write.
 
-When the same logic exists in several places and one has drifted, delete the
-duplication. Do not fix the copy.
-
-## Comments and deprecations
+## Naming and deprecations
 
 Name public conversion functions for the domain value they return. When a
 function maps request spelling to a stored vocabulary, name the stored domain
 and update all callers before removing the old name.
-
-Write comments and docstrings as short statements of the current rule and its
-reason. Check the code that implements the claim before changing it. Keep a
-measurement when it explains a non-obvious bound or choice, with its date and
-scope. Remove historical narration that no longer helps a reader decide what
-the code must do.
 
 Call a path deprecated only when it is still supported and has a named
 replacement. State the condition for removing it, including the stored-data
@@ -148,20 +130,13 @@ State the scale a constant depends on. A value derived from one user's data
 should say so.
 
 **A value an administrator might want to change lives in `app_config`, not
-in code.** Retry windows, caps, cycle sizes: declare the default, typed
-validation, help text, choices, `kind` and `section` in the owning
-`api/config_keys/` section module, which `api.config.CONFIG_KEYS` assembles,
-and read it at the point of use with `db.get_config`. Database
-seeding and GET /admin/config derive from that registry; the admin config page
-renders every key from its metadata, so a new key needs no frontend entry; four
-keys in one evening each needed one before it did. **The whole entry is served,
-because a page that infers presentation from prose infers it wrong:** `kind`
-picks the control (`text` is a paragraph, `groups` a chip list, `hosts` a
-rate table, `columns` a JSON block) where the page used to regex the help
-sentence for the word "rules"; `section` files the key under a heading where
-the page used to show twenty keys in one flat list; `default` is what "changed"
-and "Reset" mean. A new key names its section, or it lands in a General bucket
-that says nothing. A constant in code needs a deploy to
+in code.** Retry windows, caps, cycle sizes: one registry entry per key
+([config-registry.md](config-registry.md)), read at the point of use with
+`db.get_config`. The admin config page renders every key from its metadata,
+so a new key needs no frontend entry: `kind` picks the control (`text` is a
+paragraph, `groups` a chip list, `hosts` a rate table, `columns` a JSON
+block), `section` files it under a heading, and `default` is what "changed"
+and "Reset" mean. A constant in code needs a deploy to
 change; a row changes on the next cycle. The seed is the default, so the
 comment explaining the number goes beside the seed, not beside a literal
 somewhere else. Values that are facts about a system (a provider's page size,
@@ -216,7 +191,7 @@ disk.
 stages, cheapest first, each a `MATERIALIZED` CTE.** Written as one predicate,
 an `EXISTS` under an `OR` becomes a subplan run per row, and the planner
 orders the remaining checks by its own row estimates, which are wrong across
-CTE boundaries. The verify sweep's candidate query (`tasks/verify.candidates_sql`
+CTE boundaries. The verify sweep's candidate query (`tasks/verification/new_postings.candidates_sql`
 and `api/verification_candidates.reachable`) ran past 14 minutes on
 production on 2026-10-10 and held locks a deploy's `DROP VIEW` queued behind.
 Staged, it read 21 s warm and 35 to 43 s with a cold cache. Three rules came out of it:
@@ -230,11 +205,27 @@ Keep the old SQL as the reference in the equality test, built from the same
 fragments, and give the fixture a row for every branch
 (`tests/test_verification_candidates.py`).
 
+**Join a table only when the statement reads it.** The planner removes an
+unused LEFT JOIN to a unique key, but the join column stays needed, so an
+index-only scan must still return it. The admin catalog count joined
+`job_comp` on `url` for pay filters it rarely had, and counted through the
+256 MB url index instead of the 23 MB company index: 0.72-0.83 s against
+0.23 s warm on 1.48M rows (production, 2026-11-01). Add the join when a
+filter names the table (`column_filters.reads_pay`).
+
 **Measure a large statement with JIT on and off.** Above `jit_above_cost`
 PostgreSQL compiles the whole plan. For the verify candidate query that cost
 more than the query itself: 78 s with JIT, 24 s without, most of the
 difference inside one hash aggregate of 16,000 rows. Such a statement runs
 in a transaction with `SET LOCAL jit = off`.
+
+**The most common value per group over a large table is counted, not
+`mode()`.** `mode()` is an ordered-set aggregate: it needs every row of the
+group in order, so it sorts or walks an index through the heap. Count each
+(group, value) in a hash aggregate, then keep the top value per group with
+`DISTINCT ON (group) ... ORDER BY group, n DESC, value`, which breaks ties as
+`mode()` does. The company page's display names took 2.7-3.2 s this way
+against 3.6-4.2 s, identical on all 10,751 rows (production, 2026-11-01).
 
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
@@ -280,6 +271,11 @@ that the process finished.
 
 ## Comments
 
+Write comments and docstrings as short statements of the current rule and its
+reason. Keep a measurement when it explains a non-obvious bound or choice,
+with its date and scope. Remove historical narration that no longer helps a
+reader decide what the code must do.
+
 Preserve measured why-comments when refactoring. Move the evidence to the code
 that now enforces the rule, qualify historical counts, and correct stale claims
 without deleting the reason the guard exists.
@@ -291,9 +287,10 @@ and what breaks if it is reversed, not what the line does.
 Comments are frequently wrong. Verify a claim in a comment before relying on
 it, and correct it when you find it stale.
 
-## Migrations are generated from the models
+## ORM models
 
-The ORM models in `src/api/orm/` are the schema. A schema change is a model change followed by `make migration m="..."`, which autogenerates the migration against the throwaway database; the generated file is then read and, where the change moves data (a copy, a backfill, a seed of both halves of a rename), the data step is added to it by hand. Nobody writes a schema migration from scratch: the two copies drifted every time someone did, and CI's autogenerate drift check exists to catch exactly that. Non-additive changes (drops, renames) still go through the expand-then-contract shape and the before-merge conversation with homelab; generation does not change what is safe to roll, only who writes it.
+The ORM models in `src/api/orm/` are the schema; migrations are generated from
+them ([migrations.md](migrations.md)).
 
 **Keep catalog ORM models grouped by the data they represent.**
 `api.orm.catalog_postings` owns the posting, upload and page-fetch facts;
@@ -312,7 +309,8 @@ are committed and every install is `uv sync --frozen` (`make sync`), locally,
 in CI and in the image. To add or move a pin, edit `pyproject.toml` and run
 `uv lock`, then commit both files in the same change. A lockfile that does not
 match the declaration fails the install rather than resolving something new,
-which is the point: what ran in CI is what the image carries.
+which is the point: what ran in CI is what the image carries. Do not pin
+`pydantic-core` separately from Pydantic, which requires a matching core.
 
 A heavy SDK is imported with `lazy import` / `lazy from` (PEP 810), so a
 process pays for it only once it uses it: anthropic, openai, boto3, botocore,
@@ -328,8 +326,8 @@ third-party code written for eager imports, pytest among them.
 `pyright` checks every package under `src` that runs: `src/api`, `src/core`
 and `src/tasks`, listed in `pyrightconfig.json`. A new top-level package goes
 into `include` in the change that creates it. Code outside the list is not
-type-checked, however green the check is. `src/tasks` was outside it until
-2026-10-04 and had seven errors that nobody saw. `pythonVersion` is the
+type-checked, however green the check is. Editors and `pyright` use the
+repository `.venv`. `pythonVersion` is the
 interpreter the image runs (`deploy/Dockerfile`), because typeshed's stubs
 differ between versions.
 

@@ -85,8 +85,9 @@ These are instructions, not history. Follow them.
 
 ## Commands
 
-- `make check`: lint, format, types, compile, em dashes, migrations (apply
-  and match the models), the extension, and the tests in parallel. CI gates on
+- `make check`: lint, format, types, the import contract, compile, em dashes,
+  migrations (apply and match the models), the extension, and the tests in
+  parallel. CI gates on
   the same list; a gate that is more than one command is a make target CI
   calls.
 - `make testdb-up` / `make testdb-down`: disposable test database.
