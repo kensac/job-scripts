@@ -4,11 +4,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const zlib = require('node:zlib');
 const nodeCrypto = require('node:crypto');
 
-// The worker's globals the decoder needs: base64, streams, digest.
-const context = { URL, atob, Blob, Response, DecompressionStream, TextDecoder, TextEncoder, crypto: globalThis.crypto };
+// The worker's globals the decoder needs: base64 and digest.
+const context = { URL, atob, TextDecoder, TextEncoder, crypto: globalThis.crypto };
 const { PolicyStore: Store, RecipeStore } = vm.runInNewContext(
   fs.readFileSync(path.join(__dirname, '../../extension/background/policy.js'), 'utf8').replace(/^export /gm, '') + '; ({ PolicyStore, RecipeStore })',
   context,
@@ -105,112 +104,76 @@ test('max_age 0 permits the fresh operation only, with nothing kept for reuse', 
   assert.equal((await new Store(saved, async () => { throw new Error('offline'); }, BASE, () => 1001).resolve('greenhouse')).ok, false);
 });
 
-// A recipe response the way the API builds it: canonical JSON, deflated,
-// base64, with the sha256 of the canonical bytes as revision and digest.
-function encodedRecipe(table, overrides = {}) {
-  const raw = Buffer.from(JSON.stringify(table));
-  const digest = nodeCrypto.createHash('sha256').update(raw).digest('hex');
-  return {
-    schema_version: 1,
-    adapter: 'workday',
-    revision: digest,
-    max_age_seconds: 300,
-    encoding: 'deflate+base64',
-    payload: zlib.deflateSync(raw).toString('base64'),
-    digest,
-    ...overrides,
-  };
-}
-const table = { name: 'Workday', matches: ['https://*.myworkdayjobs.com/*'], fields: [{ name: 'email', variants: [] }] };
-
-test('a published recipe decodes to the table, checked against its digest, and is cached as received', async () => {
-  const saved = storage();
-  const got = await new RecipeStore(saved, responder(200, encodedRecipe(table)).fetchFn, RECIPES, () => 1000).resolve('workday');
-  assert.equal(got.ok, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(got.config.recipe)), table);
-  assert.equal(got.config.revision.length, 64);
-  assert.equal(saved.data['recipe:2:workday'].config.encoding, 'deflate+base64');
-  const offline = async () => { throw new Error('offline'); };
-  const again = await new RecipeStore(saved, offline, RECIPES, () => 1000 + 10_000).resolve('workday');
-  assert.equal(again.cached, true);
-  assert.equal(again.config.recipe.name, 'Workday');
-});
-
-test('a chunked recipe verifies every byte before it is cached', async () => {
-  const raw = Buffer.from(JSON.stringify(table));
-  const pieces = [raw.subarray(0, 17), raw.subarray(17)];
-  let digestBytes = Buffer.alloc(32);
+// A published recipe the way the API serves it: a manifest naming the chunk
+// chain digest, then each chunk by revision and index.
+function chainDigest(pieces) {
+  let digest = Buffer.alloc(32);
   for (const [index, piece] of pieces.entries()) {
     const indexBytes = Buffer.alloc(8);
     indexBytes.writeBigUInt64BE(BigInt(index));
     const lengthBytes = Buffer.alloc(8);
     lengthBytes.writeBigUInt64BE(BigInt(piece.length));
-    digestBytes = nodeCrypto.createHash('sha256').update(Buffer.concat([
-      Buffer.from('recipe-chunk-v2\0'), digestBytes, indexBytes, lengthBytes,
+    digest = nodeCrypto.createHash('sha256').update(Buffer.concat([
+      Buffer.from('recipe-chunk-v2\0'), digest, indexBytes, lengthBytes,
       nodeCrypto.createHash('sha256').update(piece).digest(),
     ])).digest();
   }
-  const digest = digestBytes.toString('hex');
+  return digest.toString('hex');
+}
+function published(pieces, overrides = {}) {
   const seen = [];
+  const manifest = {
+    schema_version: 2, adapter: 'workday', revision: chainDigest(pieces), max_age_seconds: 300,
+    encoding: 'identity-chunks', digest_algorithm: 'chunk-chain-sha256', chunk_count: pieces.length,
+    ...overrides,
+  };
   const fetchFn = async (url) => {
     seen.push(url);
-    const parsed = new URL(url);
-    const index = parsed.searchParams.get('chunk_index');
-    if (index === null) return { status: 200, json: async () => ({
-      schema_version: 2, adapter: 'workday', revision: digest, max_age_seconds: 300,
-      encoding: 'identity-chunks', digest_algorithm: 'chunk-chain-sha256', chunk_count: pieces.length,
-    }) };
+    const index = new URL(url).searchParams.get('chunk_index');
+    if (index === null) return { status: 200, json: async () => manifest };
     return { status: 200, json: async () => ({ schema_version: 2, adapter: 'workday',
-      revision: digest, index: Number(index), payload: pieces[Number(index)].toString('base64') }) };
+      revision: manifest.revision, index: Number(index), payload: pieces[Number(index)].toString('base64') }) };
   };
+  return { fetchFn, seen };
+}
+const table = { name: 'Workday', matches: ['https://*.myworkdayjobs.com/*'], fields: [{ name: 'email', variants: [] }] };
+const tableBytes = (t = table) => Buffer.from(JSON.stringify(t));
+
+test('a chunked recipe verifies every byte before it is cached', async () => {
+  const raw = tableBytes();
+  const { fetchFn, seen } = published([raw.subarray(0, 17), raw.subarray(17)]);
   const saved = storage();
   const got = await new RecipeStore(saved, fetchFn, RECIPES, () => 1000).resolve('workday');
   assert.equal(got.ok, true);
-  assert.equal(got.config.recipe.name, 'Workday');
+  assert.deepEqual(JSON.parse(JSON.stringify(got.config.recipe)), table);
   assert.equal(seen.length, 3);
   assert.equal(saved.data['recipe:2:workday'].config.chunks.length, 2);
   const cached = await new RecipeStore(saved, async () => { throw new Error('offline'); }, RECIPES, () => 2000).resolve('workday');
   assert.equal(cached.cached, true);
+  assert.equal(cached.config.recipe.name, 'Workday');
   saved.data['recipe:2:workday'].config.chunks[1] = Buffer.from('broken').toString('base64');
   const corrupt = await new RecipeStore(saved, async () => { throw new Error('offline'); }, RECIPES, () => 3000).resolve('workday');
   assert.equal(corrupt.ok, false);
 });
 
-test('a version 2 manifest verifies an older raw digest after rollback', async () => {
-  const raw = Buffer.from(JSON.stringify(table));
-  const revision = nodeCrypto.createHash('sha256').update(raw).digest('hex');
-  const fetchFn = async (url) => {
-    const index = new URL(url).searchParams.get('chunk_index');
-    if (index === null) return { status: 200, json: async () => ({
-      schema_version: 2, adapter: 'workday', revision, max_age_seconds: 300,
-      encoding: 'identity-chunks', digest_algorithm: 'raw-sha256', chunk_count: 1,
-    }) };
-    return { status: 200, json: async () => ({ schema_version: 2, adapter: 'workday',
-      revision, index: Number(index), payload: raw.toString('base64') }) };
-  };
-  const result = await new RecipeStore(storage(), fetchFn, RECIPES, () => 1000).resolve('workday');
-  assert.equal(result.ok, true);
-  assert.equal(result.config.revision, revision);
-});
-
 test('an invalid chunk manifest causes no chunk requests', async () => {
-  let calls = 0;
-  const invalid = { schema_version: 2, adapter: 'workday', revision: 'a'.repeat(64),
-    max_age_seconds: 300, encoding: 'identity-chunks', digest_algorithm: 'chunk-chain-sha256', chunk_count: 1.5 };
-  const fetchFn = async () => { calls++; return { status: 200, json: async () => invalid }; };
-  const result = await new RecipeStore(storage(), fetchFn, RECIPES).resolve('workday');
-  assert.equal(result.ok, false);
-  assert.equal(calls, 1);
+  for (const overrides of [{ chunk_count: 1.5 }, { digest_algorithm: 'raw-sha256' }, { extra: 1 }]) {
+    const { fetchFn, seen } = published([tableBytes()], overrides);
+    const result = await new RecipeStore(storage(), fetchFn, RECIPES).resolve('workday');
+    assert.equal(result.ok, false);
+    assert.equal(seen.length, 1);
+  }
 });
 
-test('a recipe that does not decode, does not match its digest, or is not this adapter is no recipe', async () => {
-  const wrongDigest = encodedRecipe(table);
-  wrongDigest.revision = wrongDigest.digest = 'b'.repeat(64);
-  const otherAdapter = encodedRecipe({ ...table, name: 'Lever' });
-  const noMatches = encodedRecipe({ ...table, matches: [] });
-  const garbage = encodedRecipe(table, { payload: Buffer.from('not deflate').toString('base64') });
-  for (const bad of [wrongDigest, otherAdapter, noMatches, garbage, { ...encodedRecipe(table), extra: 1 }]) {
-    const got = await new RecipeStore(storage(), responder(200, bad).fetchFn, RECIPES).resolve('workday');
+test('a recipe that does not match its digest, is not this adapter, or is not a table is no recipe', async () => {
+  const cases = [
+    published([tableBytes()], { revision: 'b'.repeat(64) }),
+    published([tableBytes({ ...table, name: 'Lever' })]),
+    published([tableBytes({ ...table, matches: [] })]),
+    published([Buffer.from('not json')]),
+  ];
+  for (const { fetchFn } of cases) {
+    const got = await new RecipeStore(storage(), fetchFn, RECIPES).resolve('workday');
     assert.equal(got.ok, false);
     assert.equal(got.reason, 'INVALID_RESPONSE');
   }
