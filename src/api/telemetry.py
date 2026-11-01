@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import datetime
 import logging
 import os
 import socket
@@ -66,6 +67,12 @@ INSTANCE = HOST
 # build arg), so a regression is dated to a release rather than to a day.
 RELEASE = os.environ.get("JOBTRACKER_REVISION", "unknown")
 DEFAULT_HOST = "https://us.i.posthog.com"
+# When an OTLP export last succeeded and last failed in this process, None
+# before the first of each. A worker reports both on every heartbeat, so a
+# fleet whose exporter is failing is an alert (telemetry_export_failing) and
+# not only a counter on /metrics that nothing reads.
+EXPORT_OK_AT: datetime.datetime | None = None
+EXPORT_FAILED_AT: datetime.datetime | None = None
 
 
 # Loggers whose records must never be shipped: the exporter's own, so a
@@ -145,9 +152,15 @@ def _counted(exporter: Any, kind: str) -> Any:
     export = exporter.export
 
     def counted(batch: Any, *args: Any, **kwargs: Any) -> Any:
+        global EXPORT_OK_AT, EXPORT_FAILED_AT
         result = export(batch, *args, **kwargs)
         ok = getattr(result, "name", "") == "SUCCESS"
         TELEMETRY_EXPORTS.labels(kind, "ok" if ok else "failed").inc(len(batch))
+        now = datetime.datetime.now(datetime.UTC)
+        if ok:
+            EXPORT_OK_AT = now
+        else:
+            EXPORT_FAILED_AT = now
         return result
 
     exporter.export = counted

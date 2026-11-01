@@ -265,6 +265,13 @@ class WorkerStatus(Base):
     # the level only while the two releases agree (api.data_level.fleet_at).
     data_level: Mapped[int | None] = mapped_column(Integer)
     data_level_release: Mapped[str | None] = mapped_column(Text)
+    # When this process's OTLP exporter last succeeded and last failed
+    # (api.telemetry.EXPORT_OK_AT, EXPORT_FAILED_AT); null before the first of
+    # each, and both null without POSTHOG_API_KEY. telemetry_export_failing
+    # reads them: a failing exporter only ever counted itself on /metrics,
+    # and no rule read that counter.
+    telemetry_ok_at: Mapped[datetime.datetime | None]
+    telemetry_failed_at: Mapped[datetime.datetime | None]
 
 
 class HealthAlert(Base):

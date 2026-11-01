@@ -149,9 +149,11 @@ def _report_worker_status() -> None:
             """
             INSERT INTO worker_status
                 (name, started_at, current_task_id, current_task_ids, task_limit, last_seen,
-                 kinds, excluded_kinds, release, egress_group, data_level, data_level_release)
+                 kinds, excluded_kinds, release, egress_group, data_level, data_level_release,
+                 telemetry_ok_at, telemetry_failed_at)
             VALUES (%(name)s, %(started)s, %(tid)s, %(tids)s, %(limit)s, now(), %(kinds)s,
-                    %(excluded)s, %(release)s, %(egress)s, %(level)s, %(release)s)
+                    %(excluded)s, %(release)s, %(egress)s, %(level)s, %(release)s,
+                    %(telemetry_ok)s, %(telemetry_failed)s)
             ON CONFLICT (name) DO UPDATE SET
                 started_at = EXCLUDED.started_at,
                 current_task_id = EXCLUDED.current_task_id,
@@ -160,7 +162,9 @@ def _report_worker_status() -> None:
                 kinds = EXCLUDED.kinds, excluded_kinds = EXCLUDED.excluded_kinds,
                 release = EXCLUDED.release, egress_group = EXCLUDED.egress_group,
                 data_level = EXCLUDED.data_level,
-                data_level_release = EXCLUDED.data_level_release
+                data_level_release = EXCLUDED.data_level_release,
+                telemetry_ok_at = EXCLUDED.telemetry_ok_at,
+                telemetry_failed_at = EXCLUDED.telemetry_failed_at
             """,
             {
                 "name": WORKER_NAME,
@@ -168,6 +172,8 @@ def _report_worker_status() -> None:
                 "started": _PROCESS_STARTED_AT,
                 "release": telemetry.RELEASE,
                 "level": data_level.LEVEL,
+                "telemetry_ok": telemetry.EXPORT_OK_AT,
+                "telemetry_failed": telemetry.EXPORT_FAILED_AT,
                 "tid": held[0] if held else None,
                 "tids": held,
                 "limit": _task_limit,

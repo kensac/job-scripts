@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 def _detect_fleet() -> list[dict[str, Any]]:
+    return _mixed_release() + _telemetry_failing()
+
+
+def _mixed_release() -> list[dict[str, Any]]:
     """A live worker on a different release from the api.
 
     A roll recreates every container from one image; a host whose deploy
@@ -54,5 +58,56 @@ def _detect_fleet() -> list[dict[str, Any]]:
             ORDER BY name
             """,
             {"fresh": WORKER_FRESH, "api": telemetry.RELEASE, "roll": roll_minutes},
+        )
+    ]
+
+
+def _telemetry_failing() -> list[dict[str, Any]]:
+    """A live worker whose OTLP exporter is failing now and has delivered
+    nothing for as long.
+
+    The telemetry layer never raises, so a failing exporter only counted
+    itself in jobtracker_telemetry_exports_total, and no alert rule read it.
+    Both bounds are WORKER_FRESH: the latest failure is inside it, so an idle
+    worker with an old failure and nothing since to send is not called
+    failing; and the latest success, or the process start, is before it, so
+    one failed batch between two good ones is not either. The batch
+    processors export every few seconds while there is anything to send.
+
+    Blind to the other way telemetry goes missing: PostHog's OTLP endpoint
+    answers 200 and drops the records. That is a success here, and on
+    2026-10-31 it held from 18:34 to 00:20 UTC for every service in the
+    project, this fleet's exporters counting every batch as ok throughout.
+    """
+    return [
+        {
+            "kind": "telemetry_export_failing",
+            "subject": r["name"],
+            "severity": "warning",
+            "message": (
+                f"{r['name']} has not delivered a log or trace batch to PostHog for "
+                f"{r['minutes']:.0f} minutes, and its latest export failed. Its logs and "
+                "traces are being lost; errors and events take another path. Its stdout "
+                "log carries the exporter's reason."
+            ),
+            "detail": {
+                "worker": r["name"],
+                "last_ok_at": r["telemetry_ok_at"].isoformat() if r["telemetry_ok_at"] else None,
+                "last_failed_at": r["telemetry_failed_at"].isoformat(),
+                "minutes": round(float(r["minutes"]), 1),
+            },
+        }
+        for r in db.query(
+            """
+            SELECT name, telemetry_ok_at, telemetry_failed_at,
+                   EXTRACT(EPOCH FROM now() - COALESCE(telemetry_ok_at, started_at)) / 60
+                       AS minutes
+            FROM worker_status
+            WHERE last_seen > now() - %(fresh)s::interval
+              AND telemetry_failed_at > now() - %(fresh)s::interval
+              AND COALESCE(telemetry_ok_at, started_at) < now() - %(fresh)s::interval
+            ORDER BY name
+            """,
+            {"fresh": WORKER_FRESH},
         )
     ]

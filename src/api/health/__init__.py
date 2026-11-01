@@ -107,6 +107,7 @@ _OWNERS = {
     "queue_stalled": "_detect_queue",
     "ingest_backlog": "_detect_queue",
     "fleet_mixed_release": "_detect_fleet",
+    "telemetry_export_failing": "_detect_fleet",
     "sweep_did_nothing": "_detect_silent",
     "task_progress_invalid": "_detect_silent",
     "task_progress_stalled": "_detect_silent",

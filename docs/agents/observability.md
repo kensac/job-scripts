@@ -801,6 +801,21 @@ every OTLP export attempt in
 `jobtracker_telemetry_exports_total{kind,result}`, so whether it is shipping
 is one query and zero failures is never mistaken for zero attempts.
 
+**A failing exporter is an alert, because no rule reads the counter.** Each
+worker heartbeat writes when its exporter last succeeded and last failed
+(`worker_status.telemetry_ok_at`, `telemetry_failed_at`).
+`telemetry_export_failing` fires for a live worker whose latest failure is
+inside `WORKER_FRESH` and whose latest success, or process start, is before
+it. The api process has no heartbeat row, so only workers are judged.
+
+It cannot see the other way telemetry goes missing: the receiver answers 200
+and drops the records. On 2026-10-31 PostHog stored no OTLP log or span from
+any service in the project, the frontend's included, from 18:34 to 00:20 UTC.
+Every exporter on the fleet counted every batch `ok` in Prometheus
+throughout. PostHog events (`task_failed`, `$exception`) kept arriving, because
+they use the SDK's capture path and not OTLP. So during an incident, read the
+events before concluding from an empty log page.
+
 The frontend captures its own exceptions and records upstream API failures on
 its side; this layer is for failures inside the service that never surface as
 a bad HTTP answer.

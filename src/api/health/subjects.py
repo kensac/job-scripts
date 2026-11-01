@@ -57,6 +57,7 @@ _SUBJECT_KINDS = {
     "queue_stalled": SUBJECT_WORKER,
     "ingest_backlog": SUBJECT_TASK_KIND,
     "fleet_mixed_release": SUBJECT_WORKER,
+    "telemetry_export_failing": SUBJECT_WORKER,
     "source_pattern_admits_all": SUBJECT_SOURCE,
     "sweep_did_nothing": SUBJECT_TASK_KIND,
     "task_progress_invalid": SUBJECT_TASK_KIND,
