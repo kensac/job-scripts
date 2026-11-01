@@ -31,8 +31,11 @@ Recipe = Literal[
     "levels_occupations_v1",
     "levels_roles_occupations_v1",
     "finance_new_grad_v1",
+    "finance_new_grad_v2",
 ]
-BoardRecipe = Literal["internship_v1", "new_grad_v1", "aero_major_v1", "finance_new_grad_v1"]
+BoardRecipe = Literal[
+    "internship_v1", "new_grad_v1", "aero_major_v1", "finance_new_grad_v1", "finance_new_grad_v2"
+]
 
 
 @dataclass(frozen=True)
@@ -293,6 +296,77 @@ RECIPES["finance_new_grad_v1"] = (
         _keep("core_finance_title", title=_CORE_FINANCE),
         _skip("retail_banking_title", title=_RETAIL_BANKING),
         _keep("finance_title_signal", title=_FINANCE_SIGNAL),
+    ),
+    Screen(True, "no_finance_title_signal"),
+)
+
+
+# finance_new_grad_v1 widened to the board's full scope (Kanishk, 2026-11-01):
+# consulting (management, strategy, economic, financial advisory,
+# restructuring), audit and tax, and banking leadership programs join the
+# finance families. Apprenticeships, "Experienced" and associate partner
+# titles join the level skips. Consulting is judged unless the title names
+# technology implementation work, and sales, accounts payable and
+# receivable, bookkeeping, payroll, claims and call-center titles go with the
+# retail banking ones. Sized on production 2026-11-01 (see
+# docs/agents/visibility.md).
+_FINANCE_INTERNSHIP = _words(_EXPLICIT_INTERNSHIP.pattern + r"|\bapprentice(?:ship)?s?\b")
+_EARLY_CAREER_V2 = (
+    r"\b(?:new grad\w*|graduate|campus|early career|entry[- ]level|university"
+    r"|analyst program|development program|full[- ]time analyst|rotational"
+    r"|leadership (?:development )?program)\b"
+)
+_FINANCE_EXPERIENCED_V2 = _words(
+    rf"^(?!.*{_EARLY_CAREER_V2}).*\b(?:senior|sr\.?|principal|director|vice president|vp|svp"
+    r"|managing (?:director|consultant)|executive director|head|chief|lead|experienced"
+    r"|associate partner)\b"
+)
+_FINANCE_MANAGER_V2 = _words(
+    rf"^(?!.*{_EARLY_CAREER_V2})(?!.*\b(?:analyst|associate)s?\b).*\b(?:managers?|partners?)\b"
+)
+_CORE_FINANCE_V2 = _words(
+    _CORE_FINANCE.pattern + r"|\b(?:management consult\w*|strategy consult\w*|economic consult\w*"
+    r"|transaction (?:advisory|services)|restructuring|corporate banking|commercial banking"
+    r"|audit (?:assistant|associate|staff)|tax (?:associate|staff)|valuation)\b"
+    r"|^(?=.*\b(?:bank\w*|financ\w*)\b).*\bleadership (?:development )?program"
+)
+# Implementation and technology consulting: the consultant configures or
+# builds software, which the board's criteria leave out.
+_TECH_CONSULTING = _words(
+    r"\b(?:sap|salesforce|servicenow|workday|oracle|erp|crm|cloud|it|technical|implementation"
+    r"|integration|functional|technology|data|digital|cyber\w*|network|security|ai|devops)\b"
+    r".*\bconsult\w*|\bconsult\w*.*\b(?:sap|salesforce|servicenow|workday|oracle|erp|crm|cloud"
+    r"|it|technical|implementation|integration|functional|technology|data|digital|cyber\w*"
+    r"|network|security|ai|devops)\b"
+)
+_NON_FINANCE_V2 = _words(
+    _RETAIL_BANKING.pattern
+    + r"|\b(?:sales (?:consultant|associate|representative|rep|specialist)|retail|store"
+    r"|accounts (?:payable|receivable)|bookkeep\w*|payroll|billing|claims?|call center"
+    r"|customer (?:service|support|care)|insurance (?:agent|sales)|quality assurance|qa)\b"
+)
+# Consulting, audit and tax by the shape of their entry titles: a consultant
+# title is judged when it names an early-career level or a business
+# discipline, so the sales, clinical and engineering consultants many
+# employers title that way are not.
+_FINANCE_SIGNAL_V2 = _words(
+    _FINANCE_SIGNAL.pattern + rf"|{_EARLY_CAREER_V2}.*\bconsult\w*|\bconsult\w*.*{_EARLY_CAREER_V2}"
+    r"|\b(?:(?:management|strategy|economic|financial|restructuring|transaction|deals?"
+    r"|business|risk|valuation) consult\w*|consulting (?:analyst|associate)"
+    r"|(?:advisory|deals|strategy consulting) (?:analyst|associate|consultant)"
+    r"|(?:audit|assurance|tax) (?:analyst|associate|assistant|staff|consultant)"
+    r"|internal audit|external audit|economic analyst|associate consultant)\b"
+)
+RECIPES["finance_new_grad_v2"] = (
+    (
+        _skip("internship_title_signal", title=_FINANCE_INTERNSHIP),
+        _skip("experienced_title_signal", title=_FINANCE_EXPERIENCED_V2),
+        _skip("manager_title_signal", title=_FINANCE_MANAGER_V2),
+        _skip("technical_title", title=_NON_QUANT_TECHNICAL),
+        _keep("core_finance_title", title=_CORE_FINANCE_V2),
+        _skip("technology_consulting_title", title=_TECH_CONSULTING),
+        _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
     ),
     Screen(True, "no_finance_title_signal"),
 )
