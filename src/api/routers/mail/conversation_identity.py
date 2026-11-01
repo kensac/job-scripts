@@ -2,8 +2,9 @@
 
 # How many messages one assignment may carry. A conversation is a handful of
 # messages; a number far above that means the grouping is wrong rather than the
-# thread being long, and silently reassigning hundreds of messages on one click
-# is the failure worth refusing.
+# thread being long, so a larger group is assigned one message at a time. On
+# 2026-10-31, 13 of 1,494 multi-message conversation keys in production held
+# more than this (878 messages, the largest 165).
 MAX_THREAD_FANOUT = 40
 
 # A conversation's key, derived rather than stored.

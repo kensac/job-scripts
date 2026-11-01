@@ -112,6 +112,7 @@ async def run_single_check(
         raise refuse(404, "NOT_FOUND", "unknown job")
     filter_name = prompt_hash = None
     check = body.check
+    addressing, _, ref = check.partition(":")
     spec = POSTING_CHECKS.get(check)
     if spec:
         instructions = spec.instructions
@@ -119,8 +120,8 @@ async def run_single_check(
         # sweep settles thousands at a time and the reason is read when a
         # person opens one.
         model_cls, verdict_of = spec.model_for(body.with_reason), spec.verdict_of
-    elif check.startswith(("filter:", "hash:")):
-        if check.startswith("hash:"):
+    elif addressing == "hash" or (addressing == "filter" and ref.isdecimal()):
+        if addressing == "hash":
             # Verdicts are cached by prompt_hash, not by filter id. Several
             # users' filters can share one hash. Any of them reproduces the
             # same check, so re-running by hash is the honest admin-side
@@ -128,20 +129,20 @@ async def run_single_check(
             flt = db.query_one(
                 "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters "
                 "WHERE prompt_hash = %s ORDER BY id LIMIT 1",
-                (check.split(":", 1)[1],),
+                (ref,),
             )
         else:
             flt = db.query_one(
                 "SELECT user_id, name, prompt, on_ambiguous, prompt_hash FROM user_filters WHERE id = %s",
-                (int(check.split(":", 1)[1]),),
+                (int(ref),),
             )
-        if not flt and check.startswith("hash:"):
+        if not flt and addressing == "hash":
             # A managed board's question is cached by its prompt hash too, and
             # its verdicts are named for the board (managed_boards).
             flt = db.query_one(
                 "SELECT NULL AS user_id, 'managed-board:' || id AS name, prompt, on_ambiguous, "
                 "prompt_hash FROM managed_boards WHERE prompt_hash = %s ORDER BY id LIMIT 1",
-                (check.split(":", 1)[1],),
+                (ref,),
             )
         if not flt:
             raise refuse(404, "NOT_FOUND", "unknown filter")

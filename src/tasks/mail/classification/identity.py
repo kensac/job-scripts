@@ -58,8 +58,11 @@ def identities_for(user_id: int) -> list[str]:
     )
     if found:
         return sorted(found)
+    # No address at all is no identity. An empty string would match every
+    # sender: position('' IN x) is 1.
     configured = db.query_one("SELECT lower(email) AS email FROM users WHERE id = %s", (user_id,))
-    return [(configured or {}).get("email") or ""]
+    email = (configured or {}).get("email")
+    return [email] if email else []
 
 
 def _heal_self_sent(identities: list[str]) -> int:
