@@ -15,6 +15,7 @@ PINNED = {
     "occupation_words_v1": "fbb7575ba9e69efe",
     "levels_occupations_v1": "7502f5b4775e7de3",
     "levels_roles_occupations_v1": "d982585295f110b1",
+    "finance_new_grad_v1": "a2ad2a46a1acf548",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -58,6 +59,12 @@ TITLES = [
     "Lead Backend Engineer",
     "Senior or Mid-Level Platform Engineer",
     "Apprentice Electrician",
+    "2027 Investment Banking Analyst Program",
+    "Summer Analyst - Global Markets",
+    "Personal Banker - Main Street Branch",
+    "Asset & Wealth Management, Portfolio Manager, Analyst - New York",
+    "Relationship Manager",
+    "Quantitative Developer",
 ]
 SOURCES = ["other", "internships", None]
 
@@ -198,3 +205,37 @@ def test_levels_occupations_skips_only_a_level_the_filter_rejects(title, skip):
 )
 def test_levels_roles_skips_a_role_bar_a_rejects_and_nothing_it_accepts(title, skip):
     assert screen("levels_roles_occupations_v1", title=title, source=None).skip is skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("2027 Investment Banking Analyst Program", False),
+        ("Banking - Capital Markets, Full Time Analyst, New York - USA, 2027", False),
+        ("2027 Graduate Financial Analyst - Corporate Finance (Technology)", False),
+        ("Asset & Wealth Management, Portfolio Manager, Analyst - New York", False),
+        ("Corporate Analyst Development Program - Full-Time Analyst Program", False),
+        ("New Grad 2027: Junior Quantitative Trader", False),
+        ("Quantitative Developer", False),
+        ("Financial Analyst", False),
+        ("FP&A Analyst", False),
+        ("Credit Analyst", False),
+        ("Forecasting, Budgeting & Reporting Analyst", False),
+        ("Summer Analyst - Global Markets", True),
+        ("Investment Banking Analyst Intern", True),
+        ("Senior Quantitative Researcher", True),
+        ("Vice President, Credit Risk", True),
+        ("Sr. Analyst, FP&A", True),
+        ("Finance Manager", True),
+        ("Relationship Manager", True),
+        ("Software Engineer, Trading Systems", True),
+        ("Personal Banker - Main Street Branch", True),
+        ("Part Time (30 Hours) Associate Banker", True),
+        ("Merrill Advisor Development Program - Financial Advisor: Dallas Market", True),
+        ("Background Investigator", True),
+        ("Marketing Coordinator", True),
+        ("", True),
+    ],
+)
+def test_finance_new_grad_keeps_early_career_finance_titles_only(title, skip):
+    assert screen("finance_new_grad_v1", title=title, source=None).skip is skip

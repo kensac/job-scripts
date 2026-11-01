@@ -18,8 +18,7 @@ from api import (
 )
 from api.apply import fill_answers, submissions
 from api.auth import AuthedUser, require_user
-from api.board.person_state import board_row, touchable_job_ids
-from api.board.person_state import write_board_row as _write_board_row
+from api.board.person_state import board_row, touchable_job_ids, write_board_row
 from api.mail import applications
 from api.problem import refuse
 from api.routers.apply_routes import extension, profile, report_uploads, reports, suggestions
@@ -255,7 +254,7 @@ def fill_submitted(
             job_id = None
         if job_id is not None:
             # The board write records the application with the status.
-            _write_board_row(user.id, job_id, {"status": SUBMITTED_STATUS}, publish=False)
+            write_board_row(user.id, job_id, {"status": SUBMITTED_STATUS}, publish=False)
             application_id = applications.from_board(user.id, job_id, None, set_date=False)
         else:
             application_id = applications.from_form(

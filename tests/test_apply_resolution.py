@@ -5,7 +5,8 @@ from __future__ import annotations
 from api import apply, db
 from api.mail import applications
 from tests.apply_support import ada_profile
-from tests.job_board_support import _insert_job, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job
 
 ASHBY_FORM_FIELDS = [
     {"key": "_systemfield_name", "label": "Legal Name", "kind": "text", "required": True},
@@ -30,7 +31,7 @@ ASHBY_FORM_FIELDS = [
 
 
 def test_a_form_is_filled_from_profile_drafts_and_bank_and_the_bank_learns(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     assert (
         client.put("/v1/user/profile", json=ada_profile(), headers=user_headers).status_code == 200
     )
@@ -117,7 +118,7 @@ def test_a_draft_never_names_a_gap_and_an_empty_draft_does_not_fill_a_form(clien
     assert drafts.instructions("terse").startswith("Answer in haiku.")
     assert "Writing style" in drafts.instructions("terse")
     db.execute("DELETE FROM app_config WHERE key = 'application_draft_instructions'")
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     job_id = _insert_job("src-gap", "https://jobs.ashbyhq.com/gap/abc")
     db.execute(
         "INSERT INTO application_answers (user_id, job_id, key, question, draft) "
@@ -240,7 +241,7 @@ def test_a_field_the_form_reveals_joins_the_open_fill(client, user_headers):
 
 
 def test_the_panel_can_see_its_three_sources_without_opening_a_fill(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     assert (
         client.put("/v1/user/profile", json=ada_profile(), headers=user_headers).status_code == 200
     )

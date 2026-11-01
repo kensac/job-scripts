@@ -36,9 +36,6 @@ def identities_for(user_id: int) -> list[str]:
 
     When the mailbox is too small for core.identity to infer ownership, use
     the user's configured address. This keeps the sent-mail guard active.
-
-    A former settings override had no production values when audited for
-    #301. All 1,028 recorded corrections used derived identities.
     """
     from core.identity import AddressCount, derive_identities
 

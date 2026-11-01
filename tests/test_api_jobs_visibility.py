@@ -4,11 +4,12 @@ import datetime
 
 from api import db
 from core.store import add_ai_result
-from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe
 
 
 def test_subscribed_closed_passed_no_filters_is_visible(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-a", "https://x.test/a1")
     _subscribe(uid, "src-a")
     _pass_closed("https://x.test/a1")
@@ -19,7 +20,7 @@ def test_subscribed_closed_passed_no_filters_is_visible(client, user_headers):
 
 
 def test_unsubscribed_source_invisible_then_user_jobs_row_overrides(client, user_headers):
-    _uid(user_headers)
+    user_id_for_subject("test-user")
     jid = _insert_job("src-b", "https://x.test/b1")
     _pass_closed("https://x.test/b1")
 
@@ -34,7 +35,7 @@ def test_unsubscribed_source_invisible_then_user_jobs_row_overrides(client, user
 
 
 def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-c", "https://x.test/c1")
     _subscribe(uid, "src-c")
     _pass_closed("https://x.test/c1")
@@ -77,7 +78,7 @@ def test_enabled_filter_gates_visibility_disabled_bypasses(client, user_headers)
 def test_criteria_excluded_locations_match_places(client, user_headers):
     from tasks.derivations import locations
 
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid_uk = _insert_job("src-d", "https://x.test/d1", locations=["London, UK"])
     jid_wa = _insert_job("src-d", "https://x.test/d2", locations=["Tukwila, WA"])
     _subscribe(uid, "src-d")
@@ -101,7 +102,7 @@ def test_criteria_excluded_locations_match_places(client, user_headers):
 def test_criteria_date_posted_after_hides_older(client, user_headers):
     # Dates inside the 30-day window a non-admin's criteria carry by default,
     # so this exercises the date criterion alone.
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     today = datetime.date.today()
     old_id = _insert_job(
         "src-e", "https://x.test/e1", date_posted=today - datetime.timedelta(days=20)
@@ -130,7 +131,7 @@ def test_criteria_max_age_days_is_a_rolling_window_with_a_catalog_fallback(clien
     """A fixed date has to be moved by hand; the window moves every day. A
     posting the board never dated ages from the day the catalog first saw
     it, so it still expires; an acted-on row does not."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     today = datetime.date.today()
     fresh = _insert_job(
         "src-age", "https://x.test/a1", date_posted=today - datetime.timedelta(days=5)
@@ -174,7 +175,7 @@ def test_criteria_max_age_days_is_a_rolling_window_with_a_catalog_fallback(clien
 
 
 def test_uploaded_by_user_always_visible(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("upload", "https://x.test/f1", active=False, uploaded_by=uid)
 
     resp = client.get("/v1/user/jobs", headers=user_headers)
