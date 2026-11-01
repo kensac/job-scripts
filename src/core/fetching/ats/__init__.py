@@ -41,6 +41,7 @@ from core.fetching.ats.lever import Lever
 from core.fetching.ats.oracle import Oracle
 from core.fetching.ats.rippling import Rippling
 from core.fetching.ats.smartrecruiters import SmartRecruiters
+from core.fetching.ats.ukg import Ukg
 from core.fetching.ats.workable import Workable
 from core.fetching.ats.workday import Workday
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
@@ -64,6 +65,7 @@ __all__ = [
     "Rippling",
     "SmartRecruiters",
     "Status",
+    "Ukg",
     "Workable",
     "Workday",
     "_iso_date",
@@ -102,6 +104,7 @@ RESOLVERS: list[AtsResolver] = [
     Apple(),
     Goldman(),
     Ibm(),
+    Ukg(),
 ]
 
 

@@ -182,6 +182,27 @@ def rippling_text(data: dict) -> str:
     )
 
 
+def ukg_place(loc: dict) -> str:
+    """A UKG location as city, state and country codes, else the tenant's own
+    label for it ("AZ-Phoenix")."""
+    addr = loc.get("Address") or {}
+    parts = (
+        addr.get("City"),
+        (addr.get("State") or {}).get("Code"),
+        (addr.get("Country") or {}).get("Code"),
+    )
+    return ", ".join(p for p in parts if p) or loc.get("LocalizedDescription") or ""
+
+
+def ukg_text(opportunity: dict) -> str:
+    """One opportunity as its UKG detail page embeds it."""
+    return join_posting_sections(
+        opportunity.get("Title"),
+        "; ".join(ukg_place(loc) for loc in opportunity.get("Locations") or []),
+        clean_html(opportunity.get("Description") or ""),
+    )
+
+
 class AtsResolver(ABC):
     name: ClassVar[str]
     markers: ClassVar[tuple[str, ...]]

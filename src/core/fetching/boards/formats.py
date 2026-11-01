@@ -26,6 +26,7 @@ from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
 from core.fetching.boards.successfactors import _successfactors
 from core.fetching.boards.taleo import _TALEO_SECTION, _taleo
+from core.fetching.boards.ukg import _UKG_HOST, _UKG_SEARCH, _ukg
 from core.fetching.boards.workable import _workable
 from core.fetching.boards.workday import _workday
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
@@ -136,6 +137,13 @@ FORMATS = (
         "taleo",
         lambda a: a.host.endswith(".taleo.net") and bool(_TALEO_SECTION.match(a.path)),
         _taleo,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "ukg",
+        lambda a: bool(_UKG_HOST.fullmatch(a.host) and _UKG_SEARCH.fullmatch(a.path)),
+        _ukg,
         needs_company=True,
         authoritative=True,
     ),

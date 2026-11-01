@@ -91,6 +91,23 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ("https://jobs.l3harris.com/services/rss/job/", "successfactors"),
         ("https://api.gem.com/job_board/v0/function-health/job_posts/", "gem"),
         ("https://ats.rippling.com/api/v2/board/loop/jobs", "rippling"),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        (
+            "https://recruiting2.ultipro.com/MES1003MFAC/JobBoard/69451223-cdce-4faf-9407-23a2cd5ac83b/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        # A UKG board page and its postings are not the listings.
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/",
+            "sheet_era",
+        ),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/OpportunityDetail?opportunityId=28745f89-de05-4f43-ac09-61693ca75353",
+            "sheet_era",
+        ),
         # Their public pages, and a Rippling posting, are not the listings.
         ("https://jobs.gem.com/function-health", "sheet_era"),
         ("https://ats.rippling.com/loop/jobs", "sheet_era"),
@@ -127,6 +144,7 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "avature",
         "gem",
         "rippling",
+        "ukg",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -156,6 +174,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "smartrecruiters",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
     }
@@ -176,6 +195,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "rippling",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
     }
@@ -199,6 +219,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "smartrecruiters",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
     }

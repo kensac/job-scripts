@@ -576,6 +576,31 @@ takeover is found by reading which listed urls are still uploads before the
 upsert, since afterwards their source is the feed's. A writer of both tables
 takes the jobs row first.
 
+**A UKG board is read through the search its page calls, and its text
+through the posting page.** UKG Pro Recruiting (UltiPro, kind `ukg`) serves
+boards at `https://recruiting.ultipro.com/<tenant>/JobBoard/<board>/`, and on
+`recruiting2.ultipro.com` for other tenants. The listings URL is the board's
+search endpoint, `.../JobBoard/<board>/JobBoardView/LoadSearchResults`, a POST
+taking `Top` and `Skip` that states `totalCount`. A page past the end is empty
+and states 0, so the count is read off the first page; a board that does not
+exist is a 404. Walks at 50 and 100 returned Salas O'Brien's 447 of 447
+distinct on 2026-11-01, and `_ukg` raises `PartialPull` short of the count.
+The tenant's robots.txt disallows `*/JobBoardView` and allows `*/JobBoard/`,
+so the search runs once per pull and never per posting. Rows carry no company
+and a summary only. The posting page
+(`.../OpportunityDetail?opportunityId=<id>`) embeds the opportunity as JSON,
+which the `ukg` resolver reads for the text and date. A delisted posting and an
+id the board never had both answer that page with no opportunity at all, so
+that answer is `ERROR`; only `OpportunityIsClosed: true` is `GONE`, and the
+board pull is what closes the rest.
+
+**Dayforce has no board format.** The candidate portal
+(`https://jobs.dayforcehcm.com/<locale>/<tenant>/<site>`) lists postings
+through `POST /api/geo/<tenant>/jobposting/search`, which answered 403 to a
+plain client on 2026-11-01 while the same path answered a GET with the
+backend's own 405. Reading it would mean imitating the browser session, so
+Dayforce employers stay off until a public feed exists.
+
 ## A company board's pull is the closure signal for its rows
 
 **Every pull is recorded as observations, and availability is read from
