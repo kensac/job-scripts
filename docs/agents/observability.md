@@ -313,6 +313,11 @@ over its calls (`model_calls.BATCH_TOTALS`), not columns of `ai_batches`.
 There is no other usage ledger: `api_usage`, the totals on `ai_batches` and
 the cost shares on `job_embeddings` were dropped once the ledger held their
 history.
+`idx_model_calls_user_created` INCLUDEs the columns the per-person reads take
+(`model_calls.user_spend_by_day`, `user_spend_by_purpose`,
+`budget.spent_this_week`), so they are index-only. A column a new per-person
+read takes goes into that list in the same change: otherwise the read is a
+heap fetch per call, 4.2 s cold over the owner's 610k calls.
 
 **Spend has separate cost populations.** `api/spend/ledger.py` owns
 recorded model-call totals and cuts. `api/spend/verdicts.py` owns verdict
@@ -443,7 +448,7 @@ submitted, but it must not block every later posting either: one straggling
 verify batch held the only `verify_new` for 15 hours on 2026-10-08 and no new
 posting reached a board. `verify_new` starts a new sweep whenever none is
 pending, running or waiting, and
-`tasks.verification.new_postings._in_flight` excludes the postings a parked
+`tasks.verification.selection._in_flight` excludes the postings a parked
 sweep's `batch_requests` already name.
 
 **A resume is not a retry.** Every claim increments `attempts`, because
@@ -452,7 +457,7 @@ the claim holder releasing its own claim (a `Deferred` requeue, a graceful
 exit, `PayloadUnavailable`) gives the attempt back; a park never does,
 because a lowered `attempts` on a parked task lets a later claim reuse a
 stamp a lost worker still holds. The retry budget is `attempts - batch_resumes`
-(`api.worker_lifecycle.claims.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
+(`api.queue.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
 and both the transient-error requeue and the reaper compare the difference
 with `task_max_attempts` (app_config). Counting resumes as attempts let 404
 batch tasks reach the cap by waiting alone in the 30 days to 2026-10-04.

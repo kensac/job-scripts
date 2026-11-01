@@ -44,6 +44,12 @@ def make_user(
     return row["id"]
 
 
+def user_id_for_subject(sub: str) -> int:
+    row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
+    assert row is not None
+    return row["id"]
+
+
 def make_source(name: str | None = None, *, active: bool = True) -> str:
     name = name or _next("source-")
     db.execute(

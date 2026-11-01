@@ -9,8 +9,8 @@ import pytest
 
 from api import db
 from tasks.derivations import locations
-from tests.factories import make_batch_result
-from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.factories import make_batch_result, user_id_for_subject
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def _board(client, user_headers, source):
 def test_a_country_criterion_hides_its_cities_and_an_unclassified_string_hides_nothing(
     client, user_headers, clean
 ):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     london = _insert_job("src-loc", "https://x.test/l1", locations=["London"])
     toronto = _insert_job("src-loc", "https://x.test/l2", locations=["Toronto, ON"])
     unknown = _insert_job("src-loc", "https://x.test/l3", locations=["Zorbulon Campus"])
@@ -74,7 +74,7 @@ def test_a_country_criterion_hides_its_cities_and_an_unclassified_string_hides_n
 
 
 def test_an_include_list_keeps_only_those_places(client, user_headers, clean):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     us = _insert_job("src-inc", "https://x.test/i1", locations=["Austin, TX"])
     remote = _insert_job("src-inc", "https://x.test/i2", locations=["Remote"])
     india = _insert_job("src-inc", "https://x.test/i3", locations=["Bengaluru"])
@@ -108,7 +108,7 @@ def test_an_include_list_keeps_only_those_places(client, user_headers, clean):
 
 
 def test_a_remote_criterion_hides_remote_postings_only(client, user_headers, clean):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     remote = _insert_job("src-rem", "https://x.test/r1", locations=["Remote in USA"])
     office = _insert_job("src-rem", "https://x.test/r2", locations=["Austin, TX"])
     _pass_closed("https://x.test/r1")
@@ -207,7 +207,7 @@ def test_admin_locations_page_and_count_what_the_filters_keep(client, admin_head
 
 
 def test_a_string_naming_several_places_matches_on_any_of_them(client, user_headers, clean):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     both = _insert_job("src-mp", "https://x.test/mp1", locations=["New York, London"])
     abroad = _insert_job("src-mp", "https://x.test/mp2", locations=["London, Singapore"])
     _pass_closed("https://x.test/mp1")
@@ -298,7 +298,7 @@ def test_an_untouched_board_row_obeys_the_verdicts_too(client, user_headers, cle
     them a founding-engineer role luna had just called lead-level."""
     from tests import factories
 
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     kept = _insert_job("src-ver", "https://x.test/ver1", locations=["Austin, TX"])
     rejected = _insert_job("src-ver", "https://x.test/ver2", locations=["Austin, TX"])
     rejected_but_applied = _insert_job("src-ver", "https://x.test/ver3", locations=["Austin, TX"])
@@ -333,7 +333,7 @@ def test_a_materialised_board_row_obeys_the_criteria_and_an_acted_on_row_does_no
     """The worker writes an empty board row for every passing posting; that
     row is not a decision, so the person's location and date criteria still
     apply to it. A status, a note or a date applied is a decision and wins."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     sg = _insert_job("src-mat", "https://x.test/mat1", locations=["Singapore"])
     sg_applied = _insert_job("src-mat", "https://x.test/mat2", locations=["Singapore"])
     us = _insert_job("src-mat", "https://x.test/mat3", locations=["Austin, TX"])

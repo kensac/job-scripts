@@ -7,7 +7,8 @@ import json
 import uuid
 
 from api import db
-from tests.job_board_support import _insert_job, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job
 from tests.resume_support import create_text_resume
 
 
@@ -138,7 +139,7 @@ def test_a_submit_moves_the_board_row_without_a_reload(client, user_headers, mon
 
     published: list[tuple[str, dict]] = []
     monkeypatch.setattr(events, "_publish", lambda channel, data: published.append((channel, data)))
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     job_id = _insert_job("src-rt", "https://jobs.ashbyhq.com/rt/abc")
     fill = client.post(
         "/v1/user/apply/resolve",
@@ -161,7 +162,7 @@ def test_a_submit_moves_the_board_row_without_a_reload(client, user_headers, mon
 
 
 def test_submission_retry_keeps_original_receipt_and_later_board_status(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     job_id = _insert_job("retry", "https://jobs.ashbyhq.com/retry/abc")
     fill = client.post(
         "/v1/user/apply/resolve",
@@ -193,7 +194,7 @@ def test_submission_retry_keeps_original_receipt_and_later_board_status(client, 
 def test_submission_failure_rolls_back_receipt_and_saved_answers(client, user_headers, monkeypatch):
     from api.routers import apply as router
 
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     _insert_job("atomic", "https://jobs.ashbyhq.com/atomic/abc")
     fill = client.post(
         "/v1/user/apply/resolve",
@@ -207,7 +208,7 @@ def test_submission_failure_rolls_back_receipt_and_saved_answers(client, user_he
     def fail(*args, **kwargs):
         raise RuntimeError("board unavailable")
 
-    monkeypatch.setattr(router, "_write_board_row", fail)
+    monkeypatch.setattr(router, "write_board_row", fail)
     import pytest
 
     with pytest.raises(RuntimeError, match="board unavailable"):
@@ -230,7 +231,7 @@ def test_a_submit_records_the_application_it_made(client, user_headers):
     posting on the board links that posting's application; a submit on a
     form whose posting is not on the board makes one of provenance `apply`
     (8 such submits on production on 2026-10-10 had none)."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     job_id = _insert_job("linked", "https://jobs.ashbyhq.com/linked/abc")
     for url in (
         "https://jobs.ashbyhq.com/linked/abc/application",
@@ -287,7 +288,7 @@ def test_an_attached_resume_submits_unchanged(client, user_headers):
     """A resume field holds the resume's id and its final is the attached
     file name. Every submitted resume field on production was recorded as
     changed because the two were compared as strings."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     rid = _resume(uid, "resume.pdf")
     fill = db.query_one(
         "INSERT INTO application_fills (user_id, url, host, fields) "
@@ -309,7 +310,7 @@ def test_the_report_judges_resume_fields_by_file_name(client, user_headers):
     """Rows submitted before the comparison knew file names say changed.
     The report decides again: the resume's own name is unchanged, another
     name is changed, and an unread final or an unknown resume is neither."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     # No stored filename: the PDF route serves it as resume.pdf.
     rid = _resume(uid, None)
     fields = [
