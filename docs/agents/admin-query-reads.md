@@ -64,6 +64,14 @@ than rebuilding the answer-to-call join per cut. The review-gate report runs
 the title screen once per distinct (recipe, title, source), materialized
 before the screen so the planner cannot push the regex back into the join.
 
+The catalog (/jobs/catalog) searches `company`, `title` and `url` with
+`ILIKE` joined by OR, and each column has a trigram GIN index. An OR is
+index-backed only when every arm is, so a column added to the search needs
+its own trigram index, or the whole search falls back to a seq scan of the
+catalog (2.4 s warm on 1.49M jobs, 2026-11-01). Its date sort reads
+`idx_jobs_date_posted`, which matches `date_posted DESC NULLS LAST, id DESC`
+only; a change to that ORDER BY or its tiebreak changes the index with it.
+
 ## The answer ledger's hourly sums
 
 Reads that add up a month or a lifetime of answers (/admin/stats, the spend
