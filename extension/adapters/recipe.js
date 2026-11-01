@@ -1,4 +1,5 @@
 import { isStopped } from "../runtime/operation";
+import { alternatives } from "./alternatives";
 import { createRecipeSelectors } from "./recipe-selectors";
 import { createRecipeControls } from "./recipe-controls";
 import { createRecipeValues } from "./recipe-values";
@@ -40,14 +41,14 @@ export function createRecipeAdapter(configs, context) {
   const container = () => first(recipeConfig.container || [], {}, document, true)?.el || null;
   const scope = () => container() || (recipeConfig.containerRequired ? null : document);
 
-  // The table's action list: each step waits up to `time` for its path,
-  // skips itself on a failed `condition` or an empty value it needs, and
-  // either fires an event, waits for its path to be removed, picks the
-  // option its `valuePath` names, or runs a method on what it found.
   let trace = null;
   const note = (msg) => {
     if (trace) trace.push(msg);
   };
+  // The table's action list: each step waits up to `time` for its path,
+  // skips itself on a failed `condition` or an empty value it needs, and
+  // either fires an event, waits for its path to be removed, picks the
+  // option its `valuePath` names, or runs a method on what it found.
   const { runActions, resetSeenOptions, getSeenOptions } = createRecipeActions({ context, sleep, clean, text, visible, list, $x, expand, first, waitFirst, candidates, pickOption, runMethod, events, note });
 
   // ---- fields --------------------------------------------------------------
@@ -64,6 +65,11 @@ export function createRecipeAdapter(configs, context) {
   const fieldPaths = (spec) => spec.variants.filter((v) => !isGroup(v)).flatMap((v) => v.paths || []);
   const { questionFields } = createRecipeFields(() => recipeConfig, list, $x, expand, visible, text, clean, isGroup);
   const submitElement = () => first(recipeConfig.submit || [], {}, document, true)?.el || null;
+  // A group's entry containers are numbered by the page, and the number is
+  // not always the entry's position: Workday numbers a block from a running
+  // counter (a fresh block was workExperience-6, report 8). Every number
+  // below this is tried.
+  const ENTRY_NUMBERS = 30;
 
   function groupPresent(spec, root) {
     return spec.variants.some((v) => isGroup(v) && (first(v.addButtonPath || [], {}, root) || first(v.containerPath || [], { index: 0 }, root) || countEntries(v) > 0));
@@ -72,8 +78,9 @@ export function createRecipeAdapter(configs, context) {
   // page gave them, or the rows its confirm path names.
   function countEntries(v) {
     const found = new Set();
-    for (const path of list(v.containerPath)) for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { index: n }))) found.add(el);
-    for (const path of list(v.confirmAddedPath)) for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { index: n }))) found.add(el);
+    for (const path of [...list(v.containerPath), ...list(v.confirmAddedPath)]) {
+      for (let n = 0; n < ENTRY_NUMBERS; n++) for (const el of $x(expand(path, { index: n }))) found.add(el);
+    }
     return found.size;
   }
   // Steps are the table's flow: open the form, expand a section, save it.
@@ -185,9 +192,9 @@ export function createRecipeAdapter(configs, context) {
   }
 
   async function fillVariants(variants, value, file, root, ctx) {
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     for (const want of wants.length ? wants : [""]) {
-      for (const v of variants) {
+      for (const [index, v] of variants.entries()) {
         if (isGroup(v) || v.manual) continue;
         for (const candidate of candidates(v, ctx, want)) {
           // A path per value, or the one path with the value in it.
@@ -196,34 +203,34 @@ export function createRecipeAdapter(configs, context) {
           const vctx = { ...ctx, value: candidate, raw: want };
           const found = await waitFirst(paths, vctx, root, v.hidden === true, v.time || 0);
           if (!found) {
-            note(`variant ${variants.indexOf(v)}: anchor not on page for "${candidate}"`);
+            note(`variant ${index}: anchor not on page for "${candidate}"`);
             continue;
           }
           let ok;
           try {
-          if (v.valuePath) {
-            const opt = await waitFirst(v.valuePath, { ...vctx, inputPath: found.path }, root, true, v.valueElementTime || 300);
-            ok = opt ? pickOption(opt.el) : false;
-          } else if (!v.method && v.actions && v.actions.length) {
-            // A variant with actions and no method of its own: the anchor is
-            // only the %INPUTPATH% the actions refer to, and the actions do
-            // all the work. Clicking it first opened Workday's dropdown so
-            // the recipe's own click closed it again (2026-09-08).
-            ok = true;
-          } else {
-            ok = await runMethod(v.method, found.el, candidate, file, v.eventOptions);
-          }
-          const acted = await runActions(v.actions, { ...vctx, inputPath: found.path }, root, found.el, candidate, file);
-          if (ok && acted) {
-            note(`variant ${variants.indexOf(v)}: took "${candidate}"`);
-            return true;
-          }
-          note(`variant ${variants.indexOf(v)}: ${ok ? "actions failed" : "method failed"} for "${candidate}"`);
+            if (v.valuePath) {
+              const opt = await waitFirst(v.valuePath, { ...vctx, inputPath: found.path }, root, true, v.valueElementTime || 300);
+              ok = opt ? pickOption(opt.el) : false;
+            } else if (!v.method && v.actions && v.actions.length) {
+              // A variant with actions and no method of its own: the anchor is
+              // only the %INPUTPATH% the actions refer to, and the actions do
+              // all the work. Clicking it first opened Workday's dropdown so
+              // the recipe's own click closed it again (2026-09-08).
+              ok = true;
+            } else {
+              ok = await runMethod(v.method, found.el, candidate, file, v.eventOptions);
+            }
+            const acted = await runActions(v.actions, { ...vctx, inputPath: found.path }, root, found.el, candidate, file);
+            if (ok && acted) {
+              note(`variant ${index}: took "${candidate}"`);
+              return true;
+            }
+            note(`variant ${index}: ${ok ? "actions failed" : "method failed"} for "${candidate}"`);
           } catch (e) {
             if (isStopped(e)) throw e;
             // One variant's error is that variant's; the next may work, and
             // the trace says what happened.
-            note(`variant ${variants.indexOf(v)}: ${String(e)}`);
+            note(`variant ${index}: ${String(e)}`);
           }
         }
       }
@@ -242,10 +249,8 @@ export function createRecipeAdapter(configs, context) {
       const ctx = { index: i, length: ordered.length, item, fact };
       if (i && recipeConfig.fillInputGroupInterval) await sleep(recipeConfig.fillInputGroupInterval);
       // The entry containers on the page, in page order, whichever number
-      // the page gave each: the table's path counts 1, 2, 3 in %NUMBER0%,
-      // but Workday numbers a block from a running counter (a fresh block
-      // was workExperience-6, report 8), so every number up to thirty is
-      // tried and the i-th container found is the i-th entry.
+      // the page gave each (ENTRY_NUMBERS): the i-th container found is the
+      // i-th entry.
       const containerPaths = list(group.containerPath);
       // Each container remembers the number it was found under: a recipe
       // inside the entry may name the entry by number too (Workday's
@@ -257,7 +262,7 @@ export function createRecipeAdapter(configs, context) {
         // Paths are alternatives, not separate entries. Combining them can
         // count both an entry and its wrapper as two profile rows.
         for (const path of containerPaths) {
-          for (let n = 0; n < 30; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) if (!numberOf.has(el)) numberOf.set(el, n);
+          for (let n = 0; n < ENTRY_NUMBERS; n++) for (const el of $x(expand(path, { ...ctx, index: n }))) if (!numberOf.has(el)) numberOf.set(el, n);
           if (numberOf.size) break;
         }
         return [...numberOf.keys()].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
@@ -334,7 +339,7 @@ export function createRecipeAdapter(configs, context) {
     trace = field._trace = [];
     resetSeenOptions();
     try {
-      return await fillInner(field, value, file, root);
+      return await (field._spec ? fillFact(field, value, file, root) : fillQuestion(field, value, file));
     } finally {
       // The options a search showed and nothing matched: the panel's model
       // call gets them and its pick comes back through fill as an exact.
@@ -342,32 +347,36 @@ export function createRecipeAdapter(configs, context) {
       if (seenOptions && seenOptions.length) field._seen = seenOptions;
     }
   }
-  async function fillInner(field, value, file, root) {
-    if (field._spec) {
-      // The flow steps the table puts before this field, then the field,
-      // then the steps that close the form when this is its last field.
-      await stepsBefore(field._index, root);
+  // A field the table names: the flow steps the table puts before it, then
+  // the field, then the steps that close the form when it is the last field.
+  async function fillFact(field, value, file, root) {
+    await stepsBefore(field._index, root);
+    const ok = await putFact(field, value, file, root);
+    if (field._index === lastFieldIndex()) await stepsBefore(recipeConfig.fields.length, root);
+    if (recipeConfig.fillInputInterval) await sleep(recipeConfig.fillInputInterval);
+    return ok;
+  }
+  async function putFact(field, value, file, root) {
+    if (field._person) return false;
+    if (field.kind === "group") {
+      const items = (context.profile[field.fact] || []).filter((x) => x && (x.company || x.school));
       let ok = false;
-      if (field._person) ok = false;
-      else if (field.kind === "group") {
-        const items = ((context.profile)[field.fact] || []).filter((x) => x && (x.company || x.school));
-        if (items.length) for (const v of field._spec.variants) if (isGroup(v)) ok = (await fillGroup(v, items, file, field.fact)) || ok;
-      } else {
-        // A date the field names a format for: today's date is ours to
-        // supply, a birthday must come with the value.
-        let v = value;
-        if (field.fact === "today") v = formatDate(field._spec.name, parseDate(value) || todayParts());
-        else if (field.fact === "birthday") v = formatDate(field._spec.name, parseDate(value));
-        // A file field carries the file, not a value; its recipe runs with
-        // the file (report 12: the resume never ran on a null value).
-        if (field.kind === "file") ok = file ? await fillVariants(field._spec.variants, "", file, root, {}) : false;
-        else ok = v == null ? false : await fillVariants(field._spec.variants, v, file, root, {});
-      }
-      if (field._index === lastFieldIndex()) await stepsBefore(recipeConfig.fields.length, root);
-      if (recipeConfig.fillInputInterval) await sleep(recipeConfig.fillInputInterval);
+      if (items.length) for (const v of field._spec.variants) if (isGroup(v)) ok = (await fillGroup(v, items, file, field.fact)) || ok;
       return ok;
     }
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    // A file field carries the file, not a value; its recipe runs with
+    // the file (report 12: the resume never ran on a null value).
+    if (field.kind === "file") return file ? fillVariants(field._spec.variants, "", file, root, {}) : false;
+    // A date the field names a format for: today's date is ours to
+    // supply, a birthday must come with the value.
+    let v = value;
+    if (field.fact === "today") v = formatDate(field._spec.name, parseDate(value) || todayParts());
+    else if (field.fact === "birthday") v = formatDate(field._spec.name, parseDate(value));
+    return v == null ? false : fillVariants(field._spec.variants, v, file, root, {});
+  }
+  // A custom question the table's selectors found on the page.
+  async function fillQuestion(field, value, file) {
+    const wants = alternatives(value);
     if (field._q && field._q.fillActions && (field._options?.length || field._fillEmpty) && !field._el?.tagName?.match(/SELECT|TEXTAREA/)) {
       // A custom choice with its own recipe: open the list, click the option.
       // A recipe that needs no value (a "today" button) runs once with none.
@@ -380,8 +389,9 @@ export function createRecipeAdapter(configs, context) {
     }
     if (field._options && field._options.length && field._options[0].el.type) {
       let took = false;
+      const lowered = wants.map((w) => w.toLowerCase());
       for (const o of field._options) {
-        if (wants.map((w) => w.toLowerCase()).includes(o.text.toLowerCase()) && !o.el.checked) {
+        if (lowered.includes(o.text.toLowerCase()) && !o.el.checked) {
           checkOrRadio(o.el, true);
           took = true;
           if (o.el.type === "radio") break;

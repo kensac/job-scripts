@@ -15,6 +15,7 @@ from api import db
 from api.routers.source_management.listing import SourceLedger, SourceName
 from api.routers.sources import Source
 from core.fetching import boards
+from tests.factories import user_id_for_subject
 
 # The queries as they stood before the rewrite (origin/main 845624c).
 _OLD_USER_SOURCES = """
@@ -118,15 +119,9 @@ def _fixture(f) -> None:
             f.make_job(source=source)
 
 
-def _user_id(sub: str) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (sub,))
-    assert row
-    return row["id"]
-
-
 def test_user_sources_answer_as_before(client, user_headers, f):
     _fixture(f)
-    uid = _user_id("test-user")
+    uid = user_id_for_subject("test-user")
     db.execute(
         "INSERT INTO user_sources (user_id, source) VALUES (%s, 'a_both'), (%s, 'd_off_held')",
         (uid, uid),

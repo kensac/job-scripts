@@ -17,9 +17,9 @@ from api.routers.mail.shared import (
     Reclassification,
     Reclassified,
     Reverted,
-    _apply_classification,
-    _apply_revert,
-    _candidates_payload,
+    apply_classification,
+    apply_revert,
+    candidates_payload,
 )
 
 router = APIRouter()
@@ -56,11 +56,11 @@ def admin_match_candidates(
     The admin panel offered a bare application-id field, which requires
     knowing an id that is not displayed anywhere - so the only correction
     available in practice was no correction. This is the identical ranking the
-    user side computes, including the candidates `_by_company` refused to
+    user side computes, including the candidates `by_company` refused to
     choose between, which are the ones a person is best placed to settle.
     """
     message = _admin_message(message_id)
-    return _candidates_payload(message, message["user_id"], q, limit)
+    return candidates_payload(message, message["user_id"], q, limit)
 
 
 @router.post("/admin/mail/{message_id}/classify")
@@ -74,7 +74,7 @@ def admin_correct_classification(
     owner's own without a second flag saying which.
     """
     message = _admin_message(message_id)
-    return _apply_classification(message, body, actor_user_id=user.id)
+    return apply_classification(message, body, actor_user_id=user.id)
 
 
 @router.post("/admin/mail/{message_id}/classify/revert", response_model_exclude_none=True)
@@ -83,7 +83,7 @@ def admin_revert_classification(
 ) -> Reverted:
     """Undo a correction by restoring the model's last answer."""
     _admin_message(message_id)
-    return _apply_revert(message_id, actor_user_id=user.id)
+    return apply_revert(message_id, actor_user_id=user.id)
 
 
 @router.post("/admin/mail/{message_id}/match")

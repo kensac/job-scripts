@@ -15,7 +15,6 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -126,7 +125,7 @@ class SavedView(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     page: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
-    state: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    state: Mapped[dict] = mapped_column(server_default=text("'{}'::jsonb"))
     is_default: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     position: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

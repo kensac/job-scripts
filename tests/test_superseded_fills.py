@@ -8,7 +8,7 @@ from tools import repair_empty_fills
 from api import db
 from api.apply import submissions
 from api.mail import applications
-from tests.job_board_support import _uid
+from tests.factories import user_id_for_subject
 
 URL = "https://job-boards.greenhouse.io/embed/job_app?for=acme&token=1"
 FIELDS = [
@@ -44,7 +44,7 @@ def _row(fill_id: int) -> dict:
 
 
 def test_an_empty_fill_submits_onto_the_filled_one(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     filled = client.post(
         "/v1/user/apply/resolve", json={"url": URL, "fields": FIELDS}, headers=user_headers
     ).json()["fill_id"]
@@ -86,7 +86,7 @@ def test_an_empty_fill_submits_onto_the_filled_one(client, user_headers):
 
 
 def test_the_repair_moves_recorded_empty_submissions_once(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     resolved = [
         {**FIELDS[0], "rung": "profile", "value": "Remote"},
         {**FIELDS[1], "rung": "", "value": None},

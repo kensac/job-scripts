@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 from typing import Any
 
@@ -132,15 +133,12 @@ def _record_reverify_results(task_id: int, results: list) -> int:
                 logger.warning("reverify: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"
                 continue
-            # Both axes, from one answer on one fetch. The sweep used to ask
-            # only whether the posting had closed, which is why a clearance
-            # verdict was written once and never again: nothing else revisits
-            # it. The page is already fetched and the call is already made, so
-            # the second axis costs its output tokens and nothing else.
-            # One call, two rows, and the usage books onto the first one
-            # written. The second is a zero-token decided row, which is the
-            # same spelling handle_verify_new uses below and the shape
-            # routers/spend.py reads as a joint call.
+            # Both axes, from one answer on one fetch: nothing else revisits a
+            # clearance verdict, and the second axis costs only its output
+            # tokens. One call, two rows, and the usage books onto the first
+            # one written. The second is a zero-token decided row, the same
+            # spelling handle_verify_new uses and the shape routers/spend.py
+            # reads as a joint call.
             usage = ai.batch_usage(res.usage)
             shared_call = False
             for check, rejected, reason in (
@@ -203,14 +201,11 @@ async def _reverify_jobs(
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
     # A forced sweep skips nothing. The point is to overturn existing verdicts.
-    import datetime as _dt
-
     if force:
-        fresh: set = set()
         total = len(rows)
         done = 0
     else:
-        cutoff = _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=1)
+        cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
         fresh = {
             r["url"]
             for r in db.query(
@@ -309,11 +304,12 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
     staleness, board membership and the per-cycle cap, for when the evidence
     behind existing verdicts is itself suspect (e.g. verdicts taken before the
     fetcher could tell a redirect from a live page)."""
+    full = bool(payload.get("full"))
     if has_batch_work(task_id):
-        await _reverify_jobs(task_id, [], force=bool(payload.get("full")))
+        await _reverify_jobs(task_id, [], force=full)
         demote_closed()
         return
-    if payload.get("full"):
+    if full:
         # Source-gated like every other sweep. The staleness path below reads
         # user_jobs and is reachable by construction; this one reads `jobs`
         # directly, so a full run was the last way an unreachable posting could
@@ -384,22 +380,16 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         return
     chunk_size = int(db.get_config("filter_chunk_size"))
     if len(rows) <= chunk_size:
-        await _reverify_jobs(task_id, rows, force=bool(payload.get("full")))
+        await _reverify_jobs(task_id, rows, force=full)
         demote_closed()
         return
-    total = len(rows)
-    n_chunks = 0
-    for start in range(0, total, chunk_size):
+    starts = range(0, len(rows), chunk_size)
+    for start in starts:
         enqueue(
             "reverify_chunk",
-            {
-                "parent_id": task_id,
-                "rows": rows[start : start + chunk_size],
-                "force": bool(payload.get("full")),
-            },
+            {"parent_id": task_id, "rows": rows[start : start + chunk_size], "force": full},
         )
-        n_chunks += 1
-    park_waiting(task_id, total, f"{n_chunks} chunks across the fleet")
+    park_waiting(task_id, len(rows), f"{len(starts)} chunks across the fleet")
 
 
 async def handle_reverify_chunk(task_id: int, payload: dict[str, Any]) -> None:

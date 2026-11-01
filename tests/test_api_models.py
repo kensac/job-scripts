@@ -5,16 +5,11 @@ from __future__ import annotations
 
 from api import crypto, db
 from api.routers.users_routes.model_catalog import NEEDS_OWN_KEY, NOT_ON_ALLOWLIST
+from tests.factories import user_id_for_subject
 
 
 def _by_provider(body: dict) -> dict[str, dict[str, dict]]:
     return {p["provider"]: {m["model"]: m for m in p["models"]} for p in body["providers"]}
-
-
-def _user_id() -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
-    assert row is not None
-    return row["id"]
 
 
 def test_without_any_key_everything_is_listed_and_nothing_is_eligible(
@@ -35,7 +30,7 @@ def test_on_the_owner_key_only_the_allowlist_is_eligible_and_the_rest_say_why(
     client, user_headers, monkeypatch
 ):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     row = db.query_one("SELECT groups FROM users WHERE id = %s", (uid,))
     assert row is not None and row["groups"]
     db.execute(
@@ -61,7 +56,7 @@ def test_on_the_owner_key_only_the_allowlist_is_eligible_and_the_rest_say_why(
 
 
 def test_a_byo_key_makes_its_providers_whole_catalog_eligible(client, user_headers):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     db.execute(
         "INSERT INTO user_settings (user_id, ai_provider, api_key_enc) VALUES (%s, 'openai', %s) "
         "ON CONFLICT (user_id) DO UPDATE SET ai_provider = EXCLUDED.ai_provider, "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 
 lazy from openai import AsyncOpenAI
 lazy from openai.types import Batch
@@ -45,6 +46,64 @@ def _line_error(obj: dict) -> str | None:
     return str(status) if status else None
 
 
+def _jsonl(text: str) -> Iterator[dict]:
+    for line in text.splitlines():
+        if line.strip():
+            yield json.loads(line)
+
+
+def _unanswered(result: BatchResult) -> bool:
+    return result.text is None and result.embedding_vectors is None
+
+
+def _result_for(
+    results: dict[str, BatchResult], custom_id: str | None, create_missing: bool
+) -> BatchResult | None:
+    """The result a line answers. A line for a request the caller did not pass
+    is kept only when it asked for unknown ids to be created."""
+    result = results.get(custom_id) if custom_id is not None else None
+    if result is None and create_missing and custom_id:
+        result = results.setdefault(custom_id, BatchResult(custom_id))
+    return result
+
+
+def _ordered_vectors(data: object) -> list[list[float]] | None:
+    """The vectors in index order, or None unless the indices are exactly
+    0..n-1 and every vector is a list."""
+    if not isinstance(data, list) or not data:
+        return None
+    if not all(isinstance(item, dict) and type(item.get("index")) is int for item in data):
+        return None
+    if {item["index"] for item in data} != set(range(len(data))):
+        return None
+    vectors = [item.get("embedding") for item in sorted(data, key=lambda item: item["index"])]
+    return vectors if all(isinstance(vector, list) for vector in vectors) else None
+
+
+def _read_embedding(result: BatchResult, body: dict) -> None:
+    result.usage = body.get("usage")
+    if result.usage is not None:
+        result.usage = {
+            "input_tokens": result.usage.get("prompt_tokens", 0),
+            "output_tokens": 0,
+            "total_tokens": result.usage.get("total_tokens", 0),
+        }
+    vectors = _ordered_vectors(body.get("data") or [])
+    if vectors is not None:
+        result.embedding_vectors = vectors
+    if result.embedding_vectors is None:
+        result.error = "invalid embedding vector indices"
+
+
+def _read_response(result: BatchResult, body: dict) -> None:
+    result.usage = body.get("usage")
+    result.text = _extract_output_text(body)
+    incomplete = body.get("incomplete_details") or {}
+    result.finish_reason = incomplete.get("reason") or body.get("status")
+    if result.text is None:
+        result.error = "no output text"
+
+
 async def _collect_batch(
     client: AsyncOpenAI,
     batch: Batch,
@@ -52,66 +111,26 @@ async def _collect_batch(
     create_missing: bool = False,
 ) -> dict[str, BatchResult]:
     if batch.output_file_id:
+        embeddings = getattr(batch, "endpoint", BATCH_ENDPOINT) == "/v1/embeddings"
         content = await client.files.content(batch.output_file_id)
-        for line in content.text.splitlines():
-            if not line.strip():
-                continue
-            obj = json.loads(line)
-            custom_id = obj.get("custom_id")
-            result = results.get(custom_id)
+        for obj in _jsonl(content.text):
+            result = _result_for(results, obj.get("custom_id"), create_missing)
             if result is None:
-                if not create_missing or not custom_id:
-                    continue
-                result = results.setdefault(custom_id, BatchResult(custom_id))
+                continue
             resp = obj.get("response")
             if obj.get("error") or not resp or resp.get("status_code") != 200:
                 result.error = _line_error(obj) or "unknown"
-                continue
-            body = resp.get("body", {})
-            result.usage = body.get("usage")
-            if getattr(batch, "endpoint", BATCH_ENDPOINT) == "/v1/embeddings":
-                if result.usage is not None:
-                    result.usage = {
-                        "input_tokens": result.usage.get("prompt_tokens", 0),
-                        "output_tokens": 0,
-                        "total_tokens": result.usage.get("total_tokens", 0),
-                    }
-                data = body.get("data") or []
-                if (
-                    isinstance(data, list)
-                    and data
-                    and all(
-                        isinstance(item, dict) and type(item.get("index")) is int for item in data
-                    )
-                    and {item["index"] for item in data} == set(range(len(data)))
-                ):
-                    vectors = [
-                        item.get("embedding")
-                        for item in sorted(data, key=lambda item: item["index"])
-                    ]
-                    if all(isinstance(vector, list) for vector in vectors):
-                        result.embedding_vectors = vectors
-                if result.embedding_vectors is None:
-                    result.error = "invalid embedding vector indices"
+            elif embeddings:
+                _read_embedding(result, resp.get("body", {}))
             else:
-                result.text = _extract_output_text(body)
-                incomplete = body.get("incomplete_details") or {}
-                result.finish_reason = incomplete.get("reason") or body.get("status")
-                if result.text is None:
-                    result.error = "no output text"
+                _read_response(result, resp.get("body", {}))
 
     if batch.error_file_id:
         try:
             err_content = await client.files.content(batch.error_file_id)
-            for line in err_content.text.splitlines():
-                if not line.strip():
-                    continue
-                obj = json.loads(line)
-                custom_id = obj.get("custom_id")
-                result = results.get(custom_id)
-                if result is None and create_missing and custom_id:
-                    result = results.setdefault(custom_id, BatchResult(custom_id))
-                if result is not None and result.text is None and result.embedding_vectors is None:
+            for obj in _jsonl(err_content.text):
+                result = _result_for(results, obj.get("custom_id"), create_missing)
+                if result is not None and _unanswered(result):
                     result.error = _line_error(obj) or "batch error"
         except Exception as exc:
             logger.warning(f"Failed to read batch error file: {exc}")
@@ -120,7 +139,7 @@ async def _collect_batch(
     # so only a request with no answer and no error of its own is marked.
     if batch.status != "completed":
         for result in results.values():
-            if result.text is None and result.embedding_vectors is None and result.error is None:
+            if _unanswered(result) and result.error is None:
                 result.error = f"batch {batch.status}"
 
     for result in results.values():
@@ -144,12 +163,7 @@ def _record_errors(batch: Batch, results: dict[str, BatchResult]) -> None:
     messages = [getattr(e, "message", None) or str(e) for e in batch_errors]
     placeholder = f"batch {batch.status}"
     for result in results.values():
-        if (
-            result.text is None
-            and result.embedding_vectors is None
-            and messages
-            and result.error in (None, "", placeholder)
-        ):
+        if _unanswered(result) and messages and result.error in (None, "", placeholder):
             result.error = "; ".join(messages)
     errors = {cid: r.error for cid, r in results.items() if r.error and r.batch_id == batch.id}
     if messages and not errors:
