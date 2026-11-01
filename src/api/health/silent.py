@@ -11,6 +11,7 @@ from api.health.evidence import (
     WORKER_FRESH,
     _int_from,
 )
+from api.queue import RETRIES_SPENT
 
 logger = logging.getLogger(__name__)
 
@@ -185,12 +186,13 @@ def _detect_silent() -> list[dict[str, Any]]:
 
     # A task the reaper keeps handing back. A graceful exit requeues with
     # attempts - 1, so a task that kills its worker every run never reaches
-    # the attempt ceiling and never fails.
+    # the attempt ceiling and never fails. Counted as retries spent, not
+    # claims: a batch task's resume is a claim and not a retry.
     for r in db.query(
-        """
-        SELECT id, kind, attempts, created_at
+        f"""
+        SELECT id, kind, {RETRIES_SPENT} AS attempts, created_at
         FROM tasks
-        WHERE status IN ('pending', 'running') AND attempts >= 3
+        WHERE status IN ('pending', 'running') AND {RETRIES_SPENT} >= 3
           AND created_at < now() - interval '6 hours'
         """
     ):

@@ -138,19 +138,6 @@ class TaskShape:
     # model's own declared default.
     effort_preference: tuple[str, ...] = ()
 
-    def resolved_effort(self) -> str | None:
-        """The effort this shape would send to its single candidate.
-
-        Only meaningful for a one-candidate shape, which is every shape here.
-        Exists so a call site can ask what the walk decided without resolving
-        the whole task - resolution needs a key present, and asking what effort
-        a model takes should not.
-        """
-        declared = providers.model(self.candidates[0]) if self.candidates else None
-        if declared is None:
-            return None
-        return self.effort or _preferred_effort(self, declared)
-
     params: dict[str, object] = field(default_factory=dict)
     # Human-readable label for the configuration screen.
     label: str = ""
@@ -171,6 +158,19 @@ class TaskShape:
     on_model_change: ModelChangeEffect = ModelChangeEffect.MIXES
     # Measured findings, per model. Rendered beside the option each is about.
     evidence: tuple[Evidence, ...] = ()
+
+    def resolved_effort(self) -> str | None:
+        """The effort this shape would send to its single candidate.
+
+        Only meaningful for a one-candidate shape, which is every shape here.
+        Exists so a call site can ask what the walk decided without resolving
+        the whole task - resolution needs a key present, and asking what effort
+        a model takes should not.
+        """
+        declared = providers.model(self.candidates[0]) if self.candidates else None
+        if declared is None:
+            return None
+        return self.effort or _preferred_effort(self, declared)
 
 
 @dataclass(frozen=True)
@@ -269,12 +269,6 @@ class Candidacy:
     # above the PEAK ones - the conservative reading, since a caller that
     # cannot say when the work will run must overstate rather than assume a
     # discount. It is a caveat belonging beside the price.
-    #
-    # This replaced an `off_peak` flag that could never be true: it was
-    # computed at at=None, which means peak by that same rule, so it asserted
-    # "not currently discounted" when what it knew was "nobody asked what time
-    # it is". A field that cannot express its own uncertainty is worse than an
-    # absent one, because false reads as a finding.
     price_varies_by_time: bool
 
 
@@ -297,17 +291,7 @@ def candidates_for(shape: TaskShape, at: datetime.datetime | None = None) -> lis
         if not declared.selectable:
             continue
         why = _rejection(shape, name, declared, provider)
-        per_call = (
-            None
-            if why
-            else estimate_cost_usd(
-                name,
-                shape.est_prompt_tokens,
-                shape.max_output_tokens,
-                batched=shape.batched,
-                at=at,
-            )
-        )
+        per_call = None if why else _estimate(shape, name, at)
         out.append(
             Candidacy(
                 model=name,
@@ -350,6 +334,13 @@ def _params_for(shape: TaskShape, declared: Model) -> dict[str, object]:
     return params
 
 
+def _estimate(shape: TaskShape, name: str, at: datetime.datetime | None) -> Decimal | None:
+    """One call's estimated cost on this model, priced from the shape's sizes."""
+    return estimate_cost_usd(
+        name, shape.est_prompt_tokens, shape.max_output_tokens, batched=shape.batched, at=at
+    )
+
+
 def resolve(
     shape: TaskShape,
     at: datetime.datetime | None = None,
@@ -366,42 +357,10 @@ def resolve(
     """
     if not shape.candidates:
         raise NoEligibleModel("no candidate models were declared for this task")
-
-    # An override replaces the caller's judgment, deliberately - the person who
-    # owns the system may overrule a call site. It does NOT replace the task's
-    # declared needs: a model that cannot do the work would fail at the
-    # provider, mid-batch, having already been paid for. Capability stays hard,
-    # sanction becomes soft, and the difference is the whole design.
     if override:
-        declared = providers.model(override)
-        provider = providers.provider_of(override)
-        why = _rejection(shape, override, declared, provider)
-        if why:
-            raise NoEligibleModel(f"{override} cannot run this task - {why}")
-        assert provider is not None and declared is not None
-        cost = estimate_cost_usd(
-            override,
-            shape.est_prompt_tokens,
-            shape.max_output_tokens,
-            batched=shape.batched,
-            at=at,
-        )
-        sanctioned = override in shape.candidates
-        return Choice(
-            provider=provider,
-            model=override,
-            params=_params_for(shape, declared),
-            est_cost_usd=cost,
-            off_peak=is_off_peak(declared.rates, at),
-            reason=(
-                "configured override"
-                if sanctioned
-                else "configured override, outside the models this call site sanctioned"
-            ),
-            overridden=not sanctioned,
-        )
+        return _resolve_override(shape, override, at)
 
-    eligible: list[tuple[Decimal, str, str, bool]] = []
+    eligible: list[tuple[Decimal, str, str, Model]] = []
     rejected: list[str] = []
     for name in shape.candidates:
         declared = providers.model(name)
@@ -411,17 +370,11 @@ def resolve(
             rejected.append(f"{name}: {why}")
             continue
         assert provider is not None and declared is not None
-        cost = estimate_cost_usd(
-            name,
-            shape.est_prompt_tokens,
-            shape.max_output_tokens,
-            batched=shape.batched,
-            at=at,
-        )
+        cost = _estimate(shape, name, at)
         # _rejection has already refused anything unpriced, so a None here
         # would mean the two disagree about what "priced" means.
         assert cost is not None
-        eligible.append((cost, name, provider, is_off_peak(declared.rates, at)))
+        eligible.append((cost, name, provider, declared))
 
     if not eligible:
         raise NoEligibleModel("no declared model can run this task - " + "; ".join(rejected))
@@ -429,10 +382,8 @@ def resolve(
     # Ties keep the caller's own ordering, which is the only ordering that
     # encodes their judgment. min() returns the first of equal keys, so an
     # equal-priced later candidate never displaces an earlier one.
-    cost, name, provider, off_peak = min(eligible, key=lambda e: e[0])
-    declared = providers.model(name)
-    assert declared is not None
-    params = _params_for(shape, declared)
+    cost, name, provider, declared = min(eligible, key=lambda e: e[0])
+    off_peak = is_off_peak(declared.rates, at)
 
     if len(shape.candidates) == 1:
         reason = "the only model the caller sanctioned"
@@ -446,8 +397,39 @@ def resolve(
     return Choice(
         provider=provider,
         model=name,
-        params=params,
+        params=_params_for(shape, declared),
         est_cost_usd=cost,
         off_peak=off_peak,
         reason=reason,
+    )
+
+
+def _resolve_override(shape: TaskShape, override: str, at: datetime.datetime | None) -> Choice:
+    """The configured model, if it can do the work.
+
+    An override replaces the caller's judgment, deliberately - the person who
+    owns the system may overrule a call site. It does NOT replace the task's
+    declared needs: a model that cannot do the work would fail at the
+    provider, mid-batch, having already been paid for. Capability stays hard,
+    sanction becomes soft, and the difference is the whole design.
+    """
+    declared = providers.model(override)
+    provider = providers.provider_of(override)
+    why = _rejection(shape, override, declared, provider)
+    if why:
+        raise NoEligibleModel(f"{override} cannot run this task - {why}")
+    assert provider is not None and declared is not None
+    sanctioned = override in shape.candidates
+    return Choice(
+        provider=provider,
+        model=override,
+        params=_params_for(shape, declared),
+        est_cost_usd=_estimate(shape, override, at),
+        off_peak=is_off_peak(declared.rates, at),
+        reason=(
+            "configured override"
+            if sanctioned
+            else "configured override, outside the models this call site sanctioned"
+        ),
+        overridden=not sanctioned,
     )

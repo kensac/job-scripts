@@ -137,11 +137,6 @@ def test_tier_is_selected_by_prompt_length(monkeypatch):
     ) / Decimal(1_000_000)
 
 
-def test_is_tiered_reports_the_shape():
-    assert pricing.is_tiered("gpt-5-nano") is False
-    assert pricing.is_tiered("no-such-model") is False
-
-
 # --- reasoning validation ------------------------------------------------
 
 

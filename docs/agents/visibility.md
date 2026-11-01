@@ -145,9 +145,10 @@ under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
 **"Is this person an admin" has one answer: `api.auth.is_admin(groups)`.**
-It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`), and
-`require_admin` is that test as a route dependency. Code never names the
-group outside seeded defaults.
+It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`) through
+`api.admin_groups`, and `require_admin` is that test as a route dependency.
+Code never names the group: the seeds that need it (the uncapped group
+budget, the default `gmail_connect_groups`) read `api.admin_groups` too.
 
 **A non-admin's board keeps postings at most 30 days old.** The age window
 (`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
@@ -248,6 +249,33 @@ Internships 2026-10-05, `internship_v1` skips
 96.7% of calls and dropped 7 of 1,494 model keeps. `aero_major_v1` would drop
 70 of the Aerospace board's 268 keeps and `new_grad_v1` 59 of Tech New Grad's
 1,068 (2026-10-07), so neither is enforced.
+
+**A board for a new field is gated before it has keeps to measure against.**
+With no verdicts under its prompt, recall is checked against the field's
+known postings instead: list the early-career programs the catalog holds at
+the field's employers and read every one the recipe skips. `finance_new_grad_v1`
+(Finance New Grad) keeps a finance title at an early-career level and skips
+internships, senior, manager and partner titles, software and engineering
+titles that are not quant work, and branch, retail-banking and advisor-sales
+titles. On production 2026-11-01, over 14 days of postings from Tech New
+Grad's sources, it passed 1,281 available postings inside the board's
+criteria (about 90 a day) out of 225,613 new postings. Of 2,247 live
+analyst, associate and program titles at 100 named banks and funds in 30
+days it skipped 1,438; a sample of 80 skips held branch bankers, client
+service, operations and technology roles, and one FP&A title ("Forecasting,
+Budgeting & Reporting Analyst") that the recipe now keeps.
+
+**A new board is not culled by another target's screens.** `title_screens`,
+the verification volume gate's `scopes` and every board's `title_gate` key on
+one prompt hash, so a board with a new prompt meets none of them. What it
+does meet is verification reach: a board is a verification target only once
+published (`verification_candidates.TARGETS`), so before then its candidates
+are only the postings some other target had verified. On 2026-11-01, 1,068 of
+4,539 finance-titled postings inside the criteria (24%) had no verdict,
+mostly from bank sources the volume gate skips for the tech boards (U.S.
+Bancorp, Wells Fargo, Bank of America, PNC, Huntington, State Street), and
+936 of them had page text. The first run of an unpublished board therefore
+undercounts; publishing it lets the verify sweep reach them, freshest first.
 
 **A board's question rides on the posting's verification request.** Every board
 candidate has passed verification, so verification has always read the posting

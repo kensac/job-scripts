@@ -12,8 +12,9 @@ When moving or renaming an environment reader, keep
 `tests/test_env_example.py` able to discover its reads so `.env.example`
 stays checked in both directions.
 
-Every module logs through `logging.getLogger(__name__)`. Telemetry attaches
-to the root logger, so a module needs no registration. Inside an `except`, use
+Every module logs through `logging.getLogger(__name__)`
+(`tests/test_logger_names.py`). Telemetry attaches to the root logger, so a
+module needs no registration. Inside an `except`, use
 `logger.exception`, which keeps the traceback.
 
 Preserve concurrency and locking semantics across refactors, and check them
@@ -226,6 +227,22 @@ group in order, so it sorts or walks an index through the heap. Count each
 `DISTINCT ON (group) ... ORDER BY group, n DESC, value`, which breaks ties as
 `mode()` does. The company page's display names took 2.7-3.2 s this way
 against 3.6-4.2 s, identical on all 10,751 rows (production, 2026-11-01).
+
+**A distinct count over text sorts in `COLLATE "C"`.** `count(DISTINCT url)`
+sorts its input under the database collation, en_US, which compares through
+the locale. Two strings are equal under a deterministic collation exactly when
+their bytes are, so `count(DISTINCT url COLLATE "C")` is the same number. On
+the filter insight totals (740,000 verdicts) the sort took 2.5-3 s against
+18 s (production, 2026-11-01).
+
+**A window read of a large table that is most of the page's cost is a
+partial covering index.** The filter insight page read 740,000 custom
+verdicts spread over 1.5 GB of `ai_queries` heap: 18-27 s cold before any
+aggregate. `idx_ai_queries_custom_window` and `idx_ai_queries_custom_reasons`
+carry every column the two statements read, keyed on `created_at` so the cost
+follows the window rather than the history. A column one statement needs only
+for a count (`reason`, for `rejected_with_reason`) is counted from the rows a
+second, narrower index already returns, instead of widening the large index.
 
 Prompt changes require before/after output-token and decision-quality evaluation
 on the same inputs. Schema and parsing tests establish compatibility, not outcome
