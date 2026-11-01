@@ -252,21 +252,24 @@ billing hard limit, a quota used up. A rate limit, a 5xx or a timeout keeps its
 own retry. A vendor with no recorded shape (xAI) has no markers, so nothing it
 returns is exhaustion. `app_config.model_fallback_chains` lists, per purpose
 (`core.fallback.chain_purposes`: every `SHAPES` task but `job_profile`, whose
-model its stored profiles pin, and the personal `filter`), the models to try
-in order;
-it is empty by default, which is the old behavior exactly. Routing
-(`api.model_fallback.route`) skips an exhausted provider and takes the first
-chain entry that `resolve()` admits for the task's shape (batch endpoint,
-structured mode, effort, price) and that this host holds a key for, trying
-the primary's `verdict_model_equivalence` group first. The personal filter
-chooses before it selects jobs, so its decided-postings check asks for the
-model that will answer. Managed boards never fall back: a board reads only its
-own model's verdicts, so another model's answers would be paid for and never
-shown. Every row names the model that ran: the batch row's `model`, and
+model its stored profiles pin, the personal `filter` and `managed_board`), the
+models to try in order; it is empty by default, which is the old behavior
+exactly. Routing (`api.model_fallback.route`) skips an exhausted provider and
+takes the first chain entry that `resolve()` admits for the task's shape
+(batch endpoint, structured mode, effort, price) and that this host holds a
+key for. **A purpose whose verdicts are read through `answering_models`
+falls back only inside the primary's `verdict_model_equivalence` group**:
+`filter` and `managed_board` in the `custom` kind, `verify` (and so
+re-verification) in the `verify` kind. Any other model's verdicts would be
+paid for and counted by no board, filter or reuse check. A purpose that writes
+no verdicts (extractions, classifications) may use any chain entry; its rows
+mix by model by design. The filter and a managed board choose before they
+select jobs, so the decided-postings check asks for the model that will
+answer. A board's fallback keeps `no_cache` while
+`managed_board_cache_writes_enabled` is off, on either vendor's transport.
+Every row names the model that ran: the batch row's `model`, and
 `ai_batches.fallback_from` for the model it replaced; the ledger, verdicts and
-extractions take the batch row's model. A fallback outside the primary's
-group writes verdicts the primary's readers do not count, so those postings
-are asked again once the primary is back. Spend stays inside the same caps:
+extractions take the batch row's model. Spend stays inside the same caps:
 a fleet submission is priced at the fallback's rate against the weekly
 ceiling, and a person's weekly token budget is model-blind. Live calls on the
 server's key mark the provider and fail; they do not switch models mid-call

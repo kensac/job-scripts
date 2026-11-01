@@ -39357,16 +39357,19 @@
             "type": "boolean",
             "title": "Provider Exhausted"
           },
-          "counts_as_primary": {
+          "falls_back_for": {
             "anyOf": [
               {
-                "type": "boolean"
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Counts As Primary"
+            "title": "Falls Back For"
           }
         },
         "type": "object",
@@ -39375,7 +39378,7 @@
           "provider",
           "rejection",
           "provider_exhausted",
-          "counts_as_primary"
+          "falls_back_for"
         ],
         "title": "FallbackEntry",
         "description": "One model in a purpose's fallback chain, judged as routing would."

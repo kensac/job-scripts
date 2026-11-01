@@ -37,14 +37,14 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         kind="json",
         help="Per task purpose, the models to try in order when the running model's provider "
         "reports the account cannot pay (out of credit, billing hard limit, quota used up), e.g. "
-        '{"verify": ["claude-haiku-5-5"]}. Rate limits and outages never move work. An entry '
-        "that cannot run the task (no batch endpoint, structured output or effort it needs) is "
-        "skipped, and the provider is tried again one scheduler cycle after its last refusal. "
-        "Entries in the primary's verdict_model_equivalence group are tried first. Every answer "
-        "is recorded under the model that gave it: an entry outside that group writes verdicts "
-        "the primary's readers do not count, so those postings are asked again once the primary "
-        "is back. Spend stays inside the same budgets and the fleet ceiling. Managed boards never "
-        "fall back: a board reads only its own model's verdicts.",
+        '{"managed_board": ["claude-haiku-5-5"]}. Rate limits and outages never move work. An '
+        "entry that cannot run the task (no batch endpoint, structured output or effort it "
+        "needs) is skipped, and the provider is tried again one scheduler cycle after its last "
+        "refusal. For filter, managed_board and verify only entries grouped with the running "
+        "model in verdict_model_equivalence (custom, or verify) are used, because no reader "
+        "counts any other model's verdicts; the other purposes may use any entry. Every answer "
+        "is recorded under the model that gave it. Spend stays inside the same budgets and the "
+        "fleet ceiling.",
     ),
     # The scheduler buckets the hour by this, so it must divide 60 for every
     # bucket to be the same length.

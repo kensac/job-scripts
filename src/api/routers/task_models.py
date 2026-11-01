@@ -28,7 +28,12 @@ from api.problem import refuse
 from api.routers.admin import require_admin
 from api.task_config import configured_shape
 from core import providers
-from core.fallback import FILTER_PURPOSE, chain_purposes, filter_shape
+from core.fallback import (
+    FILTER_PURPOSE,
+    MANAGED_BOARD_PURPOSE,
+    chain_purposes,
+    custom_filter_shape,
+)
 from core.providers.spec import StructuredOutput
 from core.routing import (
     Candidacy,
@@ -504,12 +509,12 @@ class FallbackEntry(BaseModel):
     # requirement that rules it out, in resolve()'s words.
     rejection: str
     provider_exhausted: bool
-    # True when its verdicts count as the primary's (verdict_model_equivalence),
-    # False when they are recorded under it and the primary's readers ignore
-    # them, so those postings are asked again once the primary is back. None
-    # when the purpose writes no verdicts, or its primary is each person's own
-    # model (the filter).
-    counts_as_primary: bool | None
+    # The models whose work this entry may take, for a purpose whose verdicts
+    # are read through verdict_model_equivalence: those grouped with it for
+    # the purpose's kind, since only their readers count its answers. Empty
+    # means it never runs for this purpose. None for a purpose that writes no
+    # verdicts, where it may take any model's work.
+    falls_back_for: list[str] | None
 
 
 class FallbackBatch(BaseModel):
@@ -525,7 +530,7 @@ class FallbackBatch(BaseModel):
 class PurposeFallback(BaseModel):
     purpose: str
     # The model routing runs when no provider is out of credit; None for the
-    # filter, which runs each person's own model.
+    # filter and managed boards, which run each person's or board's own model.
     primary: str | None
     chain: list[FallbackEntry]
     recent: list[FallbackBatch]
@@ -548,8 +553,8 @@ class ModelFallbackView(BaseModel):
 
 
 def _fallback_shape(purpose: str) -> tuple[TaskShape, str | None]:
-    if purpose == FILTER_PURPOSE:
-        return filter_shape("", None), None
+    if purpose in (FILTER_PURPOSE, MANAGED_BOARD_PURPOSE):
+        return custom_filter_shape("", None, purpose), None
     shape = configured_shape(SHAPES[purpose])
     return shape, _running_model(shape, _override(purpose))
 
@@ -557,14 +562,17 @@ def _fallback_shape(purpose: str) -> tuple[TaskShape, str | None]:
 def _purpose_fallback(purpose: str, chain: list[str], exhausted: set[str]) -> PurposeFallback:
     shape, primary = _fallback_shape(purpose)
     judged = {c.model: c for c in candidates_for(shape)}
-    counted = model_fallback.equivalent(purpose, primary) if primary else None
     entries = [
         FallbackEntry(
             model=name,
             provider=providers.provider_of(name),
             rejection=judged[name].rejection if name in judged else "not offered for selection",
             provider_exhausted=providers.provider_of(name) in exhausted,
-            counts_as_primary=None if counted is None else name in counted,
+            falls_back_for=(
+                None
+                if (group := model_fallback.equivalent(purpose, name)) is None
+                else [m for m in group if m != name]
+            ),
         )
         for name in chain
     ]

@@ -23,17 +23,20 @@ from typing import Any
 from api import db, metrics, telemetry
 from api.verdict_equivalence import answering_models
 from core import providers, routing
-from core.fallback import FILTER_PURPOSE, FallbackChains, next_choice
+from core.fallback import FILTER_PURPOSE, MANAGED_BOARD_PURPOSE, FallbackChains, next_choice
 from core.routing import Choice, TaskShape, resolve
 
 logger = logging.getLogger(__name__)
 
 ALERT_KIND = "provider_exhausted"
 
-# The verdict equivalence kind whose groups say a fallback's answers count as
-# the primary's. A purpose without one writes rows that are not verdicts
-# (extractions, classifications), which mix by model by design.
-_VERDICT_KIND = {FILTER_PURPOSE: "custom", "verify": "verify"}
+# The verdict equivalence kind each verdict-writing purpose's readers go
+# through (api.verdict_equivalence.answering_models). Such a purpose falls back
+# only to models grouped with its primary: any other model's verdicts would be
+# paid for and never read, by boards, filters or reuse checks. A purpose not
+# listed writes rows that are not verdicts (extractions, classifications),
+# which mix by model by design, so any chain entry may run it.
+_VERDICT_KIND = {FILTER_PURPOSE: "custom", MANAGED_BOARD_PURPOSE: "custom", "verify": "verify"}
 
 
 def chains() -> dict[str, list[str]]:
@@ -49,6 +52,12 @@ def equivalent(purpose: str, primary: str) -> list[str] | None:
     when the purpose writes no verdicts."""
     kind = _VERDICT_KIND.get(purpose)
     return answering_models(kind, primary) if kind else None
+
+
+def usable(purpose: str, primary: str, models: list[str]) -> list[str]:
+    """The chain entries this purpose may fall back to from `primary`, in order."""
+    group = equivalent(purpose, primary)
+    return models if group is None else [m for m in models if m in group]
 
 
 def exhausted() -> list[dict[str, Any]]:
@@ -124,15 +133,14 @@ def clear(provider: str) -> None:
 
 def next_for(shape: TaskShape, primary: str, tried: set[str], blocked: set[str]) -> Choice | None:
     """The first chain entry that can run this shape, skipping `blocked`
-    providers and `tried` models; None when there is none."""
-    models = chain(shape.purpose)
+    providers, `tried` models and, for a verdict purpose, models outside the
+    primary's equivalence group; None when there is none."""
+    models = usable(shape.purpose, primary, chain(shape.purpose))
     if not models:
         return None
     # A provider this host holds no key for cannot take the work either.
     unkeyed = {name for name in providers.PROVIDERS if not routing.server_key(name)}
-    choice = next_choice(
-        shape, models, blocked | unkeyed, tried, prefer=equivalent(shape.purpose, primary) or ()
-    )
+    choice = next_choice(shape, models, blocked | unkeyed, tried)
     if not choice:
         return None
     provider = providers.provider_of(primary)

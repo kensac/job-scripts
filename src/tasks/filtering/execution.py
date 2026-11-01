@@ -15,7 +15,12 @@ from api.model_calls import Payer
 from api.verdict_equivalence import answering_models
 from core import providers, routing
 from core.answers import FilterDecision, FilterResult
-from core.fallback import FILTER_MAX_OUTPUT_TOKENS, FILTER_PURPOSE, filter_shape
+from core.fallback import (
+    FILTER_MAX_OUTPUT_TOKENS,
+    FILTER_PURPOSE,
+    MANAGED_BOARD_PURPOSE,
+    custom_filter_shape,
+)
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import Page, decided_custom_urls, get_contents
 from tasks.runtime import (
@@ -46,9 +51,10 @@ def filter_effort(cfg: ai.AIConfig) -> str:
     return str(cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium")
 
 
-def fallback_config(cfg: ai.AIConfig) -> ai.AIConfig:
-    """The owner-credit config this run uses: the person's, or the filter
-    chain's next model while their model's provider is out of credit.
+def fallback_config(cfg: ai.AIConfig, purpose: str = FILTER_PURPOSE) -> ai.AIConfig:
+    """The owner-credit config this run uses: its own, or the purpose's chain's
+    next model in its equivalence group while its model's provider is out of
+    credit.
 
     Chosen before the run selects its jobs, so the decided-postings check asks
     for the model that will answer and the sweep does not re-buy postings a
@@ -57,7 +63,7 @@ def fallback_config(cfg: ai.AIConfig) -> ai.AIConfig:
     if cfg.key_source != "owner":
         return cfg
     effort = filter_effort(cfg)
-    choice = model_fallback.route(filter_shape(cfg.model, effort))
+    choice = model_fallback.route(custom_filter_shape(cfg.model, effort, purpose))
     if choice.fallback_from is None:
         return cfg
     params = {k: v for k, v in cfg.params.items() if k not in ("reasoning_effort", "effort")}
@@ -278,11 +284,13 @@ async def execute_batch(
 
     existing = has_batch_work(task_id)
     cache_policy = None
-    if not existing and purpose == "managed_board" and cfg:
+    if not existing and purpose == MANAGED_BOARD_PURPOSE and cfg:
         known = providers.model(cfg.model)
+        # The Anthropic transport honours no_cache too (anthropic_batches), so a
+        # board that falls back there writes no cache either.
         if (
             known
-            and known.supports_explicit_prompt_cache
+            and (known.supports_explicit_prompt_cache or cfg.provider == "anthropic")
             and not db.get_config("managed_board_cache_writes_enabled")
         ):
             cache_policy = "no_cache"
@@ -338,9 +346,7 @@ async def execute_batch(
         results = await collect(task_id, hook)
     else:
         assert cfg is not None and effort is not None
-        # Only the personal filter has a chain. A managed board's model is
-        # its contract: another model's verdicts would never reach it.
-        chained = purpose == FILTER_PURPOSE
+        chained = purpose in (FILTER_PURPOSE, MANAGED_BOARD_PURPOSE)
         results = await submit(
             task_id,
             specs,
@@ -348,7 +354,11 @@ async def execute_batch(
             effort,
             max_output_tokens,
             hook,
-            fallback=filter_shape(cfg.fallback_from or cfg.model, effort) if chained else None,
+            fallback=(
+                custom_filter_shape(cfg.fallback_from or cfg.model, effort, purpose)
+                if chained
+                else None
+            ),
             purpose=purpose,
             payer=hooks.payer,
             routed=cfg.fallback_from,

@@ -15,10 +15,16 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from api import db, model_fallback
+from api.model_calls import Payer
 from core import batch
 from core.batch.collection import _line_error
-from core.fallback import ProviderExhausted, exhaustion_reason, filter_shape, next_choice
-from core.shapes import COMP_TASK
+from core.fallback import (
+    ProviderExhausted,
+    custom_filter_shape,
+    exhaustion_reason,
+    next_choice,
+)
+from core.shapes import COMP_TASK, VERIFY_TASK
 
 _REQUEST = httpx2.Request("POST", "https://api.example.com/v1/batches")
 
@@ -201,22 +207,41 @@ def test_the_chain_skips_exhausted_providers_and_ineligible_models_in_order():
     assert next_choice(COMP_TASK, [], set(), set()) is None
 
 
-def test_the_chain_prefers_models_whose_verdicts_count_as_the_primarys():
-    chain = ["claude-haiku-5-5", "claude-sonnet-5"]
-    choice = next_choice(
-        filter_shape("gpt-6-luna", "medium"),
-        chain,
-        {"openai"},
-        {"gpt-6-luna"},
-        prefer=["claude-sonnet-5", "gpt-6-luna"],
+LUNA_HAIKU = [
+    {"kind": "custom", "models": ["gpt-6-luna", "claude-haiku-5-5"]},
+    {"kind": "verify", "models": ["gpt-6-luna", "claude-haiku-5-5"]},
+]
+
+
+@pytest.mark.parametrize("purpose", ["managed_board", "filter", "verify"])
+def test_a_verdict_purpose_falls_back_only_inside_the_primarys_group(
+    purpose, set_config, monkeypatch
+):
+    """Any other model's verdicts would be paid for and read by nobody."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    shape = (
+        VERIFY_TASK if purpose == "verify" else custom_filter_shape("gpt-6-luna", "low", purpose)
     )
+    set_config("model_fallback_chains", {purpose: ["claude-sonnet-5", "claude-haiku-5-5"]})
+    blocked = {"openai"}
+    assert model_fallback.next_for(shape, "gpt-6-luna", {"gpt-6-luna"}, blocked) is None
+    set_config("verdict_model_equivalence", LUNA_HAIKU)
+    choice = model_fallback.next_for(shape, "gpt-6-luna", {"gpt-6-luna"}, blocked)
+    assert choice is not None
+    assert (choice.model, choice.fallback_from) == ("claude-haiku-5-5", "gpt-6-luna")
+
+
+def test_a_purpose_that_writes_no_verdicts_may_use_any_entry(set_config, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    set_config("model_fallback_chains", {"comp": ["claude-sonnet-5", "claude-haiku-5-5"]})
+    choice = model_fallback.next_for(COMP_TASK, "gpt-6-luna", {"gpt-6-luna"}, {"openai"})
     assert choice is not None and choice.model == "claude-sonnet-5"
 
 
 def test_an_effort_the_fallback_does_not_take_makes_it_ineligible():
     chain = ["claude-haiku-5-5"]
-    assert next_choice(filter_shape("gpt-6-luna", "low"), chain, set(), set())
-    assert next_choice(filter_shape("gpt-6-luna", "minimal"), chain, set(), set()) is None
+    assert next_choice(custom_filter_shape("gpt-6-luna", "low"), chain, set(), set())
+    assert next_choice(custom_filter_shape("gpt-6-luna", "minimal"), chain, set(), set()) is None
 
 
 @pytest.mark.asyncio
@@ -314,6 +339,58 @@ async def test_refused_requests_resubmit_on_the_next_model_in_the_same_sweep(
 
 
 @pytest.mark.asyncio
+async def test_a_managed_board_resubmits_on_a_grouped_model_and_bills_the_board(
+    set_config, monkeypatch
+):
+    """Public boards stalled through the 2026-10-31 outage. A board reads its
+    verdicts through answering_models, so a grouped model's answers show."""
+    from tasks.runtime import batching
+
+    set_config("verdict_model_equivalence", LUNA_HAIKU)
+    set_config("model_fallback_chains", {"managed_board": ["claude-sonnet-5", "claude-haiku-5-5"]})
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setattr(batching, "has_batch_work", lambda _task_id: False)
+    monkeypatch.setattr(batching, "snapshot_specs", lambda _task_id, specs: specs)
+    monkeypatch.setattr(batching, "park_awaiting_batch", lambda _task_id, _ids: True)
+    sent = []
+
+    async def submit_batches(specs, model, effort, max_tokens, on_event=None):
+        sent.append(model)
+        if model == "gpt-6-luna":
+            raise ProviderExhausted("openai", "Billing hard limit has been reached", [], specs)
+        on_event("batch_mb_1", "validating", {"requests": len(specs)})
+        return ["batch_mb_1"]
+
+    monkeypatch.setattr("core.batch.submit_batches", submit_batches)
+    payer = Payer(managed_board_id=4242)
+    hook = batching.batch_event_hook(876543, "managed_board", "gpt-6-luna", payer=payer)
+    with pytest.raises(batching.AwaitingBatch):
+        await batching.submit_or_collect(
+            876543,
+            [batch.BatchSpec("a", "text")],
+            "gpt-6-luna",
+            "medium",
+            6000,
+            hook,
+            fallback=custom_filter_shape("gpt-6-luna", "medium", "managed_board"),
+            purpose="managed_board",
+            payer=payer,
+        )
+    assert sent == ["gpt-6-luna", "claude-haiku-5-5"], "sonnet is outside the group"
+    row = db.query_one(
+        "SELECT model, fallback_from, purpose, payer, payer_id FROM ai_batches "
+        "WHERE provider_batch_id = 'batch_mb_1'"
+    )
+    assert row == {
+        "model": "claude-haiku-5-5",
+        "fallback_from": "gpt-6-luna",
+        "purpose": "managed_board",
+        "payer": "managed_board",
+        "payer_id": 4242,
+    }
+
+
+@pytest.mark.asyncio
 async def test_without_a_chain_a_refusal_still_fails_with_its_reason_and_raises_the_alert(
     monkeypatch,
 ):
@@ -373,16 +450,22 @@ def test_accepted_batches_whose_requests_were_refused_mark_the_provider():
 def test_the_admin_view_lists_every_purpose_its_chain_and_the_exhaustion(
     client, admin_headers, set_config
 ):
-    set_config("model_fallback_chains", {"verify": ["claude-haiku-5-5", "grok-4.3"]})
+    set_config(
+        "model_fallback_chains",
+        {"verify": ["claude-haiku-5-5", "grok-4.3"], "managed_board": ["claude-sonnet-5"]},
+    )
+    set_config("verdict_model_equivalence", LUNA_HAIKU)
     model_fallback.mark("openai", "Billing hard limit has been reached", model=None, purpose=None)
     r = client.get("/admin/model-fallback", headers=admin_headers)
     assert r.status_code == 200, r.text
     body = r.json()
     assert [p["provider"] for p in body["providers"]] == ["openai"]
     purposes = {p["purpose"]: p for p in body["purposes"]}
-    assert "filter" in purposes
-    assert "managed_board" not in purposes and "job_profile" not in purposes
+    assert "filter" in purposes and "managed_board" in purposes
+    assert "job_profile" not in purposes
     haiku, grok = purposes["verify"]["chain"]
-    assert haiku["rejection"] == "" and haiku["counts_as_primary"] is False
-    assert "batch transport" in grok["rejection"]
+    assert haiku["rejection"] == "" and haiku["falls_back_for"] == ["gpt-6-luna"]
+    assert "batch transport" in grok["rejection"] and grok["falls_back_for"] == []
+    [sonnet] = purposes["managed_board"]["chain"]
+    assert sonnet["falls_back_for"] == [], "grouped with nothing, so it never runs"
     assert purposes["comp"]["chain"] == []

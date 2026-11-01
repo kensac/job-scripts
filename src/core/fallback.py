@@ -25,35 +25,33 @@ from core import providers
 from core.providers.spec import StructuredOutput
 from core.routing import Choice, NoEligibleModel, TaskShape, resolve
 
-# The purposes a chain may name: every configurable task, and the personal
-# filter, whose model is each person's own setting rather than a TaskShape.
-# Managed boards are absent on purpose: a board's model is part of its
-# published contract, and its membership reads only that model's verdicts, so
-# answers from another model would be paid for and never shown.
+# The two custom-filter purposes: a person's filter, whose model is their own
+# setting, and a managed board, whose model is the board's. Neither is a
+# declared TaskShape, so custom_filter_shape builds one from the model.
 FILTER_PURPOSE = "filter"
+MANAGED_BOARD_PURPOSE = "managed_board"
 
-# The output cap a filter batch sends; a boolean verdict has never needed more
-# than 1,050.
+# The output cap a custom-filter batch sends; a boolean verdict has never
+# needed more than 1,050.
 FILTER_MAX_OUTPUT_TOKENS = 6000
-# Mean billed input of a filter request, 269,567 calls over the 30 days to
-# 2026-11-01. It only ranks and prices a fallback; the bill is written from
-# real usage.
-FILTER_EST_PROMPT_TOKENS = 2514
+# Mean billed input of a request over the 30 days to 2026-11-01: filter
+# 269,567 calls, managed_board 160,433. It only ranks and prices a fallback;
+# the bill is written from real usage.
+_EST_PROMPT_TOKENS = {FILTER_PURPOSE: 2514, MANAGED_BOARD_PURPOSE: 1598}
 
 
-def filter_shape(model: str, effort: str | None) -> TaskShape:
-    """What a personal filter batch needs, for judging a fallback model.
+def custom_filter_shape(model: str, effort: str | None, purpose: str = FILTER_PURPOSE) -> TaskShape:
+    """What a custom-filter batch needs, for judging a fallback model.
 
-    The person's model is their own setting, not a declared shape, so this is
-    built from it. The effort is the person's: a fallback that does not accept
-    it is not eligible, rather than silently asked something else.
+    The effort is the run's own: a fallback that does not accept it is not
+    eligible, rather than silently asked something else.
     """
     return TaskShape(
-        purpose=FILTER_PURPOSE,
+        purpose=purpose,
         structured=StructuredOutput.JSON_SCHEMA,
         batched=True,
         max_output_tokens=FILTER_MAX_OUTPUT_TOKENS,
-        est_prompt_tokens=FILTER_EST_PROMPT_TOKENS,
+        est_prompt_tokens=_EST_PROMPT_TOKENS[purpose],
         candidates=(model,),
         effort=effort,
     )
@@ -102,7 +100,7 @@ def chain_purposes() -> list[str]:
 
     # job_profile's model is fixed by the profiles it stores
     # (core.derivations.job_profile), so it never falls back.
-    return [*sorted(SHAPES.keys() - {"job_profile"}), FILTER_PURPOSE]
+    return [*sorted(SHAPES.keys() - {"job_profile"}), FILTER_PURPOSE, MANAGED_BOARD_PURPOSE]
 
 
 class FallbackChains(RootModel[dict[str, list[str]]]):
@@ -127,20 +125,17 @@ class FallbackChains(RootModel[dict[str, list[str]]]):
 
 def next_choice(
     shape: TaskShape,
-    chain: list[str],
+    chain: Sequence[str],
     blocked: set[str],
     tried: set[str],
-    prefer: Sequence[str] = (),
     at: datetime.datetime | None = None,
 ) -> Choice | None:
-    """The first chain entry that can run this task now, or None.
+    """The first chain entry that can run this task now, in order, or None.
 
-    Entries whose verdicts count as the primary's (`prefer`, the verdict
-    equivalence group) go first, each side in the admin's order. An entry is
-    skipped when its provider is in `blocked`, when it was already tried, or
-    when routing rejects it for this shape.
+    An entry is skipped when its provider is in `blocked`, when it was already
+    tried, or when routing rejects it for this shape.
     """
-    for name in sorted(chain, key=lambda m: m not in prefer):
+    for name in chain:
         if name in tried or providers.provider_of(name) in blocked:
             continue
         try:
