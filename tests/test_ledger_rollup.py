@@ -10,7 +10,6 @@ from decimal import Decimal
 from api import db, ledger_rollup
 
 _KEY = ("hour", *ledger_rollup.DIMENSIONS)
-_DIRECT_ALL = "(SELECT '-infinity'::timestamptz AS lo, 'infinity'::timestamptz AS hi)"
 
 
 def _call(cost: str | None, tokens: int, write: int | None = 1) -> int:

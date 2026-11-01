@@ -9,9 +9,7 @@ export function createApplicationPreferences(api) {
     try {
       const got = await new Promise((r) => chrome.storage.local.get(["collapsed", "aiAll", "theme", "autoAdvance"], r));
       if (got && typeof got.collapsed === "boolean") prefs.collapsed = got.collapsed;
-      else prefs.collapsed = localStorage.getItem("jt-apply-collapsed") === "1";
       if (got && typeof got.aiAll === "boolean") prefs.aiAll = got.aiAll;
-      else prefs.aiAll = localStorage.getItem("jt-apply-ai-all") === "1";
       prefs.theme = got && (got.theme === "light" || got.theme === "dark") ? got.theme : null;
       if (got && typeof got.autoAdvance === "boolean") prefs.autoAdvance = got.autoAdvance;
     } catch (_) {

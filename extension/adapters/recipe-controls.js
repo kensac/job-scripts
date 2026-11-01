@@ -137,10 +137,13 @@ export function createRecipeControls(context, getConfig, sleep, note) {
     const frame = document.getElementById(`${el.id}_ifr`) || el.parentElement?.querySelector("iframe");
     const body = frame?.contentDocument?.body;
     if (body) {
-      body.innerHTML = String(value ?? "")
-        .split(/\n{2,}/)
-        .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
-        .join("");
+      // Built as nodes, not markup: an answer is text, and "<" in it is a character.
+      const doc = body.ownerDocument;
+      body.replaceChildren(...String(value ?? "").split(/\n{2,}/).map((text) => {
+        const p = doc.createElement("p");
+        text.split("\n").forEach((line, i) => { if (i) p.append(doc.createElement("br")); p.append(line); });
+        return p;
+      }));
       body.dispatchEvent(new InputEvent("input", { bubbles: true }));
       body.dispatchEvent(new Event("change", { bubbles: true }));
     }

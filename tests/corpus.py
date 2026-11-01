@@ -5,9 +5,10 @@ string lengths and timestamp ranges. Schema foreign keys and LINKS in
 corpus_generator/config.py supply relationships. The corpus contains no
 production rows and supports multiple users in pull request tests.
 
-Do not encode writer invariants into generated rows. Tests of those
-invariants need a synced production copy; otherwise the fixture would make
-their assertions true by construction. The `corpus` marker invokes build().
+Do not encode writer invariants into generated rows: the fixture would make
+the assertions about them true by construction. Whether production holds such
+an invariant is a health detector's question (api.health). The `corpus` marker
+invokes build().
 """
 
 from __future__ import annotations
