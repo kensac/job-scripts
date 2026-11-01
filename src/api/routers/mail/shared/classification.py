@@ -44,15 +44,13 @@ class Reverted(BaseModel):
     affected_application_ids: list[int] | None = None
 
 
-def _resync_applications(message_id: int) -> list[int]:
+def _affected_applications(message_id: int) -> list[int]:
     """Every application this message feeds, which a changed kind changes.
 
-    A changed kind can change what an application is waiting for, and it can
-    change an application the person is not currently looking at - so the ids
-    come back rather than an `ok`. Its asks are read from the events, so
-    nothing needs recomputing.
+    Nothing is recomputed here: an application's asks are read from the
+    events, so the new event is already in force.
     """
-    affected = [
+    return [
         r["application_id"]
         for r in db.query(
             """
@@ -62,7 +60,6 @@ def _resync_applications(message_id: int) -> list[int]:
             (message_id,),
         )
     ]
-    return affected
 
 
 def apply_classification(
@@ -97,12 +94,11 @@ def apply_classification(
     mail_events.append(
         message_id, body.kind, confidence="high", detail=detail, actor_user_id=actor_user_id
     )
-    affected = _resync_applications(message_id)
     return Reclassified(
         ok=True,
-        message_id=message["id"],
+        message_id=message_id,
         kind=body.kind,
-        affected_application_ids=affected,
+        affected_application_ids=_affected_applications(message_id),
     )
 
 
@@ -133,12 +129,9 @@ def apply_revert(message_id: int, *, actor_user_id: int) -> Reverted:
         model=model_answer["model"],
         actor_user_id=actor_user_id,
     )
-    # The same affected ids classify returns. A revert moves the derived stage
-    # exactly as a correction does, and possibly on an application nobody is
-    # looking at, so it cannot be an {ok: true}.
     return Reverted(
         ok=True,
         already=False,
         kind=model_answer["kind"],
-        affected_application_ids=_resync_applications(message_id),
+        affected_application_ids=_affected_applications(message_id),
     )

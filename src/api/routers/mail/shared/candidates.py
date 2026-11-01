@@ -117,9 +117,7 @@ def candidates_payload(
     events = mail_pipeline.events_by_application(owner_id)
     needle = (q or "").lower().strip()
     # Ranked on a key that never reaches the response: same company first, then
-    # alphabetically. It used to travel as a `_rank` field stripped on the way
-    # out, which is a field the shape would now have to declare in order to
-    # delete.
+    # alphabetically.
     scored: list[tuple[tuple[int, str], CandidateApplication]] = []
     for app in apps:
         haystack = f"{app['company_name'] or ''} {app['title'] or ''}".lower()
@@ -134,9 +132,6 @@ def candidates_payload(
                     **app,
                     stage=mail_pipeline.stage_for(own, app["board_status"]),
                     event_count=len(own),
-                    # Why it is on the list at all. A candidate the matcher
-                    # considered and declined to choose between is a different
-                    # thing from a search hit, and the UI should be able to say so.
                     reason=_SAME_COMPANY if same_company else "search match",
                 ),
             )
@@ -173,15 +168,12 @@ def candidates_payload(
         by_company([a for a in apps if a["dismissed_at"] is None]),
         company,
         thread_size(owner_id, message.get("provider_thread_id")),
-        # This payload calls its list `applications`, not `candidates`. A
-        # client reads `payload[choice.target_source]`, so naming the queue's
-        # key here would point it at a field this response does not have - the
-        # hardcoded fact moved rather than removed.
+        # This payload's list is `applications`, not the queue's `candidates`.
         PICKER_APPLICATIONS,
     )
     return Candidates(
         message=CandidateMessage(
-            id=message["id"],
+            id=message_id,
             subject=message["subject"],
             from_email=message["from_email"],
             sent_at=message["sent_at"],
