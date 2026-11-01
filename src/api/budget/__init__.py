@@ -38,12 +38,17 @@ class Entitlement:
     groups: list[str]
 
     @property
+    def budget_exhausted(self) -> bool:
+        return (
+            self.weekly_token_budget is not None
+            and self.spent_this_week >= self.weekly_token_budget
+        )
+
+    @property
     def key_source(self) -> str | None:
         if self.has_byo_key:
             return "byo"
-        if self.owner_key and (
-            self.weekly_token_budget is None or self.spent_this_week < self.weekly_token_budget
-        ):
+        if self.owner_key and not self.budget_exhausted:
             return "owner"
         return None
 
@@ -179,43 +184,41 @@ def resolve_ai_config(user_id: int, entitlement: Entitlement):
             base_url=creds.ai_base_url,
             params=params,
         )
-    if entitlement.owner_key:
-        if (
-            entitlement.weekly_token_budget is not None
-            and entitlement.spent_this_week >= entitlement.weekly_token_budget
-        ):
-            raise AIBudgetExceeded(BUDGET_EXCEEDED, entitlement)
-        allowed = owner_allowed_models(entitlement.groups)
-        chosen = creds.ai_model
-        model = chosen
-        substituted_from = reason = None
-        if model not in allowed:
-            model = (
-                ai.DEFAULT_MODELS["openai"]
-                if ai.DEFAULT_MODELS["openai"] in allowed
-                else (allowed[0] if allowed else None)
+    if not entitlement.owner_key:
+        raise AIConfigUnavailable("NO_API_KEY", entitlement)
+    if entitlement.budget_exhausted:
+        raise AIBudgetExceeded(BUDGET_EXCEEDED, entitlement)
+    allowed = owner_allowed_models(entitlement.groups)
+    chosen = creds.ai_model
+    model = chosen
+    substituted_from = reason = None
+    if model not in allowed:
+        model = (
+            ai.DEFAULT_MODELS["openai"]
+            if ai.DEFAULT_MODELS["openai"] in allowed
+            else (allowed[0] if allowed else None)
+        )
+        # Only a real substitution is reported. A user who never chose a
+        # model has not had one taken away, and saying so would put a
+        # correction on a screen where nothing was corrected.
+        if chosen:
+            substituted_from = chosen
+            reason = (
+                f"{chosen} is not available on shared credits; "
+                f"{model} was used instead. Add your own API key to choose freely."
             )
-            # Only a real substitution is reported. A user who never chose a
-            # model has not had one taken away, and saying so would put a
-            # correction on a screen where nothing was corrected.
-            if chosen:
-                substituted_from = chosen
-                reason = (
-                    f"{chosen} is not available on shared credits; "
-                    f"{model} was used instead. Add your own API key to choose freely."
-                )
-        if model:
-            provider = providers.provider_of(model) or "openai"
-            return ai.AIConfig(
-                provider=provider,
-                api_key=routing.server_key(provider),
-                key_source="owner",
-                model=model,
-                params={k: v for k, v in params.items() if k != "temperature"},
-                substituted_from=substituted_from,
-                substitution_reason=reason,
-            )
-    raise AIConfigUnavailable("NO_API_KEY", entitlement)
+    if not model:
+        raise AIConfigUnavailable("NO_API_KEY", entitlement)
+    provider = providers.provider_of(model) or "openai"
+    return ai.AIConfig(
+        provider=provider,
+        api_key=routing.server_key(provider),
+        key_source="owner",
+        model=model,
+        params={k: v for k, v in params.items() if k != "temperature"},
+        substituted_from=substituted_from,
+        substitution_reason=reason,
+    )
 
 
 def load_config(user_id: int, ignore_budget: bool = False) -> tuple[Entitlement, ai.AIConfig]:

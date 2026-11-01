@@ -36,8 +36,8 @@ def fleet_spend_this_week() -> Decimal:
     """Fleet spend since the start of the current week, in UTC.
 
     user_id IS NULL is what makes a call fleet work rather than a person's,
-    managed boards included, as the old usage ledger counted it. A call with
-    no recorded payer is older than any week this is asked about.
+    managed boards included. A call with no recorded payer is older than any
+    week this is asked about.
     """
     row = db.query_one(
         "SELECT COALESCE(SUM(cost_usd), 0) AS spent FROM model_calls "
@@ -59,9 +59,7 @@ def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
     total.
 
     A total answers "what have I spent". A person deciding whether to start a
-    backfill needs "how much room is left", which is a different question and
-    the one nothing could answer: the ceiling existed only inside the check
-    that enforced it, so the first time anyone saw it was when work stopped.
+    backfill needs "how much room is left".
 
     `projected_usd` is what a pending submission would add, so the caller can
     ask the question before committing rather than after.
