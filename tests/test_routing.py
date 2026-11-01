@@ -254,16 +254,15 @@ class TestCustomVerdictCostCliff:
     def test_the_filter_evaluator_scopes_cache_by_model(self):
         """If this call site stops passing the model, the cliff above stops
         existing and this test should be deleted with it - not left asserting
-        a coupling that no longer holds."""
+        a coupling that no longer holds. The model arrives as the list a
+        reader accepts (api.verdict_equivalence), which is the model alone
+        until two models are grouped."""
         import inspect
 
         from tasks.filtering import execution as filter_execution
 
         source = inspect.getsource(filter_execution)
-        assert (
-            'decided_custom_urls([job["url"] for job in jobs], snapshot.prompt_hash, cfg.model)'
-            in source
-        )
+        assert 'snapshot.prompt_hash, answering_models("custom", cfg.model)' in source
 
 
 def test_no_call_site_still_hardcodes_a_batched_model():

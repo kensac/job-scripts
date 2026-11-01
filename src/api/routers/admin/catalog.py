@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from api import db, pagination, scoping, task_admission
 from api import params as params_
+from api.ai import verdicts
 from api.auth import AuthedUser
 from api.locations import LocationExtract, Place, store
 from api.problem import refuse
@@ -335,15 +336,13 @@ def close_posting(
     still lists it, and a board can keep listing a posting that should never
     have passed.
     """
-    from api.ai import verdicts as _verdicts
-
     job = db.query_one("SELECT url, company, title FROM jobs WHERE id = %s", (job_id,))
     if not job:
         raise refuse(404, "NOT_FOUND", "unknown job")
     reason = f"closed by admin {user.email}" + (
         f": {body.reason.strip()}" if body.reason.strip() else ""
     )
-    _verdicts.record_manual(
+    verdicts.record_manual(
         url=job["url"],
         check_type="closed",
         rejected=True,
