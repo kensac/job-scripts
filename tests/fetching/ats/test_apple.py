@@ -8,6 +8,7 @@ import datetime
 from core.fetching import ats
 from core.fetching.urls import normalize_url
 from core.mail.prefilter import looks_job_related
+from tests.fetching.ats.responses import AtsResponse
 
 URL = "https://jobs.apple.com/en-us/details/200686523-3916/softgoods-product-design-engineer"
 
@@ -42,19 +43,12 @@ DETAIL = {
 SERVICE_ERROR = {"error": "jobsite.general.serviceError"}
 
 
-class _Resp:
-    def __init__(self, body, status_code=200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
-
 def _apple(monkeypatch, body, status_code=200):
     asked: list[str] = []
     resolver = next(r for r in ats.RESOLVERS if r.name == "apple")
-    monkeypatch.setattr(resolver, "get", lambda url: asked.append(url) or _Resp(body, status_code))
+    monkeypatch.setattr(
+        resolver, "get", lambda url: asked.append(url) or AtsResponse(body, status_code)
+    )
     return asked
 
 
