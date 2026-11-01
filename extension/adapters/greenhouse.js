@@ -1,4 +1,5 @@
 import { commitControl, setNative } from "./dom";
+import { alternatives } from "./alternatives";
 // Hosted and embedded Greenhouse forms use the same field reader. The
 // background worker fetches board questions because the page's content
 // security policy blocks the boards API. API field names match DOM control
@@ -9,10 +10,6 @@ export function createAdapter(context) {
   const FORM = "form#application-form";
   const sleep = (ms) => context.operation.sleep(ms);
   const clean = (s) => (s || "").replace(/\s+/g, " ").replace(/\s*\*$/, "").trim();
-
-  const mouse = (el, types) => {
-    for (const t of types) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, button: 0 }));
-  };
 
   // The board and job the page is for, from either url shape.
   function posting() {
@@ -217,7 +214,7 @@ export function createAdapter(context) {
       trace.push(`${label}:${opened() ? "open" : "closed"}`);
       return opened();
     };
-    const wants = String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
+    const wants = alternatives(value);
     // A search box (the location) asks a geocoder: its menu reports closed
     // and shows no notice while the answer is on its way, only a spinner
     // for a moment, and the answer can take seconds (Gusto, 2026-09-08).
@@ -308,7 +305,6 @@ export function createAdapter(context) {
   // says what shape of answer to give, the widget says how to put it in.
   // The same kind renders differently form to form (a multi-value question
   // is checkboxes on one and a react-select with chips on another).
-  const parts = (value) => String(value ?? "").split("|").map((s) => s.trim()).filter(Boolean);
 
   async function fill(field, value, file) {
     await context.operation.checkpoint();
@@ -332,7 +328,7 @@ export function createAdapter(context) {
       // Several values: each is picked from the menu and shows as a chip.
       let took = false;
       const have = current(field).toLowerCase().split(" | ");
-      for (const part of parts(value)) {
+      for (const part of alternatives(value)) {
         if (have.includes(part.toLowerCase())) continue;
         took = (await pickReactSelect(field, ctl, part, true)) || took;
       }
@@ -340,7 +336,7 @@ export function createAdapter(context) {
     }
     if (ctl.type === "checkbox" || ctl.type === "radio") {
       let took = false;
-      for (const part of parts(value).map((s) => s.toLowerCase())) {
+      for (const part of alternatives(value).map((s) => s.toLowerCase())) {
         const box = boxes(field.key).find((b) => boxLabel(b).toLowerCase() === part);
         if (box && !box.checked) {
           box.click();
