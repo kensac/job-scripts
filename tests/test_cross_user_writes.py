@@ -13,15 +13,10 @@ from api.ai import access as ai_access
 from api.ai import verdicts
 from api.board.eligibility import LATEST_CHECK
 from core.store import Page
+from tests.factories import user_id_for_subject
 
 SECRET_URL = "https://private.test/secret-role"
 SECRET_TEXT = "the secret posting text"
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def _shared_closed(url: str) -> str | None:
@@ -41,7 +36,9 @@ def _rechecks() -> list[dict]:
 @pytest.fixture
 def private_upload(user_headers, f):
     """User A's private upload, with cached page text another user must not read."""
-    job_id = f.make_job(url=SECRET_URL, source="upload", uploaded_by=_uid(user_headers))
+    job_id = f.make_job(
+        url=SECRET_URL, source="upload", uploaded_by=user_id_for_subject("test-user")
+    )
     f.make_fetch(SECRET_URL, content=SECRET_TEXT)
     return job_id
 
@@ -50,8 +47,8 @@ def private_upload(user_headers, f):
 def shared_posting(user_headers, other_user_headers, f):
     """A catalog posting the fleet verified open, on both people's boards."""
     job_id, url = f.make_ready_job()
-    f.make_board_row(_uid(user_headers), job_id)
-    f.make_board_row(_uid(other_user_headers), job_id)
+    f.make_board_row(user_id_for_subject("test-user"), job_id)
+    f.make_board_row(user_id_for_subject("test-user-2"), job_id)
     return job_id, url
 
 
@@ -160,7 +157,7 @@ def test_submitting_a_fill_naming_another_users_upload_writes_no_board_row(
     client, other_user_headers, private_upload
 ):
     """A fill attached before resolve matched only touchable postings."""
-    other = _uid(other_user_headers)
+    other = user_id_for_subject("test-user-2")
     fill = db.query_one(
         "INSERT INTO application_fills (user_id, job_id, url, host, fields) "
         "VALUES (%s, %s, %s, 'private.test', '[]'::jsonb) RETURNING id",

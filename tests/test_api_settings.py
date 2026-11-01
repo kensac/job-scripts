@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tests import mail_log
+from tests.factories import user_id_for_subject
 
 # ---------------------------------------------------------------------------
 # PUT /v1/user/settings - ai_model / ai_params validation
@@ -221,7 +222,7 @@ def test_funnel_counts_stages_with_their_denominator(client, user_headers, f):
     """ "299 of 714" is the sentence that matters, not "42%"."""
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     _apply_event(f, uid, f.make_job(source="board-a"), "acknowledgement")
     _apply_event(f, uid, f.make_job(source="board-a"), "rejection")
     db.execute(
@@ -256,7 +257,7 @@ def test_a_stage_reached_then_superseded_still_counts(client, user_headers, f):
     to the total."""
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     job_id = f.make_job(source="board-b")
     _apply_event(f, uid, job_id, "acknowledgement")
     app = db.query_one("SELECT id FROM applications WHERE job_id = %s", (job_id,))
@@ -291,7 +292,7 @@ def test_a_corrected_kind_and_a_moved_message_reach_no_stage(client, user_header
     (2026-10-10) read different stages."""
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     job_id = f.make_job(source="board-c")
     _apply_event(f, uid, job_id, "interview_invite")
     app = db.query_one("SELECT id FROM applications WHERE job_id = %s", (job_id,))
@@ -332,9 +333,8 @@ def test_per_source_funnel_flags_a_sample_too_small_to_read(client, user_headers
     created when a TRACKED posting is marked applied, and that has happened
     for essentially one source. Report the real n, flagged, rather than a
     rate off two rows."""
-    from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     _apply_event(f, uid, f.make_job(source="tiny-board"), "acknowledgement")
 
     body = client.get("/v1/user/funnel", headers=user_headers).json()
@@ -356,7 +356,7 @@ def test_criteria_are_served_in_full_shape_whatever_was_saved(client, user_heade
         "included_locations": [],
         "included_terms": [],
     }
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     db.execute(
         "INSERT INTO user_settings (user_id, criteria) VALUES (%s, %s) "
         "ON CONFLICT (user_id) DO UPDATE SET criteria = EXCLUDED.criteria",

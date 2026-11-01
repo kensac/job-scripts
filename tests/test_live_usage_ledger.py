@@ -12,6 +12,7 @@ from core import pricing
 from core.checks import JobClosedResponse
 from core.store import Page
 from tasks import uploads
+from tests.factories import user_id_for_subject
 
 
 @pytest.mark.parametrize("kind", ["explain", "suggest", "improve", "upload"])
@@ -19,7 +20,7 @@ from tasks import uploads
 def test_live_usage_is_recorded_once_with_cache_even_without_usable_output(
     client, user_headers, f, monkeypatch, kind, usable
 ):
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     cfg = ai.AIConfig("openai", "test-key", "user", "gpt-5-nano")
     monkeypatch.setattr(ai_access, "require_config", lambda user: cfg)
     usage = {

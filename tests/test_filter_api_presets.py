@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_presets_list_returns_seeded_presets(client, admin_headers, user_headers):
@@ -19,7 +20,7 @@ def test_presets_list_returns_seeded_presets(client, admin_headers, user_headers
 
 
 def test_adopt_preset_creates_user_filter(client, admin_headers, user_headers):
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     created = client.post(
         "/v1/admin/filter-presets",
         json={"name": "Junior Friendly", "prompt": "no more than 2 years experience required"},
@@ -150,3 +151,45 @@ def test_coverage_reads_the_latest_custom_verdict(client, user_headers, f):
     cov = next(p for p in body["presets"] if p["id"] == preset_id)["coverage"]
     assert cov["already_judged"] == 1
     assert cov["would_show_now"] == 0
+
+
+def test_preset_coverage_counts_judged_postings_among_the_eligible(
+    client, admin_headers, user_headers, f
+):
+    from core.filters import compute_filter_hash
+
+    preset = client.post(
+        "/v1/admin/filter-presets",
+        json={"name": "Covered", "prompt": "covered prompt"},
+        headers=admin_headers,
+    ).json()
+    unjudged = client.post(
+        "/v1/admin/filter-presets",
+        json={"name": "Unjudged", "prompt": "nobody ran this"},
+        headers=admin_headers,
+    ).json()
+    hash_ = compute_filter_hash(preset["prompt"], preset["on_ambiguous"])
+    _, kept = f.make_ready_job()
+    _, dropped = f.make_ready_job()
+    f.make_ready_job()
+    # Judged but not eligible: one gate rejected, so it counts nowhere.
+    _, closed = f.make_ready_job(closed="rejected")
+    f.make_verdict(kept, "custom", "passed", prompt_hash=hash_)
+    f.make_verdict(dropped, "custom", "rejected", prompt_hash=hash_)
+    f.make_verdict(closed, "custom", "passed", prompt_hash=hash_)
+
+    listed = client.get("/v1/filter-presets", headers=user_headers).json()
+    offers = {p["name"]: p["coverage"] for p in listed["presets"]}
+    assert listed["eligible_postings"] == 3
+    assert offers[preset["name"]] == {
+        "would_show_now": 1,
+        "already_judged": 2,
+        "eligible": 3,
+        "needs_ai": 1,
+    }
+    assert offers[unjudged["name"]] == {
+        "would_show_now": 0,
+        "already_judged": 0,
+        "eligible": 3,
+        "needs_ai": 3,
+    }

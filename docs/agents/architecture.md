@@ -223,9 +223,10 @@ not on a production step, where it costs one batch per hour.
 request and hashes its exact submitted shape.
 `tasks/verification/reverification.py` refreshes existing verdicts from current
 pages and compares that question identity before reusing an answer.
-`tasks/verification/new_postings.py` selects
-uncleared postings, reuses verified near copies, and records new closed,
-clearance and board verdicts. Keep candidate selection and result settlement
+The new-posting sweep selects uncleared postings
+(`tasks/verification/selection.py`), reuses verified near copies
+(`tasks/verification/near_copies.py`), and records new closed, clearance and
+board verdicts (`tasks/verification/new_postings.py`). Keep candidate selection and result settlement
 with their respective sweep; only request construction is shared. The task
 registry still maps the same three handler kinds through `tasks/verify.py`.
 

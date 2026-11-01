@@ -18,13 +18,7 @@ from core.store import add_ai_result
 from tasks import ingest as tasks_ingest
 from tasks.board import in_flight_urls
 from tasks.filtering import personal_runs as tasks_filters
-from tests.factories import filter_config, make_task
-
-
-def _user_id() -> int:
-    row = db.query_one("SELECT id, groups FROM users WHERE sub = 'test-user'")
-    assert row is not None
-    return row["id"]
+from tests.factories import filter_config, make_task, user_id_for_subject
 
 
 def _entitle(user_id: int) -> None:
@@ -67,7 +61,7 @@ def test_in_flight_urls_are_what_live_chunks_hold():
 
 
 def test_a_waiting_run_no_longer_blocks_the_next_cycle(user_headers):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _entitle(uid)
     make_task("run_all_filters", {"user_id": uid, "batched": True}, status="waiting")
     tasks_ingest.schedule_filter_runs("2026-09-04T16:00")
@@ -75,7 +69,7 @@ def test_a_waiting_run_no_longer_blocks_the_next_cycle(user_headers):
 
 
 def test_a_run_that_has_not_split_still_blocks(user_headers):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _entitle(uid)
     make_task("run_all_filters", {"user_id": uid, "batched": True}, status="running")
     tasks_ingest.schedule_filter_runs("2026-09-04T16:00")
@@ -114,7 +108,7 @@ async def test_a_chunk_publishes_its_passes_before_the_parent_finishes(monkeypat
         ]
 
     monkeypatch.setattr(tasks_filters, "submit_or_collect", fake_batch)
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _entitle(uid)
     url = "https://jobs.example.com/job-1"
     db.execute(

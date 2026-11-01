@@ -105,8 +105,24 @@ def test_admin_trigger_is_idempotent_and_report_is_typed(client, admin_headers):
     report = client.get("/v1/admin/job-profiles/report", headers=admin_headers)
     assert report.status_code == 200
     assert report.json()["classifier_version"] == CLASSIFIER_VERSION
-    assert report.json()["model"] == JOB_PROFILE_MODEL
+    assert report.json()["model"] == report.json()["run_model"] == JOB_PROFILE_MODEL
     assert report.json()["classifications"] == 0
+
+
+def test_report_counts_the_stored_model_when_the_pin_has_moved(client, admin_headers, f):
+    source = f.make_source()
+    f.subscribe(f.make_user(), source)
+    _job_id, url = f.make_ready_job(source=source)
+    row = job_profiles.job_profile_derivation.candidates(1)[0]
+    answer = JobProfileAnswer.model_validate_json(_answer())
+    context = {"content_row_id": row["content_row_id"], "content_hash": "h"}
+    job_profiles._store(url, context, answer, "an-earlier-model")
+
+    report = client.get("/v1/admin/job-profiles/report", headers=admin_headers).json()
+    assert report["model"] == "an-earlier-model"
+    assert report["run_model"] == JOB_PROFILE_MODEL
+    assert report["classifications"] == 1
+    assert report["role_families"] == [{"value": "engineering", "count": 1}]
 
 
 def test_scheduler_admits_backlog_once_and_skips_no_work(set_config, f, monkeypatch):
