@@ -34,6 +34,22 @@ def test_catalog_lists_unchecked_postings_under_typed_filters(client, admin_head
     assert [row["job_id"] for row in body["rows"]] == [other]
 
 
+def test_catalog_joins_pay_only_for_a_pay_filter(client, admin_headers, f):
+    """The read joins job_comp only when a filter names pay; a pay filter
+    still narrows the rows and the total to postings with that pay."""
+    paid = f.make_job(company="Paid")
+    f.make_job(company="Unpaid")
+    url = db.query_one("SELECT url FROM jobs WHERE id = %s", (paid,))["url"]
+    f.make_comp(url, comp_min=150000, comp_currency="USD")
+
+    rules = [{"field": "comp_currency", "operator": "equals", "value": "usd"}]
+    body = _catalog(client, admin_headers, column_filters=json.dumps(rules), with_total="true")
+    assert [row["job_id"] for row in body["rows"]] == [paid]
+    assert body["total"] == 1
+
+    assert _catalog(client, admin_headers, with_total="true")["total"] >= 2
+
+
 def test_catalog_refuses_a_persons_own_fields(client, admin_headers):
     rule = [{"field": "notes", "operator": "is_empty"}]
     response = client.get(

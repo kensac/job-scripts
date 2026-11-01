@@ -79,10 +79,9 @@ def enqueue(
     filter_id: int | None,
     *,
     policy: AdmissionPolicy,
-    ignore_budget: bool = False,
     dedupe_key: str | None = None,
 ) -> RunAdmission:
-    payload = {"user_id": user_id, "ignore_budget": ignore_budget}
+    payload: dict[str, object] = {"user_id": user_id}
     if filter_id is not None:
         payload["filter_id"] = filter_id
     if policy == "scheduled":

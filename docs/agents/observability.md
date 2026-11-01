@@ -58,18 +58,15 @@ beats; `api.worker` releases claims on exit. `tasks.runtime` writes progress
 (`set_progress`, `checkpoint`), parks (`park_waiting`, `park_awaiting_batch`) and finishes, each
 behind the claim. `api.queue` inserts (`enqueue`), merges payload keys
 (`merge_payload`, unguarded on purpose: the keys record paid or finished work)
-and cancels. A handler that restates one of these writes drifts from it: the
-filter batch runner kept its own heartbeat with no claim guard, which vouched
-for the run that replaced it. `tests/test_task_writes_owned.py` fails on an
+and cancels. A handler that restates one of these writes drifts from it.
+`tests/test_task_writes_owned.py` fails on an
 `UPDATE tasks` anywhere else, and on an `INSERT INTO tasks` outside the
 admission paths it lists with their reasons.
 
 **A worker claims only kinds its own image has a handler for.** A roll goes
 host by host, so for a minute an old image and a new one share the queue. A
 kind the new image added must wait for a host that can run it, rather than be
-claimed and failed as unknown by one that cannot. That happened to the first
-classify_locations task on 2026-09-05, in the seconds before the claiming
-host's own deploy. The registry in `src/tasks/__init__.py` is what the worker
+claimed and failed as unknown by one that cannot. The registry in `src/tasks/__init__.py` is what the worker
 can do, and the claim reads it; the kind allow and exclude lists narrow from
 there.
 
@@ -123,8 +120,8 @@ limit. It starts at the ceiling when `JOBTRACKER_TASK_SLOTS` is set, because
 the host's value is known at start and climbing from one after every deploy
 cost each worker a window of completions per step; with only the
 `worker_task_slots` entry it starts at one. It grows by one while a window
-of completions comes faster than the last, and halves when a task fails on the host running out of memory or
-threads (`_TRANSIENT_MARKERS`, `MemoryError`) or when free memory, the
+of completions comes faster than the last, and halves when a task fails on the host running out of memory, threads or
+disk (`_TRANSIENT_MARKERS`, `MemoryError`) or when free memory, the
 tighter of the cgroup's headroom and the host's `MemAvailable`, falls under
 `worker_memory_reserve_mb`. A task costs its kind's `worker_task_weights`
 slots; a kind heavier than the free room is left for another worker. Nothing
@@ -161,10 +158,8 @@ claim stamps, the release and the back-off are pinned by
 far from the database: `oci` is about 103 ms from it, the hosts beside it under
 a millisecond. A query issued once per candidate costs its round trips (BEGIN,
 the statement, COMMIT) times the candidate count, which a near host never
-notices and a far host pays in hours. Task 5834132 (run_managed_board_batch,
-23,394 candidates, 2026-10-04) ran 2h40m on `oci` asking the verdict cache one
-url at a time; measured on a test database, that loop was 105,273 round trips
-(about 3 h at 103 ms) and is now 6. Read a candidate list's facts in one
+notices and a far host pays in hours: a managed-board run's verdict-cache loop
+went from 105,273 round trips to 6 (measured 2026-10-04). Read a candidate list's facts in one
 statement over `= ANY(%s)` (`store.decided_custom_urls`, `store.get_contents`)
 before the per-candidate work starts, and test it by counting statements for N
 candidates, as `tests/test_verdict_cache_batch.py` does. A loop whose every
@@ -176,8 +171,8 @@ out of it.
 `core.pool.statement()`: the open `transaction()` when there is one, otherwise
 a pooled connection in autocommit, returned to the pool with autocommit off.
 An implicit transaction around one statement adds BEGIN and COMMIT, two round
-trips that change nothing. From a laptop against production on 2026-10-10 that
-was 337 ms a statement against 110 ms. On `oci` the worker's housekeeping
+trips that change nothing; the `core.pool.statement` docstring has the
+measurement. On `oci` the worker's housekeeping
 (reaper, chunk reconcile, gauges, scheduler) held it about 28 s of every
 minute between tasks during the 2026-10-10 backlog, against 8 s on `gcp-vps`
 and under a second beside the database. Several statements that must commit
@@ -270,8 +265,7 @@ the same one the handler applies.** The size is an `app_config` row named in
 it through `configured_shape`, so a change reaches both on the next cycle. A
 handler that caps from anything else makes the ceiling price a fleet that is
 not running. The shape's declared `per_cycle` is the row's seeded default,
-and its derivation stays beside it in `core.shapes`. Mail classification had two, 1,200 in the handler
-and 5,000 in the shape, each derived from its own guess at a spec's size.
+and its derivation stays beside it in `core.shapes`.
 A cap sized to fill the batch waves is computed from `core.batch`'s
 `BATCH_TOKEN_BUDGET` and `BATCH_WAVE_CONCURRENCY` over a spec size measured
 from `ai_batches.est_tokens / requests`, which is the estimate that chunks
@@ -361,7 +355,7 @@ result, a filter verdict cost about ten round trips (BEGIN, the receipt lock,
 the instruction lookup, the verdict, the ledger row, the review outcome, the
 acknowledgement, COMMIT), which for a 23,396-result run measured 230,353
 round trips: 6.6 h at the 103 ms `oci` is from the database. Filter collection
-(`tasks.filtering.execution`) now passes `COLLECT_CHUNK` results to
+(`tasks.filtering.execution`) passes `COLLECT_CHUNK` results to
 `batch_results.consume_results`, which locks and acknowledges them in one
 statement each; verdicts go in through `verdicts.record_ai_verdicts` (one
 pipelined insert) and outcomes and ledger rows through `db.pipeline()`. The
@@ -397,8 +391,7 @@ without a snapshot retain unknown input rather than using a current page.
 A title screen (core/screening.py) leaves the posting out of the candidate
 SELECT, and the posting path and the admin funnel run it again when read. The
 stored alternative, one decision row per task and posting with an outcome row
-per paid verdict, reached 9.76M decisions (1.64 GB) by 2026-10-10, 93.6% of
-them repeating one already stored, and its only readers were admin reports.
+per paid verdict, reached 9.76M rows by 2026-10-10, 93.6% repeats.
 
 Distinguish submission rejection from per-request failure using the stored
 provider errors. Failure counts alone do not establish the cause. A submission
@@ -454,15 +447,15 @@ pending, running or waiting, and
 sweep's `batch_requests` already name.
 
 **A resume is not a retry.** Every claim increments `attempts`, because
-`(worker, attempts)` is the generation stamp claim-guarded writes check, and
-it must never repeat. The retry budget is `attempts - batch_resumes`
+`(worker, attempts)` is the generation stamp claim-guarded writes check. Only
+the claim holder releasing its own claim (a `Deferred` requeue, a graceful
+exit, `PayloadUnavailable`) gives the attempt back; a park never does,
+because a lowered `attempts` on a parked task lets a later claim reuse a
+stamp a lost worker still holds. The retry budget is `attempts - batch_resumes`
 (`api.worker_lifecycle.claims.RETRIES_SPENT`): `resume_parked` counts the claim it hands out,
 and both the transient-error requeue and the reaper compare the difference
-with `task_max_attempts` (app_config). Counting resumes as attempts let 404 batch tasks reach
-the cap in the 30 days to 2026-10-04 by waiting alone; two were then failed at
-a disk-full error and a lost worker with 1,198 paid receipts unconsumed. Do
-not give the attempt back on park instead: a lowered `attempts` lets a later
-claim reuse a stamp a lost worker still holds.
+with `task_max_attempts` (app_config). Counting resumes as attempts let 404
+batch tasks reach the cap by waiting alone in the 30 days to 2026-10-04.
 
 **A failed task keeps its `batch_ids`.** Only `done` strips them, because only
 then are the batches provably spent. A task failed by the reaper or by an
@@ -486,9 +479,8 @@ request is built with the step's own instructions, schema and input (the
 goes per arm, and each arm is scored: cost and tokens per request, parse
 failures, per-field agreement with a reference arm (the dearest by default)
 and with what production decided for the same postings. The same seed draws
-the same postings later. The 2026-09-06 filter comparison was a script over
-an export, and the script fed every request the posting's first line; its
-headline was wrong and was nearly acted on. That is why this exists.
+the same postings later. A script over an export does not build the request
+production builds.
 
 **`api.run_experiment` is the only way to run one.** There is no admin
 screen, endpoint, task or table for it. Run it from a checkout. It uses the
@@ -529,8 +521,7 @@ employer's own questions are kept: the identity block, the resume upload and
 the cover-letter slot are left to autofill.
 
 A draft is per person and per job (`application_answers`), written from a
-resume the person keeps here as text (`user_resumes`; a PDF is read at upload
-and the file is not stored) in a style they describe in their own words
+resume the person keeps here (its canonical text version) in a style they describe in their own words
 (`user_settings.writing_style`, replacing the built-in default rather than
 merging with it). The `application_draft` task batches the drafts through the
 `application` shape, overridable from the task screen like any other step,
@@ -602,12 +593,12 @@ triage later. `GET /user/apply/reports` lists them.
 and `application_suggest_instructions` in app_config hold the text the
 model drafts and fills under; empty means the built-in constant. A wording
 change is an admin edit that takes effect on the next draft, not a roll.
-The person's writing style is appended per person, as before.
+The person's writing style is appended per person.
 
 **Files first, then let the page settle.** Attaching a resume makes Ashby
 rebuild its form, and a field wrapper read before the attach is a detached
 copy a moment later: a click on it still flips the widget on screen, on a
-node the form no longer owns (report 2, Clera, 2026-09-07). The content
+node the form no longer owns. The content
 script attaches files first, waits until the page's inputs and element
 count have been still for 1.5 seconds, re-reads every field, fills the
 rest, and then checks what the page holds, filling once more anything it
@@ -653,14 +644,14 @@ config. Three ATSs stay out (Homerun, PhenomPeople, Teamtailor): the table
 gives them no url because they live on employers' own domains, and running
 on every page to detect them is a separate decision. `extension/adapters/recipe.js`
 interprets the config for whichever ATS matches the page and exposes the
-same reader interface the hand-written readers do, plus a step model: a
-page with a Continue and no Submit is filled and advanced, up to twelve
-pages, and the page that submits is left to the person. Every key the
+same reader interface the hand-written readers do, plus a step model: with
+the person's auto-advance preference on and no required field blank, a page
+with a Continue and no Submit is filled and advanced, up to twelve pages,
+and the page that submits is left to the person. Every key the
 table uses has a branch in the engine; `tools/audit_ats_config.py` diffs
 the table against the converter and the engine's key lists and prints, per
-ATS, what is dropped or ignored. Run it after touching any of the three;
-on 2026-09-08 it went from 214 dropped fields, four unloaded ATSs and
-some 300 ignored keys to zero dropped and zero ignored. A reader may
+ATS, what is dropped or ignored. Run it after touching any of the three; it should report zero dropped and
+zero ignored. A reader may
 export `applyButton()`; on a posting page whose form is a click away the
 panel offers "Open the application" and never presses it unasked. A field that names its fact is filled from
 the profile without reading its label (`Field_.fact`); consents are
@@ -754,7 +745,7 @@ inside which request or task". Four things ship:
 
 - Every unhandled exception in a request handler or a worker's handler.
 - A queryable event wherever the service swallows or retries a failure that
-  would otherwise leave no trace (`task_failed`, `task_requeued`,
+  would otherwise leave no trace, for example (`task_failed`, `task_requeued`,
   `tasks_reaped`, `tasks_lost`, `ingest_pull_failed`, `source_switched_off`, `fetch_failed`,
   `fetch_deferred`, `ai_call_failed`, `alert_opened`, `alert_resolved`,
   `worker_started`).
@@ -840,13 +831,9 @@ is a thread: it proves the process is alive and nothing about the handler.
 The detector judges the handler by `progress_at`, so a handler that writes
 progress once per phase looks stuck for the whole phase. A loop over
 messages, candidates or applications writes progress every few minutes of
-work on the farthest host. `match_mail` wrote once per user, production has
-one user, and its sweep of 4,853 messages and 2,587 applications ran 110
-minutes on a host 100 ms from the database: 128 of the 235 stall alerts in
-the 30 days to 2026-10-04 were that single write. It now writes every
-`PROGRESS_EVERY` items. A phase that cannot report because it is one long
-call is usually a per-candidate loop to batch, as the managed-board verdict
-cache was (96 more of the 235, none since #769).
+work on the farthest host, as `match_mail` does every `PROGRESS_EVERY`
+items. A phase that cannot report because it is one long
+call is usually a per-candidate loop to batch.
 
 Silence is measured from the later of `progress_at` and the current claim's
 `started_at`, because `progress_at` survives a park, a graceful release and a
@@ -901,17 +888,9 @@ verification cached nothing, $0.120 per 1,000 batched requests against $0.091
 with the block. The measurement is in that constant's comment. A board whose
 question is removed or shortened can drop a combination back under the
 minimum; `cached_tokens` on the verify purpose in `model_calls` shows it.
-Measured 2026-10-18 (live, gpt-6-luna, production effort, 200 postings
-each), the block form against today's request run twice:
-- Same `input_tokens` on every posting, and each form read the other's cache,
-  so the model sees the same tokens.
-- Filter keeps: 86 and 85 today, 85 in the new form. Discordant pairs: 7/6
-  today against itself, 8/7 against the new form.
-- Joint verify, Tech New Grad: 67 and 71 today, 69 new (7/6 vs 10/12).
-  Aerospace: 13 and 12, 14 new. Clearance: 89 and 89, 90 new. All sign tests
-  p >= 0.45.
-- Writes went from 217k (filter) and 230k (joint) to 0, with cached reads
-  unchanged.
+The block form left decisions unchanged against the previous request run
+twice (2026-10-18, 200 postings per check, all sign tests p >= 0.45) and
+took cache writes to zero.
 
 A request that should never be written has no breakpoint at all; adding the
 posting as a second breakpoint would bring the premium back.
@@ -921,8 +900,7 @@ managed-board review requests whose model datasheet explicitly supports it.
 When disabled, explicit-only mode with no breakpoints disables reads as well
 as writes. The policy lives in immutable request context, not the
 criteria hash: rollback does not invalidate verdicts or resubmit paid work.
-Legacy snapshot readers accept the context during rollout; verify active
-workers have the new transport before measuring adoption. A cache setting
+A cache setting
 does not guarantee identical sampled outputs or a particular saving.
 
 Scheduled filter admission persists `scheduled=true`; older `batched=true`
@@ -933,8 +911,8 @@ later eligible cycle; they are not immediately requeued inside the run.
 
 `tasks.batch_policy.transport` decides how a scheduled run travels: the
 shared key goes through the persisted batch collector, and a shared-key
-configuration the collector cannot carry (a non-OpenAI provider, a model
-without JSON-schema output) fails with `BATCH_UNSUPPORTED` in task
+configuration the collector cannot carry (a provider with no batch transport,
+a model without JSON-schema output) fails with `BATCH_UNSUPPORTED` in task
 progress/error rather than spending the shared budget live at full price. A
 person's own key runs live, billed to them, because they were promised no cap
 and their own bill and the collector holds only the server's key. Existing
@@ -971,8 +949,7 @@ over 17,733 chunks (81 MB of payload text) and 22 distinct board copies over
 revision, the resolved model, the reservation, `urls`) stays in the payload.
 Handlers read the settings through `api.run_configs.filter_of` and
 `with_board_settings`; `tasks.board.submission_exclusions` is the one SQL
-reader. Tasks written before 2026-10-10 were converted to `config_id` in
-production, so no payload holds the old copy.
+reader.
 
 ## Embedding receipt vectors
 
@@ -996,8 +973,7 @@ parts and existing PDF downloads remain available while uploads are paused.
 
 **A new receipt's vectors are written to object storage before the receipt
 exists, and the receipt holds only `embedding_vectors_ref`.** There is no
-inline shape: 0 of 1,619 receipts held inline vectors on 2026-10-10, and the
-tools that moved them were removed. `batch_results.checkpoint` uploads every
+inline shape. `batch_results.checkpoint` uploads every
 result's vectors with `PayloadStore.put_verified` outside any transaction,
 concurrently up to `core.payloads.objects.MAX_CONNECTIONS`, then writes the receipts
 and clears the collected batch IDs in one transaction. Storage that is
@@ -1010,9 +986,7 @@ objects are content-addressed. Every reader of receipt vectors goes through
 `batch_results.response_payload` (`unconsumed`, `payload_recovery.retry`).
 
 Objects are version 2 uncompressed JSON, and the reader verifies the canonical
-JSON byte size and SHA-256. Version 1 (gzip) is not read: on 2026-10-10 the
-last 501 receipts that named one were rewritten as version 2 and none remain.
-Do not write another format beside it without a reader for it first.
+JSON byte size and SHA-256. Version 1 (gzip) is not read and none remain. Do not write another format beside it without a reader for it first.
 
 Replay reads only unconsumed receipts, so missing historical vectors cannot
 reopen acknowledged work. A required external input raises `PayloadUnavailable`
@@ -1032,11 +1006,8 @@ reference, with nothing inline.** There is no exception by kind, task status or
 receipt state. Two shapes for one population means every reader, test and
 audit must handle both, and the second shape becomes the place where the next
 rule quietly does not apply. A hot path that needs care gets a solution, such
-as proving a stored request by its digest instead of reading it. It never gets an exempt population. On 2026-10-10
-every one of 1,580,979 rows was a version 3 member with nothing inline, so
-readers accept nothing else and the tools that converted the other shapes were
-removed. 35d943a012cd dropped the `snapshot` column after a validated check
-proved it empty, and `snapshot_ref` is NOT NULL.
+as proving a stored request by its digest instead of reading it. It never gets an exempt population. Readers accept nothing else, and
+`snapshot_ref` is NOT NULL.
 
 **A new request is written to object storage before its row exists, and the row
 holds only the reference.** `batch_results.snapshot_specs` puts every request
@@ -1119,8 +1090,7 @@ Supported chunk parents can move from their derived chunk-failure state back
 to `waiting`, never `pending`; cancelled, completed, or independently failed
 parents require separate investigation. Recovery and parent finalization lock
 the parent before the child state transition/count, preventing a stale count
-from terminalizing a parent after its child was recovered. Do not deploy this
-lifecycle change without coordinating with the fleet deployment owner.
+from terminalizing a parent after its child was recovered.
 
 ## Listing text and raw records
 
@@ -1133,7 +1103,7 @@ backfill and the rollout order are in
 
 **Every reader of a task's job list goes through `task_jobs.run_jobs`, which
 reads both shapes:** inline `jobs` (a live filter chunk), and `jobs_ref` with
-`candidate_count`, a verified object. Two populations carry one (`task_jobs.POPULATIONS`):
+`candidate_count`, a verified object. Two populations carry one (`task_jobs.MANAGED_BOARD_RUNS` and `FILTER_CHUNKS`):
 
 - **Managed-board runs.** The candidate list was 7.9 to 8.6 MB of JSON per run
   and 94 percent of the payload (measured 2026-10-03). Its readers are the
@@ -1188,9 +1158,7 @@ run kinds. Its readers spell the kinds as SQL literals
 (`Population.kinds_sql`), because a prepared statement's generic plan cannot
 prove a partial predicate from a bound array.
 
-**Only a live filter chunk holds its list inline.** On 2026-10-10 every one
-of 18,683 tasks with a list held it by reference, and the tool that converted
-older inline lists was removed. Do not reintroduce an inline managed-board run
+**Only a live filter chunk holds its list inline.** Do not reintroduce an inline managed-board run
 or batch chunk: an inline list beside a referenced one is the second shape
 this rule exists to avoid.
 
@@ -1200,10 +1168,8 @@ this rule exists to avoid.
 verdict `prompt_hash` and the prompt-reporting catalog. NULL and empty strings
 remain distinct. A row holds only `instructions_id`, a reference into
 `ai_instruction_texts`; cached page content and accounting columns are
-unchanged. On 2026-10-10 none of 2,826,328 rows held inline text, so
-`hydrate` never reads the inline `instructions` column and no query names it.
-The column is empty and is dropped once the `verdicts` and `ledger_rows` views
-stop selecting it. Query detail and custom-result readers hydrate through the
+unchanged. `hydrate` never reads the inline `instructions` column, which is empty.
+Query detail and custom-result readers hydrate through the
 reference and fail explicitly if referenced content is missing or its digest
 is wrong. Keep dictionary rows permanently while referenced.
 

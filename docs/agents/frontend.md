@@ -128,8 +128,7 @@ resolves an unset `column_layout` from `board_default_column_layout` in
 
 **Named views live only in `saved_views`, through `/user/views`.**
 `column_layout` in settings is the board's default layout, not a view.
-`prefs.views` was the older home; it is converted and nothing reads or
-writes it. A page that cannot reach `/user/views` keeps views in the browser,
+Never read or write `prefs.views`. A page that cannot reach `/user/views` keeps views in the browser,
 never in `prefs`. A count of a person's views is the length of
 `GET /user/views` with no `page`.
 
@@ -144,12 +143,12 @@ caching them. The extension pins a revision per fill and keeps an unexpired
 verified copy through an outage. Publishing an earlier table again
 re-enables its row. Each published recipe row must point to an
 upload; its bytes live only in stored chunks. The version 1 single-response
-read stays only while older clients use it. Remove it
-after the fleet and extension have moved to version 2. This channel is for a
+read is kept for older clients. This channel is for a
 developer-mode or self-hosted install: the Chrome Web Store's MV3 policy
 treats a behaviour-driving config as remote logic.
 
-**Keep the recipe reader split by domain behavior.** `recipe.js` owns
+**Keep the recipe reader split by domain behavior.** In this repository's
+`extension/adapters/`, `recipe.js` owns
 adapter selection, form flow and the public reader contract.
 `recipe-selectors.js` owns XPath expansion and lookup; `recipe-controls.js`
 owns browser control events; `recipe-values.js` owns profile value and date
@@ -192,8 +191,9 @@ administrator-only; personal surfaces explain decisions without exposing
 other people's filter names or global policy editing.
 
 The implementations are `SettingsPut` and `FilterPatch` in `api/models.py`,
-`put_settings` in `api/routers/users.py`, and the request models and writers in
-`api/routers/saved_views.py` and `api/routers/apply.py`. Filter and view updates share
+`put_settings` in `api/routers/users_routes/settings.py`, and the request
+models and writers in `api/routers/saved_views.py` and
+`api/routers/apply_routes/profile.py`. Filter and view updates share
 `api.updates.NonNullUpdate`; preserve its distinction between omission and null.
 
 ## Actions
