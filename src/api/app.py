@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 
 from api import ai_pause, db, metrics, telemetry
 from api.ai import access as ai_access
@@ -84,6 +85,12 @@ app = FastAPI(
     openapi_url=None,
     lifespan=_lifespan,
 )
+# Compressed at the origin because the leg that pays for size is the one from
+# this host in Nuremberg to the Cloudflare edge beside Vercel in Virginia,
+# which Cloudflare's own compression does not cover. /v1/sources is 1.1 MB of
+# JSON and 165 KB gzipped; over that distance 1.1 MB took 710 ms more than an
+# empty reply and 150 KB took 340 ms (2026-11-01).
+app.add_middleware(GZipMiddleware)
 
 
 @app.exception_handler(ai_pause.AIPaused)
