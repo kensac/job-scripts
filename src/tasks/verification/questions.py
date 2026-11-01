@@ -14,7 +14,7 @@ from core.filters import build_custom_input
 from core.routing import resolve
 from core.shapes import VERIFY_TASK
 
-# Both sweeps submit at the shape's effort; reverify spells the fallback.
+# The effort a question hash records: the shape's, with its fallback.
 _EFFORT = VERIFY_TASK.effort or "low"
 
 

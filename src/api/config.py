@@ -15,9 +15,7 @@ from api.config_keys import (
     health,
     mail,
 )
-from api.config_types import ColumnState as ColumnState
 from api.config_types import ConfigKey as ConfigKey
-from api.config_types import SortKey as SortKey
 
 logger = logging.getLogger(__name__)
 ALL_GROUPS = "*"

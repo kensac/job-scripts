@@ -31,21 +31,12 @@ Deployed = dict[str, Comparison]
 
 @dataclass(frozen=True, slots=True)
 class ExperimentStep:
-    instruction_builder: Callable[[Params], str]
+    instructions: Callable[[Params], str]
     answer_model: type[BaseModel]
-    input_builder: Callable[[Posting], str]
+    build_input: Callable[[Posting], str]
     max_output_tokens: int
-    comparison_projector: Callable[[Comparison], Comparison]
+    project: Callable[[Comparison], Comparison]
     load_deployed: Callable[[list[str], Params], Deployed]
-
-    def instructions(self, params: Params) -> str:
-        return self.instruction_builder(params)
-
-    def build_input(self, posting: Posting) -> str:
-        return self.input_builder(posting)
-
-    def project(self, answer: Comparison) -> Comparison:
-        return self.comparison_projector(answer)
 
 
 def _filter_instructions(params: dict[str, Any]) -> str:
@@ -112,35 +103,35 @@ def steps() -> Mapping[str, ExperimentStep]:
 
     return {
         "filter": ExperimentStep(
-            instruction_builder=_filter_instructions,
+            instructions=_filter_instructions,
             answer_model=FilterDecision,
-            input_builder=_posting_input,
+            build_input=_posting_input,
             max_output_tokens=6000,
-            comparison_projector=_filter_fields,
+            project=_filter_fields,
             load_deployed=_filter_deployed,
         ),
         "verify": ExperimentStep(
-            instruction_builder=lambda params: VERIFICATION_REQUEST.instructions,
+            instructions=lambda params: VERIFICATION_REQUEST.instructions,
             answer_model=VERIFICATION_REQUEST.response_model,
-            input_builder=lambda r: VERIFICATION_REQUEST.build_input(r["input_content"]),
+            build_input=lambda r: VERIFICATION_REQUEST.build_input(r["input_content"]),
             max_output_tokens=VERIFICATION_REQUEST.max_output_tokens,
-            comparison_projector=_verify_fields,
+            project=_verify_fields,
             load_deployed=_verify_deployed,
         ),
         "comp": ExperimentStep(
-            instruction_builder=lambda params: COMP_INSTRUCTIONS,
+            instructions=lambda params: COMP_INSTRUCTIONS,
             answer_model=CompExtract,
-            input_builder=lambda r: r["input_content"][:COMP_INPUT_CHARS],
+            build_input=lambda r: r["input_content"][:COMP_INPUT_CHARS],
             max_output_tokens=COMP_TASK.max_output_tokens,
-            comparison_projector=_comp_fields,
+            project=_comp_fields,
             load_deployed=_comp_deployed,
         ),
         "requirements": ExperimentStep(
-            instruction_builder=lambda params: REQUIREMENTS_INSTRUCTIONS,
+            instructions=lambda params: REQUIREMENTS_INSTRUCTIONS,
             answer_model=RequirementsExtract,
-            input_builder=lambda r: r["input_content"][:REQUIREMENTS_INPUT_CHARS],
+            build_input=lambda r: r["input_content"][:REQUIREMENTS_INPUT_CHARS],
             max_output_tokens=REQUIREMENTS_TASK.max_output_tokens,
-            comparison_projector=_requirements_fields,
+            project=_requirements_fields,
             load_deployed=_requirements_deployed,
         ),
     }

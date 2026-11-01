@@ -12,6 +12,7 @@ from api import ai, budget, db
 from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
 from api.model_calls import Payer
+from api.verdict_equivalence import answering_models
 from core import providers
 from core.answers import FilterDecision, FilterResult
 from core.filters import build_custom_decision_instructions, build_custom_input
@@ -105,9 +106,12 @@ async def execute_live(
     # One read of each for the whole run, before the first paid call. Per job,
     # each cost its own BEGIN, read and COMMIT for every candidate, which a
     # worker far from the database pays at full latency (observability.md).
-    # Model scope is load-bearing: changing models deliberately invalidates the
-    # cache rather than treating another model's verdict as this model's work.
-    decided = decided_custom_urls([job["url"] for job in jobs], snapshot.prompt_hash, cfg.model)
+    # Model scope is load-bearing: changing models invalidates the cache rather
+    # than treating another model's verdict as this model's work, unless the
+    # two were measured and grouped (api.verdict_equivalence).
+    decided = decided_custom_urls(
+        [job["url"] for job in jobs], snapshot.prompt_hash, answering_models("custom", cfg.model)
+    )
     stored = get_contents(
         [job["url"] for job in jobs if "content" not in job and job["url"] not in decided]
     )
@@ -250,6 +254,11 @@ async def execute_batch(
         ):
             cache_policy = "no_cache"
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
+    # One value, sent and recorded. OpenAI settings name it reasoning_effort
+    # and Anthropic settings name it effort; the batch transport takes either.
+    effort = (
+        cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium" if cfg else None
+    )
     specs, by_url = [], {}
     for job in jobs:
         if existing:
@@ -270,10 +279,7 @@ async def execute_batch(
                     "job": job,
                     "page_fetch_id": page.fetch_id,
                     "filter": snapshot.__dict__,
-                    "reasoning_effort": cfg.params.get("reasoning_effort")
-                    or cfg.params.get("effort")
-                    if cfg
-                    else None,
+                    "reasoning_effort": effort,
                 },
             )
         )
@@ -297,12 +303,12 @@ async def execute_batch(
         logger.info("Task %s: collecting previously submitted results", task_id)
         results = await collect(task_id, hook)
     else:
-        assert cfg is not None
+        assert cfg is not None and effort is not None
         results = await submit(
             task_id,
             specs,
             cfg.model,
-            cfg.params.get("reasoning_effort", "medium"),
+            effort,
             max_output_tokens,
             hook,
         )
