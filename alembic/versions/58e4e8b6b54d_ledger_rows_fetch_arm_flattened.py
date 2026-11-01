@@ -15,7 +15,7 @@ The same page reads in 1.3 ms. The rows and the columns are unchanged; the
 marker is not one of the view's columns.
 
 Revision ID: 58e4e8b6b54d
-Revises: 255b3de2e3a3
+Revises: 0b6e2f1c9a47
 Create Date: 2026-11-01 01:32:19.291001
 
 """
@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "58e4e8b6b54d"
-down_revision: str | None = "255b3de2e3a3"
+down_revision: str | None = "0b6e2f1c9a47"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
