@@ -255,6 +255,52 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     assert scraped == []
 
 
+@pytest.mark.asyncio
+async def test_content_backfill_reaches_a_published_boards_only_source(monkeypatch):
+    """A source only a published board reads has no subscriber; its postings
+    the board would verify still need page text. The ones its title gate skips
+    and an unpublished board's do not."""
+    from api import source_selection
+    from core.fetching import ats as core_ats
+
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('mbonly', 'https://mb')")
+    db.execute("INSERT INTO users (sub, email) VALUES ('mb-sponsor', 'm@b.com')")
+    board = db.query_one(
+        "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
+        "requested_model, published, public_revision, published_at, title_gate) "
+        "VALUES ('mb-content', 'MB', %s, 'finance', 'mb-hash', 'gpt-6-luna', true, 1, now(), "
+        '\'{"recipe": "finance_new_grad_v2"}\') RETURNING id',
+        (user_id_for_subject("mb-sponsor"),),
+    )
+    draft = db.query_one(
+        "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
+        "requested_model) VALUES ('mb-draft', 'Draft', %s, 'finance', 'draft-hash', "
+        "'gpt-6-luna') RETURNING id",
+        (user_id_for_subject("mb-sponsor"),),
+    )
+    db.execute("INSERT INTO sources (name, listings_url) VALUES ('mbdraft', 'https://md')")
+    source_selection.set_board_sources(board["id"], ["mbonly"])
+    source_selection.set_board_sources(draft["id"], ["mbdraft"])
+    db.execute(
+        "INSERT INTO jobs (url, source, company, title, available) VALUES "
+        "('https://mb.test/analyst', 'mbonly', 'Bank', 'Investment Banking Analyst', true), "
+        "('https://mb.test/teller', 'mbonly', 'Bank', 'Part Time Teller', true), "
+        "('https://mb.test/draft', 'mbdraft', 'Bank', 'Investment Banking Analyst', true)"
+    )
+    scraped = []
+
+    async def fake_fetch_page(url):
+        scraped.append(url)
+        return "Y" * 500, False
+
+    monkeypatch.setattr(fetching, "fetch_page", fake_fetch_page)
+    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
+
+    tid = tasks_runtime.enqueue("fetch_missing_content", {})
+    await tasks_content.handle_fetch_missing_content(tid, {})
+    assert scraped == ["https://mb.test/analyst"]
+
+
 def test_worker_startup_seeds_open_alert_count_from_database():
     from api import metrics, worker
 
