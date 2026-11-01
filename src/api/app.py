@@ -61,16 +61,31 @@ async def _lifespan(app: FastAPI):
 
 
 def _warm_admin_pages() -> None:
-    """The admin pages whose default view takes 15 to 70 s to compute start
-    computing now, in the background, so the first visit after a roll does not
+    """The admin pages whose default view takes 15 to 70 s to compute, and the
+    jobs list's verdict tabs, start computing now, in the background, so the first visit after a roll does not
     wait for them (api.stale_cache)."""
-    from api.routers.admin import ledger_stats, posting_inspection, query_ledger, review_gates
+    from api.routers.admin import (
+        health,
+        ledger_stats,
+        posting_inspection,
+        query_ledger,
+        review_gates,
+    )
 
     ledger_stats._stats.warm()
     query_ledger._options.warm()
     posting_inspection._checked_urls.warm()
-    spend._spend_pages.warm(30, lambda: spend._spend(30))
-    default_report = (7, None, None, None, None)
+    for verdict in posting_inspection._VERDICT_HOLDS:
+        posting_inspection._verdict_totals.warm(
+            verdict, lambda verdict=verdict: posting_inspection._verdict_total(verdict)
+        )
+    health._content_mix.warm()
+    # Both panels sit on the spend page and read its default window. A report
+    # warmed for any other window leaves the page's own request to wait the
+    # full computation after every roll.
+    days = 30
+    spend._spend_pages.warm(days, lambda: spend._spend(days))
+    default_report = (days, None, None, None, None)
     screens = json.dumps(db.get_config("title_screens"), sort_keys=True)
     review_gates._reports.warm(
         (*default_report, screens), lambda: review_gates._report(*default_report)
