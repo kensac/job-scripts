@@ -188,16 +188,12 @@ def _health_view(row: BatchHealth | None) -> ModelHealth | None:
 
 
 def _money(value: Any) -> str | None:
-    """A dollar figure as a plain decimal string, or absent.
+    """A dollar figure as a plain decimal string, or absent; ModelCandidate
+    says why both.
 
-    Sent as a string rather than a float because these are Decimals and a
-    float would round money on the way out. Formatted with 'f' because
-    str(Decimal) renders an exact zero as "0E-8", which is a correct Decimal
-    and an alarming thing to put on a spending screen.
-
-    None stays None all the way to the client: an ineligible model has no
-    price and an unbounded sweep has no cycle cost, and rendering either as 0
-    would make an unknown look like a free one.
+    Formatted with 'f' because str(Decimal) renders an exact zero as "0E-8",
+    which is a correct Decimal and an alarming thing to put on a spending
+    screen.
     """
     return format(value, "f") if value is not None else None
 
@@ -216,7 +212,11 @@ class ModelEvidence(BaseModel):
 class ModelCandidate(BaseModel):
     """One model this task could run on, eligible or not, carrying WHY.
 
-    Every dollar figure is a `_money` string, and None means unknown.
+    Every dollar figure is a decimal string, never a number: these are
+    Decimals and a float would round money on the way out. None means unknown
+    - an ineligible model has no price and an unbounded sweep has no cycle
+    cost - and rendering either as 0 would make an unknown look like a free
+    one.
     """
 
     model: str
@@ -476,7 +476,7 @@ def put_task_model(
 
 @router.get("/task-models/{purpose}/history")
 def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModelHistory:
-    """The newest HISTORY_LIMIT decisions for this task, newest first.
+    """This task's decisions, newest first, up to a read bound.
 
     The table is append-only and a cleared override is a NULL row rather than a
     deletion, so this is the record and not a reconstruction. A monthly
