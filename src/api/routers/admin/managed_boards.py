@@ -120,7 +120,9 @@ _Slug = Annotated[str, Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=1
 _BoardName = Annotated[str, Field(min_length=1, max_length=120)]
 _Description = Annotated[str, Field(max_length=1000)]
 _Prompt = Annotated[str, Field(min_length=1, max_length=8000)]
-_Sources = Annotated[list[str], Field(max_length=5000)]
+# A bound on the request body, not a product limit: a board can read the
+# whole catalog, and Finance New Grad held 4,838 sources on 2026-11-01.
+_Sources = Annotated[list[str], Field(max_length=20000)]
 
 
 class ManagedBoardCreate(BaseModel):

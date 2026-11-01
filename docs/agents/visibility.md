@@ -264,6 +264,17 @@ analyst, associate and program titles at 100 named banks and funds in 30
 days it skipped 1,438; a sample of 80 skips held branch bankers, client
 service, operations and technology roles, and one FP&A title ("Forecasting,
 Budgeting & Reporting Analyst") that the recipe now keeps.
+`finance_new_grad_v2` widens it to the board's full scope: consulting,
+audit and tax, restructuring, valuation, and banking leadership programs.
+A consultant title is judged when it names an early-career level or a
+business discipline, and skipped when it names technology implementation
+work (SAP, Salesforce, cloud, data). Sales, accounts payable and
+receivable, payroll, claims, customer service and quality assurance titles
+go with the branch ones, and "Experienced", managing consultant and
+associate partner titles with the levels. On production 2026-11-01, over
+the board's 61,624 available postings inside its criteria, it passed 889
+(v1 892), skipped none of the board's 49 keeps and 28 of its 619 rejects,
+and matched `skips_sql` on 2,082 titles.
 
 **A new board is not culled by another target's screens.** `title_screens`,
 the verification volume gate's `scopes` and every board's `title_gate` key on
