@@ -257,22 +257,23 @@ async def execute_batch(
     # One value, sent and recorded. OpenAI settings name it reasoning_effort
     # and Anthropic settings name it effort; the batch transport takes either.
     effort = (
-        cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium" if cfg else None
+        (cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium")
+        if cfg
+        else None
     )
     specs, by_url = [], {}
     for job in jobs:
         if existing:
-            by_url[job["url"]] = (job, None)
+            by_url[job["url"]] = job
             continue
         page = contents.pop(job["url"], None)
         if not page:
             continue
-        input_text = build_custom_input(job["company"], job["title"], page.text)
         specs.append(
             structured_response_spec(
                 job["url"],
                 instructions,
-                input_text,
+                build_custom_input(job["company"], job["title"], page.text),
                 FilterDecision,
                 context={
                     **({"prompt_cache_policy": cache_policy} if cache_policy else {}),
@@ -283,7 +284,7 @@ async def execute_batch(
                 },
             )
         )
-        by_url[job["url"]] = (job, input_text)
+        by_url[job["url"]] = job
     total = len(jobs)
     if not specs and not existing:
         hooks.progress(0, total, "no content-ready jobs; waiting for a later cycle")
@@ -346,13 +347,13 @@ class _Collected:
 def _plan(
     result: Any,
     snapshot: FilterSnapshot,
-    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    by_url: dict[str, dict[str, Any]],
     hooks: ExecutionHooks,
 ) -> _Collected:
     url = result.custom_id
     context = (result.request.context or {}) if result.request else {}
     stored = FilterSnapshot.from_mapping(context.get("filter") or snapshot.__dict__)
-    job = context.get("job") or (by_url.get(url) or (None, None))[0]
+    job = context.get("job") or by_url.get(url)
     usage = ai.batch_usage(result.usage)
     if job is None:
         return _Collected(usage, result.model, "unknown_request")
@@ -392,7 +393,7 @@ def _collect_chunk(
     task_id: int,
     results: list[Any],
     snapshot: FilterSnapshot,
-    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    by_url: dict[str, dict[str, Any]],
     hooks: ExecutionHooks,
 ) -> None:
     """Write a chunk's verdicts, usage and receipts in one transaction.
@@ -422,7 +423,7 @@ def _collect_one(
     task_id: int,
     result: Any,
     snapshot: FilterSnapshot,
-    by_url: dict[str, tuple[dict[str, Any], str | None]],
+    by_url: dict[str, dict[str, Any]],
     hooks: ExecutionHooks,
 ) -> None:
     with consume_result(task_id, result) as receipt:
