@@ -425,6 +425,6 @@ def read_archive(path: Path | str) -> Iterator[ImportedMessage]:
     name = str(path).lower()
     if name.endswith(".olm"):
         return read_olm(path)
-    if name.endswith((".mbox", ".mbx")):
+    if name.endswith((".mbox", ".mbx", ".zip")):
         return read_mbox(path)
     raise ValueError(f"unsupported archive: {path}")
