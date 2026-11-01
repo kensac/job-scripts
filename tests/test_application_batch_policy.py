@@ -78,7 +78,7 @@ async def test_application_shape_is_independent_of_interactive_model(f, monkeypa
         on_event("application-batch", "submitted", {"requests": len(specs)})
         return ["application-batch"]
 
-    monkeypatch.setattr(batch, "submit_responses_batches", submit)
+    monkeypatch.setattr(batch, "submit_batches", submit)
     with pytest.raises(runtime.AwaitingBatch):
         await application.handle_application_sweep(task_id, {"user_id": uid})
     assert len(submitted) == 1 and submitted[0] != cfg.model
