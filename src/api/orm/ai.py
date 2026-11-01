@@ -338,9 +338,8 @@ class ModelCall(Base):
     purpose: Mapped[str] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     # Who pays: 'fleet', 'user' or 'managed_board'. NULL is a backfilled call
-    # whose payer nothing recorded, which is not the fleet. The delete rules
-    # are the old usage ledger's, so a person's or a board's removal
-    # behaves as it does today.
+    # whose payer nothing recorded, which is not the fleet. A person's removal
+    # deletes their calls; a managed board with calls cannot be deleted.
     payer: Mapped[str | None] = mapped_column(Text)
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE")

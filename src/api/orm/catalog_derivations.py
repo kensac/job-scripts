@@ -53,10 +53,10 @@ class JobRequirements(Base):
     sponsorship: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
-    # The ai_queries row the answer was read from. Ids are not TOASTed, so
-    # "is there a newer page for this url" is an index read rather than a
-    # detoast of the corpus; the hash above then decides whether the text
-    # actually changed and the work needs paying for again.
+    # The page fetch the answer was read from (a page_texts id). Ids are not
+    # TOASTed, so "is there a newer page for this url" is an index read rather
+    # than a detoast of the corpus; the hash above then decides whether the
+    # text actually changed and the work needs paying for again.
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     extracted_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -108,10 +108,7 @@ class JobEmbedding(Base):
     embedding: Mapped[Any] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
     model: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
-    # The ai_queries row the answer was read from. Ids are not TOASTed, so
-    # "is there a newer page for this url" is an index read rather than a
-    # detoast of the corpus; the hash above then decides whether the text
-    # actually changed and the work needs paying for again.
+    # The page fetch the vector was read from, as on JobRequirements.
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
@@ -130,10 +127,10 @@ class JobProfile(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     url: Mapped[str] = mapped_column(Text)
-    # The page text the profile was read from: a page fetch, or for 3,502 of
-    # 84,052 profiles (2026-10-10) a copy older verification wrote on its
-    # answer in ai_queries. No foreign key, like content_row_id on
-    # job_requirements and job_embeddings: it names a row in either table, and
+    # The page fetch the profile was read from. For 3,502 of 84,052 profiles
+    # (2026-10-10) that is a 'verification' fetch: text older verification
+    # kept on its answer, moved into page_fetches under the answer's id. No
+    # foreign key, like content_row_id on job_requirements and job_embeddings;
     # a profile whose row is not a url's newest fetch reads as superseded.
     content_row_id: Mapped[int] = mapped_column(BigInteger)
     content_hash: Mapped[str] = mapped_column(Text)
