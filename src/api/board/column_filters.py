@@ -81,6 +81,12 @@ def fields(catalog_only: bool) -> list[FilterField]:
     ]
 
 
+def reads_pay(rules: list[ColumnFilter]) -> bool:
+    """Whether a compiled filter names the posting's pay row (`pay`), so a
+    read that does not select pay knows when it must join job_comp."""
+    return any(_FIELDS[rule.field][2].startswith("pay.") for rule in rules)
+
+
 def compile_filters(
     raw: str | None, catalog_only: bool
 ) -> tuple[list[ColumnFilter], list[str], dict]:

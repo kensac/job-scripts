@@ -230,6 +230,14 @@ Keep the old SQL as the reference in the equality test, built from the same
 fragments, and give the fixture a row for every branch
 (`tests/test_verification_candidates.py`).
 
+**Join a table only when the statement reads it.** The planner removes an
+unused LEFT JOIN to a unique key, but the join column stays needed, so an
+index-only scan must still return it. The admin catalog count joined
+`job_comp` on `url` for pay filters it rarely had, and counted through the
+256 MB url index instead of the 23 MB company index: 0.72-0.83 s against
+0.23 s warm on 1.48M rows (production, 2026-11-01). Add the join when a
+filter names the table (`column_filters.reads_pay`).
+
 **Measure a large statement with JIT on and off.** Above `jit_above_cost`
 PostgreSQL compiles the whole plan. For the verify candidate query that cost
 more than the query itself: 78 s with JIT, 24 s without, most of the
