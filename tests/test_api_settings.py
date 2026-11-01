@@ -174,14 +174,20 @@ def test_email_digest_toggle_generates_token_and_unsubscribe_works(client, user_
     )
     assert row["email_digest"] is True and row["digest_token"]
     service_only = {"X-Service-Token": user_headers["X-Service-Token"]}
-    resp = client.get(f"/v1/digest/unsubscribe?token={row['digest_token']}", headers=service_only)
+    token = row["digest_token"]
+    assert (
+        client.get(f"/v1/digest/unsubscribe?token={token}", headers=service_only).status_code == 405
+    )
+    resp = client.post(f"/v1/digest/unsubscribe?token={token}", headers=service_only)
     assert resp.status_code == 200
     row2 = db.query_one(
         "SELECT email_digest FROM user_settings us JOIN users u ON u.id = us.user_id WHERE u.sub = %s",
         (user_headers["X-User-Sub"],),
     )
     assert row2["email_digest"] is False
-    assert client.get("/v1/digest/unsubscribe?token=bogus", headers=service_only).status_code == 404
+    assert (
+        client.post("/v1/digest/unsubscribe?token=bogus", headers=service_only).status_code == 404
+    )
 
 
 def _apply_event(f, user_id: int, job_id: int, kind: str) -> None:
