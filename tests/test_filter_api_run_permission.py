@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_a_flagged_task_goes_past_the_cap_for_one_run_only(monkeypatch, user_headers, client):
@@ -10,7 +11,7 @@ def test_a_flagged_task_goes_past_the_cap_for_one_run_only(monkeypatch, user_hea
     from api import budget
 
     client.get("/v1/user/settings", headers=user_headers)
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
 
     # A spent cap blocks the ordinary load and not the flagged one.
     spent = budget.Entitlement(

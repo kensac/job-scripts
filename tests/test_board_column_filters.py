@@ -3,13 +3,14 @@ import json
 import pytest
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 @pytest.mark.parametrize("field,value", [("locations", "Toronto"), ("terms", "internship")])
 def test_array_backed_posting_fields_support_text_and_empty_filters(
     client, user_headers, f, field, value
 ):
-    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     matching = f.make_job()
     empty = f.make_job()
     db.execute(f"UPDATE jobs SET {field}=%s WHERE id=%s", ([value], matching))
@@ -80,7 +81,7 @@ def test_invalid_filters_are_rejected_not_silently_ignored(client, user_headers,
 def test_a_pay_minimum_matches_a_yearly_posting(client, user_headers, f, period):
     """job_comp stores 'yearly'; the board's form sends 'year'. Both must reach
     it, and an hourly posting above the number must not."""
-    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     yearly = f.make_job(url="https://example.com/yearly")
     hourly = f.make_job(url="https://example.com/hourly")
     f.make_comp(
@@ -108,7 +109,7 @@ def test_a_pay_minimum_matches_a_yearly_posting(client, user_headers, f, period)
 
 
 def test_column_filters_apply_before_pagination_and_totals(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     for company in ["Acme", "Other", "Acme"]:
         jid = f.make_job(company=company)
         db.execute(
@@ -143,7 +144,7 @@ def test_column_filters_apply_before_pagination_and_totals(client, user_headers,
 def test_text_filters_keep_literal_wildcards_and_explicit_empty_semantics(
     client, user_headers, f, operator, value, expected
 ):
-    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     for company in ["100%_ Inc", "100XX Inc", "Acme", "", "   "]:
         jid = f.make_job(company=company)
         db.execute(
@@ -165,7 +166,7 @@ def test_text_filters_keep_literal_wildcards_and_explicit_empty_semantics(
 
 
 def test_private_column_predicates_cannot_read_another_users_notes(client, user_headers, f):
-    uid = db.query_one("SELECT id FROM users WHERE sub='test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     other = db.query_one(
         "INSERT INTO users (sub,email) VALUES ('other-filter-user','other@example.test') RETURNING id"
     )["id"]

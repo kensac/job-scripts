@@ -4,11 +4,12 @@ the report about it says so."""
 
 from __future__ import annotations
 
-from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _job_ids, _pass_closed, _subscribe
 
 
 def test_closing_a_reported_posting_removes_it_from_the_board(client, user_headers, admin_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-cl", "https://x.test/cl1", company="Pools R Us", title="Engineer")
     _subscribe(uid, "src-cl")
     _pass_closed("https://x.test/cl1")

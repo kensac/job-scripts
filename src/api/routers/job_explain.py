@@ -56,7 +56,7 @@ async def explain_check(
     import dataclasses
 
     from api import budget, model_calls
-    from api.ai import verdicts as _verdicts
+    from api.ai import verdicts
     from core.answer_inputs import LIVE_CHECK_INPUT_CHARS
     from core.answers import FilterVerdict
     from core.checks import POSTING_CHECKS
@@ -102,7 +102,7 @@ async def explain_check(
             f"check must be one of {', '.join(POSTING_CHECKS)}, or filter:<id>",
         )
 
-    fresh, closure_signal = await _verdicts.refresh_page(
+    fresh, closure_signal = await verdicts.refresh_page(
         job["url"], company=job["company"], job_title=job["title"], context="explain"
     )
     if fresh is None:
@@ -123,7 +123,7 @@ async def explain_check(
     cfg = ai_access.require_config(user)
     cfg = dataclasses.replace(cfg, params={**cfg.params, "reasoning_effort": "medium"})
 
-    parsed, _usage = await _verdicts.run_check(
+    parsed, _usage = await verdicts.run_check(
         cfg,
         url=job["url"],
         check_type=check,
