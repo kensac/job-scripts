@@ -1,13 +1,14 @@
 export function createPanelShell({ prefs, surface, operation, esc, getPanelUp, getSubmission, getApplicationContext }) {
   const THEME_NEXT = { light: "dark", dark: null, null: "light" };
   const themeLabel = (t) => (t === "light" ? "Light" : t === "dark" ? "Dark" : "System");
+  const themeIcon = (t) => (t === "light" ? "☀" : t === "dark" ? "☾" : "◐");
+  const themeTitle = (t) => `Theme: ${themeLabel(t)}. Switch to ${themeLabel(THEME_NEXT[String(t)])}`;
   const render = (html) => {
     if (!getPanelUp()) return;
-    const themeTitle = `Theme: ${themeLabel(prefs.theme)}. Switch to ${themeLabel(THEME_NEXT[String(prefs.theme)])}`;
     surface.paint(`
       <div class="head">
         <div class="brand"><span class="brand-mark" aria-hidden="true">↗</span><div><h3>Job Tracker</h3><span class="eyebrow">Apply assistant</span></div></div>
-        <div class="head-actions"><button id="jt-theme" aria-label="${esc(themeTitle)}" title="${esc(themeTitle)}">${prefs.theme === "light" ? "☀" : prefs.theme === "dark" ? "☾" : "◐"}</button>
+        <div class="head-actions"><button id="jt-theme" aria-label="${esc(themeTitle(prefs.theme))}" title="${esc(themeTitle(prefs.theme))}">${themeIcon(prefs.theme)}</button>
         <button id="jt-min" aria-label="${prefs.collapsed ? "Expand panel" : "Minimise panel"}" aria-expanded="${!prefs.collapsed}" title="${prefs.collapsed ? "Expand" : "Minimise"}">${prefs.collapsed ? "+" : "−"}</button></div>
       </div>
       <div class="body">
@@ -29,5 +30,5 @@ export function createPanelShell({ prefs, surface, operation, esc, getPanelUp, g
     const paused = operation.state === "paused";
     return `<div class="operation-controls"><span>${paused ? "Autofill paused" : "Autofill is running"}</span><button id="jt-pause" aria-label="${paused ? "Resume autofill" : "Pause autofill"}">${paused ? "Resume" : "Pause"}</button><button id="jt-stop" aria-label="Stop autofill">Stop</button></div>`;
   }
-  return { THEME_NEXT, themeLabel, render, operationControls };
+  return { THEME_NEXT, themeIcon, themeTitle, render, operationControls };
 }
