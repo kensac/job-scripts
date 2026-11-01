@@ -26,8 +26,9 @@ for one per query. The first read in a process waits; after that a read
 older than `admin_stats_cache_seconds` returns the cached answer and starts
 one background recompute. `_warm_admin_pages` in `api.app` warms the
 default views that take 15 to 70 s (stats, query options, checked urls, spend,
-the review-gate report) and the jobs list's Passed and Rejected totals at
-startup, so a roll does not make the next visitor
+the review-gate report), the jobs list's Passed and Rejected totals, and the
+dashboard's content mix that every live tick refetches, at startup, so a roll
+does not make the next visitor
 wait. Key the cache on
 everything the answer depends on, config included (the review report keys
 on `title_screens`). conftest clears every cache before each test.
