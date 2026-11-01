@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
+from api.updates import NonNullUpdate
 
 router = APIRouter()
 
@@ -25,12 +27,12 @@ _PRESET_COLS = (
 
 
 class PresetBody(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    description: str | None = Field(default=None, max_length=500)
-    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
-    on_ambiguous: str | None = None
-    fail_closed: bool | None = None
-    active: bool | None = None
+    name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=80)]] = None
+    description: NonNullUpdate[Annotated[str, Field(max_length=500)]] = None
+    prompt: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=8000)]] = None
+    on_ambiguous: NonNullUpdate[str] = None
+    fail_closed: NonNullUpdate[bool] = None
+    active: NonNullUpdate[bool] = None
 
 
 class FilterPreset(BaseModel):
