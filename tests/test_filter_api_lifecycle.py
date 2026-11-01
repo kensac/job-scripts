@@ -34,71 +34,82 @@ def test_duplicate_filter_name_for_same_user_is_conflict(client, user_headers):
     assert second.json()["detail"]["code"] == "DUPLICATE_NAME"
 
 
-def test_one_filter_is_enabled_at_a_time(client, user_headers, admin_headers):
-    """A person runs one filter (Kanishk, 2026-09-08: a new account's three
-    filters judged the whole catalog three times over). A second enabled
-    filter is refused on create, on turning it on, and on adopting a
-    preset, with the name of the one that is on; a disabled second is fine,
-    and turning the first off frees the slot."""
-    first = client.post(
-        "/v1/user/filters",
-        json={"name": "one", "prompt": "remote only"},
-        headers=user_headers,
-    ).json()
-    assert first["enabled"] is True
+# A person runs one filter (Kanishk, 2026-09-08: a new account's three filters
+# judged the whole catalog three times over). A second enabled filter is
+# refused on create, on turning it on, and on adopting a preset; a disabled
+# second is fine, and turning the first off frees the slot.
 
-    second = client.post(
-        "/v1/user/filters",
-        json={"name": "two", "prompt": "pays well"},
-        headers=user_headers,
+
+def _create_filter(client, user_headers, name: str, prompt: str, **extra):
+    return client.post(
+        "/v1/user/filters", json={"name": name, "prompt": prompt, **extra}, headers=user_headers
     )
+
+
+def _set_enabled(client, user_headers, filter_id: int, enabled: bool, **extra):
+    return client.patch(
+        f"/v1/user/filters/{filter_id}", json={"enabled": enabled, **extra}, headers=user_headers
+    )
+
+
+def _enabled_filter(client, user_headers) -> dict:
+    first = _create_filter(client, user_headers, "one", "remote only").json()
+    assert first["enabled"] is True
+    return first
+
+
+def _parked_filter(client, user_headers) -> dict:
+    parked = _create_filter(client, user_headers, "two", "pays well", enabled=False).json()
+    assert parked["enabled"] is False
+    return parked
+
+
+def test_a_second_enabled_filter_is_refused_on_create_naming_the_one_on(client, user_headers):
+    first = _enabled_filter(client, user_headers)
+
+    second = _create_filter(client, user_headers, "two", "pays well")
     assert second.status_code == 409
     assert second.json()["detail"]["code"] == "ONE_FILTER"
     assert second.json()["detail"]["enabled_filter_id"] == first["id"]
     assert '"one" is on' in second.json()["detail"]["message"]
     assert "fold this into it" in second.json()["detail"]["message"]
 
-    parked = client.post(
-        "/v1/user/filters",
-        json={"name": "two", "prompt": "pays well", "enabled": False},
-        headers=user_headers,
-    ).json()
-    assert parked["enabled"] is False
-    turn_on = client.patch(
-        f"/v1/user/filters/{parked['id']}", json={"enabled": True}, headers=user_headers
-    )
+
+def test_turning_on_a_disabled_second_filter_is_refused(client, user_headers):
+    _enabled_filter(client, user_headers)
+    parked = _parked_filter(client, user_headers)
+
+    turn_on = _set_enabled(client, user_headers, parked["id"], True)
     assert turn_on.status_code == 409 and turn_on.json()["detail"]["code"] == "ONE_FILTER"
 
-    # Editing the one that is on, or re-sending enabled on it, is not a second.
-    assert (
-        client.patch(
-            f"/v1/user/filters/{first['id']}",
-            json={"enabled": True, "prompt": "remote only, please"},
-            headers=user_headers,
-        ).status_code
-        == 200
-    )
 
+def test_editing_the_enabled_filter_is_not_a_second(client, user_headers):
+    first = _enabled_filter(client, user_headers)
+    _parked_filter(client, user_headers)
+
+    edit = _set_enabled(client, user_headers, first["id"], True, prompt="remote only, please")
+    assert edit.status_code == 200
+
+
+def test_adopting_a_preset_while_a_filter_is_on_is_refused(client, user_headers, admin_headers):
+    _enabled_filter(client, user_headers)
+    _parked_filter(client, user_headers)
     preset_id = client.post(
         "/v1/admin/filter-presets",
         json={"name": "Remote Only", "prompt": "must be fully remote"},
         headers=admin_headers,
     ).json()["id"]
+
     adopt = client.post(f"/v1/filter-presets/{preset_id}/adopt", headers=user_headers)
     assert adopt.status_code == 409 and adopt.json()["detail"]["code"] == "ONE_FILTER"
 
-    assert (
-        client.patch(
-            f"/v1/user/filters/{first['id']}", json={"enabled": False}, headers=user_headers
-        ).status_code
-        == 200
-    )
-    assert (
-        client.patch(
-            f"/v1/user/filters/{parked['id']}", json={"enabled": True}, headers=user_headers
-        ).status_code
-        == 200
-    )
+
+def test_turning_the_enabled_filter_off_frees_the_slot(client, user_headers):
+    first = _enabled_filter(client, user_headers)
+    parked = _parked_filter(client, user_headers)
+
+    assert _set_enabled(client, user_headers, first["id"], False).status_code == 200
+    assert _set_enabled(client, user_headers, parked["id"], True).status_code == 200
 
 
 def test_a_filter_save_waits_for_the_sweep_unless_the_group_rejudges_on_change(
