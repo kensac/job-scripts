@@ -1,6 +1,7 @@
 import hashlib
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -212,7 +213,7 @@ async def test_rejected_packed_request_is_acknowledged_without_live_fallback(f, 
 async def test_malformed_provider_vectors_are_acknowledged_without_database_failure(f, malformed):
     task_id, _ = _receipt(f)
     db.execute("DELETE FROM batch_result_receipts WHERE task_id=%s", (task_id,))
-    data = [{"index": i, "embedding": [0.1] * EMBEDDING_DIMENSIONS} for i in range(2)]
+    data: list[Any] = [{"index": i, "embedding": [0.1] * EMBEDDING_DIMENSIONS} for i in range(2)]
     if malformed == "numeric_bool":
         for item in data:
             item["embedding"][0] = True

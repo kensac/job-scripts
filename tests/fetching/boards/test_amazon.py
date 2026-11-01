@@ -122,6 +122,7 @@ def test_an_amazon_row_becomes_a_posting_with_its_full_text(monkeypatch):
     assert "Applicants must be Australian citizens" in p.description
     assert "Basic qualifications\n\n- Valid and active driver's license" in p.description
     assert "Preferred qualifications\n\n- Experience in data center" in p.description
+    assert p.raw is not None
     assert "description" not in p.raw and "basic_qualifications" not in p.raw
     assert p.raw["id_icims"] == "10567672"
 
