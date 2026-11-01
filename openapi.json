@@ -55767,7 +55767,7 @@
           "recipe"
         ],
         "title": "TitleGateConfig",
-        "description": "A managed board's title gate (`managed_boards.title_gate`).\n\nA gate that is set is enforced. A shadow mode used to judge every\ncandidate anyway and report what the gate would drop; that is a query over\nthe board's verdicts and `screen`, so a recipe is measured that way before\na board names it."
+        "description": "A managed board's title gate (`managed_boards.title_gate`).\n\nA gate that is set is enforced. What a gate would drop is a query over the\nboard's verdicts and `screen`, so a recipe is measured that way before a\nboard names it."
       },
       "Totals": {
         "properties": {
