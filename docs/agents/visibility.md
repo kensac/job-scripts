@@ -277,6 +277,19 @@ Bancorp, Wells Fargo, Bank of America, PNC, Huntington, State Street), and
 936 of them had page text. The first run of an unpublished board therefore
 undercounts; publishing it lets the verify sweep reach them, freshest first.
 
+**A posting a board would verify gets its page text, subscribed or not.**
+Verification reads only postings with page text. Ingest stores it for a dated
+posting, and `fetch_missing_content` fills the rest, for subscribed sources'
+postings and for the postings a published board would send to verification
+(`verification_candidates.BOARD_READS`: its sources, criteria and title
+screens). It walks them freshest first by the age the criteria read, the
+posting date or else the day it was found. A Workday tenant's first pull lists
+its older postings with no date. Before this, a source only a board read never
+had those pages fetched, and an undated posting waited behind every dated
+one: on 2026-11-01, 1,414 of 2,099 recent postings on board-only Workday
+sources had no text, and 108,788 of the 110,462 postings waiting for a fetch
+were undated.
+
 **A board's question rides on the posting's verification request.** Every board
 candidate has passed verification, so verification has always read the posting
 first, and each board then paid to read the same text again. `verify_new` asks

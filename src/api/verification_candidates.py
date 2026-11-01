@@ -33,6 +33,19 @@ verification_targets AS (
 )
 """
 
+# The postings a published board sends to verification, as a predicate over a
+# `jobs` row aliased j: from one of its sources, inside its criteria, and
+# through its title screens. Verification reads only postings with page text,
+# so the page-text sweep (tasks.content) fetches these as well as subscribed
+# sources' postings. Binds screening.PARAMS and title_screens.
+BOARD_READS = f"""EXISTS (
+    SELECT 1 FROM managed_boards target
+    JOIN managed_board_sources source ON source.managed_board_id = target.id
+    WHERE target.published AND source.source = j.source
+        {criteria.json_sql("target.criteria")}
+        {_TITLE_SQL}
+)"""
+
 # How a title is compared: case and runs of whitespace do not make a new title.
 TITLE_KEY = "lower(regexp_replace(j.title, '\\s+', ' ', 'g'))"
 
