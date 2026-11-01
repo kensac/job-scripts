@@ -66,9 +66,9 @@ export function panelSurface() {
       // and the frame that owns the flow binds by id rather than by node.
       for (const type of ["click", "change"]) {
         panel.addEventListener(type, (ev) => {
-          const el = ev.target.closest("[id], [data-ai]");
+          const el = ev.target.closest("[id]");
           if (!el) return;
-          onEvent({ type, id: el.id || null, ai: el.dataset.ai || null, values: values(panel) });
+          onEvent({ type, id: el.id, values: values(panel) });
         });
       }
       attach();
