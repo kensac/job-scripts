@@ -23,7 +23,8 @@ from core.derivations.requirements import (
     EMPLOYMENT_TYPES,
     SENIORITIES,
 )
-from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
 
 def _old_stats(uid: int) -> dict[str, Any]:
@@ -74,7 +75,7 @@ def _old_stats(uid: int) -> dict[str, Any]:
 
 
 def test_stats_cuts_match_the_per_cut_sql(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject(user_headers["X-User-Sub"])
     applied_at = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
     # (source, user_jobs status or "no row", hidden, applied). NULL and ''
     # both appear in one source: the per-source cut lists them apart and the
@@ -188,7 +189,7 @@ def _old_market(uid: int, seniority: str | None, employment_type: str | None) ->
 
 
 def test_market_cuts_match_the_per_cut_sql(client, user_headers, f):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject(user_headers["X-User-Sub"])
     source = f.make_source()
     f.subscribe(uid, source)
     # Counts differ within every cut, and every field has a stated and an

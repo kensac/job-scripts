@@ -13,16 +13,16 @@ from api.ai import verdicts
 from api.auth import AuthedUser
 from api.board import column_filters as column_filters_
 from api.problem import refuse
-from api.routers.admin.query_ledger import _QUERY_DETAIL_COLUMNS, QueryRecord, _held_input
+from api.routers.admin.query_ledger import QueryRecord, query_records
 from api.routers.admin.shared import require_admin
 from api.stale_cache import Stale, StaleByKey
-from core import catalog, query_instructions, verdict_reads
+from core import catalog, verdict_reads
 
 router = APIRouter()
 
 
-def _count(sql: str) -> int:
-    row = db.query_one(sql)
+def _count(sql: str, params: dict | None = None) -> int:
+    row = db.query_one(sql, params)
     return row["c"] if row else 0
 
 
@@ -45,6 +45,14 @@ _PASSED = """(EXISTS (SELECT 1 FROM ai_queries q WHERE q.url = u.url AND q.statu
     OR EXISTS (SELECT 1 FROM page_fetches f WHERE f.url = u.url AND f.status = 'passed'
                AND f.method <> 'verification'))"""
 _VERDICT_HOLDS = {"rejected": _REJECTED, "passed": f"NOT {_REJECTED} AND {_PASSED}"}
+# The same verdicts as HAVING clauses, for the list grouped over every row.
+_VERDICT_HAVING = {
+    "rejected": "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0",
+    "passed": (
+        "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
+        "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
+    ),
+}
 
 # Postings with neither verdict: every check failed or has no status. They
 # are few (5,870 of 1,279,002 on 2026-11-01), found from the rows that are
@@ -220,6 +228,19 @@ _RECENT_POSTINGS = f"""
 _URL_STREAK = verdicts.FETCH_STREAK.format(url="ledger_rows.url")
 
 
+def _checked_posting(row: dict, give_up: int) -> CheckedPosting:
+    unfetchable = row["content_failures"] >= give_up
+    if row["rejected"] > 0:
+        verdict = "rejected"
+    elif row["passed"] > 0:
+        verdict = "passed"
+    elif unfetchable:
+        verdict = "unfetchable"
+    else:
+        verdict = "other"
+    return CheckedPosting(**row, verdict=verdict, unfetchable=unfetchable)
+
+
 @router.get("/jobs")
 def list_jobs(
     q: str | None = None,
@@ -250,14 +271,7 @@ def list_jobs(
     if config:
         sub.append("config_name = %(config)s")
         params["config"] = config
-    having = ""
-    if verdict == "rejected":
-        having = "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) > 0"
-    elif verdict == "passed":
-        having = (
-            "HAVING SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) = 0 "
-            "AND SUM(CASE WHEN status='passed' THEN 1 ELSE 0 END) > 0"
-        )
+    having = _VERDICT_HAVING.get(verdict or "", "")
     # The count below wraps this, and the planner drops a subquery output
     # nobody reads, so the streak is paid for only on the page.
     base = f"""
@@ -277,37 +291,23 @@ def list_jobs(
         # The id tiebreaker selects one row when a URL has equal timestamps;
         # every check still contributes to that URL's reported totals.
         known = verdict if verdict in _VERDICT_HOLDS else None
-        total_row = {
-            "c": _checked_urls.get()
+        total = (
+            _checked_urls.get()
             if known is None
             else _verdict_totals.get(known, lambda: _verdict_total(known))
-        }
+        )
         urls = _newest_urls(paging.offset, paging.size, known)
         rows = db.query(_RECENT_POSTINGS, {"urls": urls}) if urls else []
     else:
-        total_row = db.query_one(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
+        total = _count(f"SELECT COUNT(*) AS c FROM ({base}) sub", params)
         rows = db.query(
             f"{base} ORDER BY {sorting.clause(sorts, _POSTING_SORT_EXPRESSIONS)}, url "
             "LIMIT %(limit)s OFFSET %(offset)s",
             page_params,
         )
-    total = total_row["c"] if total_row else 0
     give_up = int(db.get_config("fetch_give_up_after_failures"))
     return CheckedPostings(
-        rows=[
-            CheckedPosting(
-                **r,
-                verdict="rejected"
-                if r["rejected"] > 0
-                else "passed"
-                if r["passed"] > 0
-                else "unfetchable"
-                if r["content_failures"] >= give_up
-                else "other",
-                unfetchable=r["content_failures"] >= give_up,
-            )
-            for r in rows
-        ],
+        rows=[_checked_posting(r, give_up) for r in rows],
         **paging.metadata(total),
         # Echoed so the UI can render the active sort without duplicating the
         # default, and sortable so it never has to guess the accepted keys.
@@ -423,8 +423,7 @@ def list_catalog_jobs(
     total = None
     if with_total:
         # Exact count, 0.23 s warm unfiltered on 1.48M rows (2026-11-01); opt-in for that reason.
-        row = db.query_one(f"SELECT COUNT(*) AS c FROM {tables} WHERE TRUE {where}", params)
-        total = row["c"] if row else 0
+        total = _count(f"SELECT COUNT(*) AS c FROM {tables} WHERE TRUE {where}", params)
     return CatalogPostings(
         rows=[CatalogPosting(**r) for r in rows[:limit]],
         has_more=len(rows) > limit,
@@ -447,18 +446,7 @@ class QueryResponses(BaseModel):
 
 @router.get("/jobs/responses")
 def job_responses(url: str, user: AuthedUser = Depends(require_admin)) -> QueryResponses:
-    rows = db.query(
-        f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE url = %s ORDER BY id ASC",
-        (url,),
-    )
-    # ponytail: one lookup per held row, as GET /queries/{id} does; batch it if
-    # a posting's history grows past a drawer's worth of calls.
-    for row in rows:
-        if row["input_content"] is None:
-            row["input_content"] = _held_input(row)
-    return QueryResponses(
-        rows=[QueryRecord.model_validate(row) for row in query_instructions.hydrate(rows)]
-    )
+    return QueryResponses(rows=query_records("url = %s ORDER BY id ASC", (url,)))
 
 
 class TimelineEntry(BaseModel):

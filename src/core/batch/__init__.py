@@ -220,12 +220,10 @@ async def run_responses_batch(
         f"(<= {BATCH_TOKEN_BUDGET:,} tokens each)"
     )
 
-    # Waves used to run one after another. Each is an independent OpenAI batch
-    # that spends most of its life waiting, so serialising them made total time
-    # the SUM of every wave's queue time: a 37-wave backfill at ~42 min a wave
-    # is ~26 hours of mostly idle waiting, holding a worker slot throughout.
-    # Running a bounded number concurrently collapses that to roughly the
-    # slowest few waves.
+    # Waves run concurrently, bounded. Each is an independent OpenAI batch that
+    # spends most of its life waiting, so running them in series makes total
+    # time the SUM of every wave's queue time: a 37-wave backfill at ~42 min a
+    # wave is ~26 hours of mostly idle waiting, holding a worker slot throughout.
     sem = asyncio.Semaphore(max(1, BATCH_WAVE_CONCURRENCY))
 
     async def run_wave(index: int, chunk: list[BatchSpec]) -> dict[str, BatchResult]:
@@ -245,8 +243,7 @@ async def run_responses_batch(
         if isinstance(wave, BaseException):
             # One wave failing must not discard the ones that succeeded and
             # were already paid for. The unanswered specs simply get no
-            # verdict, which the next sweep picks up - the same idempotency
-            # the serial version relied on, just without losing siblings.
+            # verdict, which the next sweep picks up.
             logger.warning(f"Batch wave {index}/{len(chunks)} failed: {wave}")
             continue
         results.update(wave)
@@ -347,7 +344,7 @@ async def _collect_anthropic(
             collected: dict[str, BatchResult] = {}
             await anthropic.collect(claude, batch, collected, known, create_missing=True)
         except Exception as exc:
-            # Unreadable is unfinished, as for the OpenAI batches below.
+            # Unreadable is unfinished, as for the OpenAI batches above.
             logger.warning(f"Batch {batch_id} collection failed: {exc}")
             unfinished.append(batch_id)
             continue
