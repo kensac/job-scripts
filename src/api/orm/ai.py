@@ -83,6 +83,22 @@ class AiQuery(Base):
             postgresql_include=["status"],
             postgresql_where=text("check_type = 'custom' AND status IN ('passed', 'rejected')"),
         ),
+        # The filter insight page reads a window of custom verdicts: its
+        # counts from the first, its reasoned rejections from the second, both
+        # as index-only scans (admin_insights.rejection_reasons). Through the
+        # heap the 30-day page took 23 to 37 s on production (2026-11-01).
+        Index(
+            "idx_ai_queries_custom_window",
+            "created_at",
+            postgresql_include=["prompt_hash", "status", "url", "filter_name"],
+            postgresql_where=text("check_type = 'custom'"),
+        ),
+        Index(
+            "idx_ai_queries_custom_reasons",
+            "created_at",
+            postgresql_include=["prompt_hash", "url", "reason"],
+            postgresql_where=text("check_type = 'custom' AND status = 'rejected' AND reason <> ''"),
+        ),
         # The reason-group regex. url, company and job_title had one each;
         # nothing scans them any more (the migrations dropping them say why),
         # so the admin search is a seq scan.
