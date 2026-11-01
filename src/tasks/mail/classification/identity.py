@@ -16,14 +16,18 @@ from api.mail.current import current_event
 # OLM sent items can lack from_email. Of 252 such messages, 184 also lack
 # recipients and give no direction evidence. Require a recipient before
 # treating a message with no sender as sent; 57 met that condition in the audit.
-_SELF_SENT = """(
+#
+# Binds `identities` as the jsonb map identities_by_owner returns: each
+# message is judged by its own owner's addresses.
+_OWNED = "ARRAY(SELECT jsonb_array_elements_text(%(identities)s::jsonb -> m.user_id::text))"
+_SELF_SENT = f"""(
         (COALESCE(m.from_email, '') <> '' AND EXISTS (
-            SELECT 1 FROM unnest(%(identities)s::text[]) ident
+            SELECT 1 FROM unnest({_OWNED}) ident
             WHERE position(ident IN lower(m.from_email)) > 0))
         OR (COALESCE(m.from_email, '') = '' AND cardinality(m.to_emails) > 0
             AND NOT EXISTS (
                 SELECT 1 FROM unnest(m.to_emails) recipient
-                WHERE lower(recipient) = ANY(%(identities)s::text[])))
+                WHERE lower(recipient) = ANY({_OWNED})))
     )"""
 
 
@@ -58,11 +62,22 @@ def identities_for(user_id: int) -> list[str]:
     )
     if found:
         return sorted(found)
+    # No address at all is no identity. An empty string would match every
+    # sender: position('' IN x) is 1.
     configured = db.query_one("SELECT lower(email) AS email FROM users WHERE id = %s", (user_id,))
-    return [(configured or {}).get("email") or ""]
+    email = (configured or {}).get("email")
+    return [email] if email else []
 
 
-def _heal_self_sent(identities: list[str]) -> int:
+def identities_by_owner() -> dict[int, list[str]]:
+    """Each mailbox owner's addresses, keyed by user id, for `_SELF_SENT`."""
+    return {
+        row["user_id"]: identities_for(row["user_id"])
+        for row in db.query("SELECT DISTINCT user_id FROM email_messages ORDER BY user_id")
+    }
+
+
+def _heal_self_sent(identities: dict[int, list[str]]) -> int:
     """Supersede events already booked on mail the owner sent.
 
     The ordinary sweep selects messages with no events. An earlier corpus
@@ -82,7 +97,7 @@ def _heal_self_sent(identities: list[str]) -> int:
         WHERE {_SELF_SENT}
           AND NOT (l.kind = 'not_job_related' AND l.detail ->> 'reason' = 'self_sent')
         """,
-        {"identities": identities},
+        {"identities": db.jsonb(identities)},
     )
     for row in rows:
         mail_events.append(

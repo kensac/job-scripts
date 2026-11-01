@@ -39,7 +39,6 @@ export interface Adapter {
   applyButton?(): Element | null | undefined;
   nextButton?(): Element | null | undefined;
   errors?(): string[];
-  proxySubmit?: boolean;
   useConfig?(value: unknown): boolean;
 }
 

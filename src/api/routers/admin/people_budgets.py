@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import ai, db
 from api.auth import AuthedUser
 from api.models import Ok
 from api.problem import refuse
@@ -39,8 +39,6 @@ class GroupBudgets(BaseModel):
 
 @router.get("/group-budgets")
 def list_group_budgets(user: AuthedUser = Depends(require_admin)) -> GroupBudgets:
-    from api import ai
-
     return GroupBudgets(
         groups=db.query_as(
             GroupBudget,
@@ -55,8 +53,6 @@ def list_group_budgets(user: AuthedUser = Depends(require_admin)) -> GroupBudget
 def put_group_budget(
     group_name: str, body: GroupBudgetPut, user: AuthedUser = Depends(require_admin)
 ) -> GroupBudget:
-    from api import ai
-
     if body.allowed_models is not None:
         known = {m["model"] for models in ai.MODEL_CATALOG.values() for m in models}
         unknown = [m for m in body.allowed_models if m not in known]

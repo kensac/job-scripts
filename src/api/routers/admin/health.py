@@ -128,8 +128,6 @@ class HealthRun(BaseModel):
 @router.post("/health/check")
 async def run_health_check(user: AuthedUser = Depends(require_admin)) -> HealthRun:
     """Run the detectors now instead of waiting for the hourly task."""
-    from api import health
-
     run = health.detect()
     fresh = health.record(run)
     return HealthRun(
