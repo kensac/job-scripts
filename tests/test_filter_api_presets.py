@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def test_presets_list_returns_seeded_presets(client, admin_headers, user_headers):
@@ -19,7 +20,7 @@ def test_presets_list_returns_seeded_presets(client, admin_headers, user_headers
 
 
 def test_adopt_preset_creates_user_filter(client, admin_headers, user_headers):
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     created = client.post(
         "/v1/admin/filter-presets",
         json={"name": "Junior Friendly", "prompt": "no more than 2 years experience required"},

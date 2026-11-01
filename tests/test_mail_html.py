@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from core.mail.html import sanitise
+from tests.factories import user_id_for_subject
 
 
 @pytest.mark.parametrize(
@@ -132,7 +133,7 @@ def test_the_reader_never_receives_the_raw_markup(client, user_headers, f):
     the original will eventually render it."""
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     row = db.query_one(
         "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
         "subject, sent_at, body_text, body_html) VALUES "
@@ -158,7 +159,7 @@ def test_the_reader_never_receives_the_raw_markup(client, user_headers, f):
 def test_a_message_with_no_markup_reports_nothing_to_load(client, user_headers, f):
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     row = db.query_one(
         "INSERT INTO email_messages (user_id, provider_message_id, source, from_email, "
         "subject, sent_at, body_text) VALUES "
@@ -176,7 +177,7 @@ def test_a_thread_serves_the_same_safe_markup_as_a_single_message(client, user_h
     shapes, and the thread is the one that gets read first."""
     from api import db
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    uid = user_id_for_subject("test-user")
     ids = []
     for n in range(2):
         row = db.query_one(

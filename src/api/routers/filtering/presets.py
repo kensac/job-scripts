@@ -9,11 +9,11 @@ from api import db
 from api.auth import AuthedUser, require_user
 from api.problem import refuse
 from api.routers.filtering.saved_filters import (
-    _FILTER_COLS,
+    FILTER_COLS,
     Filter,
     SavedFilter,
-    _after_filter_change,
-    _refuse_second_enabled,
+    after_filter_change,
+    refuse_second_enabled,
 )
 from core import catalog, verdict_reads
 from core.filters import compute_filter_hash
@@ -176,14 +176,14 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> Sa
             (user.id, preset_id, name),
         ):
             raise refuse(409, "ALREADY_ADOPTED", "this preset is already in your filters")
-        _refuse_second_enabled(user.id)
+        refuse_second_enabled(user.id)
         row = db.query_one_as(
             Filter,
             f"""
             INSERT INTO user_filters
                 (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id)
             VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s)
-            RETURNING {_FILTER_COLS}
+            RETURNING {FILTER_COLS}
             """,
             (
                 user.id,
@@ -196,4 +196,4 @@ def adopt_preset(preset_id: int, user: AuthedUser = Depends(require_user)) -> Sa
             ),
         )
         assert row is not None
-    return _after_filter_change(user, row, None)
+    return after_filter_change(user, row, None)

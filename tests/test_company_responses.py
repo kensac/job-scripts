@@ -14,6 +14,7 @@ from api.companies.models import _ResponseRow
 from api.companies.projection import _response_block
 from api.companies.queries import _OUTCOME_KINDS, _RESPONSE_SQL
 from tests import mail_log
+from tests.factories import user_id_for_subject
 
 OUTCOMES = list(_OUTCOME_KINDS)
 
@@ -187,7 +188,7 @@ def test_the_aggregate_is_scoped_to_one_user(f, client):
 
     mine = _auth_headers("company-scope-admin", "scope@example.com", ["infra-admins"])
     assert client.post("/v1/users/bootstrap", headers=mine).status_code == 200
-    my_id = db.query_one("SELECT id FROM users WHERE sub = %s", ("company-scope-admin",))["id"]
+    my_id = user_id_for_subject("company-scope-admin")
     theirs = f.make_user()
 
     # The company list is built from `jobs`, so the company needs a posting to

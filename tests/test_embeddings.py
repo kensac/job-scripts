@@ -7,14 +7,9 @@ from api import db
 from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.pricing import estimate_cost_usd
 from tasks.derivations.embeddings import _CANDIDATES, _store
+from tests.factories import user_id_for_subject
 
 CONTENT = "a long job description " * 20
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def _vec(*, seed: float = 0.0) -> list[float]:
@@ -151,7 +146,7 @@ class TestPricing:
 class TestSimilarEndpoint:
     def _board(self, client, headers, f, n: int = 3):
         source = f.make_source()
-        f.subscribe(_uid(headers), source)
+        f.subscribe(user_id_for_subject(headers["X-User-Sub"]), source)
         jobs = []
         for i in range(n):
             job_id, url = f.make_ready_job(source=source, content=CONTENT)
@@ -192,7 +187,7 @@ class TestSimilarEndpoint:
 
     def test_a_posting_with_no_vector_yet_says_so(self, client, user_headers, f):
         source = f.make_source()
-        f.subscribe(_uid(user_headers), source)
+        f.subscribe(user_id_for_subject("test-user"), source)
         job_id, _ = f.make_ready_job(source=source, content=CONTENT)
         r = client.get(f"/v1/jobs/{job_id}/similar", headers=user_headers)
         assert r.status_code == 404

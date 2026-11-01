@@ -10,6 +10,7 @@ import requests
 
 from core.fetching import ats
 from core.mail.prefilter import looks_job_related
+from tests.fetching.ats.responses import AtsResponse
 
 GS_URL = "https://higher.gs.com/roles/182810"
 
@@ -46,22 +47,12 @@ GS_ERROR = {
 }
 
 
-class _Resp:
-    def __init__(self, body=None, status_code=200, headers=None):
-        self._body = body
-        self.status_code = status_code
-        self.headers = headers or {}
-
-    def json(self):
-        return self._body
-
-
 def _goldman(monkeypatch, body, status_code=200):
     asked: list[dict] = []
 
     def post(url, json, **kw):
         asked.append({"url": url, **json["variables"]})
-        return _Resp(body, status_code)
+        return AtsResponse(body, status_code)
 
     monkeypatch.setattr(ats._session, "post", post)
     return asked
@@ -124,7 +115,7 @@ def _ibm(monkeypatch, status_code, location):
 
     def get(url, **kw):
         asked.append((url, kw.get("allow_redirects", True)))
-        return _Resp(status_code=status_code, headers={"location": location})
+        return AtsResponse(status_code=status_code, headers={"location": location})
 
     monkeypatch.setattr(ats._session, "get", get)
     return asked

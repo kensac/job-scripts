@@ -200,6 +200,9 @@ def test_a_dismissed_application_is_counted_not_hidden(client, user_headers):
     review = client.get("/v1/user/pipeline?stage=dismissed", headers=user_headers).json()
     assert [a["id"] for a in review["applications"]] == [drop]
     assert review["applications"][0]["dismissed_reason"] == "coursework"
+    # The list carries the unfiltered summary, whatever its own filter.
+    assert review["summary"] == summary
+    assert listed["summary"] == summary
 
     client.post(f"/v1/user/pipeline/{drop}/restore", headers=user_headers, json={})
     assert client.get("/v1/user/pipeline/summary", headers=user_headers).json()["dismissed"] == 0

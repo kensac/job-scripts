@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
-from api import db
-from tests.factories import make_source, subscribe
+from tests.factories import make_source, subscribe, user_id_for_subject
 
 
 def test_users_sort_by_a_computed_column_and_echo_the_sort(client, admin_headers, user_headers):
-    admin = db.query_one("SELECT id FROM users WHERE sub = 'test-admin'")
-    other = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")
-    assert admin is not None and other is not None
+    other = user_id_for_subject("test-user")
     # Give the plain user more sources so the sort is visibly not by id.
     for _ in range(3):
-        subscribe(other["id"], make_source())
+        subscribe(other, make_source())
     body = client.get(
         "/v1/admin/users", params={"sort": "sources", "dir": "desc"}, headers=admin_headers
     ).json()
-    assert body["users"][0]["id"] == other["id"]
+    assert body["users"][0]["id"] == other
     assert (body["sort"], body["dir"]) == ("sources", "desc")
     assert "sources" in body["sortable"] and "email" in body["sortable"]
 
     body = client.get(
         "/v1/admin/users", params={"sort": "sources", "dir": "asc"}, headers=admin_headers
     ).json()
-    assert body["users"][-1]["id"] == other["id"]
+    assert body["users"][-1]["id"] == other
 
     # An unknown key falls back to the default and says so.
     body = client.get("/v1/admin/users", params={"sort": "nope"}, headers=admin_headers).json()

@@ -10,6 +10,7 @@ from typing import Any, LiteralString, cast
 
 from psycopg.types.json import Jsonb
 
+from api.admin_groups import ADMIN_GROUPS
 from api.config import CONFIG_KEYS
 
 # The pool and its instrumentation live in core.pool, shared by store and
@@ -20,8 +21,9 @@ from core.pool import pool, statement, transaction
 # Weekly owner-key token budgets by Authentik group. Seeded once with ON
 # CONFLICT DO NOTHING so runtime edits via /v1/admin/group-budgets stick;
 # groups absent from the table (e.g. jobtracker-users-public) are BYO-only.
+# The admin groups (JOBTRACKER_ADMIN_GROUPS) have no cap.
 _GROUP_BUDGET_SEED = [
-    ("infra-admins", None),
+    *((group, None) for group in sorted(ADMIN_GROUPS)),
     ("jobtracker-users-internal", 5_000_000),
 ]
 

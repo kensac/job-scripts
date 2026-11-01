@@ -18,12 +18,8 @@ from typing import Any
 import requests
 
 from api import oauth
-from core.mail.importer import (
-    ImportedMessage,
-    clean_text,
-    html_to_text,
-    parse_sent_at,
-)
+from core.mail.importer import ImportedMessage
+from core.mail.importer.text import clean_text, html_to_text, parse_sent_at
 
 logger = logging.getLogger(__name__)
 

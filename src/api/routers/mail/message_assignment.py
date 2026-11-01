@@ -12,7 +12,7 @@ from api.mail import match as mail_match
 from api.mail.store import owned_message
 from api.problem import refuse
 from api.routers.mail.conversation_identity import CONVERSATION_KEY_SQL, MAX_THREAD_FANOUT
-from api.routers.mail.shared import Candidates, _candidates_payload
+from api.routers.mail.shared import Candidates, candidates_payload
 
 router = APIRouter()
 
@@ -53,7 +53,7 @@ def match_candidates(
     applying to", and there is nothing to attach to until one exists.
     """
     message = owned_message(message_id, user.id)
-    return _candidates_payload(message, user.id, q, limit)
+    return candidates_payload(message, user.id, q, limit)
 
 
 class MessageAssigned(BaseModel):
