@@ -10,7 +10,7 @@ from api.mail import match as mail_match
 from api.mail.current import current_event, current_match
 from api.mail.match_decision import DERIVED
 
-logger = logging.getLogger("tasks.mail.matching.handler")
+logger = logging.getLogger(__name__)
 
 
 # Kinds that are evidence the user applied. An employer does not acknowledge,

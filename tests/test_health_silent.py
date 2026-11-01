@@ -7,18 +7,19 @@ from __future__ import annotations
 from api import db, health, mail
 
 
-def _task(kind, status, *, progress=None, attempts=0, age_hours=1, error=None):
+def _task(kind, status, *, progress=None, attempts=0, age_hours=1, error=None, resumes=0):
     db.execute(
         """
-        INSERT INTO tasks (kind, payload, status, attempts, error, progress, created_at,
-                           finished_at)
-        VALUES (%s, '{}', %s, %s, %s, %s, now() - make_interval(hours => %s),
+        INSERT INTO tasks (kind, payload, status, attempts, batch_resumes, error, progress,
+                           created_at, finished_at)
+        VALUES (%s, '{}', %s, %s, %s, %s, %s, now() - make_interval(hours => %s),
                 CASE WHEN %s IN ('done', 'failed') THEN now() - make_interval(hours => %s) END)
         """,
         (
             kind,
             status,
             attempts,
+            resumes,
             error,
             db.jsonb(progress) if progress else None,
             age_hours,
@@ -130,6 +131,12 @@ def test_a_task_the_reaper_keeps_handing_back_fires():
     kinds = {k for k, _ in _silent()}
     assert kinds == {"task_requeued_forever"}
     assert len(_silent()) == 1
+
+
+def test_a_batch_task_that_resumed_is_not_handed_back():
+    # Four claims, three of them resumes from a parked batch wait: one retry.
+    _task("verify_new", "pending", attempts=4, resumes=3, age_hours=7)
+    assert _silent() == set()
 
 
 def test_an_alert_nobody_was_told_about_fires_only_when_mail_is_configured(monkeypatch):

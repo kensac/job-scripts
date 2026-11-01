@@ -6,14 +6,9 @@ import pytest
 import requests
 
 from api import db, oauth
-from tests.gmail_support import (
-    allow_gmail_connection_for_groups,
-    connect_gmail_account,
-    user_id_for_subject,
-)
-from tests.gmail_support import (
-    google as google,
-)
+from tests.factories import user_id_for_subject
+from tests.gmail_support import allow_gmail_connection_for_groups, connect_gmail_account
+from tests.gmail_support import google as google
 
 # --- disconnect ----------------------------------------------------------
 

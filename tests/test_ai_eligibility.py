@@ -118,8 +118,8 @@ def test_spend_splits_by_reach(client, admin_headers, population, f):
     assert by_reach["no_posting"]["calls"] == 1
 
     sources = {(r["reach"], r["source"]) for r in body["by_source_reach"]}
-    assert ("unreachable", UNWANTED) in sources
-    assert ("reachable", CATALOGUED) in sources
+    # Only the unreachable sources are itemized; the buckets count the rest.
+    assert sources == {("unreachable", UNWANTED)}
 
 
 def test_scraping_stays_narrower_than_spending(population):

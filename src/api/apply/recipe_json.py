@@ -10,9 +10,43 @@ class InvalidRecipe(ValueError):
     pass
 
 
-_SPACE = {9, 10, 13, 32}
+_SPACE = set(b" \t\n\r")
 _HEX = set(b"0123456789abcdefABCDEF")
-_ESCAPES = {34: '"', 92: "\\", 47: "/", 98: "\b", 102: "\f", 110: "\n", 114: "\r", 116: "\t"}
+_DIGITS = set(b"0123456789")
+_NONZERO_DIGITS = set(b"123456789")
+_ESCAPES = {
+    ord('"'): '"',
+    ord("\\"): "\\",
+    ord("/"): "/",
+    ord("b"): "\b",
+    ord("f"): "\f",
+    ord("n"): "\n",
+    ord("r"): "\r",
+    ord("t"): "\t",
+}
+_LITERALS = {ord("t"): "true", ord("f"): "false", ord("n"): "null"}
+_OPEN_OBJECT = ord("{")
+_CLOSE_OBJECT = ord("}")
+_OPEN_ARRAY = ord("[")
+_CLOSE_ARRAY = ord("]")
+_QUOTE = ord('"')
+_BACKSLASH = ord("\\")
+_COLON = ord(":")
+_COMMA = ord(",")
+_MINUS = ord("-")
+_PLUS = ord("+")
+_ZERO = ord("0")
+_DOT = ord(".")
+_EXPONENT = set(b"eE")
+_UNICODE_ESCAPE = ord("u")
+_FIRST_PRINTABLE = ord(" ")
+
+# The keys a recipe must give, and the JSON type each must have, by the
+# object that holds them.
+_REQUIRED_KEYS = {
+    "root": {"name": "string", "matches": "array", "fields": "array"},
+    "field": {"name": "string", "variants": "array"},
+}
 
 
 @dataclass
@@ -84,10 +118,8 @@ class RecipeParser:
         )
 
     def required_kind(self, frame: Frame) -> str | None:
-        if frame.scope == "root":
-            return {"name": "string", "matches": "array", "fields": "array"}.get(frame.key)
-        if frame.scope == "field":
-            return {"name": "string", "variants": "array"}.get(frame.key)
+        if frame.scope in _REQUIRED_KEYS:
+            return _REQUIRED_KEYS[frame.scope].get(frame.key)
         if frame.scope == "matches":
             return "string"
         if frame.scope == "fields":
@@ -97,17 +129,16 @@ class RecipeParser:
     def start_value(self, byte: int) -> None:
         parent = self.frame()
         required = self.required_kind(parent)
-        kind = (
-            "object"
-            if byte == 123
-            else "array"
-            if byte == 91
-            else "string"
-            if byte == 34
-            else "number"
-            if byte in b"-0123456789"
-            else "literal"
-        )
+        if byte == _OPEN_OBJECT:
+            kind = "object"
+        elif byte == _OPEN_ARRAY:
+            kind = "array"
+        elif byte == _QUOTE:
+            kind = "string"
+        elif byte == _MINUS or byte in _DIGITS:
+            kind = "number"
+        else:
+            kind = "literal"
         if required is not None and required != kind:
             raise InvalidRecipe("recipe field has the wrong JSON type")
         parent.state = "comma_or_end"
@@ -134,9 +165,9 @@ class RecipeParser:
             self.mode = "number"
             self.number_state = "start"
             self.number(byte)
-        elif byte in (116, 102, 110):
+        elif byte in _LITERALS:
             self.mode = "literal"
-            self.literal = {116: "true", 102: "false", 110: "null"}[byte]
+            self.literal = _LITERALS[byte]
             self.literal_pos = 1
         else:
             raise InvalidRecipe("invalid recipe JSON value")
@@ -182,19 +213,12 @@ class RecipeParser:
                     raise InvalidRecipe("invalid UTF-8 in recipe JSON")
                 self.capture(chr(codepoint))
             return
-        if byte == 34:
+        if byte == _QUOTE:
             self.mode = "default"
             frame = self.frame()
             if self.string_context == "key":
                 frame.key = self.prefix if not self.truncated else ""
-                relevant = (
-                    {"name", "matches", "fields"}
-                    if frame.scope == "root"
-                    else {"name", "variants"}
-                    if frame.scope == "field"
-                    else set()
-                )
-                if frame.key in relevant:
+                if frame.key in _REQUIRED_KEYS.get(frame.scope, {}):
                     if frame.key in frame.seen:
                         raise InvalidRecipe("duplicate recipe field")
                     frame.seen.append(frame.key)
@@ -208,9 +232,9 @@ class RecipeParser:
                     raise InvalidRecipe("matches must contain only https:// patterns")
                 self.match_count += 1
             return
-        if byte == 92:
+        if byte == _BACKSLASH:
             self.mode = "escape"
-        elif byte < 32:
+        elif byte < _FIRST_PRINTABLE:
             raise InvalidRecipe("control character in recipe JSON string")
         elif byte < 128:
             self.capture(chr(byte))
@@ -225,26 +249,26 @@ class RecipeParser:
 
     def number(self, byte: int) -> bool:
         state = self.number_state
-        digit = 48 <= byte <= 57
+        digit = byte in _DIGITS
         if state == "start":
-            if byte == 45:
+            if byte == _MINUS:
                 self.number_state = "minus"
-            elif byte == 48:
+            elif byte == _ZERO:
                 self.number_state = "zero"
-            elif 49 <= byte <= 57:
+            elif byte in _NONZERO_DIGITS:
                 self.number_state = "int"
             else:
                 raise InvalidRecipe("invalid number in recipe JSON")
         elif state == "minus":
-            if byte == 48:
+            if byte == _ZERO:
                 self.number_state = "zero"
-            elif 49 <= byte <= 57:
+            elif byte in _NONZERO_DIGITS:
                 self.number_state = "int"
             else:
                 raise InvalidRecipe("invalid number in recipe JSON")
-        elif state in ("zero", "int") and byte == 46:
+        elif state in ("zero", "int") and byte == _DOT:
             self.number_state = "dot"
-        elif state in ("zero", "int", "fraction") and byte in (69, 101):
+        elif state in ("zero", "int", "fraction") and byte in _EXPONENT:
             self.number_state = "exp"
         elif state == "zero" and digit:
             raise InvalidRecipe("invalid number in recipe JSON")
@@ -252,7 +276,7 @@ class RecipeParser:
             pass
         elif state == "dot" and digit:
             self.number_state = "fraction"
-        elif state == "exp" and byte in (43, 45):
+        elif state == "exp" and byte in (_PLUS, _MINUS):
             self.number_state = "exp_sign"
         elif state in ("exp", "exp_sign") and digit:
             self.number_state = "exp_digits"
@@ -268,7 +292,7 @@ class RecipeParser:
             if self.mode == "root":
                 if byte in _SPACE:
                     return
-                if byte != 123:
+                if byte != _OPEN_OBJECT:
                     raise InvalidRecipe("a recipe is an object")
                 self.mode = "default"
                 return
@@ -276,7 +300,7 @@ class RecipeParser:
                 self.string(byte)
                 return
             if self.mode == "escape":
-                if byte == 117:
+                if byte == _UNICODE_ESCAPE:
                     self.mode = "unicode"
                     self.unicode_digits = ""
                 elif byte in _ESCAPES:
@@ -313,32 +337,32 @@ class RecipeParser:
             frame = self.frame()
             if frame.kind == "object":
                 if frame.state in ("key_or_end", "key"):
-                    if byte == 125 and frame.state == "key_or_end":
+                    if byte == _CLOSE_OBJECT and frame.state == "key_or_end":
                         self.pop()
-                    elif byte == 34:
+                    elif byte == _QUOTE:
                         self.start_string("key")
                     else:
                         raise InvalidRecipe("invalid recipe JSON object")
                 elif frame.state == "colon":
-                    if byte != 58:
+                    if byte != _COLON:
                         raise InvalidRecipe("invalid recipe JSON object")
                     frame.state = "value"
                 elif frame.state == "value":
                     self.start_value(byte)
-                elif byte == 44:
+                elif byte == _COMMA:
                     frame.state = "key"
-                elif byte == 125:
+                elif byte == _CLOSE_OBJECT:
                     self.pop()
                 else:
                     raise InvalidRecipe("invalid recipe JSON object")
             elif frame.state in ("value_or_end", "value"):
-                if byte == 93 and frame.state == "value_or_end":
+                if byte == _CLOSE_ARRAY and frame.state == "value_or_end":
                     self.pop()
                 else:
                     self.start_value(byte)
-            elif byte == 44:
+            elif byte == _COMMA:
                 frame.state = "value"
-            elif byte == 93:
+            elif byte == _CLOSE_ARRAY:
                 self.pop()
             else:
                 raise InvalidRecipe("invalid recipe JSON array")
