@@ -9,7 +9,7 @@ Built CONCURRENTLY so ingest and the task claim keep writing, with an invalid
 leftover dropped first and a lock timeout, as in c1746d710146.
 
 Revision ID: 5e1d2c7a9b40
-Revises: 4c366382d721
+Revises: 58e4e8b6b54d
 Create Date: 2026-11-01 01:55:00.000000
 
 """
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "5e1d2c7a9b40"
-down_revision: str | None = "4c366382d721"
+down_revision: str | None = "58e4e8b6b54d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
