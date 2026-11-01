@@ -250,11 +250,6 @@ time to save runner time on the 1 run in 200 whose gate failed (measured
 and exported against a DSN on a closed port it is byte-identical to the
 committed file.
 
-**Every Python job installs with `uv sync --frozen --compile-bytecode`.**
-Without it, pytest startup compiled about 5,100 installed modules from source
-in every lane, 4.7 s each, one at a time. uv compiles them in parallel while
-the Postgres image is still pulling.
-
 ## Measured and rejected
 
 Recorded so the next attempt starts somewhere new. Each of these looked

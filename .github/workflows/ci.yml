@@ -38,11 +38,7 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      # Bytecode at install, where uv compiles in parallel and the
-      # Postgres pull still has seconds to run. Left to import time, a
-      # lane compiled about 5,100 modules one by one: 4.7 s of pytest
-      # startup, measured 2026-11-01.
-      - run: uv sync --frozen --compile-bytecode
+      - run: uv sync --frozen
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       # Mechanical fixes are committed, not reported. Lint autofixes,
       # formatting and the generated openapi.json are the three things a
@@ -140,11 +136,7 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-      # Bytecode at install, where uv compiles in parallel and the
-      # Postgres pull still has seconds to run. Left to import time, a
-      # lane compiled about 5,100 modules one by one: 4.7 s of pytest
-      # startup, measured 2026-11-01.
-      - run: uv sync --frozen --compile-bytecode
+      - run: uv sync --frozen
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Type check
         run: pyright
