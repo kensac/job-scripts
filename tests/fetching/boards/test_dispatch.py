@@ -91,6 +91,23 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ("https://jobs.l3harris.com/services/rss/job/", "successfactors"),
         ("https://api.gem.com/job_board/v0/function-health/job_posts/", "gem"),
         ("https://ats.rippling.com/api/v2/board/loop/jobs", "rippling"),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        (
+            "https://recruiting2.ultipro.com/MES1003MFAC/JobBoard/69451223-cdce-4faf-9407-23a2cd5ac83b/JobBoardView/LoadSearchResults",
+            "ukg",
+        ),
+        # A UKG board page and its postings are not the listings.
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/",
+            "sheet_era",
+        ),
+        (
+            "https://recruiting.ultipro.com/SEA1007SEACO/JobBoard/7851737e-66c7-908f-77e9-6d69f4eb0ead/OpportunityDetail?opportunityId=28745f89-de05-4f43-ac09-61693ca75353",
+            "sheet_era",
+        ),
         # Their public pages, and a Rippling posting, are not the listings.
         ("https://jobs.gem.com/function-health", "sheet_era"),
         ("https://ats.rippling.com/loop/jobs", "sheet_era"),
@@ -132,6 +149,17 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
             "acf634cc-bb17-43ff-950e-ad7dfb8b47de",
             "sheet_era",
         ),
+        (
+            "https://sjobs.brassring.com/TGnewUI/Search/Home/Home?partnerid=25539&siteid=5313",
+            "brassring",
+        ),
+        ("https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5012", "brassring"),
+        # A BrassRing posting page is not its search page.
+        (
+            "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008"
+            "&siteid=5012&PageType=JobDetails&jobid=350625",
+            "sheet_era",
+        ),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -161,6 +189,16 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "rippling",
         "adp",
         "paylocity",
+        "ukg",
+        "brassring",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -175,6 +213,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -192,8 +231,17 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "smartrecruiters",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.needs_company} == {
         "adp",
@@ -201,6 +249,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -214,8 +263,17 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "rippling",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert {name for name, board_format in formats.items() if board_format.authoritative} == {
         "adp",
@@ -223,6 +281,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -239,8 +298,17 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "smartrecruiters",
         "successfactors",
         "taleo",
+        "ukg",
         "workable",
         "workday",
+        "bamboohr",
+        "breezy",
+        "jazzhr",
+        "jobvite",
+        "pageup",
+        "pinpoint",
+        "recruitee",
+        "teamtailor",
     }
     assert all(board_format.fetcher is not None for board_format in formats.values())
     assert boards.format_for_url("https://airtable.com/appX/shrY").fetcher is None

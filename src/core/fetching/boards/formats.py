@@ -12,6 +12,9 @@ from core.fetching.boards.amazon import _amazon
 from core.fetching.boards.apple import _apple
 from core.fetching.boards.ashby import _ashby
 from core.fetching.boards.avature import _avature
+from core.fetching.boards.bamboohr import _bamboohr
+from core.fetching.boards.brassring import _brassring
+from core.fetching.boards.breezy import _breezy
 from core.fetching.boards.bytedance import _BYTEDANCE_HOSTS, _BYTEDANCE_SEARCH, _bytedance
 from core.fetching.boards.eightfold import _eightfold
 from core.fetching.boards.gem import _gem
@@ -20,15 +23,22 @@ from core.fetching.boards.google import _google
 from core.fetching.boards.greenhouse import _greenhouse
 from core.fetching.boards.ibm import _ibm
 from core.fetching.boards.icims import _icims
+from core.fetching.boards.jazzhr import _jazzhr
 from core.fetching.boards.jibe import _jibe
+from core.fetching.boards.jobvite import _JOBVITE_BOARD, _jobvite
 from core.fetching.boards.lever import _lever
 from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
+from core.fetching.boards.pageup import _PAGEUP_FEED, _pageup
 from core.fetching.boards.paylocity import PAYLOCITY_BOARD, _paylocity
+from core.fetching.boards.pinpoint import _pinpoint
+from core.fetching.boards.recruitee import _recruitee
 from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
 from core.fetching.boards.successfactors import _successfactors
 from core.fetching.boards.taleo import _TALEO_SECTION, _taleo
+from core.fetching.boards.teamtailor import _teamtailor
+from core.fetching.boards.ukg import _UKG_HOST, _UKG_SEARCH, _ukg
 from core.fetching.boards.workable import _workable
 from core.fetching.boards.workday import _workday
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
@@ -143,6 +153,13 @@ FORMATS = (
         authoritative=True,
     ),
     BoardFormat(
+        "ukg",
+        lambda a: bool(_UKG_HOST.fullmatch(a.host) and _UKG_SEARCH.fullmatch(a.path)),
+        _ukg,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
         "apple",
         lambda a: a.host == "jobs.apple.com" and a.path.startswith("/api/"),
         _apple,
@@ -221,10 +238,74 @@ FORMATS = (
         needs_company=True,
         authoritative=True,
     ),
+    # BrassRing runs on sjobs.brassring.com and employer hosts (jobs.ubs.com).
+    BoardFormat(
+        "brassring",
+        lambda a: a.path.lower() == "/tgnewui/search/home/home",
+        _brassring,
+        needs_company=True,
+        authoritative=True,
+    ),
     BoardFormat(
         "paylocity",
         lambda a: a.host == "recruiting.paylocity.com" and bool(PAYLOCITY_BOARD.fullmatch(a.path)),
         _paylocity,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "jazzhr",
+        lambda a: a.host == "app.jazz.co" and a.path.startswith("/feeds/export/jobs/"),
+        _jazzhr,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "jobvite",
+        lambda a: a.host == "jobs.jobvite.com" and bool(_JOBVITE_BOARD.fullmatch(a.path)),
+        _jobvite,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "bamboohr",
+        lambda a: a.host.endswith(".bamboohr.com") and a.path == "/careers/list",
+        _bamboohr,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "pinpoint",
+        lambda a: a.host.endswith(".pinpointhq.com") and a.path == "/postings.json",
+        _pinpoint,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "breezy",
+        lambda a: a.host.endswith(".breezy.hr") and a.path == "/json",
+        _breezy,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "teamtailor",
+        lambda a: a.host.endswith(".teamtailor.com") and a.path == "/jobs.rss",
+        _teamtailor,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "pageup",
+        lambda a: a.host == "careers.pageuppeople.com" and bool(_PAGEUP_FEED.fullmatch(a.path)),
+        _pageup,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "recruitee",
+        lambda a: a.host.endswith(".recruitee.com") and a.path.rstrip("/") == "/api/offers",
+        _recruitee,
         needs_company=True,
         authoritative=True,
     ),
