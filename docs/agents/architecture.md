@@ -1,7 +1,6 @@
 # Architecture and domain semantics
 
-The pipeline, the matcher, and the facts every other topic reads. Four
-neighbouring documents carry what used to live here:
+The pipeline, the matcher, and the facts every other topic reads. Related:
 [sources-and-boards.md](sources-and-boards.md) for ingest and the catalog,
 [visibility.md](visibility.md) for who sees what,
 [observability.md](observability.md) for the worker fleet and batched work,
@@ -112,8 +111,7 @@ that needs the current rows of many messages without the message takes its
 subquery from `api/mail/current.py` (`current_event(...)`,
 `current_match(...)`), naming the columns it reads; one message's current
 match is `match.latest`. `tests/test_mail_current.py` fails on a "newest row
-per message" (`DISTINCT ON (message_id)`) written anywhere else: there were
-36 such copies in nine files. Join on the pointer alone, not on the pointer
+per message" (`DISTINCT ON (message_id)`) written anywhere else. Join on the pointer alone, not on the pointer
 and the message id together: the planner multiplies the two and expects one
 row (the module docstring has the production measurements). Test fixtures
 that write a log directly go through `tests/mail_log.py`, which moves the
@@ -138,14 +136,13 @@ match, or a board row moved into an applied status. A sweep skips a user with
 none of these, decides again only messages whose verdict or the cutoff is
 older than a new application or event. The verdict timestamp alone is not a
 cutoff, because `match.record` does not append a verdict that repeats the
-standing one. Before this, 245 runs in the 14 days to 2026-10-10 took 200.5
-worker-hours deciding the same 4,852 messages, and 244 of them wrote nothing.
+standing one.
 
 **A request reads the current event and current match once.** "Latest row per
 message" is a pass over every row of both tables, so a surface that needs it
 for several derivations takes it in one statement and derives the rest from
 those rows, as the resolve queue does (`resolve/queue_items.current_rows`).
-Where such a derivation restates one that `mail/pipeline.py` also serves
+Where such a derivation restates one that `api/mail/pipeline/` also serves
 (`events_by_application`, `proposals_for`), a test holds the two equal. A
 surface that ranks before it pages reads only what ranking needs for every row
 and reads the shown columns for the page alone.
@@ -178,15 +175,11 @@ A human verdict stays reconsiderable by a human, from the queue that exists to
 reconsider it. What it must not be is undone by the next sweep, because then
 rejecting a match achieves nothing. A selection predicate cannot enforce this:
 the sweep reads its candidates, then writes minutes later, and the decision can
-land in between. That is not hypothetical. The only human decision ever
-recorded in production was overwritten exactly that way, an hour after it was
-made.
+land in between.
 
-**Every write to `application_matches` goes through `mail_match.record`**, so
-`actor_user_id` cannot be omitted. Three endpoints wrote the table directly and
-none of them set it. So rows reading `manual` are not evidence a person was
-there, and "has anyone reviewed this attachment" was unanswerable by query for
-15,090 rows.
+**Every write to `application_matches` goes through `api.mail.match.record`**,
+so `actor_user_id` cannot be omitted. Older rows reading `manual` are not
+evidence a person was there.
 
 ## Providers and cost
 
@@ -205,34 +198,21 @@ present one as the other.
 **Extraction is paid for only where its result can be read, and not at all
 where nothing reads it.** Requirements extraction is off
 (`requirements_extraction_enabled`, persisted config, seeded false): its one
-consumer is the market table, and measured on 2026-09-07 through the
-experiments harness the deployed arm (nano, minimal) named a seniority for
-5 of the 92 postings the reference named one for and shared about a third
-of the skills, most of the rest being wording. Turning it on is a config
-row, not a deploy; choosing an arm worth paying for is the experiment
-(luna at none gets seniority to 74 percent of the reference for about 70
-cents a day at the current verification rate). Comp and
-requirements select on `core.verdict_reads.verified_open`: the posting's latest
-closed and clearance verdicts both passed.
+consumer is the market table, and on 2026-09-07 the deployed arm (nano,
+minimal) named a seniority for 5 of the 92 postings the reference named one
+for. Turning it on is a config row; choosing an arm worth paying for is an
+experiment. Comp and requirements select on
+`core.verdict_reads.verified_open`: the posting's latest closed and clearance
+verdicts both passed. On 2026-09-06 that was 37,438 of 74,477 active
+postings; the rest is closed or restricted and reaches no board.
 
 **An arm that answers nothing is re-bought every sweep.** Comp leaves a row
 unextracted when the answer does not parse, so the next sweep selects it
-again; that is the right retry for a transient failure and a spend loop
-for a systematic one. The 2026-09-07 baselines showed the systematic case:
-nano at medium or high spends the whole output cap on reasoning and
-returns no text on verify, comp and requirements (65 to 100 of 100).
-Production runs those steps at low and never hit it. Try an effort in an
-experiment, where a failed arm costs one batch and shows as a count, not
-on a production step, where it costs one batch per hour until someone
-notices. On 2026-09-06 that was 37,438 of
-74,477 active postings; the other half is closed or restricted and reaches
-no board, so a number extracted from it is never read. The narrower cut,
-extracting only for postings on someone's board (3,117 that day, 4 percent
-of the catalog), is a documented option not yet taken: it would make a
-posting that reaches a board later wait a cycle for its comp column and
-build the market table from a smaller slice than the filters admit. If the
-verified-open cost still reads as too high, that is the next step, and it
-is the same one-line change to the same two selections.
+again: the right retry for a transient failure, a spend loop for a systematic
+one. On 2026-09-07 nano at medium or high effort spent the whole output cap
+on reasoning and returned no text on verify, comp and requirements (65 to 100
+of 100). Try an effort in an experiment, where a failed arm costs one batch,
+not on a production step, where it costs one batch per hour.
 
 **Verification has three owners.** `tasks/verification/questions.py` builds the
 request and hashes its exact submitted shape.
@@ -276,10 +256,7 @@ reuse check takes its model list from `answering_models`, never `model = %s`.
 **A re-listing re-asks a closure; it is not a first read.** The sweep's
 re-listing branch takes only postings that already hold a closed verdict. A
 re-listed posting never checked is `verify_new`'s, because only its gate knows
-whether any board or filter can keep it. The branch used to treat a missing
-verdict as older than any re-listing. In the week to 2026-10-18 that bought
-1,407 of 3,209 paid re-checks, all first reads of postings the gate skips,
-most from feeds that keep re-listing.
+whether any board or filter can keep it.
 
 ## Time
 
@@ -303,7 +280,9 @@ fresh copy:
   source with a parity test.
 - **Provider facts**: one datasheet per provider under `core/providers/`.
 - **Task handlers**: `src/tasks/`, one module per family. The task runtime
-  imports nothing from the worker; the worker imports only the handler table.
+  imports nothing from the worker. The worker imports the handler table, the
+  runtime and `tasks.DERIVATIONS`, and nothing else from `tasks` (the
+  `ignore_imports` in `pyproject.toml`).
 - **Person-state writes**: `api/board/person_state.py`. HTTP adapters may
   authorize and shape a command, but the status/date rules, history and board
   event publication have one service owner.
@@ -320,12 +299,9 @@ fresh copy:
   owned by their domain or task.
 - **Listing formats**: `core/fetching/boards/formats.py`, one format object with its URL
   matcher, fetcher and source rules, chosen by the listings URL. See [sources-and-boards.md](sources-and-boards.md).
-- **What the mail implies the board should say**: `mail_pipeline.proposals_for`
+- **What the mail implies the board should say**: `api.mail.pipeline.proposals_for`
   and `answer_proposal`. The route that lists proposals and the queue that
-  merges them into everything else read the same function. A second spelling
-  would drift, and the first one already had: an inner join against
-  `user_jobs` silenced 947 of 1,159 proposals by never forming the question for
-  applications that have no board row.
+  merges them into everything else read the same function.
 
 ## Compensation source provenance
 

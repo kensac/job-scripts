@@ -31,9 +31,6 @@ such a migration, check the condition against production yourself and say the
 result in the PR; if it could plausibly raise, or the migration is not
 additive, ask the deployment owner for an explicit roll and restore the
 job-scripts opt-out in the host repos' `renovate.json` for that one release.
-The two constraint migrations of #476 (2026-09-09) were the first to land
-unattended; they passed because the data was clean and #472 already refused
-the condition at write time.
 
 **Parallel work produces two heads from one parent.** Each branch is green
 against its own parent, and `upgrade head` fails only once both are on main.
@@ -170,13 +167,11 @@ its remaining values.
 
 ## Every table is a model
 
-No table is created outside alembic. `ai_queries` was the last one, created
-by `core/store.py` at import and hidden from the drift check; f3a4b5c6d7e8
-adopted it with an `IF NOT EXISTS` migration mirroring what production held,
-and the model has described it since. A table without a model has no
+No table is created outside alembic. A table without a model has no
 autogenerate, needs every column added in two places, and makes a clean drift
-check a lie about the largest table in the database. When a table exists that
-the models do not know, adopt it the same way rather than excluding it.
+check a lie. When a table exists that the models do not know, adopt it with an
+`IF NOT EXISTS` migration mirroring what production holds (f3a4b5c6d7e8 is the
+example) rather than excluding it.
 
 Per-table storage settings (autovacuum thresholds, fillfactor) live in the
 migration that needs them, with the measurement that chose the value, because
@@ -201,9 +196,8 @@ views, and the test corpus and sync tools read base tables only.
 
 ## Derived state is not schema
 
-Do not add a column for something derivable from rows you already have. A
-stored derivation desyncs; a derived one cannot. Store the person's answer,
-derive the system's inference.
+Do not add a column for something derivable from rows you already have
+([data-and-truth.md](data-and-truth.md) states the principle).
 
 The answer ledger's hourly sums (`answer_usage_hourly`) are the one stored
 derivation. They are allowed because a read never returns a stale hour;
