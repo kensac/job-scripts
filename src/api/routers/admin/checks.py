@@ -6,10 +6,15 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api import ai, budget, db, model_calls, user_settings
+from api.ai import verdicts
 from api.auth import AuthedUser
 from api.problem import PROVIDER_REFUSALS, UNAVAILABLE_REFUSALS, refuse
 from api.routers.admin.shared import require_admin
 from core import providers, routing
+from core.answer_inputs import LIVE_CHECK_INPUT_CHARS
+from core.answers import FilterVerdict
+from core.checks import POSTING_CHECKS
+from core.filters import build_custom_instructions
 
 router = APIRouter()
 
@@ -18,8 +23,6 @@ def _recheck_models(user: AuthedUser) -> list[str]:
     """The models a manual re-check may run: what this caller is allowed on
     the server key, intersected with the keys the server holds. Same rule as
     everything else that spends on the owner key; not a second list."""
-    from api import budget
-
     return budget.owner_allowed_models(user.groups)
 
 
@@ -101,12 +104,6 @@ async def run_single_check(
     fresh row becomes the latest for that (url, check_type), so visibility
     re-derives from it immediately. No downstream re-run needed, since
     visibility is a read-time predicate rather than stored derived state."""
-    from api.ai import verdicts as _verdicts
-    from core.answer_inputs import LIVE_CHECK_INPUT_CHARS
-    from core.answers import FilterVerdict
-    from core.checks import POSTING_CHECKS
-    from core.filters import build_custom_instructions
-
     job = db.query_one("SELECT id, url, company, title FROM jobs WHERE id = %s", (body.job_id,))
     if not job:
         raise refuse(404, "NOT_FOUND", "unknown job")
@@ -161,7 +158,7 @@ async def run_single_check(
         )
     # Re-fetch: a recheck against cached text cannot discover that a posting
     # has since closed, which is usually the whole reason for asking.
-    fresh, closure_signal = await _verdicts.refresh_page(
+    fresh, closure_signal = await verdicts.refresh_page(
         job["url"], company=job["company"], job_title=job["title"], context="manual"
     )
     if fresh is None:
@@ -209,7 +206,7 @@ async def run_single_check(
 
     # The re-check runs on the server's key for the admin who asked, and
     # until the call ledger it was booked nowhere but its verdict row.
-    parsed, usage = await _verdicts.run_check(
+    parsed, usage = await verdicts.run_check(
         cfg,
         url=job["url"],
         check_type=check,
