@@ -10,6 +10,7 @@ from core.fetching.boards.amazon import _amazon
 from core.fetching.boards.apple import _apple
 from core.fetching.boards.ashby import _ashby
 from core.fetching.boards.avature import _avature
+from core.fetching.boards.brassring import _brassring
 from core.fetching.boards.bytedance import _BYTEDANCE_HOSTS, _BYTEDANCE_SEARCH, _bytedance
 from core.fetching.boards.eightfold import _eightfold
 from core.fetching.boards.gem import _gem
@@ -208,6 +209,14 @@ FORMATS = (
         "eightfold",
         lambda a: a.path.rstrip("/") in (EIGHTFOLD_PCSX, EIGHTFOLD_V2),
         _eightfold,
+        needs_company=True,
+        authoritative=True,
+    ),
+    # BrassRing runs on sjobs.brassring.com and employer hosts (jobs.ubs.com).
+    BoardFormat(
+        "brassring",
+        lambda a: a.path.lower() == "/tgnewui/search/home/home",
+        _brassring,
         needs_company=True,
         authoritative=True,
     ),

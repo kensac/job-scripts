@@ -100,6 +100,17 @@ from tests.fetching.boards.responses import BoardResponse as _Resp
         ),
         # A Career Site Builder search page is not its feed.
         ("https://jobs.l3harris.com/search/?q=", "sheet_era"),
+        (
+            "https://sjobs.brassring.com/TGnewUI/Search/Home/Home?partnerid=25539&siteid=5313",
+            "brassring",
+        ),
+        ("https://jobs.ubs.com/TGnewUI/Search/Home/Home?partnerid=25008&siteid=5012", "brassring"),
+        # A BrassRing posting page is not its search page.
+        (
+            "https://jobs.ubs.com/TGnewUI/Search/home/HomeWithPreLoad?partnerid=25008"
+            "&siteid=5012&PageType=JobDetails&jobid=350625",
+            "sheet_era",
+        ),
     ],
 )
 def test_kind_is_read_off_the_url(url, expected):
@@ -127,6 +138,7 @@ def test_boards_that_never_name_a_company_are_the_ones_that_need_one():
         "avature",
         "gem",
         "rippling",
+        "brassring",
     } == boards.NEEDS_COMPANY
     # Every board that needs a company is one whose absence closes a posting.
     assert boards.NEEDS_COMPANY <= boards.AUTHORITATIVE
@@ -140,6 +152,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -164,6 +177,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
@@ -184,6 +198,7 @@ def test_each_format_owns_its_fetcher_and_source_rules():
         "apple",
         "ashby",
         "avature",
+        "brassring",
         "bytedance",
         "eightfold",
         "gem",
