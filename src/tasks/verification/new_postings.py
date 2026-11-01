@@ -59,7 +59,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
 def _build_specs(rows: list[dict[str, Any]]) -> list[BatchSpec]:
     """One request per posting: joint with the boards' questions where a
     board asks one, verification alone otherwise."""
-    model, effort = _submission_model()
+    model, effort, _ = _submission_model()
     questions = (
         managed_boards.verification_questions(rows, model, effort)
         if db.get_config("verify_answers_board_questions")

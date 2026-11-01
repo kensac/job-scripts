@@ -22,12 +22,13 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from api import db
+from api import db, model_fallback
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
 from api.task_config import configured_shape
 from core import providers
+from core.fallback import FILTER_PURPOSE, chain_purposes, filter_shape
 from core.providers.spec import StructuredOutput
 from core.routing import (
     Candidacy,
@@ -488,3 +489,118 @@ def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> 
     """
     _known_purpose(purpose)
     return TaskModelHistory(purpose=purpose, changes=_history(purpose, HISTORY_LIMIT))
+
+
+# How many fallback batches a purpose's view carries; every row stays stored.
+RECENT_FALLBACKS = 20
+
+
+class FallbackEntry(BaseModel):
+    """One model in a purpose's fallback chain, judged as routing would."""
+
+    model: str
+    provider: str | None
+    # Empty when routing would send this purpose's work to it; otherwise the
+    # requirement that rules it out, in resolve()'s words.
+    rejection: str
+    provider_exhausted: bool
+    # True when its verdicts count as the primary's (verdict_model_equivalence),
+    # False when they are recorded under it and the primary's readers ignore
+    # them, so those postings are asked again once the primary is back. None
+    # when the purpose writes no verdicts, or its primary is each person's own
+    # model (the filter).
+    counts_as_primary: bool | None
+
+
+class FallbackBatch(BaseModel):
+    provider_batch_id: str
+    task_id: int | None
+    purpose: str
+    model: str | None
+    fallback_from: str
+    requests: int
+    submitted_at: datetime.datetime
+
+
+class PurposeFallback(BaseModel):
+    purpose: str
+    # The model routing runs when no provider is out of credit; None for the
+    # filter, which runs each person's own model.
+    primary: str | None
+    chain: list[FallbackEntry]
+    recent: list[FallbackBatch]
+
+
+class ProviderExhaustion(BaseModel):
+    provider: str
+    reason: str | None
+    message: str
+    first_seen: datetime.datetime
+    last_seen: datetime.datetime
+    # True while routing skips it: within one scheduler cycle of its last
+    # refusal. After that the provider is tried again.
+    skipped: bool
+
+
+class ModelFallbackView(BaseModel):
+    providers: list[ProviderExhaustion]
+    purposes: list[PurposeFallback]
+
+
+def _fallback_shape(purpose: str) -> tuple[TaskShape, str | None]:
+    if purpose == FILTER_PURPOSE:
+        return filter_shape("", None), None
+    shape = configured_shape(SHAPES[purpose])
+    return shape, _running_model(shape, _override(purpose))
+
+
+def _purpose_fallback(purpose: str, chain: list[str], exhausted: set[str]) -> PurposeFallback:
+    shape, primary = _fallback_shape(purpose)
+    judged = {c.model: c for c in candidates_for(shape)}
+    counted = model_fallback.equivalent(purpose, primary) if primary else None
+    entries = [
+        FallbackEntry(
+            model=name,
+            provider=providers.provider_of(name),
+            rejection=judged[name].rejection if name in judged else "not offered for selection",
+            provider_exhausted=providers.provider_of(name) in exhausted,
+            counts_as_primary=None if counted is None else name in counted,
+        )
+        for name in chain
+    ]
+    recent = db.query_as(
+        FallbackBatch,
+        """
+        SELECT provider_batch_id, task_id, purpose, model, fallback_from, requests, submitted_at
+        FROM ai_batches
+        WHERE fallback_from IS NOT NULL AND purpose = ANY(%(purposes)s)
+        ORDER BY id DESC
+        LIMIT %(limit)s
+        """,
+        {
+            # Re-verification asks verify's model, so it runs on verify's chain.
+            "purposes": [purpose, "reverify"] if purpose == "verify" else [purpose],
+            "limit": RECENT_FALLBACKS,
+        },
+    )
+    return PurposeFallback(purpose=purpose, primary=primary, chain=entries, recent=recent)
+
+
+@router.get("/model-fallback")
+def model_fallback_view(_: AuthedUser = Depends(require_admin)) -> ModelFallbackView:
+    """Which providers are out of credit, and per purpose its fallback chain
+    (app_config model_fallback_chains) and the batches recently run on it.
+
+    Every purpose that can hold a chain is listed, an empty chain included, so
+    a purpose with nowhere to go is visible rather than absent.
+    """
+    exhausted = model_fallback.exhausted()
+    marked = {row["provider"] for row in exhausted}
+    chains = model_fallback.chains()
+    return ModelFallbackView(
+        providers=[ProviderExhaustion.model_validate(row) for row in exhausted],
+        purposes=[
+            _purpose_fallback(purpose, chains.get(purpose, []), marked)
+            for purpose in chain_purposes()
+        ],
+    )

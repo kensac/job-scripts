@@ -155,6 +155,9 @@ PROVIDER = Provider(
     # value, the valid range of temperature is [0, 2]".
     supports_temperature=True,
     batch_endpoint=None,
+    # HTTP 402 "Insufficient Balance", the vendor's documented error for an
+    # account that has run out of balance.
+    exhaustion_markers=("insufficient balance",),
     source=_PROBE,
     models=(
         # models.list returns exactly these three. deepseek-chat and

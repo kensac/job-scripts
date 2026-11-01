@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from api import ai, budget, db
+from api import ai, budget, db, model_fallback
 from api.ai import batch_results, verdicts
 from api.ai.batch_results import progress_counts
 from api.model_calls import Payer
 from api.verdict_equivalence import answering_models
-from core import providers
+from core import providers, routing
 from core.answers import FilterDecision, FilterResult
+from core.fallback import FILTER_MAX_OUTPUT_TOKENS, FILTER_PURPOSE, filter_shape
 from core.filters import build_custom_decision_instructions, build_custom_input
 from core.store import Page, decided_custom_urls, get_contents
 from tasks.runtime import (
@@ -37,6 +38,38 @@ logger = logging.getLogger(__name__)
 # chunk (about 18 per chunk with its progress read; 88 s at the 103 ms `oci`
 # is from the database) where collecting per result took 230,353 (6.6 h).
 COLLECT_CHUNK = 500
+
+
+def filter_effort(cfg: ai.AIConfig) -> str:
+    """One value, sent and recorded. OpenAI settings name it reasoning_effort
+    and Anthropic settings name it effort; the batch transport takes either."""
+    return str(cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium")
+
+
+def fallback_config(cfg: ai.AIConfig) -> ai.AIConfig:
+    """The owner-credit config this run uses: the person's, or the filter
+    chain's next model while their model's provider is out of credit.
+
+    Chosen before the run selects its jobs, so the decided-postings check asks
+    for the model that will answer and the sweep does not re-buy postings a
+    fallback already decided.
+    """
+    if cfg.key_source != "owner":
+        return cfg
+    effort = filter_effort(cfg)
+    choice = model_fallback.route(filter_shape(cfg.model, effort))
+    if choice.fallback_from is None:
+        return cfg
+    params = {k: v for k, v in cfg.params.items() if k not in ("reasoning_effort", "effort")}
+    params.update({k: v for k, v in choice.params.items() if k in ("reasoning_effort", "effort")})
+    return replace(
+        cfg,
+        provider=choice.provider,
+        model=choice.model,
+        api_key=routing.server_key(choice.provider),
+        params=params,
+        fallback_from=cfg.model,
+    )
 
 
 @dataclass(frozen=True)
@@ -236,7 +269,7 @@ async def execute_batch(
     contents: dict[str, Page],
     unavailable: int,
     purpose: str = "filter",
-    max_output_tokens: int = 6000,
+    max_output_tokens: int = FILTER_MAX_OUTPUT_TOKENS,
     complete_without_submission: bool = False,
     collect: Callable[..., Awaitable[list[Any]]] = collect_pending,
     submit: Callable[..., Awaitable[list[Any]]] = submit_or_collect,
@@ -254,13 +287,7 @@ async def execute_batch(
         ):
             cache_policy = "no_cache"
     instructions = build_custom_decision_instructions(snapshot.prompt, snapshot.on_ambiguous)
-    # One value, sent and recorded. OpenAI settings name it reasoning_effort
-    # and Anthropic settings name it effort; the batch transport takes either.
-    effort = (
-        (cfg.params.get("reasoning_effort") or cfg.params.get("effort") or "medium")
-        if cfg
-        else None
-    )
+    effort = filter_effort(cfg) if cfg else None
     specs, by_url = [], {}
     for job in jobs:
         if existing:
@@ -299,12 +326,21 @@ async def execute_batch(
         else f"batch of {len(specs)} submitted (half price)",
     )
 
-    hook = batch_event_hook(task_id, purpose, cfg.model if cfg else None, payer=hooks.payer)
+    hook = batch_event_hook(
+        task_id,
+        purpose,
+        cfg.model if cfg else None,
+        payer=hooks.payer,
+        fallback_from=cfg.fallback_from if cfg else None,
+    )
     if existing:
         logger.info("Task %s: collecting previously submitted results", task_id)
         results = await collect(task_id, hook)
     else:
         assert cfg is not None and effort is not None
+        # Only the personal filter has a chain. A managed board's model is
+        # its contract: another model's verdicts would never reach it.
+        chained = purpose == FILTER_PURPOSE
         results = await submit(
             task_id,
             specs,
@@ -312,6 +348,10 @@ async def execute_batch(
             effort,
             max_output_tokens,
             hook,
+            fallback=filter_shape(cfg.fallback_from or cfg.model, effort) if chained else None,
+            purpose=purpose,
+            payer=hooks.payer,
+            routed=cfg.fallback_from,
         )
     for start in range(0, len(results), COLLECT_CHUNK):
         chunk = results[start : start + COLLECT_CHUNK]

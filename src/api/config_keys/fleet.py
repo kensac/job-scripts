@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field, NonNegativeInt, PositiveInt
 
 from api.config_types import ConfigKey
+from core.fallback import FallbackChains
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
     # The site-wide AI switch (api.ai_pause), for a stretch nobody uses the
@@ -26,6 +27,24 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="When AI is switched back on, postings first seen during the pause are read only "
         "from this many days before it ended; older ones stay in the catalog unread.",
+    ),
+    # Read by api.model_fallback. Empty: a provider out of credit fails the
+    # work, as it did on 2026-10-31, and nothing moves to another model.
+    "model_fallback_chains": ConfigKey(
+        section="Fleet",
+        default=FallbackChains().model_dump(mode="json"),
+        value_type=FallbackChains,
+        kind="json",
+        help="Per task purpose, the models to try in order when the running model's provider "
+        "reports the account cannot pay (out of credit, billing hard limit, quota used up), e.g. "
+        '{"verify": ["claude-haiku-5-5"]}. Rate limits and outages never move work. An entry '
+        "that cannot run the task (no batch endpoint, structured output or effort it needs) is "
+        "skipped, and the provider is tried again one scheduler cycle after its last refusal. "
+        "Entries in the primary's verdict_model_equivalence group are tried first. Every answer "
+        "is recorded under the model that gave it: an entry outside that group writes verdicts "
+        "the primary's readers do not count, so those postings are asked again once the primary "
+        "is back. Spend stays inside the same budgets and the fleet ceiling. Managed boards never "
+        "fall back: a board reads only its own model's verdicts.",
     ),
     # The scheduler buckets the hour by this, so it must divide 60 for every
     # bucket to be the same length.

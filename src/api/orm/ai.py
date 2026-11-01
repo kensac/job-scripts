@@ -187,6 +187,10 @@ class AiBatch(Base):
     # its calls are left to the ledger backfill rather than guessed.
     payer: Mapped[str | None] = mapped_column(Text)
     payer_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The model routing chose, when `model` ran in its place because that
+    # model's provider was out of credit (api.model_fallback). NULL for a
+    # batch on the routed model.
+    fallback_from: Mapped[str | None] = mapped_column(Text)
 
 
 class BatchObject(Base):

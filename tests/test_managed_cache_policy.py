@@ -77,7 +77,7 @@ async def test_only_new_managed_requests_receive_cache_control(f):
     )
     captured = []
 
-    async def submit(task_id, specs, *_args):
+    async def submit(task_id, specs, *_args, **_kwargs):
         captured.extend(snapshot_specs(task_id, specs))
         return []
 
@@ -131,7 +131,7 @@ async def test_the_recorded_effort_is_the_effort_sent(f, params, sent):
     )
     calls = []
 
-    async def submit(task_id, specs, model, effort, *_args):
+    async def submit(task_id, specs, model, effort, *_args, **_kwargs):
         calls.append((effort, snapshot_specs(task_id, specs)[0].context["reasoning_effort"]))
         return []
 

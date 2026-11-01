@@ -28,6 +28,7 @@ from tasks.filtering.execution import (
     FilterSnapshot,
     execute_batch,
     execute_live,
+    fallback_config,
     prepare_content,
 )
 from tasks.runtime import (
@@ -343,6 +344,7 @@ async def handle_run_filter_batch_chunk(task_id: int, payload: dict[str, Any]) -
     unavailable = int(payload.get("content_unavailable") or 0)
     if not existing:
         ent, cfg = load_config(user_id, bool(payload.get("ignore_budget")))
+        cfg = fallback_config(cfg)
         if batch_policy.scheduled(payload) and batch_policy.transport(task_id, cfg) == "batch":
             contents, unavailable = await prepare_content(
                 task_id,

@@ -286,7 +286,7 @@ class TestTakesEffect:
 
         sent = {}
 
-        async def fake_submit(task_id, specs, model, effort, max_tokens, hook):
+        async def fake_submit(task_id, specs, model, effort, max_tokens, hook, **_kwargs):
             sent.update(model=model, effort=effort, max_tokens=max_tokens)
             return []
 

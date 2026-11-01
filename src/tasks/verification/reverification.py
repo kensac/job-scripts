@@ -11,9 +11,11 @@ from api import ai, db, metrics
 from api.ai import verdicts
 from api.ai.batch_results import progress_counts
 from api.board.person_state import UNTOUCHED
+from api.task_config import configured_shape
 from api.verdict_equivalence import answering_models
 from core import catalog, routing, verdict_reads
 from core.answers import VERIFICATION_REQUEST
+from core.shapes import VERIFY_TASK
 from core.store import AI_ELIGIBLE_JOB, Page, add_ai_results, ai_result_row
 from tasks.board import demote_closed
 from tasks.runtime import (
@@ -195,9 +197,9 @@ async def _reverify_jobs(
     if not routing.server_key("openai"):
         raise LookupError("no server OpenAI key for reverification")
     # The model and effort verify_new submits with, configured override included.
-    model, effort = _submission_model()
+    model, effort, routed = _submission_model()
     by_url = {r["url"]: r for r in rows}
-    hook = batch_event_hook(task_id, "reverify", model)
+    hook = batch_event_hook(task_id, "reverify", model, fallback_from=routed)
 
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
     # A forced sweep skips nothing. The point is to overturn existing verdicts.
@@ -289,6 +291,11 @@ async def _reverify_jobs(
             effort,
             VERIFICATION_REQUEST.max_output_tokens,
             hook,
+            # Verify's chain: a re-check must be asked of the model verify_new
+            # asks, or its answer is a different question.
+            fallback=configured_shape(VERIFY_TASK),
+            purpose="reverify",
+            routed=routed,
         )
         _record_reverify_results(task_id, results)
     set_progress(task_id, total, total, "reverified")

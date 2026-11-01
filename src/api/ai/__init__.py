@@ -10,6 +10,7 @@ lazy from openai import AsyncOpenAI
 from core import providers, routing
 from core.batch import cached_prompt, prompt_cache_key
 from core.env import env_list
+from core.fallback import exhaustion_reason
 from core.providers.spec import Model, StructuredOutput
 
 PROVIDERS = (*providers.PROVIDERS, "openai_compatible")
@@ -99,6 +100,10 @@ class AIConfig:
     # with it.
     substituted_from: str | None = None
     substitution_reason: str | None = None
+    # The model this config ran instead of, because that model's provider was
+    # out of credit (api.model_fallback). Kept apart from substituted_from,
+    # which is the allowlist's substitution of what the person asked for.
+    fallback_from: str | None = None
 
 
 def validate_params(provider: str, params: dict[str, Any], model: str | None = None) -> str | None:
@@ -218,6 +223,14 @@ async def parse[T: BaseModel](
     except Exception as exc:
         s = str(exc).lower()
         outcome = "rate_limited" if ("429" in s or "rate limit" in s) else "error"
+        reason = exhaustion_reason(cfg.provider, exc) if cfg.key_source == "owner" else None
+        if reason:
+            # The server's account, so every worker should know. A person's
+            # own key running dry says nothing about the fleet's.
+            from api import model_fallback
+
+            outcome = "exhausted"
+            model_fallback.mark(cfg.provider, reason, model=cfg.model, purpose=None)
         metrics.AI_CALLS.labels(cfg.provider, cfg.model, outcome).inc()
         raise
     metrics.AI_CALLS.labels(cfg.provider, cfg.model, "ok").inc()

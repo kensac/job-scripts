@@ -249,6 +249,21 @@ PROVIDER = Provider(
     api_key_env="OPENAI_API_KEY",
     supports_temperature=False,
     batch_endpoint="/v1/responses",
+    # "Error code: 400 - Billing hard limit has been reached" refused every
+    # batch submission from 19:05 to 23:17 UTC on 2026-10-31 (883 refused
+    # waves in the worker logs); the per-request form is the same message in
+    # a result line's response body. insufficient_quota arrives as a 429
+    # ("You exceeded your current quota, please check your plan and billing
+    # details") and billing_not_active as "Your account is not active, please
+    # check your billing details"; the codes are matched as well as the text.
+    exhaustion_markers=(
+        "billing hard limit has been reached",
+        "billing_hard_limit_reached",
+        "insufficient_quota",
+        "exceeded your current quota",
+        "billing_not_active",
+        "please check your billing details",
+    ),
     source=Source(
         url="",
         read_on=None,

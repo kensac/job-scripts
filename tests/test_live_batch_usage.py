@@ -94,7 +94,7 @@ async def test_every_consumed_filter_result_records_transport_and_cached_usage(
     task_id = f.make_task("run_filter_batch_chunk", payload, status="running")
     monkeypatch.setattr(filters, "load_config", lambda *args: (ent, cfg))
 
-    async def submitted(*args):
+    async def submitted(*args, **_kwargs):
         return [f.make_batch_result(task_id, args[1][0], text=text, usage=RAW_USAGE, model=MODEL)]
 
     monkeypatch.setattr(filters, "submit_or_collect", submitted)

@@ -14,3 +14,8 @@ intended display order within each section.
 
 Read the persisted value at the point of use. A host-specific deployment fact
 that the admin UI does not turn belongs in the host environment instead.
+
+A value that names models or task purposes validates them against the
+registries that define them (`core.providers.MODELS`, `core.shapes.SHAPES`),
+as `verdict_model_equivalence` and `model_fallback_chains` do, so a typo is
+refused on save instead of silently matching nothing.

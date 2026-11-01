@@ -245,6 +245,34 @@ to the same model, and 5,776 got back the answer already held. A new purpose
 that re-asks on a timer gets the same treatment rather than a second
 mechanism.
 
+**A provider out of credit moves work down the purpose's fallback chain, and
+nothing else moves it.** `core.fallback.exhaustion_reason` reads an error
+against the vendor's declared `Provider.exhaustion_markers`: out of credit, a
+billing hard limit, a quota used up. A rate limit, a 5xx or a timeout keeps its
+own retry. A vendor with no recorded shape (xAI) has no markers, so nothing it
+returns is exhaustion. `app_config.model_fallback_chains` lists, per purpose
+(`core.fallback.chain_purposes`: every `SHAPES` task but `job_profile`, whose
+model its stored profiles pin, and the personal `filter`), the models to try
+in order;
+it is empty by default, which is the old behavior exactly. Routing
+(`api.model_fallback.route`) skips an exhausted provider and takes the first
+chain entry that `resolve()` admits for the task's shape (batch endpoint,
+structured mode, effort, price) and that this host holds a key for, trying
+the primary's `verdict_model_equivalence` group first. The personal filter
+chooses before it selects jobs, so its decided-postings check asks for the
+model that will answer. Managed boards never fall back: a board reads only its
+own model's verdicts, so another model's answers would be paid for and never
+shown. Every row names the model that ran: the batch row's `model`, and
+`ai_batches.fallback_from` for the model it replaced; the ledger, verdicts and
+extractions take the batch row's model. A fallback outside the primary's
+group writes verdicts the primary's readers do not count, so those postings
+are asked again once the primary is back. Spend stays inside the same caps:
+a fleet submission is priced at the fallback's rate against the weekly
+ceiling, and a person's weekly token budget is model-blind. Live calls on the
+server's key mark the provider and fail; they do not switch models mid-call
+(28 owner-key live calls in the 30 days to 2026-11-01, against 805,000
+batched).
+
 **A verdict counts for the model that gave it, unless two models are grouped.**
 Every reuse check (filter and board candidates, board membership, near-copy
 reuse, reverify's unchanged page) asks for the model it will call, so a model

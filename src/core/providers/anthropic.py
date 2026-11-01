@@ -125,6 +125,11 @@ PROVIDER = Provider(
     api_key_env="ANTHROPIC_API_KEY",
     supports_temperature=False,
     batch_endpoint="/v1/messages/batches",
+    # A 400 invalid_request_error reading "Your credit balance is too low to
+    # access the Anthropic API", and the SDK's billing_error error type
+    # (anthropic.types.shared.BillingError). The SDK's exception text carries
+    # the whole body, so the type is in it.
+    exhaustion_markers=("credit balance is too low", "billing_error"),
     source=_MODELS,
     models=(
         Model(

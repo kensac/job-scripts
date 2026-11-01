@@ -224,3 +224,10 @@ class Provider:
     batch_endpoint: str | None
     models: tuple[Model, ...]
     source: Source
+    # Lowercase fragments of this vendor's error text or code that mean the
+    # account cannot pay: out of credit, a billing hard limit, a quota used up.
+    # core.fallback matches them against an error's text, code and body. Never
+    # a rate limit, a 5xx or a timeout: those keep their own retry. Empty
+    # means no exhaustion shape has been recorded for this vendor, so nothing
+    # it returns is read as one.
+    exhaustion_markers: tuple[str, ...] = ()

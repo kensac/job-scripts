@@ -97,7 +97,7 @@ async def test_scheduled_chunk_fetches_then_batches(setup, f, monkeypatch):
         calls.append(url)
         return Page(f.make_fetch(url, content=text), text), None
 
-    async def submit(tid, specs, *args):
+    async def submit(tid, specs, *args, **_kwargs):
         assert len(specs) == 1
         assert "fetched posting" in specs[0].input
         return [
@@ -147,7 +147,7 @@ async def test_scheduled_receipt_replay_ignores_current_configuration(setup, f, 
     f.make_fetch(job["url"], content="ready posting " * 30)
     submissions = []
 
-    async def submit(tid, specs, *args):
+    async def submit(tid, specs, *args, **_kwargs):
         submissions.append(len(specs))
         return [
             f.make_batch_result(

@@ -70,7 +70,7 @@ TASK_DURATION = Histogram(
 AI_CALLS = Counter(
     "jobtracker_ai_calls_total",
     "AI API calls",
-    ["provider", "model", "outcome"],  # ok | error | rate_limited
+    ["provider", "model", "outcome"],  # ok | error | rate_limited | exhausted
 )
 AI_CALL_DURATION = Histogram(
     "jobtracker_ai_call_duration_seconds",
@@ -120,6 +120,16 @@ AI_COST_USD = Counter(
     "jobtracker_ai_cost_usd_total",
     "Estimated AI spend in USD (app-side pricing tables)",
     ["provider", "model", "key_source"],
+)
+PROVIDER_EXHAUSTED = Counter(
+    "jobtracker_provider_exhausted_total",
+    "Refusals a provider reported because the account cannot pay (api.model_fallback)",
+    ["provider"],
+)
+MODEL_FALLBACK_REQUESTS = Counter(
+    "jobtracker_model_fallback_requests_total",
+    "Requests submitted on a fallback model because the routed model's provider was out of credit",
+    ["purpose", "from_model", "to_model"],
 )
 BOARD_ROWS = Counter(
     "jobtracker_board_rows_total",

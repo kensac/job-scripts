@@ -36,6 +36,7 @@ from core.batch.transport import (
     _submit_chunk,
     _wait_for_batch,
 )
+from core.fallback import ProviderExhausted, exhaustion_reason
 
 logger = logging.getLogger(__name__)
 _batch_client: AsyncOpenAI | None = None
@@ -133,6 +134,11 @@ async def submit_batches(
     slot to poll it is pure waste. Waves are all created up front for the same
     reason - there is nothing local to ration, so no concurrency limit is
     needed here.
+
+    A wave refused because the account cannot pay stops the submission and
+    raises ProviderExhausted with the waves already accepted and the requests
+    never sent: every later wave would be refused the same way, and the caller
+    may send the rest to another model.
     """
     reason = batch_capabilities.unavailable_reason(model)
     if reason:
@@ -167,6 +173,11 @@ async def submit_batches(
             # A failed submission must not discard the waves already created
             # and paid for; the unsubmitted specs fall to the next sweep.
             logger.warning(f"Batch wave {index}/{len(chunks)} submission failed: {exc}")
+            reason = exhaustion_reason(vendor, exc)
+            if reason is not None:
+                assert vendor is not None
+                unsent = [spec for later in chunks[index - 1 :] for spec in later]
+                raise ProviderExhausted(vendor, reason, ids, unsent) from exc
             refusal = exc
             continue
         ids.append(batch)
@@ -260,7 +271,12 @@ async def _run_anthropic(
     """Submit-and-wait on the Anthropic transport, for the experiment runner."""
     if not anthropic.client():
         return {spec.custom_id: BatchResult(spec.custom_id, error="no api key") for spec in specs}
-    ids = await submit_batches(specs, model, reasoning_effort, max_output_tokens, on_event)
+    try:
+        ids = await submit_batches(specs, model, reasoning_effort, max_output_tokens, on_event)
+    except ProviderExhausted as exc:
+        if not exc.accepted:
+            raise
+        ids = exc.accepted
     custom_ids = [spec.custom_id for spec in specs]
     results: dict[str, BatchResult] = {}
     while ids:

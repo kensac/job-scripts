@@ -2,7 +2,9 @@
 
 Callers name models judged fit for their task. This module checks their
 capabilities and chooses the least costly eligible model. One named model
-either qualifies or raises; a failed call never silently switches providers.
+either qualifies or raises. A failed call switches models only when its
+provider reported the account cannot pay and an admin set a fallback chain for
+the purpose (core.fallback); the switch is recorded on every row it writes.
 
 Model switches can re-run paid work when a task's candidate query scopes its
 skip check by model. Callers own that choice and its evidence. Provider key
@@ -189,6 +191,9 @@ class Choice:
     # sanctioned. Carried so the log line and the screen both say so - an
     # override that looks like a default is the failure mode here.
     overridden: bool = False
+    # The model routing chose before its provider was found out of credit,
+    # when this choice is a fallback from it (core.fallback). None otherwise.
+    fallback_from: str | None = None
 
 
 def _rejection(shape: TaskShape, name: str, declared: Model | None, provider: str | None) -> str:
