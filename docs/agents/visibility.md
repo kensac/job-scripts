@@ -145,9 +145,10 @@ under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
 **"Is this person an admin" has one answer: `api.auth.is_admin(groups)`.**
-It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`), and
-`require_admin` is that test as a route dependency. Code never names the
-group outside seeded defaults.
+It reads `JOBTRACKER_ADMIN_GROUPS` (default `infra-admins`) through
+`api.admin_groups`, and `require_admin` is that test as a route dependency.
+Code never names the group: the seeds that need it (the uncapped group
+budget, the default `gmail_connect_groups`) read `api.admin_groups` too.
 
 **A non-admin's board keeps postings at most 30 days old.** The age window
 (`criteria.max_age_days`) is 30 when a non-admin saves criteria without one
