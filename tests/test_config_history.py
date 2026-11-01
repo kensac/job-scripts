@@ -5,6 +5,7 @@ import pytest
 from api import db
 from api.auth import AuthedUser
 from api.routers.admin.config import ConfigPut, put_config
+from tests.factories import user_id_for_subject
 
 
 def test_config_history_records_actual_changes_and_actor(client, admin_headers):
@@ -16,9 +17,8 @@ def test_config_history_records_actual_changes_and_actor(client, admin_headers):
     assert response.status_code == 200
     rows = response.json()["items"]
     assert [(r["old_value"], r["new_value"]) for r in rows] == [(False, True), (True, False)]
-    admin = db.query_one("SELECT id FROM users WHERE sub = 'test-admin'")
-    assert admin
-    assert all(r["actor_user_id"] == admin["id"] and r["old_value_present"] for r in rows)
+    admin = user_id_for_subject("test-admin")
+    assert all(r["actor_user_id"] == admin and r["old_value_present"] for r in rows)
     assert all("email" not in r and "name" not in r for r in rows)
     assert response.json()["next_before_id"] is None
 
@@ -140,5 +140,6 @@ def test_filter_scope_options_are_named_scoped_and_revision_bound(client, admin_
         "occupation_words_v1",
         "levels_occupations_v1",
         "levels_roles_occupations_v1",
+        "finance_new_grad_v1",
     ]
     assert body["filters"] == {"user": [str(first)]}

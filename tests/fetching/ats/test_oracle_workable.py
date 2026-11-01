@@ -6,15 +6,7 @@ from __future__ import annotations
 import datetime
 
 from core.fetching import ats
-
-
-class _Resp:
-    def __init__(self, body, status_code=200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
+from tests.fetching.ats.responses import AtsResponse
 
 
 def test_oracle_canonical_drops_locale_and_facets():
@@ -42,7 +34,7 @@ def test_oracle_fetches_the_requisition_detail_and_reads_its_date(monkeypatch):
 
     def get(url):
         asked.append(url)
-        return _Resp(
+        return AtsResponse(
             {
                 "items": [
                     {
@@ -77,7 +69,7 @@ def test_oracle_fetches_the_requisition_detail_and_reads_its_date(monkeypatch):
 
 def test_oracle_reads_an_empty_detail_as_gone(monkeypatch):
     res = ats.Oracle()
-    monkeypatch.setattr(res, "get", lambda url: _Resp({"items": []}))
+    monkeypatch.setattr(res, "get", lambda url: AtsResponse({"items": []}))
     out = res.fetch("https://x.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/9923")
     assert out.status is ats.Status.GONE and out.source == "oracle"
 
@@ -99,7 +91,7 @@ def test_workable_fetches_the_v2_job_and_reads_its_date(monkeypatch):
 
     def get(url):
         asked.append(url)
-        return _Resp(
+        return AtsResponse(
             {
                 "title": "Tech Talent Sourcer",
                 "published": "2026-09-01T00:00:00.000Z",

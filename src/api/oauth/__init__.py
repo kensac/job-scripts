@@ -12,34 +12,51 @@ import requests
 from psycopg import Connection
 
 from api import crypto, db
-from api.oauth import authorization as consent
-from api.oauth import provider
+from api.oauth.authorization import authorization_url, issue_state, verify_state
+from api.oauth.provider import (
+    ALL_GROUPS,
+    CONNECT_GROUPS_KEY,
+    DEAD_GRANT_ERROR,
+    EXPIRY_SKEW,
+    GMAIL_SCOPES,
+    GOOGLE,
+    HTTP_TIMEOUT,
+    PROFILE_ENDPOINT,
+    REVOKE_ENDPOINT,
+    STATE_TTL_SECONDS,
+    TOKEN_ENDPOINT,
+    NeedsReconnect,
+    NotConnected,
+    ProviderError,
+    ScopeDeclined,
+    StateInvalid,
+    client_id,
+    client_secret,
+    connect_allowed,
+    redirect_uris,
+)
 
-authorization_url = consent.authorization_url
-issue_state = consent.issue_state
-verify_state = consent.verify_state
-
-ALL_GROUPS = provider.ALL_GROUPS
-CONNECT_GROUPS_KEY = provider.CONNECT_GROUPS_KEY
-GMAIL_SCOPES = provider.GMAIL_SCOPES
-GOOGLE = provider.GOOGLE
-STATE_TTL_SECONDS = provider.STATE_TTL_SECONDS
-NotConnected = provider.NotConnected
-NeedsReconnect = provider.NeedsReconnect
-StateInvalid = provider.StateInvalid
-ScopeDeclined = provider.ScopeDeclined
-ProviderError = provider.ProviderError
-_client_id = provider.client_id
-_client_secret = provider.client_secret
-connect_allowed = provider.connect_allowed
-redirect_uris = provider.redirect_uris
-
-_TOKEN_ENDPOINT = provider.TOKEN_ENDPOINT
-_REVOKE_ENDPOINT = provider.REVOKE_ENDPOINT
-_PROFILE_ENDPOINT = provider.PROFILE_ENDPOINT
-_EXPIRY_SKEW = provider.EXPIRY_SKEW
-_HTTP_TIMEOUT = provider.HTTP_TIMEOUT
-_DEAD_GRANT_ERROR = provider.DEAD_GRANT_ERROR
+__all__ = [
+    "ALL_GROUPS",
+    "CONNECT_GROUPS_KEY",
+    "GMAIL_SCOPES",
+    "GOOGLE",
+    "STATE_TTL_SECONDS",
+    "NeedsReconnect",
+    "NotConnected",
+    "ProviderError",
+    "ScopeDeclined",
+    "StateInvalid",
+    "authorization_url",
+    "connect_allowed",
+    "disconnect",
+    "exchange_code",
+    "get_access_token",
+    "issue_state",
+    "redirect_uris",
+    "status",
+    "verify_state",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +76,7 @@ def _error_code(resp: requests.Response) -> str:
 
 def _post_token(data: dict[str, str]) -> requests.Response:
     try:
-        return requests.post(_TOKEN_ENDPOINT, data=data, timeout=_HTTP_TIMEOUT)
+        return requests.post(TOKEN_ENDPOINT, data=data, timeout=HTTP_TIMEOUT)
     except requests.RequestException as exc:
         raise ProviderError(f"token endpoint unreachable: {type(exc).__name__}") from exc
 
@@ -74,9 +91,9 @@ def _account_email(access_token: str) -> str | None:
     the label for it could not be fetched."""
     try:
         resp = requests.get(
-            _PROFILE_ENDPOINT,
+            PROFILE_ENDPOINT,
             headers={"Authorization": f"Bearer {access_token}"},
-            timeout=_HTTP_TIMEOUT,
+            timeout=HTTP_TIMEOUT,
         )
         if resp.status_code >= 400:
             logger.warning("gmail profile lookup failed with %s", resp.status_code)
@@ -98,8 +115,8 @@ def exchange_code(*, user_id: int, code: str, state: str) -> None:
     resp = _post_token(
         {
             "code": code,
-            "client_id": _client_id(),
-            "client_secret": _client_secret(),
+            "client_id": client_id(),
+            "client_secret": client_secret(),
             "redirect_uri": verified.redirect_uri,
             "grant_type": "authorization_code",
         }
@@ -188,7 +205,7 @@ def get_access_token(user_id: int, provider: str = GOOGLE) -> str:
             WHERE user_id = %s AND provider = %s
             FOR UPDATE
             """,
-            (_EXPIRY_SKEW, user_id, provider),
+            (EXPIRY_SKEW, user_id, provider),
         ).fetchone()
         if row is None:
             raise NotConnected(f"user {user_id} has no {provider} grant")
@@ -203,15 +220,15 @@ def _refresh_locked(conn: Connection, user_id: int, provider: str, refresh_token
     """Refresh while holding the row lock taken by get_access_token."""
     resp = _post_token(
         {
-            "client_id": _client_id(),
-            "client_secret": _client_secret(),
+            "client_id": client_id(),
+            "client_secret": client_secret(),
             "refresh_token": refresh_token,
             "grant_type": "refresh_token",
         }
     )
     if resp.status_code >= 400:
         error = _error_code(resp)
-        if error == _DEAD_GRANT_ERROR:
+        if error == DEAD_GRANT_ERROR:
             _mark_invalid(conn, user_id, provider, error)
             raise NeedsReconnect(f"{provider} grant for user {user_id} was rejected")
         raise ProviderError(f"token refresh failed: {error or resp.status_code}")
@@ -317,9 +334,9 @@ def disconnect(user_id: int, provider: str = GOOGLE) -> bool:
         return False
     try:
         requests.post(
-            _REVOKE_ENDPOINT,
+            REVOKE_ENDPOINT,
             data={"token": crypto.decrypt(row["refresh_token_enc"])},
-            timeout=_HTTP_TIMEOUT,
+            timeout=HTTP_TIMEOUT,
         )
     except requests.RequestException:
         logger.warning("provider revoke failed for user %s; row already deleted", user_id)

@@ -3,6 +3,7 @@
 from core.catalog.jobs import add_upload as add_upload
 from core.catalog.jobs import correct_posting as correct_posting
 from core.catalog.jobs import fill_date_posted as fill_date_posted
+from core.catalog.jobs import fill_source_company as fill_source_company
 from core.catalog.jobs import record_extraction as record_extraction
 from core.catalog.jobs import set_extraction_status as set_extraction_status
 from core.catalog.jobs import set_near_copy_keys as set_near_copy_keys

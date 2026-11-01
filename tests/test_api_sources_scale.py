@@ -5,6 +5,7 @@ lists cut and counted rather than rendered whole."""
 from __future__ import annotations
 
 from api import db
+from tests.factories import user_id_for_subject
 
 
 def _sources(f):
@@ -95,7 +96,7 @@ def test_the_queue_cuts_to_one_board_and_the_requests_badge_counts_everything(
     ).json()["rows"]
     assert len(rows) == 2 and all(r["payload"]["source"] == "gh_stripe" for r in rows)
 
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     for i in range(3):
         db.execute(
             "INSERT INTO source_requests (user_id, url) VALUES (%s, %s)",

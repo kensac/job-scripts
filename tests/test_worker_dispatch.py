@@ -9,6 +9,7 @@ from core import page_fetches
 from core.store import add_ai_result
 from tasks import content as tasks_content
 from tasks import runtime as tasks_runtime
+from tests.factories import user_id_for_subject
 from tests.worker_queue_support import _clear_claim as _clear_claim
 
 pytestmark = pytest.mark.usefixtures("_clear_claim")
@@ -68,7 +69,7 @@ def test_reconcile_chunks_cancels_pending_chunk_of_cancelled_parent():
 
 
 def test_reconcile_chunks_finalizes_waiting_parent_with_no_live_chunks(user_headers):
-    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    user_id = user_id_for_subject("test-user")
     parent_id = tasks_runtime.enqueue("run_all_filters", {"user_id": user_id})
     db.execute("UPDATE tasks SET status = 'waiting' WHERE id = %s", (parent_id,))
     worker.reconcile_chunks()
@@ -93,7 +94,7 @@ async def test_chunked_run_all_filters_lifecycle(set_config, monkeypatch, user_h
 
     monkeypatch.setattr(ai, "parse", fake_parse)
 
-    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    user_id = user_id_for_subject("test-user")
     db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, 'internships')", (user_id,))
     db.execute(
         "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) VALUES (%s, %s, %s, %s)",
@@ -220,7 +221,7 @@ async def test_content_backfill_caches_pages_and_skips_covered_jobs(monkeypatch)
     db.execute(
         "INSERT INTO users (sub, email) VALUES ('bf-user', 'b@f.com') ON CONFLICT DO NOTHING"
     )
-    uid = db.query_one("SELECT id FROM users WHERE sub = 'bf-user'")["id"]
+    uid = user_id_for_subject("bf-user")
     db.execute(
         "INSERT INTO user_sources (user_id, source) VALUES (%s, 'bf') ON CONFLICT DO NOTHING",
         (uid,),

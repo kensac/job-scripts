@@ -1,4 +1,5 @@
 import { commitControl, setNative } from "./dom";
+import { alternatives } from "./alternatives";
 import { confirmAshbySave } from "./ashby-save";
 // Ashby's hosted application form (jobs.ashbyhq.com/<org>/<id>/application).
 //
@@ -245,10 +246,7 @@ export function createAdapter(context) {
   // one produces a result; a fixed list wants the exact option text. With
   // strict set, only a result that is the text or starts with it is taken.
   async function pickFromList(ctl, value, strict = false) {
-    const wants = String(value ?? "")
-      .split("|")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const wants = alternatives(value);
     for (const want of wants) {
       ctl.focus();
       setNative(ctl, want);
@@ -294,7 +292,7 @@ export function createAdapter(context) {
     if (field._edu) return fillEducation(eduRows());
     if (field._group) {
       let took = false;
-      for (const part of want.split("|").map((s) => s.trim()).filter(Boolean)) {
+      for (const part of alternatives(want)) {
         const opt = choices(box).find((o) => o.text.toLowerCase() === part);
         if (!opt) continue;
         if (!opt.input.checked) (box.querySelector(`label[for="${CSS.escape(opt.input.id)}"]`) || opt.input).click();
@@ -304,7 +302,7 @@ export function createAdapter(context) {
       return took;
     }
     if (field.kind === "yesno" || field._buttons) {
-      const wants = want.split("|").map((s) => s.trim()).filter(Boolean);
+      const wants = alternatives(want);
       const btn = choiceButtons(box).find((b) => wants.includes(b.innerText.trim().toLowerCase()));
       if (!btn) return false;
       btn.click();

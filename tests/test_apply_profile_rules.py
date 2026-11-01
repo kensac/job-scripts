@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from api import apply, db
 from tests.apply_support import ada_profile
-from tests.job_board_support import _uid
+from tests.factories import user_id_for_subject
 
 
 def test_the_ladder_rungs():
@@ -112,7 +112,7 @@ def test_the_profile_and_bank_are_the_persons_own(client, user_headers, other_us
 
 
 def test_apply_context_includes_every_saved_answer(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     for number in range(201):
         db.execute(
             "INSERT INTO application_answer_bank "
