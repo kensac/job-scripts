@@ -830,6 +830,48 @@ Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
 challenge, also to a browser-fingerprinted client, so they are not sources
 (IBM is read through its own search API, `_ibm`).
 
+**An ADP Workforce Now board is read through its career center's API, and its
+gateway's 404 is asked again.** The listings URL is
+`https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions?cid={cid}`
+(kind `adp`; `workforcenow.cloud.adp.com` serves the same path), where `cid` is
+the tenant id on the career center page `recruitment.html?cid=...`. That page
+renders in the browser; its `ccId`, `lang` and `type` change nothing in the
+API's answer. `$skip` is one-based (`$skip=0` answers the first page short by
+one), `$top` stops at 20, and every page states `meta.totalNumber`; a pull
+holding fewer distinct postings than that is `PartialPull`. Rows carry no
+text. A posting's URL is `recruitment.html?cid={cid}&jobId={ExternalJobID}`,
+the spelling the aggregators already use, and the `adp` resolver reads its
+text from `job-requisitions/{jobId}?cid={cid}`. A posting the board no longer
+lists answers that call 200 with an empty requisition (no `itemID`), which is
+`GONE`: of 33 catalog postings on 2026-11-01, the 19 listed answered their
+text and the 14 unlisted answered that. The host is a pool of nodes
+behind a load balancer, and some nodes cannot serve some tenants: they answer a
+bare 404 whose body starts `default backend`, or a 500. Without cookies a
+request lands on a node at random (Prosperity Bank was refused 11 of 25 times
+on 2026-11-01, six other tenants 60 of 60 fine). The balancer pins a client to
+a node by cookie, and a pull process whose shared session had been pinned got
+a 500 from every ADP tenant while a fresh process read them. So
+`ats.adp.adp_get` drops the host's cookies before every request and sends a
+node's refusal again, up to eight times. A 503 is the host shedding load under
+a burst and is final, as is the openresty 404 page a cid no tenant has.
+ADP Recruiting Management (`myjobs.adp.com`, and the older
+`recruiting.adp.com/srccar` it replaced) is not a format: its search call
+(`my.adp.com/.../job-requisitions/search-custom-filters`) needs headers the
+career site derives in its session, and without them answers 400 or 500.
+
+**A Paylocity board is the board page's own data, not its feed.** The listings
+URL is the board page,
+`https://recruiting.paylocity.com/Recruiting/Jobs/All/{guid}` (kind
+`paylocity`; a trailing company slug is the same board). The page carries every
+open posting in one `window.pageData` object, unpaged and with no count, so a
+page without it, or with it cut short, fails the pull. Paylocity's job feed,
+`/recruiting/v2/api/feed/jobs/{guid}`, answered no jobs for all 22 boards read
+on 2026-11-01, so it is not the listing. Postings marked `IsInternal` are
+skipped. A row carries only the opening of the text; the posting page
+(`/Recruiting/Jobs/Details/{JobId}`) is server-rendered with JobPosting
+JSON-LD, so the static tier reads it, and a closed posting redirects to
+`/Recruiting/Jobs/JobNotFound`.
+
 **A board whose sort ties is read in the order of its key.** A BrassRing site
 (IBM Kenexa, on `sjobs.brassring.com` or an employer host such as
 `jobs.ubs.com`) is listed by its own search page,

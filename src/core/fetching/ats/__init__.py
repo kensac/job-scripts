@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from urllib.parse import urlparse
 
+from core.fetching.ats.adp import Adp
 from core.fetching.ats.apple import Apple
 from core.fetching.ats.ashby import Ashby
 from core.fetching.ats.brassring import BrassRing
@@ -51,6 +52,7 @@ __all__ = [
     "EIGHTFOLD",
     "RESOLVERS",
     "UNSUPPORTED",
+    "Adp",
     "Apple",
     "Ashby",
     "AtsResolver",
@@ -106,6 +108,7 @@ RESOLVERS: list[AtsResolver] = [
     Apple(),
     Goldman(),
     Ibm(),
+    Adp(),
     Ukg(),
     BrassRing(),
 ]

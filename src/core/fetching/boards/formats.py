@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+from core.fetching.ats.adp import ADP_HOSTS, ADP_REQUISITIONS
+from core.fetching.boards.adp import _adp
 from core.fetching.boards.amazon import _amazon
 from core.fetching.boards.apple import _apple
 from core.fetching.boards.ashby import _ashby
@@ -28,6 +30,7 @@ from core.fetching.boards.lever import _lever
 from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
 from core.fetching.boards.pageup import _PAGEUP_FEED, _pageup
+from core.fetching.boards.paylocity import PAYLOCITY_BOARD, _paylocity
 from core.fetching.boards.pinpoint import _pinpoint
 from core.fetching.boards.recruitee import _recruitee
 from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
@@ -228,11 +231,25 @@ FORMATS = (
         needs_company=True,
         authoritative=True,
     ),
+    BoardFormat(
+        "adp",
+        lambda a: a.host in ADP_HOSTS and a.path == ADP_REQUISITIONS,
+        _adp,
+        needs_company=True,
+        authoritative=True,
+    ),
     # BrassRing runs on sjobs.brassring.com and employer hosts (jobs.ubs.com).
     BoardFormat(
         "brassring",
         lambda a: a.path.lower() == "/tgnewui/search/home/home",
         _brassring,
+        needs_company=True,
+        authoritative=True,
+    ),
+    BoardFormat(
+        "paylocity",
+        lambda a: a.host == "recruiting.paylocity.com" and bool(PAYLOCITY_BOARD.fullmatch(a.path)),
+        _paylocity,
         needs_company=True,
         authoritative=True,
     ),
