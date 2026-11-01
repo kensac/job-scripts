@@ -13,8 +13,9 @@ from api import db
 from api.board import visibility
 from core.fetching import forms
 from tasks import application as drafts
-from tests.application_support import GREENHOUSE, _owner_config, _user_id
+from tests.application_support import GREENHOUSE, _owner_config
 from tests.application_support import _job_for as _row_for
+from tests.factories import user_id_for_subject
 from tests.resume_support import create_text_resume
 
 
@@ -66,7 +67,7 @@ def _fake_batch(monkeypatch, calls, f):
 async def test_the_sweep_reads_the_board_forms_and_drafts_what_is_missing_once(
     client, user_headers, f, monkeypatch
 ):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     on_board = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/10")
     unreadable = _job_for(f, uid, "https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/z")
     # Visible but on nobody's board row: the sweep works the board, not the catalog.
@@ -108,7 +109,7 @@ async def test_the_sweep_reads_the_board_forms_and_drafts_what_is_missing_once(
 async def test_the_sweep_needs_a_resume_and_respects_the_switch(
     client, user_headers, f, monkeypatch
 ):
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/12")
     fetched = []
     monkeypatch.setattr(forms, "_get", lambda url: fetched.append(url) or GREENHOUSE)
@@ -141,7 +142,7 @@ async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
 ):
     from api import hosts
 
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/13")
     create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
     fetched = []
@@ -163,7 +164,7 @@ async def test_a_busy_host_is_skipped_this_cycle_not_waited_on(
 def test_the_cycle_queues_a_sweep_for_each_person_with_a_resume(client, user_headers, f):
     from api import worker
 
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
     f.make_user(sub="no-resume")
     worker.schedule_ingest_cycle()
@@ -183,7 +184,7 @@ async def test_a_sweep_waits_for_an_earlier_one_still_parked_on_its_batch(
     """The hourly sweep was claimed while a manual one sat parked on its
     batch; both selected the same undrafted rows. The later one steps
     aside; the earlier one is unaffected by the later one's existence."""
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/30")
     create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
     fetched = []
@@ -231,7 +232,7 @@ async def test_a_sweep_back_from_its_batch_collects_and_reads_no_more_forms(
     """The first sweep read 113 forms on the way out and 114 more on the
     way back from the batch, spending two cycles of reads on one and
     reporting 60 of 158 done. A resumed task only collects."""
-    uid = _user_id()
+    uid = user_id_for_subject("test-user")
     _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/20")
     create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
     fetched = []

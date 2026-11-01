@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from api import db
 from api.apply.drafting import resume_text
-from tests.job_board_support import _uid
+from tests.factories import user_id_for_subject
 from tests.resume_support import seed_text_resume
 
 
 def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_user_headers):
-    resume_id = seed_text_resume(_uid(user_headers), "main", "First complete text")
+    resume_id = seed_text_resume(user_id_for_subject("test-user"), "main", "First complete text")
     first_version = db.query_one(
         "SELECT text_version_id FROM user_resumes WHERE id = %s", (resume_id,)
     )["text_version_id"]
@@ -65,7 +65,7 @@ def test_text_parts_retry_and_keep_previous_resume(client, user_headers, other_u
         for index in range(2)
     )
     assert actual == first_part + second_part
-    assert resume_text(_uid(user_headers), resume_id) == "A" * 12_000
+    assert resume_text(user_id_for_subject("test-user"), resume_id) == "A" * 12_000
     prior = db.query_one(
         "SELECT filename, pdf_upload_id, text_version_id "
         "FROM user_resume_revisions WHERE resume_id = %s",
