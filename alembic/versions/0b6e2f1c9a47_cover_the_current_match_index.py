@@ -18,7 +18,7 @@ leftover from a build that died is dropped first, and a start that died after
 the rename finds the definition already in place and skips the rebuild.
 
 Revision ID: 0b6e2f1c9a47
-Revises: 4c366382d721
+Revises: 255b3de2e3a3
 Create Date: 2026-11-01
 
 """
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0b6e2f1c9a47"
-down_revision: str | None = "4c366382d721"
+down_revision: str | None = "255b3de2e3a3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
