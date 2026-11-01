@@ -7,8 +7,10 @@ import re
 from collections.abc import Callable
 from urllib.parse import urlparse
 
+from core.fetching.ats.adp import Adp
 from core.fetching.ats.apple import Apple
 from core.fetching.ats.ashby import Ashby
+from core.fetching.ats.brassring import BrassRing
 from core.fetching.ats.common import (
     UNSUPPORTED,
     AtsResolver,
@@ -41,6 +43,7 @@ from core.fetching.ats.lever import Lever
 from core.fetching.ats.oracle import Oracle
 from core.fetching.ats.rippling import Rippling
 from core.fetching.ats.smartrecruiters import SmartRecruiters
+from core.fetching.ats.ukg import Ukg
 from core.fetching.ats.workable import Workable
 from core.fetching.ats.workday import Workday
 from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
@@ -49,10 +52,12 @@ __all__ = [
     "EIGHTFOLD",
     "RESOLVERS",
     "UNSUPPORTED",
+    "Adp",
     "Apple",
     "Ashby",
     "AtsResolver",
     "AtsResult",
+    "BrassRing",
     "Eightfold",
     "Gem",
     "Goldman",
@@ -64,6 +69,7 @@ __all__ = [
     "Rippling",
     "SmartRecruiters",
     "Status",
+    "Ukg",
     "Workable",
     "Workday",
     "_iso_date",
@@ -102,6 +108,9 @@ RESOLVERS: list[AtsResolver] = [
     Apple(),
     Goldman(),
     Ibm(),
+    Adp(),
+    Ukg(),
+    BrassRing(),
 ]
 
 
