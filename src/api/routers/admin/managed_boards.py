@@ -393,10 +393,11 @@ def patch_managed_board(
                 "managed board changed; reload it before saving",
                 current_revision=existing.revision,
             )
-        _validate_title_gate(
-            fields.get("execution_mode", existing.execution_mode),
-            fields.get("title_gate", existing.title_gate),
-        )
+        # Read from the body, not `fields`: model_dump turned the nested models
+        # in `fields` into plain dicts. A null title_gate clears the gate.
+        criteria = body.criteria if body.criteria is not None else existing.criteria
+        title_gate = body.title_gate if "title_gate" in fields else existing.title_gate
+        _validate_title_gate(fields.get("execution_mode", existing.execution_mode), title_gate)
         if "slug" in fields:
             db.execute(
                 "SELECT pg_advisory_xact_lock(hashtext('managed-board-slug:' || %s))",
@@ -423,23 +424,9 @@ def patch_managed_board(
                 raise refuse(400, "NO_SOURCES", "a published board needs a source")
         prompt = fields.get("prompt", existing.prompt)
         on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
-        fields["criteria"] = (
-            db.jsonb(fields["criteria"].model_dump(mode="json"))
-            if "criteria" in fields
-            else db.jsonb(existing.criteria.model_dump(mode="json"))
-        )
+        fields["criteria"] = db.jsonb(criteria.model_dump(mode="json"))
         fields["title_gate"] = (
-            (
-                db.jsonb(fields["title_gate"].model_dump(mode="json"))
-                if fields.get("title_gate") is not None
-                else None
-            )
-            if "title_gate" in fields
-            else (
-                db.jsonb(existing.title_gate.model_dump(mode="json"))
-                if existing.title_gate is not None
-                else None
-            )
+            db.jsonb(title_gate.model_dump(mode="json")) if title_gate is not None else None
         )
         fields["prompt_hash"] = compute_filter_hash(prompt, on_ambiguous)
         fields["published"] = effective_published
