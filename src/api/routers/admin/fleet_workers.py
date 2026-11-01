@@ -60,15 +60,21 @@ def list_workers(user: AuthedUser = Depends(require_admin)) -> FleetWorkers:
                w.last_seen > now() - %(fresh)s::interval AS alive,
                t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
                t.started_at AS task_started_at,
-               stats.done_24h, stats.failed_24h
+               COALESCE(stats.done_24h, 0) AS done_24h,
+               COALESCE(stats.failed_24h, 0) AS failed_24h
         FROM worker_status w
         LEFT JOIN tasks t ON t.id = w.current_task_id AND t.status = 'running'
-        LEFT JOIN LATERAL (
-            SELECT COUNT(*) FILTER (WHERE s.status = 'done') AS done_24h,
-                   COUNT(*) FILTER (WHERE s.status = 'failed') AS failed_24h
-            FROM tasks s WHERE s.worker = w.name
-              AND s.finished_at > now() - interval '24 hours'
-        ) stats ON TRUE
+        -- One pass over the day's finished tasks, grouped by worker. tasks
+        -- has no finished_at index, so the per-worker lateral this replaces
+        -- scanned all 554k tasks once per worker: 4.7 s for 7 workers on
+        -- production, against 0.25 s for this (2026-11-01).
+        LEFT JOIN (
+            SELECT worker,
+                   COUNT(*) FILTER (WHERE status = 'done') AS done_24h,
+                   COUNT(*) FILTER (WHERE status = 'failed') AS failed_24h
+            FROM tasks WHERE finished_at > now() - interval '24 hours'
+            GROUP BY worker
+        ) stats ON stats.worker = w.name
         ORDER BY w.name
         """,
         {"fresh": health.WORKER_FRESH},

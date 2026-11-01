@@ -146,10 +146,8 @@ DEFAULT_STATUSES = [
     "No Longer Interested",
 ]
 
-# What a status MEANS, served beside the names so the board never decides
-# "is this over" or "which tone" by matching a name it hand-copied: a status
-# absent here is in play with no outcome. The withdrawn pair mirrors
-# mail_pipeline.WITHDRAWN_STATUSES.
+# (terminal, outcome) per status; see StatusMeta. The withdrawn pair mirrors
+# api.mail.pipeline.events.WITHDRAWN_STATUSES.
 _STATUS_META: dict[str, tuple[bool, Outcome | None]] = {
     "Accepted": (True, "won"),
     "Rejected": (True, "lost"),
@@ -275,11 +273,23 @@ class Board(BaseModel):
 
 
 def status_meta(statuses: list[str]) -> list[StatusMeta]:
-    return [
-        StatusMeta(name=name, terminal=meta[0], outcome=meta[1])
-        for name in statuses
-        for meta in (_STATUS_META.get(name, (False, None)),)
-    ]
+    metas = []
+    for name in statuses:
+        terminal, outcome = _STATUS_META.get(name, (False, None))
+        metas.append(StatusMeta(name=name, terminal=terminal, outcome=outcome))
+    return metas
+
+
+def _ats_counts(filter_sql: str, params: dict) -> list[AtsCount]:
+    """Rows per ATS on the person's board under `filter_sql`, most first."""
+    return db.query_as(
+        AtsCount,
+        visibility.FAST.format(
+            columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
+            extra=f"{filter_sql}\nGROUP BY 1 ORDER BY 2 DESC, 1",
+        ),
+        params,
+    )
 
 
 @router.get("/user/jobs/options")
@@ -302,16 +312,8 @@ def job_options(user: AuthedUser = Depends(require_user)) -> BoardOptions:
             (user.id,),
         )
     ]
-    # The ATSs on this person's board with how many rows each, most first,
-    # so the filter offers what is there rather than a fixed list.
-    ats = db.query_as(
-        AtsCount,
-        visibility.FAST.format(
-            columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
-            extra="AND COALESCE(uj.hidden, FALSE) = FALSE GROUP BY 1 ORDER BY 2 DESC, 1",
-        ),
-        {"uid": user.id},
-    )
+    # Counted, so the filter offers what is there rather than a fixed list.
+    ats = _ats_counts("AND COALESCE(uj.hidden, FALSE) = FALSE", {"uid": user.id})
     return BoardOptions(
         statuses=statuses,
         status_meta=status_meta(statuses),
@@ -375,28 +377,13 @@ def list_jobs(
     if wanted_sources:
         extra.append("AND j.source = ANY(%(sources)s)")
         params["sources"] = wanted_sources
-    # The ATS counts a select should show are the counts under every OTHER
-    # filter the page has on: a board-wide "rippling 4" beside a lens that
-    # holds none of them reads as a lie (2026-09-07). So the facet is taken
-    # before the ats clause joins the rest.
-    facets = None
-    if with_facets:
-        facets = Facets(
-            ats=db.query_as(
-                AtsCount,
-                visibility.FAST.format(
-                    columns=f"({ATS_SQL}) AS ats, COUNT(*) AS count",
-                    extra="\n".join(extra) + "\nGROUP BY 1 ORDER BY 2 DESC, 1",
-                ),
-                params,
-            )
-        )
+    # Counted before the ats clause joins `extra`; see Facets (2026-09-07).
+    facets = Facets(ats=_ats_counts("\n".join(extra), params)) if with_facets else None
     if wanted_ats:
         extra.append(f"AND ({ATS_SQL}) = ANY(%(ats)s)")
         params["ats"] = wanted_ats
 
     filter_sql = "\n".join(extra)
-    total = None
     order = (
         f"ORDER BY {sorting.clause(sorts, _SORTABLE)}, j.id DESC LIMIT %(limit)s OFFSET %(offset)s"
     )
@@ -406,6 +393,7 @@ def list_jobs(
     columns = _JOB_ROW + (", COUNT(*) OVER () AS total_rows" if with_total else "")
     sql = visibility.FAST.format(columns=columns, extra=f"{filter_sql}\n{order}")
     rows = db.query_as(BoardRow, sql, params)
+    total = None
     if with_total:
         if rows:
             total = rows[0].total_rows

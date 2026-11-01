@@ -113,7 +113,12 @@ subquery from `api/mail/current.py` (`current_event(...)`,
 match is `match.latest`. `tests/test_mail_current.py` fails on a "newest row
 per message" (`DISTINCT ON (message_id)`) written anywhere else. Join on the pointer alone, not on the pointer
 and the message id together: the planner multiplies the two and expects one
-row (the module docstring has the production measurements). Test fixtures
+row (the module docstring has the production measurements).
+`idx_email_messages_current_match` INCLUDEs the message columns those
+whole-mailbox reads take (`current_event_id`, `sent_at`, `from_email`,
+`subject`), so they are index-only. A message column a new one of them reads
+goes into that list in the same change: otherwise each matched message is a
+heap fetch of a row that carries the mail body, about 5 s cold. Test fixtures
 that write a log directly go through `tests/mail_log.py`, which moves the
 pointer the way the writers do.
 

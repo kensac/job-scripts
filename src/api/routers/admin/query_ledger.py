@@ -178,8 +178,9 @@ def distinct_query_values(col: str, recent: bool = False) -> list[str]:
     it on ai_queries, and on page_fetches when the fetch arm reads a column.
 
     The two arms of ledger_rows are scanned on their own tables: through the
-    view the fetch arm is not flattened, so each step sorted every fetch and
-    the four vocabularies took 30 s on production (2026-10-13). A fetch value
+    view, while its fetch arm was not flattened (before 58e4e8b6b54d), each
+    step sorted every fetch and the four vocabularies took 30 s on production
+    (2026-10-13). A fetch value
     counts only if a fetch other than a verification copy carries it, as in
     the view. Measured before that, against 2.07M rows (2026-10-04, warm):
     DISTINCT check_type 2.0 s became 66 ms, status 0.3 s became 3 ms. `col` is

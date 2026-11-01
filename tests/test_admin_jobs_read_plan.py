@@ -112,3 +112,51 @@ def test_recent_postings_keep_all_checks_ties_orphans_and_page_boundaries(client
         "/v1/admin/jobs", params={"config": "older"}, headers=admin_headers
     ).json()
     assert filtered["rows"] == body["rows"]
+
+
+def test_verdict_tabs_walk_the_window_and_match_the_grouped_read():
+    """Passed and Rejected read the newest-first window and check each url's
+    whole history; the answer is the one the grouped HAVING read gives."""
+    db.execute(
+        "INSERT INTO ai_queries(url,created_at,status) VALUES "
+        "('https://v.test/rejected-late','2026-01-09','rejected'), "
+        "('https://v.test/rejected-early','2026-01-01','rejected'), "
+        "('https://v.test/rejected-early','2026-01-08','passed'), "
+        "('https://v.test/passed','2026-01-07','passed'), "
+        "('https://v.test/failed','2026-01-06','failed'), "
+        "('https://v.test/tie-b','2026-01-03','passed'), "
+        "('https://v.test/tie-a','2026-01-03','passed'), "
+        "('https://v.test/unstatused','2026-01-02',NULL)"
+    )
+    db.execute(
+        "INSERT INTO page_fetches(url,status,method,created_at) VALUES "
+        "('https://v.test/fetched','passed','scraped','2026-01-05'), "
+        "('https://v.test/verification-only','passed','verification','2026-01-04'), "
+        "('https://v.test/verification-only','failed','scraped','2026-01-04'), "
+        "('https://v.test/failed','passed','scraped','2026-01-02')"
+    )
+    for verdict in ("rejected", "passed"):
+        posting_inspection._verdict_totals.clear()
+        pages = [
+            posting_inspection.list_jobs(verdict=verdict, page=page, page_size=2, user=None)
+            for page in (1, 2, 3)
+        ]
+        # Two sort keys take the grouped read with the same order.
+        grouped = posting_inspection.list_jobs(
+            verdict=verdict, sort="last_seen,url", dir="desc,asc", page_size=50, user=None
+        )
+        assert [row for page in pages for row in page.rows] == grouped.rows
+        assert {page.total for page in pages} == {grouped.total}
+        assert grouped.total == len(grouped.rows)
+        if verdict == "rejected":
+            assert [row.url for row in grouped.rows] == [
+                "https://v.test/rejected-late",
+                "https://v.test/rejected-early",
+            ]
+    assert [row.url for row in grouped.rows] == [
+        "https://v.test/passed",
+        "https://v.test/failed",
+        "https://v.test/fetched",
+        "https://v.test/tie-a",
+        "https://v.test/tie-b",
+    ]

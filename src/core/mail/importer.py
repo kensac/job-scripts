@@ -68,10 +68,15 @@ class ImportedMessage:
 _THREADING_HEADERS = ("Message-ID", "References", "In-Reply-To")
 
 
-def _threading_headers(msg) -> dict[str, str]:
+def _header(msg: Message, name: str) -> str:
+    """A header as text, empty when the message does not carry it."""
+    return str(msg.get(name, "") or "")
+
+
+def _threading_headers(msg: Message) -> dict[str, str]:
     out: dict[str, str] = {}
     for name in _THREADING_HEADERS:
-        value = _clean_header(str(msg.get(name, "") or ""))
+        value = _clean_header(_header(msg, name))
         if value:
             out[name.lower()] = value
     return out
@@ -161,14 +166,13 @@ def _part_content(msg: Message, kind: str) -> str | None:
 def _body(msg: Message) -> tuple[str | None, str | None]:
     """The readable text, and the markup it came from.
 
-    Text still prefers text/plain and falls back to stripped HTML - marketing
+    Text prefers text/plain and falls back to stripped HTML - marketing
     and ATS mail is frequently HTML-only, so a plain-text-only reader would
     drop a large share of exactly the messages that matter.
 
-    The HTML alternative is now kept ALONGSIDE rather than discarded, and it is
-    fetched independently of which part won: a multipart message usually
-    carries both, and the plain part winning for the classifier is no reason
-    to throw away the part a reader wants to see.
+    The HTML alternative is kept alongside, whichever part supplied the text:
+    a multipart message usually carries both, and the plain part winning for
+    the classifier is no reason to throw away the part a reader wants to see.
     """
     plain = _part_content(msg, "plain")
     html = _part_content(msg, "html")
@@ -208,28 +212,24 @@ def parse_sent_at(raw: str | None) -> datetime | None:
 
 
 def _from_message(msg: Message, *, source: str, fallback_id: str) -> ImportedMessage:
-    sender = getaddresses([str(msg.get("From", "") or "")])
+    sender = getaddresses([_header(msg, "From")])
     from_name, from_email = sender[0] if sender else ("", "")
     recipients = [
-        addr
-        for _, addr in getaddresses([str(msg.get("To", "") or ""), str(msg.get("Cc", "") or "")])
-        if addr
+        addr for _, addr in getaddresses([_header(msg, "To"), _header(msg, "Cc")]) if addr
     ]
     text, html = _body(msg)
     return ImportedMessage(
         # Message-ID is the only cross-archive stable identity available. The
         # four .olm exports overlap heavily with each other and with Takeout,
         # so without it the same message imports many times.
-        provider_message_id=(_clean_header(str(msg.get("Message-ID", "") or "")) or fallback_id),
+        provider_message_id=_clean_header(_header(msg, "Message-ID")) or fallback_id,
         source=source,
-        provider_thread_id=_clean_header(
-            (str(msg.get("References", "") or "").split() or [None])[0]
-        ),
+        provider_thread_id=_clean_header(next(iter(_header(msg, "References").split()), None)),
         from_email=_clean_header(from_email),
         from_name=_clean_header(from_name),
         to_emails=[r for r in (_clean_header(a) for a in recipients) if r],
-        subject=_clean_header(str(msg.get("Subject", "") or "")),
-        sent_at=parse_sent_at(str(msg.get("Date", "") or "") or None),
+        subject=_clean_header(_header(msg, "Subject")),
+        sent_at=parse_sent_at(_header(msg, "Date")),
         body_text=text,
         body_html=html,
         headers=_threading_headers(msg),
