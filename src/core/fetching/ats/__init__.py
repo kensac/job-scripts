@@ -39,14 +39,16 @@ from core.fetching.ats.ibm import Ibm
 from core.fetching.ats.icims import ICims
 from core.fetching.ats.lever import Lever
 from core.fetching.ats.oracle import Oracle
+from core.fetching.ats.phenom import PHENOM, Phenom
 from core.fetching.ats.rippling import Rippling
 from core.fetching.ats.smartrecruiters import SmartRecruiters
 from core.fetching.ats.workable import Workable
 from core.fetching.ats.workday import Workday
-from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2, PHENOM_SEARCH
 
 __all__ = [
     "EIGHTFOLD",
+    "PHENOM",
     "RESOLVERS",
     "UNSUPPORTED",
     "Apple",
@@ -61,6 +63,7 @@ __all__ = [
     "Ibm",
     "Lever",
     "Oracle",
+    "Phenom",
     "Rippling",
     "SmartRecruiters",
     "Status",
@@ -71,7 +74,6 @@ __all__ = [
     "ashby_text",
     "canonicalize",
     "clean_html",
-    "eightfold_listing_prefixes",
     "employer_canonical",
     "goldman_place",
     "goldman_text",
@@ -79,6 +81,7 @@ __all__ = [
     "is_ats_email_domain",
     "join",
     "lever_text",
+    "listing_prefixes",
     "oracle_text",
     "resolve",
     "resolve_listed",
@@ -233,9 +236,12 @@ def resolve(url: str) -> AtsResult:
 
 
 def resolve_listed(url: str, listings_url: str) -> AtsResult:
-    """An Eightfold posting's text, its tenant known by listings_url: the
-    listing of a source on the posting's host, which a URL cannot name."""
-    return _logged(EIGHTFOLD, url, lambda: EIGHTFOLD.fetch_listed(url, listings_url) or UNSUPPORTED)
+    """A posting's text on a board that runs on its employer's host, known
+    by listings_url: the listing of a source on the posting's host, which a
+    URL cannot name. Eightfold and Phenom resolve this way."""
+    phenom = PHENOM_SEARCH.match(urlparse(listings_url).path)
+    resolver: Eightfold | Phenom = PHENOM if phenom else EIGHTFOLD
+    return _logged(resolver, url, lambda: resolver.fetch_listed(url, listings_url) or UNSUPPORTED)
 
 
 def _logged(resolver: AtsResolver, url: str, fetch: Callable[[], AtsResult]) -> AtsResult:
@@ -251,12 +257,14 @@ def _logged(resolver: AtsResolver, url: str, fetch: Callable[[], AtsResult]) -> 
     return result
 
 
-def eightfold_listing_prefixes(url: str) -> tuple[str, str] | None:
-    """The listings URLs an Eightfold source on this posting's host starts
-    with, or None when the URL is not shaped like an Eightfold posting. The
-    caller finds the source; the resolver never guesses a host is Eightfold's."""
+def listing_prefixes(url: str) -> tuple[str, str] | None:
+    """The listings URLs a source that can resolve this posting starts with:
+    an Eightfold search or a Phenom search page on the posting's host. None
+    when the URL is shaped like neither. The caller finds the source; a
+    resolver never guesses a host runs its board."""
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not Eightfold._JOB.match(parsed.path):
-        return None
-    origin = f"https://{parsed.netloc.lower()}"
-    return f"{origin}{EIGHTFOLD_PCSX}?", f"{origin}{EIGHTFOLD_V2}?"
+    if parsed.scheme == "https" and Eightfold._JOB.match(parsed.path):
+        origin = f"https://{parsed.netloc.lower()}"
+        return f"{origin}{EIGHTFOLD_PCSX}?", f"{origin}{EIGHTFOLD_V2}?"
+    phenom = PHENOM.listing(url)
+    return (phenom, phenom) if phenom else None

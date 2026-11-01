@@ -266,7 +266,10 @@ below. Every careers.ibm.com page answers the static tier with an AWS WAF
 challenge (202), so IBM's text always comes from the browser (7 of 7 listed
 postings read on 2026-10-05); the static tier read Bloomberg's and Two Sigma's
 Avature posting pages whole the same day. Eightfold lists without the text,
-and its resolver reads it from the tenant's detail endpoint.
+and its resolver reads it from the tenant's detail endpoint. A Phenom search
+row carries a teaser, which is not stored, and the Phenom resolver reads the
+text from the site's `jobDetail` widget. A SuccessFactors Career Portal export
+carries each requisition's whole description.
 
 **A board on its employers' own domains is known by its sources, never by a
 URL's shape.** An Eightfold tenant posts on its own host
@@ -274,7 +277,15 @@ URL's shape.** An Eightfold tenant posts on its own host
 a source whose listings URL is an Eightfold search on the posting's host and
 hands that URL to `ats.resolve`; without one the resolver does not answer.
 A posting host that differs from its listing host (Bayer lists on
-bayer.eightfold.ai and posts on talent.bayer.com) is not resolved. The page is
+bayer.eightfold.ai and posts on talent.bayer.com) is not resolved. Phenom is
+known the same way: a posting `https://<host><prefix>/job/<id>` resolves only
+beside a source whose listings URL is `https://<host><prefix>/search-results`,
+the same host and language. `ats.listing_prefixes` names the listings URL
+either format would have, and `ats.resolve_listed` picks the resolver by it.
+Phenom's page is a shell too: the static tier read 445 to 922 characters of
+navigation from six sites' postings on 2026-11-01, and 8,869 from Merck's,
+which clears the gate with no line of the posting. Its `jobDetail` answers a
+made-up id with 200 and no job, so the resolver never says GONE. The page is
 a shell that clears the static gate: on 2026-10-05 the static tier returned
 139,000 to 163,000 characters for eight Lockheed and Northrop postings, the
 title and the site's theme JSON with no part of the description, and a removed
@@ -640,6 +651,21 @@ only a `tz` header, without which it answers 500. Its contract, measured on
   locations (a JSON list inside a string) and the date is per section; the
   date is `10/02/2026` on Textron and `Oct 5, 2026` on AAR, both `lang=en`.
 
+A section with no `portalNo` on its page has no faceted search: the endpoint
+answers it `careerSectionUnAvailable`. Kearney's `jobsearch.ftl` redirects to
+a server-rendered `joblist.ftl`, and the Port of Seattle's is a basic search.
+The page states the list's page size and length
+(`listRequisition.size!|!10!|!listRequisition.nbElements!|!48`), and its pager
+is a POST to the same page as `.ajax`, with no session or token, answering a
+page as one `!|!`-separated string of cells. Every page comes from the pager,
+the first too, because the page's own first page is sorted differently:
+mixing them read 40 of Kearney's 48, the pager alone 48 of 48. The length
+matched each section's `/careersection/sitemap.jss` (48 and 10, 2026-11-01),
+so a pull short of it is partial. Cells are positional, so a row is found by
+its leading number, title, number, title; the code is the one its "Job
+Number" cell names; and no place is read, because the location column cannot
+be told from the job type's.
+
 **A paged pull is held to its distinct postings, not its rows.** A sort with
 ties lets each page request order the tied rows afresh, so a pass can return
 exactly the stated count while serving some rows twice and others never.
@@ -718,9 +744,48 @@ page's "Results 1 to 25 of N" is not the board's count; and an item's title is
 `<title> (<primary location>)`, and either half can carry parentheses of its
 own ("Saône (Haute), FR" on Deere), so the location is the balanced group that
 closes the heading.
-The legacy `career<N>.successfactors.com/career?company=` site has no
-unauthenticated list call (its search is a session-bound DWR call), so it is
-not a board format.
+
+**A Career Portal export is the whole board, one language at a time.** A
+SuccessFactors tenant without Career Site Builder (Moody's: careers.moodys.com
+is a Radancy site whose apply links open career8.successfactors.com) has a
+Career Portal. Its search page is a session-bound DWR call, but
+`https://<career host>/career?company=<tenant>&career_ns=job_listing_summary&resultType=XML`
+(kind `successfactors_portal`, hosts `career*.successfactors.com/.eu` and
+`career*.sapsf.com/.eu`) exports every open requisition with its whole
+description, unpaged and with no count. On 2026-11-01 it matched the Career
+Site Builder feed of the same tenant requisition for requisition (Halliburton
+514, DTE 75, Norfolk Southern 54, Dominion 80; Hershey 316 of 333, the rest
+its fr_CA, pt_BR and es_MX copies), and Moody's 324 matched its Radancy
+sitemap, so a pull is authoritative. The export holds one language, the
+tenant's default unless `lang` names another, and some tenants post a
+requisition in one language only (Allianz: en_US 1,098, fr_FR 305 with 2 in
+en_US, 1,727 across 15 languages), so the listings URL names every language
+to read, `lang=en_US,fr_FR`, folded by requisition. A language the tenant does
+not use answers another one's list, which the fold absorbs. Quirks: an unnamed custom field is written `<>99</>`,
+which no parser reads, and is removed first; an unknown tenant answers the
+HTML login page, a failed pull; the date is month first; the place is in the
+description or a filter labelled Location; the posting is
+`/sfcareer/jobreqcareer?jobId=<req>&company=<tenant>`, the page the
+employer's site links to apply.
+
+**A Phenom career site is read from the search its page calls.** Phenom runs
+on employers' own hosts, and the listings URL is the site's search page,
+`https://<host>[/<country>/<lang>]/search-results` (kind `phenom`), whose
+path is the mark and names the language (`/ca/fr` is `fr_ca`; without one the
+site's default answers). `_phenom` POSTs `{"ddoKey": "refineSearch", "from",
+"size"}` to `https://<host>/widgets`, which needs no session; `size` stops at
+500. Rows name no employer and carry a teaser, not the text. The site answers
+from replicas that order a query differently and ignore `sortBy`: Truist's
+1,478 postings read 1,144 to 1,351 distinct when each page opened a new
+connection, and 1,478 when the pages shared one, as the client session's do
+(Truist, PNC 2,092 and Thermo Fisher 3,155, three pulls each, 2026-11-01). So
+the count is the check, and short of it the pull is partial. A request it
+cannot read answers 200, status 200, totalHits 0 and `data` without `jobs`;
+an empty search carries `"jobs": []`, so the first fails the pull. Most
+Phenom sites front a Workday board that is already a source, and a second
+reader of the same postings under other URLs duplicates them, so a Phenom
+source is for an employer whose own system is not public (Franklin
+Templeton's Workday board answers 0) or not supported.
 
 **A board that publishes every posting in one document is read from that
 document, never from its search.** Google's careers feed

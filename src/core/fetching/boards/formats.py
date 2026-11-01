@@ -22,13 +22,18 @@ from core.fetching.boards.jibe import _jibe
 from core.fetching.boards.lever import _lever
 from core.fetching.boards.markdown import _markdown
 from core.fetching.boards.oracle import _oracle
+from core.fetching.boards.phenom import _phenom
 from core.fetching.boards.rippling import _RIPPLING_BOARD, _rippling
 from core.fetching.boards.smartrecruiters import _smartrecruiters
-from core.fetching.boards.successfactors import _successfactors
+from core.fetching.boards.successfactors import (
+    _successfactors,
+    _successfactors_portal,
+    is_successfactors_portal,
+)
 from core.fetching.boards.taleo import _TALEO_SECTION, _taleo
 from core.fetching.boards.workable import _workable
 from core.fetching.boards.workday import _workday
-from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2
+from core.fetching.hosts import EIGHTFOLD_PCSX, EIGHTFOLD_V2, PHENOM_SEARCH
 from core.fetching.posting import JobPosting
 
 
@@ -203,11 +208,26 @@ FORMATS = (
         needs_company=True,
         authoritative=True,
     ),
+    BoardFormat(
+        "successfactors_portal",
+        lambda a: is_successfactors_portal(a.host, a.path),
+        _successfactors_portal,
+        needs_company=True,
+        authoritative=True,
+    ),
     # Eightfold's listing path is the marker across its tenant domains.
     BoardFormat(
         "eightfold",
         lambda a: a.path.rstrip("/") in (EIGHTFOLD_PCSX, EIGHTFOLD_V2),
         _eightfold,
+        needs_company=True,
+        authoritative=True,
+    ),
+    # Phenom runs on employer domains. Its search page path is the marker.
+    BoardFormat(
+        "phenom",
+        lambda a: bool(PHENOM_SEARCH.match(a.path)),
+        _phenom,
         needs_company=True,
         authoritative=True,
     ),
