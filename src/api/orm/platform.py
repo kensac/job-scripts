@@ -143,6 +143,15 @@ class Task(Base):
             text("id DESC"),
             postgresql_where=text("kind = 'ingest_source'"),
         ),
+        # The finished pulls of a window, for the admin Pulls tab. Without
+        # this the window is a seq scan of all of tasks (304 MB, 554k rows)
+        # for 9k pulls a day: 0.37 s warm and 2.3 s cold on production
+        # (2026-11-01), and a seq scan never stays cached.
+        Index(
+            "idx_tasks_ingest_finished",
+            "finished_at",
+            postgresql_where=text("kind = 'ingest_source' AND status IN ('done', 'failed')"),
+        ),
         # A board's latest run and its active-run check. Without this both
         # walk tasks backwards decompressing every payload to read the board
         # id: 150,847 rows and 7.5 s for board 4 on 2026-10-03 (EXPLAIN
