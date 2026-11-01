@@ -313,6 +313,11 @@ over its calls (`model_calls.BATCH_TOTALS`), not columns of `ai_batches`.
 There is no other usage ledger: `api_usage`, the totals on `ai_batches` and
 the cost shares on `job_embeddings` were dropped once the ledger held their
 history.
+`idx_model_calls_user_created` INCLUDEs the columns the per-person reads take
+(`model_calls.user_spend_by_day`, `user_spend_by_purpose`,
+`budget.spent_this_week`), so they are index-only. A column a new per-person
+read takes goes into that list in the same change: otherwise the read is a
+heap fetch per call, 4.2 s cold over the owner's 610k calls.
 
 **Spend has separate cost populations.** `api/spend/ledger.py` owns
 recorded model-call totals and cuts. `api/spend/verdicts.py` owns verdict
