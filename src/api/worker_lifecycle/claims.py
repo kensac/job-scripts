@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from api import db, hosts, metrics, telemetry
+from api.queue import RETRIES_SPENT
 from core.env import env_list
 from tasks import HANDLERS
 
@@ -39,16 +40,6 @@ def _kinds_clause(kinds: list[str], exclude: list[str]) -> str:
 
 WORKER_KINDS = env_list("JOBTRACKER_WORKER_KINDS")
 EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
-# The retry budget, which is not the claim count. Every claim increments
-# attempts, because (worker, attempts) is the generation stamp a claim's
-# writes are guarded by and a repeated stamp would let a lost worker write
-# over the run that replaced it. A claim that resumes a parked batch wait is
-# not a retry, so resume_parked counts it in batch_resumes and the budget
-# subtracts it. Counting resumes against the budget let 404 batch tasks reach
-# the cap in the 30 days to 2026-10-04 without a single failure, and two of
-# them were then failed at their first real error with 1,198 paid receipts
-# unconsumed.
-RETRIES_SPENT = "(attempts - batch_resumes)"
 
 
 # The order eligible tasks are claimed in: by age, except that a scheduled

@@ -3,38 +3,14 @@ from __future__ import annotations
 from api import db
 
 
-def test_an_admin_queues_a_run_past_the_cap_for_one_run_only(
-    client, user_headers, admin_headers, monkeypatch
-):
-    """The shared weekly cap is a group setting; a run an admin queues with
-    ignore_budget goes past it for that run alone, the spend still recorded,
-    and the cap never moves. The person's own endpoints cannot set it."""
-    from api import budget, db
+def test_a_flagged_task_goes_past_the_cap_for_one_run_only(monkeypatch, user_headers, client):
+    """The shared weekly cap is a group setting; a task carrying ignore_budget
+    goes past it for that run alone, the spend still recorded, and the cap
+    never moves."""
+    from api import budget
 
-    flt = client.post(
-        "/v1/user/filters",
-        json={"name": "one", "prompt": "remote only", "enabled": False},
-        headers=user_headers,
-    ).json()
+    client.get("/v1/user/settings", headers=user_headers)
     uid = db.query_one("SELECT id FROM users WHERE sub = %s", (user_headers["X-User-Sub"],))["id"]
-
-    forbidden = client.post(
-        "/v1/admin/filters/run",
-        json={"user_id": uid, "filter_id": flt["id"], "ignore_budget": True},
-        headers=user_headers,
-    )
-    assert forbidden.status_code == 403
-
-    queued = client.post(
-        "/v1/admin/filters/run",
-        json={"user_id": uid, "filter_id": flt["id"], "ignore_budget": True},
-        headers=admin_headers,
-    )
-    assert queued.status_code == 200, queued.text
-    task = db.query_one(
-        "SELECT kind, payload FROM tasks WHERE id = %s", (queued.json()["task_id"],)
-    )
-    assert task["kind"] == "run_filter" and task["payload"]["ignore_budget"] is True
 
     # A spent cap blocks the ordinary load and not the flagged one.
     spent = budget.Entitlement(

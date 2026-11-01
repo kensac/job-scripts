@@ -45,7 +45,7 @@ def test_two_boards_of_one_sponsor_cannot_both_spend_one_allowance(f, monkeypatc
     # its own, so without a lock both share, both pass before either inserts.
     # With one, the second waits on the lock, the first's wait times out, and
     # the second rechecks after the first commits.
-    checked = threading.Barrier(2, timeout=5)
+    checked = threading.Barrier(2, timeout=2)
     recheck = admission._refuse_over_budget
 
     def recheck_then_wait(sponsor_id, cap, reserved):

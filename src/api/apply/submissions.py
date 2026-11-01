@@ -14,9 +14,11 @@ submission once, on the fill that has the fields. The row itself stays.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from api import db
+from api.resumes import attached_name
 
 
 def _filled_sibling(user_id: int, url: str, before_id: int) -> int | None:
@@ -80,3 +82,43 @@ def repair() -> list[tuple[int, int]]:
             )
             moved.append((empty["id"], sibling))
     return moved
+
+
+def _resume_id(entry: dict[str, Any]) -> int | None:
+    """The resume a file field was filled with: the resolver writes its id
+    as the field's value on the `resume` rung."""
+    value = str(entry.get("value") or "")
+    if entry.get("kind") != "file" or entry.get("rung") != "resume" or not value.isdigit():
+        return None
+    return int(value)
+
+
+def resume_names(user_id: int, entries: Iterable[dict[str, Any]]) -> dict[int, str]:
+    """The attached file name of each resume these entries were filled with."""
+    ids = {rid for e in entries if (rid := _resume_id(e)) is not None}
+    if not ids:
+        return {}
+    rows = db.query(
+        "SELECT id, filename FROM user_resumes WHERE user_id = %s AND id = ANY(%s)",
+        (user_id, sorted(ids)),
+    )
+    return {r["id"]: attached_name(r["filename"]) for r in rows}
+
+
+def changed(entry: dict[str, Any], names: dict[int, str]) -> bool | None:
+    """Whether the person changed what was filled, or None when it cannot
+    be told: the submit read no final for the field.
+
+    A resume field holds the resume's id and its final is the attached file
+    name, so it is unchanged when that name is the resume's. A resume whose
+    name cannot be found, or a final the extension did not read, is unknown."""
+    if "final" not in entry:
+        return None
+    final = entry["final"]
+    rid = _resume_id(entry)
+    if rid is not None:
+        name = names.get(rid)
+        if name is None or final is None:
+            return None
+        return final != name
+    return (final or "") != (entry.get("value") or "")
