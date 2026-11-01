@@ -14,8 +14,8 @@ APPLICATIONS_MIN = 1
 OPEN_MIN_CHECKED = 5
 
 # Grouping on lower(btrim(company)) rather than the raw string is the whole
-# identity model, such as it is. mode() picks the most common spelling for
-# display so the UI shows "Stripe" rather than whichever variant sorted first.
+# identity model, such as it is. The most common spelling is the display
+# name, so the UI shows "Stripe" rather than whichever variant sorted first.
 #
 # The comp split is three-way on purpose. A job_comp row says the extractor
 # ran; an amount says it found one. A posting where it ran and found nothing
@@ -27,13 +27,23 @@ OPEN_MIN_CHECKED = 5
 # totals, rather than joining job_comp to every jobs row before grouping:
 # that join spilled its sort to disk, 4.3 s against 2.9 s for this shape and
 # 2.6 s for the old single pass over jobs (production, 2026-10-10).
+#
+# The display spelling is mode() computed by hand: count each spelling, then
+# keep the most common per name, ties to the first in sort order as mode()
+# breaks them. mode() walked all 1.41M postings in name order through the
+# heap; counting spellings is one hash aggregate into 10,891 rows. The page
+# statement took 2.7-3.2 s against 3.6-4.2 s, with all 10,751 rows identical
+# under both sorts (production, 2026-11-01).
 _BASE_CTES = """
 WITH seen AS (
-    SELECT lower(btrim(company)) AS company_key,
-           mode() WITHIN GROUP (ORDER BY company) AS company_name,
-           count(*) AS total_postings_seen
-    FROM jobs WHERE company <> ''
-    GROUP BY lower(btrim(company))
+    SELECT DISTINCT ON (company_key) company_key, company AS company_name,
+           sum(n) OVER (PARTITION BY company_key)::bigint AS total_postings_seen
+    FROM (
+        SELECT lower(btrim(company)) AS company_key, company, count(*) AS n
+        FROM jobs WHERE company <> ''
+        GROUP BY lower(btrim(company)), company
+    ) spellings
+    ORDER BY company_key, n DESC, company
 ), paid AS (
     SELECT lower(btrim(j.company)) AS company_key,
            count(*) FILTER (

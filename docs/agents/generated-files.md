@@ -30,11 +30,27 @@ real branch, and it only lints and formats. Every other job checks out the
 merge result (`github.sha` on a pull request), so anything that breaks only in
 combination with main, such as two migration heads, fails on the pull request.
 
-**The file pins requests, not responses.** Only a handful of operations declare
-a response schema; the rest are empty objects. So it will catch a bad path,
-method, or query parameter, and it will never catch a client and server
-disagreeing about the shape of a response. Where you can declare a response
-schema, do. It is the only place that class of drift becomes machine-visible.
+**Every operation declares what it returns.** `tests/test_openapi_current.py`
+fails on a route without a response model (the resume PDF is the one named
+exception), on a mangled schema name such as
+`api__routers__source_admin__Source` (two routers naming two models the same
+thing), and on a `Decimal` field. Declaring a shape must not change the
+payload:
+
+- Declare money as `float`. A `Decimal` field is served as a JSON string,
+  where the bare dict served a number. A `numeric` sum of a token count
+  declares `int`.
+- A dict omits a key it has no value for; a model emits it as null. Where the
+  old payload omitted keys, set `response_model_exclude_none=True` on the
+  route and say so beside the model.
+- A datetime serialises with `Z` rather than `+00:00`. Same instant.
+- Define a response model above the route that returns it. Under `from
+  __future__ import annotations` a later definition raises `PydanticUserError:
+  ... is not fully defined` at import.
+
+Running `npx openapi-typescript openapi.json` and reading the output is the
+check that a generated client is usable; the tests can pass on a schema that
+is self-consistent and wrong.
 
 ## The migration drift check: checked, never committed
 
