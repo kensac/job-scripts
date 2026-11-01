@@ -54,6 +54,17 @@ The row carries what ingest needs and nothing derived: `company` (required
 where the system never names it), a `title_pattern` that normally gates which
 titles enter the catalog, and an `ingest_interval_hours`.
 
+**A board that needs its company does not pull without one.** The API
+refuses such a source (`COMPANY_REQUIRED`), and `boards.fetch_listings`
+refuses the pull too, so a row that reached the table another way fails on
+the failure path and ends at a `source_switched_off` warning. Before that
+check, 884 Lever and Ashby sources inserted by hand on 2026-09-12 pulled
+"successfully" for seven weeks and stored 71,070 postings with no company,
+which leaves a posting with no company link to open it by.
+`tools/fill_board_companies.py` named them from the catalog's other postings
+on the same board and filled their postings through
+`catalog.fill_source_company`, which writes only empty values.
+
 `source_title_patterns_enabled` is the fleet-wide admission switch. When true,
 only titles matching a source's pattern enter `jobs`. When false, every fetched
 posting enters `jobs`; the pattern remains stored and `listings.kept` continues

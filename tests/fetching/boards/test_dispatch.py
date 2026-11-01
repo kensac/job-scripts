@@ -6,6 +6,7 @@ import pytest
 
 from core.fetching import boards, client
 from core.fetching.boards import common as board_common
+from tests.fetching.boards.responses import BoardResponse as _Resp
 
 
 @pytest.mark.parametrize(
@@ -208,6 +209,35 @@ def test_each_format_owns_its_fetcher_and_source_rules():
 def test_company_requirement_cannot_be_non_authoritative():
     with pytest.raises(ValueError, match="company board"):
         boards.BoardFormat("invalid", lambda address: True, None, needs_company=True)
+
+
+@pytest.mark.parametrize("company", [None, "", "  "])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.lever.co/v0/postings/sonarsource?mode=json",
+        "https://api.ashbyhq.com/posting-api/job-board/fluidstack",
+    ],
+)
+def test_a_board_that_needs_a_company_refuses_to_pull_without_one(monkeypatch, url, company):
+    # A feed that answers: without the refusal, its posting is stored nameless.
+    posting = {
+        "text": "Engineer",
+        "title": "Engineer",
+        "hostedUrl": "https://jobs.lever.co/sonarsource/ac978161-6f46-4f6b-ad9e-a258e642751c",
+        "jobUrl": "https://jobs.ashbyhq.com/fluidstack/ac978161-6f46-4f6b-ad9e-a258e642751c",
+    }
+    asked: list[str] = []
+    monkeypatch.setattr(
+        boards._session,
+        "get",
+        lambda url, **kw: (
+            asked.append(url) or _Resp([posting] if "lever" in url else {"jobs": [posting]})
+        ),
+    )
+    with pytest.raises(ValueError, match="names no company"):
+        boards.fetch_listings(url, company)
+    assert asked == []
 
 
 def test_unknown_urls_fall_through_to_the_sheet_era_fetcher(monkeypatch):
