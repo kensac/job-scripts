@@ -315,6 +315,19 @@ def test_phrasings_without_a_group_covers_the_whole_version(client, admin_header
     assert body["total_phrasings"] == 2
 
 
+def test_phrasings_refuses_an_unknown_group(client, admin_headers):
+    """sql_pattern raises KeyError for a key outside the taxonomy, which was a 500."""
+    resp = client.get(
+        "/v1/admin/filter-insights/phrasings",
+        params={"prompt_hash": "hash_aaaa", "group": "not_a_real_group"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400, resp.text
+    body = resp.json()["detail"]
+    assert body["code"] == "UNKNOWN_REASON_GROUP"
+    assert "ungrouped" in body["valid"]
+
+
 def test_examples_are_a_deterministic_sample_not_a_frequency_ranking(client, admin_headers):
     """Nearly every phrasing occurs once, so ordering by count alone leaves the
     choice to row arrival order. Ties break on the text so the same three come
