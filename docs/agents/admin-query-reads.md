@@ -31,6 +31,12 @@ wait. Key the cache on
 everything the answer depends on, config included (the review report keys
 on `title_screens`). conftest clears every cache before each test.
 
+The provider's bill (/admin/spend/provider) is not a scan but an outside API
+read of 1.2 to 1.5 s, the slowest panel on the spend page, so it reads through
+the same cache keyed on window and UTC day. A read the provider did not answer
+in full is returned and not cached: raise from the compute so the next visit
+asks again rather than serving the failure for the cache window.
+
 Lifetime sums never read `ledger_rows`: the view's per-row lookups took 116 s
 at p90 for /admin/stats. They read the hourly sums (below). A newest-first
 page of urls reads each table's `created_at` index directly, because the
