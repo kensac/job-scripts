@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
 from pydantic import BaseModel
+lazy from anthropic import AsyncAnthropic
+lazy from openai import AsyncOpenAI
 
 from core import providers, routing
 from core.batch import cached_prompt, prompt_cache_key

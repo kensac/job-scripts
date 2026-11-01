@@ -8,8 +8,8 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 
 from api import crypto, db, model_calls, user_settings
-from api.auth import AuthedUser
 from core import providers, routing
+lazy from api.auth import AuthedUser
 
 if TYPE_CHECKING:
     from api import ai

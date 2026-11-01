@@ -6,8 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from api import auth, db, metrics
+from api import db, metrics
 from tasks.runtime import set_progress
+lazy from api import auth
 
 logger = logging.getLogger(__name__)
 

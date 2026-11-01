@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel
+lazy from openai.lib._pydantic import to_strict_json_schema
 
 from core import providers
 

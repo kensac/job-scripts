@@ -8,9 +8,9 @@ The read and refusal stay together so callers cannot omit the access check.
 from __future__ import annotations
 
 from api import db
-from api.auth import AuthedUser
 from api.board import visibility
 from api.problem import refuse
+lazy from api.auth import AuthedUser
 
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:

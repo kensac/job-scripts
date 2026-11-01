@@ -84,7 +84,7 @@ def _account_email(access_token: str) -> str | None:
             logger.warning("gmail profile lookup failed with %s", resp.status_code)
             return None
         payload = resp.json()
-    except (requests.RequestException, ValueError):
+    except requests.RequestException, ValueError:
         logger.warning("gmail profile lookup failed", exc_info=True)
         return None
     return payload.get("emailAddress") if isinstance(payload, dict) else None

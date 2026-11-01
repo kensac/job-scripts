@@ -155,6 +155,6 @@ def fetch_costs(days: int) -> dict:
             params["page"] = cursor
     except requests.RequestException:
         return {**report, "reason": "REQUEST_FAILED"}
-    except (ValueError, TypeError, InvalidOperation):
+    except ValueError, TypeError, InvalidOperation:
         return {**report, "reason": "INVALID_RESPONSE"}
     return {**report, "reason": "PAGINATION_LIMIT"}

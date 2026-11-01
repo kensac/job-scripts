@@ -17,8 +17,8 @@ under the same private name.
 
 from __future__ import annotations
 
-from fastapi import HTTPException
 from pydantic import BaseModel
+lazy from fastapi import HTTPException
 
 
 class Problem(BaseModel):

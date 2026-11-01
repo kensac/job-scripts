@@ -35,7 +35,7 @@ def floor_for(host: str) -> float:
     limits = db.get_config("ingest_host_pace_seconds") or {}
     try:
         return float(limits.get(host) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 

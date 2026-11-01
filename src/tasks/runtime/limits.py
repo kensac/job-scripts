@@ -83,7 +83,7 @@ def available_memory_mb(
         for line in (proc / "meminfo").read_text().splitlines():
             if line.startswith("MemAvailable:"):
                 readings.append(int(line.split()[1]) / 1024)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     try:
         limit = (cgroup / "memory.max").read_text().strip()
@@ -92,7 +92,7 @@ def available_memory_mb(
             stat = dict(line.split() for line in (cgroup / "memory.stat").read_text().splitlines())
             reclaimable = int(stat.get("inactive_file", 0))
             readings.append((int(limit) - used + reclaimable) / 2**20)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     return min(readings) if readings else None
 

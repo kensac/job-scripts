@@ -6,7 +6,7 @@ import tempfile
 import uuid
 from typing import Any
 
-from pypdf import PdfReader
+lazy from pypdf import PdfReader
 
 from api import db
 from api.resumes.revisions import archive_resume, lock_owner

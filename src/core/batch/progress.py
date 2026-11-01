@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from openai import AsyncOpenAI
+lazy from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 TERMINAL_STATES = {"completed", "failed", "expired", "cancelled"}

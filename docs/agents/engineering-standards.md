@@ -314,6 +314,15 @@ in CI and in the image. To add or move a pin, edit `pyproject.toml` and run
 match the declaration fails the install rather than resolving something new,
 which is the point: what ran in CI is what the image carries.
 
+A heavy SDK is imported with `lazy import` / `lazy from` (PEP 810), so a
+process pays for it only once it uses it: anthropic, openai, boto3, botocore,
+pypdf, and fastapi outside the API's own modules. Our own modules stay eager.
+Measured 2026-10-31, `import api.worker` loaded 4,673 modules in about 200 MB
+before and 941 in 79 MB after. gcp-vps has a 400 MB worker cap and never uses
+anthropic. `tests/test_lazy_imports.py` fails if a fresh worker loads any of
+them. Do not turn on the global mode (`PYTHON_LAZY_IMPORTS=all`): it breaks
+third-party code written for eager imports, pytest among them.
+
 ## Types
 
 `pyright` checks every package under `src` that runs: `src/api`, `src/core`

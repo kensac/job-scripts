@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 
-from fastapi import FastAPI, Request
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
+lazy from fastapi import FastAPI, Request
 
 from api import db
 

@@ -1,7 +1,7 @@
 [project]
 name = "jobtracker"
 version = "0"
-requires-python = ">=3.13"
+requires-python = ">=3.15"
 dependencies = [
     "alembic==1.20.1",
     "annotated-types==0.8.0",
@@ -90,7 +90,7 @@ package = false
 [tool.ruff]
 src = ["src"]
 line-length = 100
-target-version = "py313"
+target-version = "py315"
 extend-exclude = ["alembic/versions", "backups"]
 
 [tool.ruff.lint]

@@ -355,7 +355,7 @@ async def handle_verify_new(task_id: int, payload: dict[str, Any]) -> None:
                     }
                 else:
                     parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
-            except (ValueError, KeyError, TypeError):
+            except ValueError, KeyError, TypeError:
                 logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
                 receipt.outcome = "invalid_output"
                 continue
