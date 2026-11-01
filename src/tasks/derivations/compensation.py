@@ -176,7 +176,6 @@ PAY = Derivation(
     requests=_requests,
     store=_store,
     input_chars=COMP_INPUT_CHARS,
-    recipe=None,
     shape=COMP_TASK,
     answer=CompExtract,
     context_keys=("job_id", "content_row_id"),

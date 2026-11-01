@@ -375,7 +375,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
             for e in node.iter("emailAddress")
             if e.get("OPFContactEmailAddressAddress")
         ]
-        sender = _olm_sender(node)
+        sender, sender_name = _olm_sender(node)
         yield ImportedMessage(
             provider_message_id=(
                 _bracketed(_clean_header(_olm_text(node, "OPFMessageCopyMessageID")))
@@ -389,7 +389,7 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
             provider_thread_id=None,
             thread_topic=_clean_header(_olm_text(node, "OPFMessageCopyThreadTopic")),
             from_email=_clean_header(sender),
-            from_name=_clean_header(_olm_text(node, "OPFMessageCopyFromAddresses")),
+            from_name=_clean_header(sender_name or _olm_text(node, "OPFMessageCopyFromAddresses")),
             to_emails=[r for r in (_clean_header(a) for a in addresses) if r and r != sender],
             subject=_clean_header(_olm_text(node, "OPFMessageCopySubject")),
             sent_at=_olm_sent_at(node),
@@ -398,15 +398,19 @@ def _olm_entries(raw: bytes, *, source: str, origin: str) -> Iterator[ImportedMe
         )
 
 
-def _olm_sender(node: ElementTree.Element) -> str | None:
+def _olm_sender(node: ElementTree.Element) -> tuple[str | None, str | None]:
+    """The sender's address and display name. Outlook writes both as
+    attributes of an emailAddress element; the holder element has no text
+    of its own, so reading its text stored no name for any .olm message
+    (0 of 28,224 on 2026-10-31)."""
     holder = node.find("OPFMessageCopyFromAddresses")
     if holder is None:
-        return None
+        return None, None
     for addr in holder.iter("emailAddress"):
         value = addr.get("OPFContactEmailAddressAddress")
         if value:
-            return value
-    return None
+            return value, addr.get("OPFContactEmailAddressName")
+    return None, None
 
 
 def _olm_sent_at(node: ElementTree.Element) -> datetime | None:

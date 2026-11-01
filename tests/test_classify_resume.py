@@ -62,7 +62,7 @@ class TestASelfClaimDoesNotHideTheWork:
         tid = _task([mid])
         rows = db.query(
             mail_classify._SELECTION,
-            {"cap": 10, "identities": ["nobody@x.com"], "task_id": tid},
+            {"cap": 10, "identities": db.jsonb({}), "task_id": tid},
         )
         assert [r["id"] for r in rows] == [mid]
 
@@ -73,7 +73,7 @@ class TestASelfClaimDoesNotHideTheWork:
         mine = _task([])
         rows = db.query(
             mail_classify._SELECTION,
-            {"cap": 10, "identities": ["nobody@x.com"], "task_id": mine},
+            {"cap": 10, "identities": db.jsonb({}), "task_id": mine},
         )
         assert rows == []
         assert other != mine

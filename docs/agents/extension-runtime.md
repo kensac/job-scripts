@@ -23,6 +23,9 @@ page or review action sees the current record. Build the modules before
 starting the submission watcher or offering the Autofill button. The extension
 never presses the employer's Submit control. The person's click or form submit
 arms tracking, and a confirmation signal or explicit confirmation records it.
+The page under one URL changes only when none of the filled controls remain on
+screen. A control appearing or leaving beside them is the same page and keeps
+the fill, so the submission records against it.
 
 Verify a runtime split with extension typecheck, build, unit tests, and the
 browser tests. The browser suite exercises startup, form filling, review,

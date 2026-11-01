@@ -31,7 +31,6 @@ from core.fetching.forms import posting_urls
 router = APIRouter()
 
 SUBMITTED_STATUS = "Application Submitted"
-_BANK_COLS = "id, label, kind, value, times_used, last_used_at, updated_at"
 
 
 class TrackedFill(BaseModel):
@@ -303,5 +302,3 @@ router.include_router(profile.router)
 router.include_router(suggestions.router)
 router.include_router(reports.router)
 router.include_router(report_uploads.router)
-
-SuggestField = suggestions.SuggestField

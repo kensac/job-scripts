@@ -20,10 +20,6 @@ from tasks.derivations import compensation as task_comp
 from tasks.verification import new_postings
 
 
-def _verdict(url: str, rejected: bool) -> str:
-    return json.dumps({"should_filter": rejected, "reason": "because"})
-
-
 def _sample(f, n: int) -> list[str]:
     urls = []
     for i in range(n):

@@ -18,8 +18,15 @@ listing_router = APIRouter()
 detail_router = APIRouter()
 
 
-class ProviderBatch(BaseModel):
-    """One batch job at the provider, with the task it belongs to.
+_BATCH_SELECT_COLUMNS = (
+    "b.id, b.provider_batch_id, b.task_id, b.purpose, b.model, b.requests, b.completed, "
+    "b.failed_count, b.status, b.submitted_at, b.updated_at, b.completed_at, b.est_tokens, "
+    "totals.input_tokens, totals.output_tokens, totals.cache_write_tokens, totals.est_cost_usd"
+)
+
+
+class BatchRecord(BaseModel):
+    """One batch job at the provider.
 
     `requests` is what was submitted, `completed` and `failed_count` what came
     back. `est_tokens` is what submission estimated; `input_tokens` and
@@ -36,6 +43,9 @@ class ProviderBatch(BaseModel):
     completed: int
     failed_count: int
     status: str
+    submitted_at: datetime.datetime
+    updated_at: datetime.datetime
+    completed_at: datetime.datetime | None
     est_tokens: int
     input_tokens: int
     output_tokens: int
@@ -43,9 +53,11 @@ class ProviderBatch(BaseModel):
     # float, not Decimal: a declared Decimal serialises as a JSON string and
     # this has always been a number on the wire.
     est_cost_usd: float | None
-    submitted_at: datetime.datetime
-    updated_at: datetime.datetime
-    completed_at: datetime.datetime | None
+
+
+class ProviderBatch(BatchRecord):
+    """A batch with the task it belongs to."""
+
     task_kind: str | None
     task_status: str | None
 
@@ -70,12 +82,7 @@ def list_batches(
     rows = db.query_as(
         ProviderBatch,
         f"""
-        SELECT b.id, b.provider_batch_id, b.task_id, b.purpose, b.model,
-               b.requests, b.completed, b.failed_count, b.status,
-               b.est_tokens, totals.input_tokens, totals.output_tokens,
-               totals.cache_write_tokens, totals.est_cost_usd,
-               b.submitted_at, b.updated_at, b.completed_at,
-               t.kind AS task_kind, t.status AS task_status
+        SELECT {_BATCH_SELECT_COLUMNS}, t.kind AS task_kind, t.status AS task_status
         FROM ai_batches b LEFT JOIN tasks t ON t.id = b.task_id
         {model_calls.BATCH_TOTALS}
         WHERE (b.status NOT IN ('completed', 'failed', 'expired', 'cancelled')
@@ -91,33 +98,6 @@ def list_batches(
         filters=params_.applied(user=scoping.echo(ids)),
         filterable=["user"],
     )
-
-
-_BATCH_SELECT_COLUMNS = (
-    "b.id, b.provider_batch_id, b.task_id, b.purpose, b.model, b.requests, b.completed, "
-    "b.failed_count, b.status, b.submitted_at, b.updated_at, b.completed_at, b.est_tokens, "
-    "totals.input_tokens, totals.output_tokens, totals.cache_write_tokens, totals.est_cost_usd"
-)
-
-
-class BatchRecord(BaseModel):
-    id: int
-    provider_batch_id: str
-    task_id: int | None
-    purpose: str
-    model: str | None
-    requests: int
-    completed: int
-    failed_count: int
-    status: str
-    submitted_at: datetime.datetime
-    updated_at: datetime.datetime
-    completed_at: datetime.datetime | None
-    est_tokens: int
-    input_tokens: int
-    output_tokens: int
-    cache_write_tokens: int | None
-    est_cost_usd: float | None
 
 
 class BatchedCheck(BaseModel):
