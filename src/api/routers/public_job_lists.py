@@ -14,11 +14,12 @@ from fastapi import APIRouter, Header, Query, Response
 from pydantic import BaseModel
 
 from api import db
+from api.board.ats import ATS_SQL, AtsName
 from api.params import csv
 from api.problem import refuse
-from api.routers.job_board import ATS_SQL, AtsName, Openness
 from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
+from core.verdict_reads import Openness
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 PublicSort = Literal["posted", "added", "company", "title", "comp"]

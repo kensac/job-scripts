@@ -11,77 +11,22 @@ from api import params as params_
 from api.auth import AuthedUser, require_user
 from api.board import column_filters as column_filters_
 from api.board import visibility
+from api.board.ats import ATS_SQL, AtsName
 from api.mail import applications
 from api.reports import ReportKind, report_kinds
 from core import catalog, verdict_reads
 from core.derivations.compensation import CompBasis, CompPeriod
+from core.verdict_reads import Openness
 
 router = APIRouter()
-
-# closed_verdict is three-valued and must stay that way: 'open', 'closed', or
-# NULL for never checked. `active` cannot answer this question - it is whatever
-# a board's feed last said and nothing ever clears it, so on a board that is
-# not re-listed (sheet_import, imported once from a sheet) it reports our own
-# stale copy as the posting's state. The closed check observes the posting
-# itself and is applied uniformly across boards, which is what makes it
-# comparable. Collapsing NULL into 'closed' would reintroduce exactly the bug
-# this column exists to fix: 114 of the applications flagged dead by `active`
-# have a closed-check that says the posting is open.
-# The host names the ATS for the hosted ones; the rest fold into "other",
-# because on a real board the tail is wide (183 employer careers hosts against
-# five systems on 2026-09-07) and a select of 188 entries filters nothing.
-AtsName = Literal[
-    "ashby",
-    "greenhouse",
-    "lever",
-    "workable",
-    "workday",
-    "smartrecruiters",
-    "icims",
-    "jobvite",
-    "bamboohr",
-    "rippling",
-    "gem",
-    "other",
-]
 
 # How a status ended, for a board that must not decide "is this over" or
 # "which tone" by matching a name it hand-copied.
 Outcome = Literal["won", "lost", "withdrawn"]
 
-# Whether the posting is still up, as the closed check saw it. Three-valued and
-# it must stay that way: null is "never checked", which is not "open".
-Openness = Literal["open", "closed"]
-
 # Where a posting's own extraction got to. Written only by the upload handler
 # and the extractors.
 ExtractionStatus = Literal["pending", "done", "failed"]
-# The applicant tracking system a posting's url lives on, as one definition
-# used by the row, the filter and the options. The patterns and the names are
-# one table so a system added to the SQL cannot be missing from the type that
-# declares what the column can hold, which is how a Literal turns into a 500.
-_ATS_PATTERNS: dict[AtsName, str] = {
-    "ashby": "https://jobs.ashbyhq.com/%%",
-    "greenhouse": "%%greenhouse.io/%%",
-    "lever": "https://jobs.lever.co/%%",
-    "workable": "%%workable.com/%%",
-    "workday": "%%myworkdayjobs.com/%%",
-    "smartrecruiters": "%%smartrecruiters.com/%%",
-    "icims": "%%icims.com/%%",
-    "jobvite": "%%jobvite.com/%%",
-    "bamboohr": "%%bamboohr.com/%%",
-    "rippling": "%%rippling.com/%%",
-    "gem": "https://jobs.gem.com/%%",
-}
-
-ATS_SQL = (
-    "\n    CASE\n"
-    + "".join(
-        f"      WHEN j.url ILIKE '{pattern}' THEN '{name}'\n"
-        for name, pattern in _ATS_PATTERNS.items()
-    )
-    + "      ELSE 'other'\n    END\n"
-)
 
 _JOB_ROW = f"""
     j.id AS job_id, j.company, j.title, j.locations, j.terms, j.source,
