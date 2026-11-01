@@ -186,41 +186,16 @@ class PromptVersion(BaseModel):
     ungrouped: Breakdown
 
 
-class MyPromptVersion(BaseModel):
-    """The same prompt version as its owner sees it: their own filter names
-    rather than every name the prompt has been given, and no owner block,
-    because they are it."""
-
-    prompt_hash: str
-    filters: list[OwnedFilter]
-    first_seen: datetime.datetime | None
-    last_seen: datetime.datetime | None
-    sufficient: bool
-    totals: PromptTotals
-    groups: list[GroupBreakdown]
-    ungrouped: Breakdown
-
-
-class ReasonsEnvelope(BaseModel):
-    """What both rejection-reason views say about how they counted, so the
-    two surfaces cannot describe the same prompt differently."""
-
+class RejectionReasons(BaseModel):
     window_days: int
     unit: str = "decisions"
     min_decisions: int
     overlapping_groups: bool = True
     examples_selection: ExamplesSelection
     evidence_missing_criterion: EvidenceCriterion
-
-
-class RejectionReasons(ReasonsEnvelope):
     prompt_versions: list[PromptVersion]
     filters: dict[str, list[str]]
     filterable: list[str]
-
-
-class MyRejectionReasons(ReasonsEnvelope):
-    prompt_versions: list[MyPromptVersion]
 
 
 def _evidence_criterion() -> EvidenceCriterion:
