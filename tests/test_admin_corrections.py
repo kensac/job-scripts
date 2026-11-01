@@ -15,6 +15,7 @@ import pytest
 from api import db
 from tests import mail_log
 from tests.conftest import _auth_headers
+from tests.factories import user_id_for_subject
 
 
 def _owner_with_message(f) -> tuple[int, int, int]:
@@ -42,7 +43,7 @@ def _owner_with_message(f) -> tuple[int, int, int]:
 def admin(client):
     headers = _auth_headers("corr-admin", "corradmin@example.com", ["infra-admins"])
     assert client.post("/v1/users/bootstrap", headers=headers).status_code == 200
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", ("corr-admin",))["id"]
+    uid = user_id_for_subject("corr-admin")
     return headers, uid
 
 

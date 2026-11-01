@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from api import db
 from core.store import Page
+from tests.factories import user_id_for_subject
 
 
 def test_manual_check_addresses_filters_by_hash(client, admin_headers):
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-admin")
     db.execute(
         "INSERT INTO user_filters (user_id, name, prompt, prompt_hash) "
         "VALUES (%s, 'byhash', 'keep backend roles', 'hash-xyz')",
@@ -31,7 +32,7 @@ def test_manual_check_addresses_filters_by_hash(client, admin_headers):
 
 
 def test_manual_check_addresses_a_managed_board_by_hash(client, admin_headers):
-    uid = db.query_one("SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-admin")
     db.execute(
         "INSERT INTO managed_boards (slug, name, sponsor_user_id, prompt, prompt_hash, "
         "requested_model) VALUES ('mb-hash', 'MB', %s, 'new grad roles', 'board-hash', 'gpt-6-luna')",

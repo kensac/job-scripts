@@ -18,7 +18,6 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
@@ -220,7 +219,7 @@ class BatchRequest(Base):
     # batch_objects still also holds the bundle's fields until
     # tasks.batch_objects moves them out; request_snapshots.REF composes the
     # whole reference either way (observability.md, request snapshot storage).
-    snapshot_ref: Mapped[dict] = mapped_column(JSONB)
+    snapshot_ref: Mapped[dict]
     # NULL only on a row written before batch_objects and not yet backfilled.
     object_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("batch_objects.id", name="fk_batch_requests_object")
@@ -234,7 +233,7 @@ class BatchResultReceipt(Base):
     provider_batch_id: Mapped[str] = mapped_column(Text, primary_key=True)
     custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"))
-    response: Mapped[dict] = mapped_column(JSONB)
+    response: Mapped[dict]
     model: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

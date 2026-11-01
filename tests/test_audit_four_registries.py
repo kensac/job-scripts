@@ -8,13 +8,8 @@ import datetime
 from api import db
 from tasks import runtime as tasks_runtime
 from tests import mail_log
+from tests.factories import user_id_for_subject
 from tests.pipeline_data import insert_application
-
-
-def _uid(headers: dict) -> int:
-    row = db.query_one("SELECT id FROM users WHERE sub = %s", (headers["X-User-Sub"],))
-    assert row is not None
-    return row["id"]
 
 
 def test_board_options_carry_status_meaning_and_report_kinds(client, user_headers):
@@ -70,7 +65,7 @@ def test_queue_takes_lists_echoes_filters_and_flags_cancellable(client, admin_he
 
 
 def test_admin_mail_takes_lists_on_kind_method_and_source(client, admin_headers, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     sent = datetime.datetime(2025, 6, 1, tzinfo=datetime.UTC)
     ids = {}
     for key, source, kind in (
@@ -107,7 +102,7 @@ def test_admin_mail_takes_lists_on_kind_method_and_source(client, admin_headers,
 
 
 def test_pipeline_takes_provenance_lists_and_serves_stages(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     tracker = insert_application(uid, company="A", prov="tracker")
     email = insert_application(uid, company="B", prov="email")
     body = client.get(

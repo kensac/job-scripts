@@ -6,16 +6,7 @@ from __future__ import annotations
 import datetime
 
 from core.fetching import ats
-
-
-class _Resp:
-    def __init__(self, body, status_code=200):
-        self._body = body
-        self.status_code = status_code
-
-    def json(self):
-        return self._body
-
+from tests.fetching.ats.responses import AtsResponse
 
 _RIP = "ed637533-ed67-46ea-a8bb-b22b0559befb"
 
@@ -36,7 +27,7 @@ def test_rippling_reads_the_posting_and_its_date(monkeypatch):
 
     def get(url):
         asked.append(url)
-        return _Resp(
+        return AtsResponse(
             {
                 "name": "Head of Payments",
                 "description": {
@@ -70,7 +61,7 @@ def test_rippling_gone_only_on_the_closed_posting_answer(monkeypatch):
         (no_board, 404, ats.Status.ERROR),
         ({}, 500, ats.Status.ERROR),
     ):
-        monkeypatch.setattr(res, "get", lambda u, b=body, s=status: _Resp(b, s))
+        monkeypatch.setattr(res, "get", lambda u, b=body, s=status: AtsResponse(b, s))
         assert res.fetch(url).status is want
     monkeypatch.setattr(res, "get", lambda u: None)
     assert res.fetch(url).status is ats.Status.ERROR
@@ -91,7 +82,7 @@ def test_gem_reads_the_board_api_posting(monkeypatch):
 
     def get(url):
         asked.append(url)
-        return _Resp(
+        return AtsResponse(
             {
                 "title": "Principal Product Designer",
                 "location": {"name": "United States - Remote"},
@@ -116,7 +107,7 @@ def test_gem_reads_the_board_api_posting(monkeypatch):
 def test_gem_never_says_gone(monkeypatch):
     res = ats.Gem()
     missing = {"code": 404, "message": "Job post with ID x not found"}
-    monkeypatch.setattr(res, "get", lambda u: _Resp(missing, 404))
+    monkeypatch.setattr(res, "get", lambda u: AtsResponse(missing, 404))
     assert res.fetch(_GEM).status is ats.Status.ERROR
 
 

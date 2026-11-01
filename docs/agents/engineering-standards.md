@@ -192,7 +192,7 @@ disk.
 stages, cheapest first, each a `MATERIALIZED` CTE.** Written as one predicate,
 an `EXISTS` under an `OR` becomes a subplan run per row, and the planner
 orders the remaining checks by its own row estimates, which are wrong across
-CTE boundaries. The verify sweep's candidate query (`tasks/verification/new_postings.candidates_sql`
+CTE boundaries. The verify sweep's candidate query (`tasks/verification/selection.candidates_sql`
 and `api/verification_candidates.reachable`) ran past 14 minutes on
 production on 2026-10-10 and held locks a deploy's `DROP VIEW` queued behind.
 Staged, it read 21 s warm and 35 to 43 s with a cold cache. Three rules came out of it:
@@ -313,9 +313,8 @@ them ([migrations.md](migrations.md)).
 `api.orm.catalog_postings` owns the posting, upload and page-fetch facts;
 `api.orm.catalog_derivations` owns extracted answers and classified places;
 `api.orm.catalog_sources` owns source settings, listing evidence and source
-observations. `api.orm.catalog` re-exports their models for existing imports,
-while `api.orm.__init__` imports the groups to register every table on one
-`Base.metadata` for Alembic. A model move preserves its mapped table, columns,
+observations. `api.orm.__init__` imports the groups to register every table
+on one `Base.metadata` for Alembic. A model move preserves its mapped table, columns,
 constraints and indexes exactly. Compare the full metadata before and after,
 then run `migrations-check`; moving a class alone needs no migration.
 
