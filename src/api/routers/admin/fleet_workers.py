@@ -19,8 +19,9 @@ router = APIRouter()
 class FleetWorker(BaseModel):
     """One worker, as its heartbeat and its current task leave it.
 
-    `alive` is the heartbeat being under 90 seconds old, resolved in SQL so
-    every reader agrees on the same clock. The task fields are null when the
+    `alive` is the heartbeat being younger than `health.WORKER_FRESH`, the
+    window /queue's `fresh` uses, resolved in SQL so every reader agrees on
+    the same clock. The task fields are null when the
     worker is idle: they come from a join on a task that is still running.
     A worker running several tasks at once (worker_task_slots) names them all
     in `current_task_ids` and its adaptive limit in `task_limit`; the task
@@ -56,7 +57,7 @@ def list_workers(user: AuthedUser = Depends(require_admin)) -> FleetWorkers:
         """
         SELECT w.name, w.started_at, w.last_seen, w.current_task_id, w.current_task_ids,
                w.task_limit, w.release,
-               now() - w.last_seen < interval '90 seconds' AS alive,
+               w.last_seen > now() - %(fresh)s::interval AS alive,
                t.kind AS task_kind, t.status AS task_status, t.progress AS task_progress,
                t.started_at AS task_started_at,
                stats.done_24h, stats.failed_24h
@@ -70,6 +71,7 @@ def list_workers(user: AuthedUser = Depends(require_admin)) -> FleetWorkers:
         ) stats ON TRUE
         ORDER BY w.name
         """,
+        {"fresh": health.WORKER_FRESH},
     )
     return FleetWorkers(rows=rows)
 

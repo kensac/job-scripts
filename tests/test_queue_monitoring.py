@@ -45,6 +45,20 @@ def test_an_idle_worker_beside_old_pending_work_is_a_stall_and_a_busy_one_is_not
     assert _queue_alerts() == set()
 
 
+def test_the_fleet_and_queue_views_agree_on_which_workers_are_alive(client, admin_headers):
+    # Between the 90 seconds the fleet view once used and the queue's two
+    # minutes, where the two pages disagreed; and past both.
+    _worker("late-beat", idle=False, seen_minutes_ago=1.75)
+    _worker("gone", idle=True, seen_minutes_ago=3)
+
+    fleet = client.get("/v1/admin/workers", headers=admin_headers).json()["rows"]
+    queue = client.get("/v1/admin/queue", headers=admin_headers).json()["workers"]
+
+    expected = {("late-beat", True), ("gone", False)}
+    assert {(w["name"], w["alive"]) for w in fleet} == expected
+    assert {(w["name"], w["fresh"]) for w in queue} == expected
+
+
 def test_ingest_pending_past_two_cycles_is_a_backlog_and_within_one_is_not(set_config, monkeypatch):
 
     set_config("ingest_interval_minutes", 60)

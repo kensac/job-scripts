@@ -230,6 +230,14 @@ Keep the old SQL as the reference in the equality test, built from the same
 fragments, and give the fixture a row for every branch
 (`tests/test_verification_candidates.py`).
 
+**Join a table only when the statement reads it.** The planner removes an
+unused LEFT JOIN to a unique key, but the join column stays needed, so an
+index-only scan must still return it. The admin catalog count joined
+`job_comp` on `url` for pay filters it rarely had, and counted through the
+256 MB url index instead of the 23 MB company index: 0.72-0.83 s against
+0.23 s warm on 1.48M rows (production, 2026-11-01). Add the join when a
+filter names the table (`column_filters.reads_pay`).
+
 **Measure a large statement with JIT on and off.** Above `jit_above_cost`
 PostgreSQL compiles the whole plan. For the verify candidate query that cost
 more than the query itself: 78 s with JIT, 24 s without, most of the
@@ -340,6 +348,16 @@ type-checked, however green the check is. `src/tasks` was outside it until
 2026-10-04 and had seven errors that nobody saw. `pythonVersion` is the
 interpreter the image runs (`deploy/Dockerfile`), because typeshed's stubs
 differ between versions.
+
+`tests` is in the list too, so a test that imports a name that no longer
+exists fails `make check` instead of failing collection in every CI lane at
+once. Its execution environment turns off six rules that `src` keeps:
+`reportArgumentType` and the five `reportOptional*` rules. Measured
+2026-11-01, they were 929 of the 972 errors in `tests`. A test reads
+`db.query_one(...)["n"]` and passes `enqueue()`'s `int | None` straight on,
+and a None there fails the test at once. The other 43 were fixed. Missing
+imports and unknown import symbols stay errors in `tests`. Turn a rule back on
+by fixing what it reports, not by widening the list.
 
 Fix a type error with the true type or real `None` handling. A
 `# type: ignore` is acceptable only when the checker is wrong, and it says why.

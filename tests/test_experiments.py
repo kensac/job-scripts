@@ -41,7 +41,8 @@ def test_experiment_steps_are_typed_immutable_and_own_purpose_behavior():
     )
     assert all(isinstance(step, exp.ExperimentStep) for step in declared.values())
     with pytest.raises(FrozenInstanceError):
-        declared["comp"].max_output_tokens = 1
+        # The write is the behaviour under test: a frozen step refuses it.
+        declared["comp"].max_output_tokens = 1  # pyright: ignore[reportAttributeAccessIssue]
     assert exp.deployed_verdicts("not-a-step", [], {}) == {}
 
 

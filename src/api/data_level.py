@@ -19,8 +19,8 @@ from api import db
 LEVEL = 1
 
 # A worker beats every 60 seconds (api.worker.HEARTBEAT_SECONDS) and the
-# fleet screen calls it dead after 90; five minutes waits out a slow beat
-# without counting a stopped host as running.
+# fleet screen calls it dead after two minutes (health.WORKER_FRESH); five
+# minutes waits out a slow beat without counting a stopped host as running.
 LIVE = "5 minutes"
 
 

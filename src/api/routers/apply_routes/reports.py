@@ -76,7 +76,7 @@ def list_fills(limit: int = 50, user: AuthedUser = Depends(require_user)) -> Fil
     return FillList(
         fills=db.query_as(
             Fill,
-            "SELECT f.id, f.job_id, f.url, f.host, f.created_at, f.submitted_at, "
+            "SELECT f.id, f.job_id, f.url, f.host, f.created_at, f.submitted_at, f.superseded_by, "
             "j.company, j.title, jsonb_array_length(f.fields) AS fields "
             "FROM application_fills f LEFT JOIN jobs j ON j.id = f.job_id "
             "WHERE f.user_id = %s ORDER BY f.created_at DESC LIMIT %s",
@@ -95,7 +95,7 @@ def report(user: AuthedUser = Depends(require_user)) -> ApplyReport:
         """
         SELECT f.host, e.value->>'label' AS label, e.value->>'kind' AS kind,
                COALESCE(e.value->>'rung', '') AS rung,
-               COALESCE((e.value->>'changed')::boolean, false) AS changed
+               (e.value->>'changed')::boolean AS changed
         FROM application_fills f, jsonb_array_elements(f.fields) e
         WHERE f.user_id = %s AND f.submitted_at IS NOT NULL
         """,
@@ -112,8 +112,10 @@ def report(user: AuthedUser = Depends(require_user)) -> ApplyReport:
             blank[norm] = blank.get(norm, 0) + 1
         elif r["changed"]:
             corrected[norm] = corrected.get(norm, 0) + 1
-        else:
+        elif r["changed"] is False:
             unchanged += 1
+        # changed is NULL on a field whose final the submit never read
+        # (api.apply.submissions): neither corrected nor unchanged.
 
     def top(counts: dict[str, int]) -> list[LabelCount]:
         ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:25]

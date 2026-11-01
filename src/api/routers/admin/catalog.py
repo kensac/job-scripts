@@ -17,6 +17,7 @@ from api.locations import LocationExtract, Place, store
 from api.problem import refuse
 from api.reports import ReportKind, report_kinds
 from api.routers.admin.shared import require_admin
+from api.updates import NonNullUpdate
 from core import catalog, verdict_reads
 
 router = APIRouter()
@@ -276,11 +277,11 @@ def resolve_report(
 
 
 class JobCorrection(BaseModel):
-    company: str | None = None
-    title: str | None = None
-    locations: list[str] | None = None
-    terms: list[str] | None = None
-    active: bool | None = None
+    company: NonNullUpdate[str] = None
+    title: NonNullUpdate[str] = None
+    locations: NonNullUpdate[list[str]] = None
+    terms: NonNullUpdate[list[str]] = None
+    active: NonNullUpdate[bool] = None
 
 
 class CorrectedJob(BaseModel):

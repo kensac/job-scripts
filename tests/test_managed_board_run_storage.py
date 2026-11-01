@@ -146,8 +146,8 @@ def test_latest_and_active_check_answer_from_the_board_index(f):
     second = run("run_managed_board_batch", 1, 3, "failed")
     run("run_filter_chunk", 1, 4, "done")
 
-    run = runs.latest(1)
-    assert run is not None and run.id == second and run.snapshot_revision == 3
+    latest = runs.latest(1)
+    assert latest is not None and latest.id == second and latest.snapshot_revision == 3
     assert runs.latest(2).id == other and first < second
     assert runs.latest(3) is None
 
