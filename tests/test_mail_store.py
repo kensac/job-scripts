@@ -77,6 +77,21 @@ def test_a_richer_copy_fills_a_gap(f):
     assert row["body_text"] == "Now we have the text."
 
 
+def test_a_reimport_fills_a_missing_sender_name_and_keeps_a_stored_one(f):
+    """.olm rows were stored with no sender name. Re-importing fills it,
+    and never replaces a name another copy already stored."""
+    uid = f.make_user()
+    mail_store.store_messages(uid, [_msg(source="olm", from_name=None)])
+    mail_store.store_messages(uid, [_msg(source="olm", from_name="Greenhouse")])
+    row = _row(uid)
+    assert row is not None and row["from_name"] == "Greenhouse"
+
+    mail_store.store_messages(uid, [_msg(source="takeout", from_name="Other Name")])
+    mail_store.store_messages(uid, [_msg(source="takeout", from_name=None)])
+    row = _row(uid)
+    assert row is not None and row["from_name"] == "Greenhouse"
+
+
 def test_two_users_may_hold_the_same_message(f):
     """Dedupe is per user. The same ATS mail reaching two accounts is two
     people's evidence, not a duplicate."""

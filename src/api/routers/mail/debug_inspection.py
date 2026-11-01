@@ -107,7 +107,7 @@ def _mail_filters(
         # branch inside the same OR as the named methods.
         parts = []
         if NEVER_ATTEMPTED in methods:
-            parts.append("mt.match_id IS NULL")
+            parts.append("mt.id IS NULL")
         named = [x for x in methods if x != NEVER_ATTEMPTED]
         if named:
             parts.append("mt.method = ANY(%(method)s)")
@@ -125,18 +125,13 @@ def _mail_filters(
     return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
 
-# Latest row per message for both, because both logs are append-only and only
-# the newest verdict counts. Spelled once here so the list and the detail view
-# cannot disagree about what "current" means.
+# The current row of each log, through the pointers its writer keeps on the
+# message (api.mail.current). The newest-row lateral this replaced cost
+# 290-475 ms for a filtered count on production against 70-170 ms through the
+# pointers (EXPLAIN ANALYZE, warm, 2026-10-31, 69k messages).
 _CURRENT_VERDICTS = """
-    LEFT JOIN LATERAL (
-        SELECT kind, confidence, deadline_at, deadline_inferred, detail, model, id
-        FROM email_events WHERE message_id = m.id ORDER BY id DESC LIMIT 1
-    ) ev ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT application_id, method, confidence AS match_confidence, rationale, id AS match_id
-        FROM application_matches WHERE message_id = m.id ORDER BY id DESC LIMIT 1
-    ) mt ON TRUE
+    LEFT JOIN email_events ev ON ev.id = m.current_event_id
+    LEFT JOIN application_matches mt ON mt.id = m.current_match_id
 """
 
 
@@ -180,7 +175,7 @@ def list_mail(
         SELECT m.id, m.provider_message_id, m.source, m.from_email, m.subject, m.sent_at,
                m.prefilter_hit, m.prefilter_reason,
                ev.kind, ev.confidence, ev.deadline_at, ev.deadline_inferred, ev.model,
-               mt.application_id, mt.method, mt.match_confidence, mt.rationale,
+               mt.application_id, mt.method, mt.confidence AS match_confidence, mt.rationale,
                a.company_name, a.title
         FROM email_messages m
         {_CURRENT_VERDICTS}

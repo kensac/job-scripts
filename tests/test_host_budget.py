@@ -130,6 +130,28 @@ async def test_a_deferred_pull_goes_back_to_pending_without_an_attempt(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_a_deferral_does_not_requeue_the_run_that_took_the_claim(monkeypatch):
+    """A worker can re-claim its own reaped task under the same name; the
+    attempt count is what tells the two runs apart."""
+    opens = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
+
+    async def reclaimed_then_deferred(task_id, payload):
+        db.execute("UPDATE tasks SET attempts = attempts + 1 WHERE id = %s", (task_id,))
+        raise Deferred(opens)
+
+    monkeypatch.setitem(worker.HANDLERS, "ingest_source", reclaimed_then_deferred)
+    task_id = db.query_one(
+        "INSERT INTO tasks (kind, payload, status) VALUES ('ingest_source', %s, 'pending') "
+        "RETURNING id",
+        (db.jsonb({"source": "x"}),),
+    )["id"]
+    assert await worker.run_once() is True
+    row = db.query_one("SELECT status, attempts, worker FROM tasks WHERE id = %s", (task_id,))
+    assert row["status"] == "running" and row["attempts"] == 2
+    assert row["worker"] == worker.WORKER_NAME
+
+
+@pytest.mark.asyncio
 async def test_a_429_from_the_board_defers_the_pull_and_teaches_the_budget(monkeypatch, f):
     f.make_source("wb")
     db.execute(

@@ -12,9 +12,6 @@ from fastapi import APIRouter, Depends, Query
 
 from api.auth import AuthedUser, require_user
 from api.problem import refuse
-from api.resolve.choice_policy import by_company as by_company
-from api.resolve.choice_policy import choices_for_message as choices_for_message
-from api.resolve.choice_policy import thread_size as thread_size
 from api.resolve.commands import resolve as resolve_command
 from api.resolve.contracts import (
     ITEM_KINDS,
@@ -24,8 +21,6 @@ from api.resolve.contracts import (
     ResolveResult,
     ReviewRates,
 )
-from api.resolve.contracts import PICKER_APPLICATIONS as PICKER_APPLICATIONS
-from api.resolve.contracts import ResolveChoice as ResolveChoice
 from api.resolve.history import history_for
 from api.resolve.queue import queue_for
 from api.resolve.review_rates import review_rates_for

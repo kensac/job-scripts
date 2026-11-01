@@ -138,7 +138,7 @@ condition, and a new account's first pass judges the whole open catalog
 once per enabled filter (23,000 postings and 10 dollars for one account on
 2026-09-08), so the rule is a cost rule as much as a product one. When the
 shared weekly budget is spent, every refusal says so in numbers (spent of
-cap, resets weekly) and names the way past it: the person's own key,
+cap, counted over the last seven days) and names the way past it: the person's own key,
 under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
@@ -539,10 +539,10 @@ refinement from overwriting a newer edit.
 ## Filter route ownership
 
 `api.routers.filters` assembles the person's filter CRUD routes, run controls,
-shared presets and prompt assistance in that order. `filter_crud` owns the
-person-scoped filter rows and writes. `filter_run_routes` owns manual run
-permission, budget admission and in-flight task lookup. `filter_presets` owns
-current coverage and adoption. A preset is adopted through the same filter
-write rules as a hand-written filter. Keep permission to start a run separate
-from admission right now, so a person who cannot start one can still see a run
-already in flight. Keep every filter read and write scoped to the caller's id.
+shared presets and prompt assistance in that order, from
+`api.routers.filtering`. `saved_filters` owns the person-scoped filter rows
+and writes. `run_controls` owns manual run permission, budget admission and
+in-flight task lookup. `presets` owns current coverage and adoption. A preset
+is adopted through the same filter write rules as a hand-written filter. Keep
+permission to start a run separate from admission right now, so a person who
+cannot start one can still see a run already in flight. Keep every filter read and write scoped to the caller's id.
