@@ -281,6 +281,12 @@ itemizes unreachable sources only; `by_reach` totals all three buckets. The lega
 batch IDs and recorded batch flags do not establish historical transport, and
 superseded verdicts do not establish wasted spend.
 
+`/admin/spend/balance` carries each provider's reported spend and its money
+left. **Show every headroom as derived, with its derivation in words, beside
+the figure.** Neither provider reports a balance, so a figure shown without the
+label reads as the provider's own. A provider whose `status` is not available,
+or a headroom with `unavailable` set, shows unknown and no number.
+
 ## Extension configuration
 
 `GET /v1/extension/config?schema_version=1&adapter=<reader.host>` is public,

@@ -26183,6 +26183,137 @@
         }
       }
     },
+    "/v1/admin/spend/balance": {
+      "get": {
+        "summary": "Provider Balances",
+        "description": "Each provider's reported spend and its derived money left.\n\nThe provider reads are served stale like /admin/spend/provider, keyed on\nthe UTC day and the read window; an unreadable read is answered and never\ncached. The derivation reads the admin's settings on every request, so a\nchanged grant or threshold shows at once.",
+        "operationId": "provider_balances_v1_admin_spend_balance_get",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderBalances"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/mail": {
       "get": {
         "summary": "List Mail",
@@ -44213,7 +44344,7 @@
               "type": "string"
             },
             "type": "array",
-            "maxItems": 5000,
+            "maxItems": 20000,
             "title": "Sources"
           }
         },
@@ -44294,7 +44425,7 @@
             ]
           },
           "sources": {
-            "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____"
+            "$ref": "#/components/schemas/NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_20000_____"
           },
           "published": {
             "$ref": "#/components/schemas/NonNullUpdate_bool_"
@@ -45505,12 +45636,12 @@
         "maximum": 168.0,
         "minimum": 1.0
       },
-      "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_5000_____": {
+      "NonNullUpdate_Annotated_list_str___FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_20000_____": {
         "items": {
           "type": "string"
         },
         "type": "array",
-        "maxItems": 5000
+        "maxItems": 20000
       },
       "NonNullUpdate_Annotated_str__FieldInfo_annotation_NoneType__required_True__metadata__MaxLen_max_length_1000_____": {
         "type": "string",
@@ -48211,6 +48342,102 @@
         "title": "ProposalAnswered",
         "description": "What answering actually wrote.\n\n`board_status` is present only when a row moved. It used to carry the\nproposed status whenever the answer was `accepted`, including for the\napplications with no board row where the UPDATE matched nothing, so the\ncaller was told a status had moved that no SELECT could find."
       },
+      "ProviderBalance": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "fetched_at": {
+            "type": "string",
+            "title": "Fetched At"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headrooms": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHeadroom"
+            },
+            "type": "array",
+            "title": "Headrooms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "status",
+          "reason",
+          "scope",
+          "fetched_at",
+          "spend",
+          "limit",
+          "headrooms"
+        ],
+        "title": "ProviderBalance"
+      },
+      "ProviderBalances": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderBalance"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "alert_usd": {
+            "type": "integer",
+            "title": "Alert Usd"
+          },
+          "alert_days": {
+            "type": "integer",
+            "title": "Alert Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers",
+          "alert_usd",
+          "alert_days"
+        ],
+        "title": "ProviderBalances"
+      },
       "ProviderBatch": {
         "properties": {
           "id": {
@@ -48653,6 +48880,303 @@
           "skipped"
         ],
         "title": "ProviderExhaustion"
+      },
+      "ProviderHeadroom": {
+        "properties": {
+          "basis": {
+            "type": "string",
+            "title": "Basis"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "derivation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivation"
+          },
+          "amount_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Usd"
+          },
+          "spent_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spent Usd"
+          },
+          "granted_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted Usd"
+          },
+          "granted_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Granted On"
+          },
+          "limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Usd"
+          },
+          "runway_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runway Days"
+          },
+          "ends_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On"
+          },
+          "unavailable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable"
+          },
+          "alert": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert"
+          }
+        },
+        "type": "object",
+        "required": [
+          "basis",
+          "amount_usd",
+          "unavailable",
+          "alert"
+        ],
+        "title": "ProviderHeadroom",
+        "description": "Money left on one basis. Always derived, never provider-reported:\n`derivation` names how, and `unavailable` says why a basis that applies\nhas no figure."
+      },
+      "ProviderLimit": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "threshold_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold Usd"
+          },
+          "interval": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval"
+          },
+          "enforcement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enforcement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "reason",
+          "threshold_usd",
+          "interval",
+          "enforcement"
+        ],
+        "title": "ProviderLimit",
+        "description": "OpenAI's hard spend limit, as the provider reports it."
+      },
+      "ProviderSpend": {
+        "properties": {
+          "yesterday_usd": {
+            "type": "number",
+            "title": "Yesterday Usd"
+          },
+          "last_7_days_usd": {
+            "type": "number",
+            "title": "Last 7 Days Usd"
+          },
+          "last_30_days_usd": {
+            "type": "number",
+            "title": "Last 30 Days Usd"
+          },
+          "month_to_date_usd": {
+            "type": "number",
+            "title": "Month To Date Usd"
+          },
+          "daily_rate_usd": {
+            "type": "number",
+            "title": "Daily Rate Usd"
+          },
+          "item_basis": {
+            "type": "string",
+            "title": "Item Basis"
+          },
+          "by_item": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSpendItem"
+            },
+            "type": "array",
+            "title": "By Item"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSpendDay"
+            },
+            "type": "array",
+            "title": "Daily"
+          }
+        },
+        "type": "object",
+        "required": [
+          "yesterday_usd",
+          "last_7_days_usd",
+          "last_30_days_usd",
+          "month_to_date_usd",
+          "daily_rate_usd",
+          "item_basis",
+          "by_item",
+          "daily"
+        ],
+        "title": "ProviderSpend",
+        "description": "Provider-reported spend over completed UTC days."
+      },
+      "ProviderSpendDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "total_usd": {
+            "type": "number",
+            "title": "Total Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "total_usd"
+        ],
+        "title": "ProviderSpendDay"
+      },
+      "ProviderSpendItem": {
+        "properties": {
+          "item": {
+            "type": "string",
+            "title": "Item"
+          },
+          "amount_usd": {
+            "type": "number",
+            "title": "Amount Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item",
+          "amount_usd"
+        ],
+        "title": "ProviderSpendItem"
       },
       "PublicCompensation": {
         "properties": {
@@ -56161,7 +56685,8 @@
               "internship_v1",
               "new_grad_v1",
               "aero_major_v1",
-              "finance_new_grad_v1"
+              "finance_new_grad_v1",
+              "finance_new_grad_v2"
             ],
             "title": "Recipe"
           },

@@ -35,7 +35,9 @@ on `title_screens`). conftest clears every cache before each test.
 
 The provider's bill (/admin/spend/provider) is not a scan but an outside API
 read of 1.2 to 1.5 s, the slowest panel on the spend page, so it reads through
-the same cache keyed on window and UTC day. A read the provider did not answer
+the same cache keyed on window and UTC day. /admin/spend/balance caches each
+provider's raw read the same way, keyed on provider, grant day and UTC day, and
+derives from the current settings on every request. A read the provider did not answer
 in full is returned and not cached: raise from the compute so the next visit
 asks again rather than serving the failure for the cache window.
 

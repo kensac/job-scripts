@@ -2,11 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import datetime
+from typing import Annotated, Literal
 
-from pydantic import Field, PositiveInt
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt
 
 from api.config_types import ConfigKey
+
+
+def _iso_day(value: str) -> str:
+    # Kept as text: the registry validates strictly, which refuses a date
+    # parsed from a string.
+    datetime.date.fromisoformat(value)
+    return value
+
+
+class PrepaidCredit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    amount_usd: Annotated[float, Field(gt=0)]
+    granted_on: Annotated[str, AfterValidator(_iso_day)]
+    expires_on: Annotated[str, AfterValidator(_iso_day)] | None = None
+
 
 CONFIG_KEYS: dict[str, ConfigKey] = {
     # An idle worker beside pending work for this long is a stall: a claim
@@ -75,6 +92,41 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="Minutes a worker may run a different release from the api before it counts as a "
         "host that did not deploy.",
+    ),
+    # Neither provider reports a remaining prepaid balance, so a balance is
+    # only ever derived from a grant an admin enters here, minus what the
+    # provider reports spent since. Empty means no balance is claimed.
+    "provider_prepaid_credits": ConfigKey(
+        section="Health",
+        default={},
+        value_type=dict[Literal["openai", "anthropic"], PrepaidCredit],
+        kind="json",
+        help="Prepaid credit per provider, as the provider's billing page states it, because "
+        'neither provider\'s API reports a balance: {"anthropic": {"amount_usd": 200, '
+        '"granted_on": "2026-10-30", "expires_on": "2026-11-17"}}. The AI spend page shows '
+        "amount minus provider-reported spend on completed UTC days from granted_on, labelled "
+        "as derived. expires_on is optional.",
+    ),
+    # A provider whose remaining money (a derived prepaid balance, or headroom
+    # under OpenAI's hard spend limit) falls to this many dollars is alerted.
+    # 0 alerts only once it is exhausted.
+    "provider_balance_alert_usd": ConfigKey(
+        section="Health",
+        default=5,
+        value_type=NonNegativeInt,
+        help="Alert when a provider's remaining prepaid balance or spend-limit headroom is at or "
+        "under this many dollars.",
+    ),
+    # Seven days of warning: on 2026-10-31 OpenAI's hard limit stopped all
+    # filtering for four hours with none. A week leaves a weekly look at the
+    # admin pages time to act before the money runs out.
+    "provider_runway_alert_days": ConfigKey(
+        section="Health",
+        default=7,
+        value_type=PositiveInt,
+        help="Alert when a provider's remaining balance or spend-limit headroom lasts fewer than "
+        "this many days at the last seven completed days' spend rate, or prepaid credit expires "
+        "sooner.",
     ),
     "health_warning_digest_hour_utc": ConfigKey(
         section="Health",

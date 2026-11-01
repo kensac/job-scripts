@@ -366,6 +366,40 @@ unavailable costs, never a zero bill. Provider data can arrive late or change;
 do not overwrite historical usage estimates or allocate organization costs to
 users without attribution evidence.
 
+## Provider balances
+
+`GET /admin/spend/balance` reports, for OpenAI and Anthropic, the spend each
+provider reports for completed UTC days (yesterday, last 7 and 30 days, month
+to date, by model) and the money left. Anthropic is read from the legacy
+`/v1/organizations/cost_report` with `ANTHROPIC_ADMIN_KEY`, because its
+successor is a beta whose data lags up to a day. Both admin keys live only in
+the environment of the api and of every worker that may run the health task.
+
+**Money left is never provider-reported, because neither provider reports a
+prepaid balance or a credit's expiry (checked 2026-11-01). It is derived, and
+every derived figure says so in its `derivation` and its label.** Two bases:
+
+- `prepaid`: an admin-entered grant in `provider_prepaid_credits` minus the
+  provider-reported spend from its `granted_on` day. The expiry is the admin's
+  too. Do not substitute ledger estimates for the provider's spend.
+- `spend_limit`: OpenAI's `GET /v1/organization/spend_limit` threshold minus
+  provider-reported spend this UTC month. Not derived when costs are
+  project-scoped, because the limit is the organization's.
+
+A basis that applies but cannot be derived carries `unavailable` and no
+amount, never 0. Today's partial day is in no figure.
+
+`_detect_openai_money` and `_detect_anthropic_money` open
+`<provider>_balance_low` when a headroom is at or under
+`provider_balance_alert_usd`, lasts fewer than `provider_runway_alert_days` at
+the last seven completed days' rate, or a grant expires sooner. A spend-limit
+headroom that outlasts the month's reset is not an alert. Under a day of runway
+is critical, because a warning waits for the daily digest. A configured
+provider whose read fails raises, so its open alerts stay open; one section
+per provider, so one unreadable provider never hides the other. The route
+caches provider reads like `/admin/spend/provider` and never caches a failed
+read; the detector reads fresh.
+
 ## Person pipeline route ownership
 
 `api.routers.mail.pipeline` registers the person's pipeline views before the

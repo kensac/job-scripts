@@ -1,7 +1,7 @@
 """Data-health detectors, their shared vocabulary, and alert recording.
 
-`detect` runs the source, board, queue, fleet, silent-task, and mail detectors
-separately. A failure in one detector becomes its own finding and does not
+`detect` runs the source, board, queue, fleet, silent-task, mail, and provider
+money detectors separately. A failure in one detector becomes its own finding and does not
 stop the others. This package re-exports the health API used by callers.
 """
 
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from api import db, telemetry
+from api.health.billing import detect_provider_money
 from api.health.boards import _detect_boards
 from api.health.evidence import (
     WORKER_FRESH as WORKER_FRESH,
@@ -115,6 +116,8 @@ _OWNERS = {
     "address_blocked_by_host": "_detect_silent",
     "alerts_unnotified": "_detect_silent",
     "mail_pointer_stale": "_detect_mail",
+    "openai_balance_low": "_detect_openai_money",
+    "anthropic_balance_low": "_detect_anthropic_money",
 }
 
 
@@ -145,6 +148,10 @@ def detect() -> DetectionRun:
         ("_detect_fleet", _detect_fleet),
         ("_detect_silent", _detect_silent),
         ("_detect_mail", _detect_mail),
+        # One section per provider, so one provider's unreadable billing
+        # never hides the other's money running out.
+        ("_detect_openai_money", lambda: detect_provider_money("openai")),
+        ("_detect_anthropic_money", lambda: detect_provider_money("anthropic")),
     )
     for name, section in sections:
         try:
