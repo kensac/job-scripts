@@ -4,10 +4,7 @@ from api import db
 from core import catalog
 from core.store import add_ai_result
 from tasks import board as tasks_board
-
-
-def _user_id() -> int:
-    return db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+from tests.factories import user_id_for_subject
 
 
 def _make_passing_job(user_id: int, url: str, source: str = "internships") -> int:
@@ -54,7 +51,7 @@ def _picked(user_id: int, job_id: int) -> None:
 
 
 def test_materialize_passing_writes_the_working_set_and_no_person_row(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://jobs.example.com/board-1")
 
     assert tasks_board.materialize_passing(user_id) == 1
@@ -63,7 +60,7 @@ def test_materialize_passing_writes_the_working_set_and_no_person_row(user_heade
 
 
 def test_materialize_passing_rejoins_a_removed_pair_and_reruns_idempotently(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://jobs.example.com/rejoin")
 
     assert tasks_board.materialize_passing(user_id) == 1
@@ -76,7 +73,7 @@ def test_materialize_passing_rejoins_a_removed_pair_and_reruns_idempotently(user
 
 
 def test_materialize_passing_adds_scope_without_changing_existing_person_state(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://jobs.example.com/person-state-first")
     db.execute(
         """
@@ -101,7 +98,7 @@ def test_materialize_passing_adds_scope_without_changing_existing_person_state(u
 
 
 def test_demote_closed_removes_untouched_row_when_closed_now_rejected(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     url = "https://jobs.example.com/board-3"
     job_id = _make_passing_job(user_id, url)
     _picked(user_id, job_id)
@@ -114,7 +111,7 @@ def test_demote_closed_removes_untouched_row_when_closed_now_rejected(user_heade
 
 
 def test_demote_closed_removes_scope_but_leaves_explicit_noop_person_state(client, user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     url = "https://jobs.example.com/board-4"
     job_id = _make_passing_job(user_id, url)
     tasks_board.materialize_passing(user_id)
@@ -130,7 +127,7 @@ def test_demote_closed_removes_scope_but_leaves_explicit_noop_person_state(clien
 
 
 def test_demote_closed_removes_and_counts_a_working_set_only_pair(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     url = "https://jobs.example.com/board-working-only"
     job_id = _make_passing_job(user_id, url)
     db.execute(
@@ -145,7 +142,7 @@ def test_demote_closed_removes_and_counts_a_working_set_only_pair(user_headers):
 
 
 def test_demote_closed_removes_both_relations_when_no_longer_available(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://jobs.example.com/board-inactive")
     _picked(user_id, job_id)
     db.execute("UPDATE jobs SET available = false WHERE id = %s", (job_id,))
@@ -156,7 +153,7 @@ def test_demote_closed_removes_both_relations_when_no_longer_available(user_head
 
 
 def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     url = "https://jobs.example.com/board-5"
     job_id = _make_passing_job(user_id, url)
     _picked(user_id, job_id)
@@ -166,7 +163,7 @@ def test_demote_closed_leaves_untouched_row_when_still_open(user_headers):
 
 
 def test_demote_closed_retry_is_idempotent(user_headers):
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     url = "https://jobs.example.com/board-demote-retry"
     job_id = _make_passing_job(user_id, url)
     _picked(user_id, job_id)
@@ -197,7 +194,7 @@ def test_the_working_set_is_scope_and_not_what_a_person_sees(user_headers):
     """
     from api.board import visibility
 
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://scope.test/1")
 
     # Visible with no board row at all: the structural branch decides.
@@ -223,7 +220,7 @@ def test_a_board_row_is_what_keeps_a_posting_worth_checking(user_headers):
     subscribes to stays AI-eligible while somebody keeps it."""
     from core.store import AI_ELIGIBLE_JOB
 
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     job_id = _make_passing_job(user_id, "https://scope.test/2", source="unsubscribed-src")
     db.execute(
         "DELETE FROM user_sources WHERE user_id = %s AND source = 'unsubscribed-src'", (user_id,)
@@ -246,7 +243,7 @@ def test_a_board_row_is_what_keeps_a_posting_worth_checking(user_headers):
 def test_demote_closed_reads_availability_not_the_feed_flag(user_headers, f):
     """A pair goes when its posting is no longer available
     (catalog.IS_AVAILABLE), not when the last feed to upsert it said inactive."""
-    user_id = _user_id()
+    user_id = user_id_for_subject("test-user")
     f.make_source("still-lists-it")
     listed = _make_passing_job(user_id, "https://jobs.example.com/board-still-listed")
     _picked(user_id, listed)

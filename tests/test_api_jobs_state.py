@@ -4,11 +4,12 @@ import datetime
 
 from api import db
 from api.mail import applications
-from tests.job_board_support import _insert_job, _pass_closed, _subscribe, _uid
+from tests.factories import user_id_for_subject
+from tests.job_board_support import _insert_job, _pass_closed, _subscribe
 
 
 def test_delete_user_job_removes_only_user_jobs_row(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-i", "https://x.test/i1")
     client.patch(f"/v1/user/jobs/{jid}", json={"notes": "x"}, headers=user_headers)
     assert db.query_one("SELECT 1 FROM user_jobs WHERE user_id = %s AND job_id = %s", (uid, jid))
@@ -35,7 +36,7 @@ def _has_application(uid: int, jid: int) -> bool:
 
 
 def test_patch_status_autofills_date_applied(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af1")
     resp = client.patch(
         f"/v1/user/jobs/{jid}", json={"status": "Application Submitted"}, headers=user_headers
@@ -50,7 +51,7 @@ def test_patch_status_autofills_date_applied(client, user_headers):
 
 def test_patch_withdrawn_status_gets_no_applied_day(client, user_headers):
     """A posting the person decided against was never applied to."""
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af5")
     resp = client.patch(
         f"/v1/user/jobs/{jid}", json={"status": "No Longer Interested"}, headers=user_headers
@@ -61,7 +62,7 @@ def test_patch_withdrawn_status_gets_no_applied_day(client, user_headers):
 
 
 def test_patch_explicit_date_applied_wins_over_autofill(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af2")
     resp = client.patch(
         f"/v1/user/jobs/{jid}",
@@ -75,7 +76,7 @@ def test_patch_explicit_date_applied_wins_over_autofill(client, user_headers):
 
 
 def test_patch_status_change_does_not_overwrite_existing_date_applied(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af3")
     client.patch(
         f"/v1/user/jobs/{jid}",
@@ -88,7 +89,7 @@ def test_patch_status_change_does_not_overwrite_existing_date_applied(client, us
 
 
 def test_patch_date_edits_and_clears_the_application_day(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af6")
     client.patch(
         f"/v1/user/jobs/{jid}", json={"status": "Application Submitted"}, headers=user_headers
@@ -102,7 +103,7 @@ def test_patch_date_edits_and_clears_the_application_day(client, user_headers):
 
 
 def test_patch_notes_only_does_not_autofill_date_applied(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-af", "https://x.test/af4")
     resp = client.patch(f"/v1/user/jobs/{jid}", json={"notes": "check later"}, headers=user_headers)
     assert resp.json()["autofilled"] == {}
@@ -110,7 +111,7 @@ def test_patch_notes_only_does_not_autofill_date_applied(client, user_headers):
 
 
 def test_status_changes_append_history(client, user_headers):
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     jid = _insert_job("src-h", "https://x.test/h1")
     client.patch(f"/v1/user/jobs/{jid}", json={"status": "Applied"}, headers=user_headers)
     client.patch(f"/v1/user/jobs/{jid}", json={"status": "Interview"}, headers=user_headers)
@@ -133,7 +134,7 @@ def test_a_bulk_patch_publishes_one_event_not_one_per_row(client, user_headers, 
 
     published: list[dict] = []
     monkeypatch.setattr(events, "_publish", lambda channel, data: published.append(data))
-    uid = _uid(user_headers)
+    uid = user_id_for_subject("test-user")
     ids = [_insert_job("src-bulk", f"https://x.test/bulk{i}") for i in range(3)]
     _subscribe(uid, "src-bulk")
     for i in range(3):

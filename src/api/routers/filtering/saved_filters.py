@@ -18,14 +18,14 @@ from core.filters import ON_AMBIGUOUS_VALUES, compute_filter_hash
 
 router = APIRouter()
 
-_FILTER_COLS = (
+FILTER_COLS = (
     "id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash, preset_id, "
     "created_at, updated_at"
 )
 
 
 class Filter(BaseModel):
-    """`_FILTER_COLS`, in types. `preset_id` names the preset it was adopted
+    """`FILTER_COLS`, in types. `preset_id` names the preset it was adopted
     from and is null for one written by hand; `prompt_hash` is what a verdict
     is keyed by, which is why two people on the same preset share verdicts."""
 
@@ -83,7 +83,7 @@ def _validate_ambiguous(value: str) -> str:
     return value
 
 
-def _refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
+def refuse_second_enabled(user_id: int, except_id: int | None = None) -> None:
     """One enabled filter per person (Kanishk, 2026-09-08): a new account's
     three filters judged the whole catalog three times over, and one prompt
     can hold every condition. Enabling a second is refused with the name of
@@ -110,7 +110,7 @@ def list_filters(user: AuthedUser = Depends(require_user)) -> FilterList:
     in-flight run-all, so a button is disabled from server state."""
     rows = db.query_as(
         Filter,
-        f"SELECT {_FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
+        f"SELECT {FILTER_COLS} FROM user_filters WHERE user_id = %s ORDER BY id",
         (user.id,),
     )
     access_failure = budget.access_failure(user)
@@ -135,7 +135,7 @@ def list_filters(user: AuthedUser = Depends(require_user)) -> FilterList:
     )
 
 
-def _after_filter_change(user: AuthedUser, row: Filter, previous: Filter | None) -> SavedFilter:
+def after_filter_change(user: AuthedUser, row: Filter, previous: Filter | None) -> SavedFilter:
     needs_judgement = row.enabled and (
         previous is None or not previous.enabled or row.prompt_hash != previous.prompt_hash
     )
@@ -160,13 +160,13 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)) 
         ):
             raise refuse(409, "DUPLICATE_NAME", "filter name already exists")
         if body.enabled:
-            _refuse_second_enabled(user.id)
+            refuse_second_enabled(user.id)
         row = db.query_one_as(
             Filter,
             f"""
             INSERT INTO user_filters (user_id, name, prompt, on_ambiguous, fail_closed, enabled, prompt_hash)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING {_FILTER_COLS}
+            RETURNING {FILTER_COLS}
             """,
             (
                 user.id,
@@ -179,7 +179,7 @@ def create_filter(body: FilterCreate, user: AuthedUser = Depends(require_user)) 
             ),
         )
         assert row is not None
-    return _after_filter_change(user, row, None)
+    return after_filter_change(user, row, None)
 
 
 @router.patch("/user/filters/{filter_id}")
@@ -192,7 +192,7 @@ def patch_filter(
         # update returns, and a star and the shape reading it drift in silence.
         existing = db.query_one_as(
             Filter,
-            f"SELECT {_FILTER_COLS} FROM user_filters WHERE id = %s AND user_id = %s",
+            f"SELECT {FILTER_COLS} FROM user_filters WHERE id = %s AND user_id = %s",
             (filter_id, user.id),
         )
         if not existing:
@@ -203,7 +203,7 @@ def patch_filter(
         if "on_ambiguous" in fields:
             _validate_ambiguous(fields["on_ambiguous"])
         if fields.get("enabled") and not existing.enabled:
-            _refuse_second_enabled(user.id, filter_id)
+            refuse_second_enabled(user.id, filter_id)
         prompt = fields.get("prompt", existing.prompt)
         on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
         fields["prompt_hash"] = compute_filter_hash(prompt, on_ambiguous)
@@ -212,7 +212,7 @@ def patch_filter(
             row = db.query_one_as(
                 Filter,
                 f"UPDATE user_filters SET {cols}, updated_at = now() "
-                f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {_FILTER_COLS}",
+                f"WHERE id = %(fid)s AND user_id = %(uid)s RETURNING {FILTER_COLS}",
                 {"fid": filter_id, "uid": user.id, **fields},
             )
         except UniqueViolation as exc:
@@ -220,7 +220,7 @@ def patch_filter(
             # way rather than letting user_filters_user_id_name_key escape as a 500.
             raise refuse(409, "DUPLICATE_NAME", "filter name already exists") from exc
         assert row is not None
-    return _after_filter_change(user, row, existing)
+    return after_filter_change(user, row, existing)
 
 
 @router.delete("/user/filters/{filter_id}")
