@@ -209,3 +209,32 @@ async def test_an_unchanged_page_keeps_its_answer_and_a_changed_one_is_asked_aga
     assert submitted == [[url], [url]], "a changed page is a new question"
     await sweep(force=True)
     assert len(submitted) == 3, "a forced sweep doubts the answers and pays"
+
+
+@pytest.mark.asyncio
+async def test_reverification_submits_with_the_configured_verify_model(f, monkeypatch):
+    """An administrator's model override for verify is the source of truth for
+    both sweeps. Reverify resolved the shape's default and ignored it."""
+    db.execute(
+        "INSERT INTO task_model_overrides (purpose, model, reason) "
+        "VALUES ('verify', 'gpt-6-sol', 'test')"
+    )
+
+    async def fetch(url):
+        return "a long job description " * 40, False
+
+    sent: list[tuple[str, str]] = []
+
+    async def submit(task_id, specs, model, effort, *args, **kwargs):
+        sent.append((model, effort))
+        return []
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(core_ats, "resolve", lambda url: core_ats.UNSUPPORTED)
+    monkeypatch.setattr(fetching, "fetch_page", fetch)
+    monkeypatch.setattr(reverification, "submit_or_collect", submit)
+    _, url = f.make_ready_job(source=f.make_source("override-src"))
+    age_closed_verdict(url, 30)
+    task_id = f.make_task("reverify_chunk", {}, status="running")
+    await tasks_verify._reverify_jobs(task_id, [{"url": url, "company": "C", "title": "T"}])
+    assert [model for model, _ in sent] == ["gpt-6-sol"]

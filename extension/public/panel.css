@@ -30,7 +30,7 @@
 :host {
   all: initial !important;
 
-  /* The host is a manual popover, so it lives in the top layer (content.js
+  /* The host is a manual popover, so it lives in the top layer (ui/panel.js
    * says why). `all: initial` has just thrown the browser's popover styles
    * away with everything else, and those are the ones that would stretch the
    * host over the whole viewport and swallow every click meant for the page.
