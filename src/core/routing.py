@@ -71,7 +71,8 @@ class ModelChangeEffect(StrEnum):
     MIXES = "mixes"
     # The sweep's skip-check is scoped by model, so the next cycle sees no
     # completed work and re-pays for all of it. tasks/filtering/personal_runs.py is the case:
-    # decided_custom_urls(urls, prompt_hash, cfg.model).
+    # decided_custom_urls(urls, prompt_hash, cfg.model), unless the old and
+    # new models are grouped in app_config verdict_model_equivalence.
     RERUNS = "reruns"
 
 

@@ -1,5 +1,5 @@
 from api import apply
-from api.routers.apply import SuggestField
+from api.routers.apply_routes.suggestions import SuggestField
 
 
 def test_large_school_dropdown_preserves_every_choice():

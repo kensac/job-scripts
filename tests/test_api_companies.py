@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from api import db, signals
-from api.routers.companies import OPEN_MIN_CHECKED
+from api.companies.queries import OPEN_MIN_CHECKED
 
 ENDPOINT = "/v1/admin/companies"
 
