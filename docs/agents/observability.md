@@ -1110,7 +1110,7 @@ backfill and the rollout order are in
 
 **Every reader of a task's job list goes through `task_jobs.run_jobs`, which
 reads both shapes:** inline `jobs` (a live filter chunk), and `jobs_ref` with
-`candidate_count`, a verified object. Two populations carry one (`task_jobs.POPULATIONS`):
+`candidate_count`, a verified object. Two populations carry one (`task_jobs.MANAGED_BOARD_RUNS` and `FILTER_CHUNKS`):
 
 - **Managed-board runs.** The candidate list was 7.9 to 8.6 MB of JSON per run
   and 94 percent of the payload (measured 2026-10-03). Its readers are the
