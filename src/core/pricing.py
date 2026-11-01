@@ -28,18 +28,6 @@ def rates_for(model: str | None) -> Rates | None:
     return entry.rates if entry else None
 
 
-def is_tiered(model: str | None) -> bool:
-    """True when this model's rates depend on how long the prompt is.
-
-    Tier selection is per REQUEST, so a tiered model cannot be priced from
-    summed token counts: a thousand 1K-token calls sum to 1M tokens and select
-    a tier no individual call was ever billed at. Callers that aggregate have
-    to ask this and decline rather than return a confident wrong number.
-    """
-    rates = rates_for(model)
-    return rates is not None and len(rates.tiers) > 1
-
-
 def _tier_for(rates: Rates, prompt_tokens: Decimal) -> Tier:
     for tier in rates.tiers:
         if tier.up_to_prompt_tokens is None or prompt_tokens <= tier.up_to_prompt_tokens:
@@ -85,30 +73,6 @@ def is_off_peak(rates: Rates, at: datetime.datetime | None) -> bool:
     )
 
 
-def off_peak_sql(rates: Rates, at: str) -> str:
-    """The same window test as is_off_peak, as a SQL boolean over `at`.
-
-    Rendered from the SAME PeakWindow tuples the Python reads, so a vendor
-    changing its hours moves both renderings at once. The hours and days go in
-    as literals rather than bound parameters, unlike the rates: they are part
-    of the shape of the expression, not numbers a caller supplies, and the
-    number of them varies with the provider.
-
-    FALSE when nothing is declared, matching is_off_peak: no discount claimed
-    means the tier rate stands.
-    """
-    if not rates.peak_windows or rates.off_peak_multiplier is None:
-        return "FALSE"
-    dow = f"EXTRACT(isodow FROM {at} AT TIME ZONE 'UTC')"
-    hour = f"EXTRACT(hour FROM {at} AT TIME ZONE 'UTC')"
-    windows = " OR ".join(
-        f"({dow} IN ({', '.join(str(d) for d in w.isodows)})"
-        f" AND {hour} >= {w.start_hour_utc} AND {hour} < {w.end_hour_utc})"
-        for w in rates.peak_windows
-    )
-    return f"NOT ({windows})"
-
-
 def estimate_cost_usd(
     model: str | None,
     prompt_tokens: int | None,
@@ -127,7 +91,7 @@ def estimate_cost_usd(
 
     One call, not many: the tier is chosen by this request's prompt length, so
     passing summed tokens for a tiered model prices a request that never
-    happened. See is_tiered.
+    happened.
 
     `at` is when the request was made, for the vendors that bill by wall-clock
     time. Omitting it bills the PEAK rate rather than reading the clock here:
@@ -189,8 +153,6 @@ def cost_sql(
     cached: str = "cached_tokens",
     cache_write: str | None = None,
     batched: str,
-    off_peak: str = "FALSE",
-    off_peak_multiplier: str = "1",
 ) -> str:
     """The same formula as estimate_cost_usd, rendered as a SQL expression.
 
@@ -205,10 +167,8 @@ def cost_sql(
     point: there is no longer a universal discount to hardcode on either side.
     A caller whose model has no batch lane binds 1.
 
-    `off_peak` is a SQL boolean - build it with off_peak_sql() rather than by
-    hand, so the window definition has one source. It defaults to FALSE, which
-    is what every provider without wall-clock pricing wants and leaves their
-    callers unchanged.
+    Wall-clock discounts are NOT rendered here either: estimate_cost_usd
+    applies them from `at`, and no bulk caller prices a provider that has them.
 
     Tier selection is NOT rendered here. A tiered model's rate depends on each
     row's own prompt length, so a caller pricing in bulk binds the rates per
@@ -253,6 +213,5 @@ def cost_sql(
         f" + {write_part} * {write_rate}"
         f" + {c} * {model_rate_out}) / {_PER_MTOK})"
         f" * CASE WHEN {batched} THEN {batch_rate} ELSE 1 END"
-        f" * CASE WHEN {off_peak} THEN {off_peak_multiplier} ELSE 1 END"
     )
     return f"{unknown_guard}{expression} END" if unknown_guard else expression
