@@ -45844,6 +45844,9 @@
             },
             "type": "array",
             "title": "Actions"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PipelineSummary"
           }
         },
         "type": "object",
@@ -45852,7 +45855,8 @@
           "total",
           "has_more",
           "filters",
-          "actions"
+          "actions",
+          "summary"
         ],
         "title": "Pipeline"
       },
