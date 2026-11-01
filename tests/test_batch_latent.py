@@ -41,26 +41,6 @@ def _batch(
     )
 
 
-def _completed(kind: str, minutes: float, n: int = 1) -> None:
-    for _ in range(n):
-        db.execute(
-            "INSERT INTO tasks (kind, payload, status, started_at, finished_at) "
-            "VALUES (%s, '{}'::jsonb, 'done', now() - make_interval(secs => %s), now())",
-            (kind, int(minutes * 60)),
-        )
-
-
-def _running(kind: str, minutes: float, worker: str = "oci") -> int:
-    row = db.query_one(
-        "INSERT INTO tasks (kind, payload, status, started_at, last_heartbeat, worker, attempts) "
-        "VALUES (%s, '{}'::jsonb, 'running', now() - make_interval(secs => %s), now(), %s, 1) "
-        "RETURNING id",
-        (kind, int(minutes * 60), worker),
-    )
-    assert row is not None
-    return row["id"]
-
-
 class TestVerifyNewDoesNotOverlapItself:
     """verify_new batches and parks, and its predicate - jobs with no verdict -
     stays true while the batch is in flight. Two sweeps never select at once;

@@ -4,7 +4,7 @@ if not, why, instead of a list that silently shrank."""
 from __future__ import annotations
 
 from api import crypto, db
-from api.routers.users import NEEDS_OWN_KEY, NOT_ON_ALLOWLIST
+from api.routers.users_routes.model_catalog import NEEDS_OWN_KEY, NOT_ON_ALLOWLIST
 
 
 def _by_provider(body: dict) -> dict[str, dict[str, dict]]:

@@ -226,7 +226,6 @@ REQUIREMENTS = Derivation(
     requests=_requests,
     store=_store_result,
     input_chars=REQUIREMENTS_INPUT_CHARS,
-    recipe=None,
     shape=REQUIREMENTS_TASK,
     answer=RequirementsExtract,
     context_keys=("content_hash", "content_row_id"),

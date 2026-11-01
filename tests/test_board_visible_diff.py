@@ -53,10 +53,6 @@ def _board(f, *, n: int = 3) -> tuple[int, list[int]]:
     return uid, jobs
 
 
-def _committed_now() -> object:
-    return db.query_one("SELECT now() AS at")["at"]
-
-
 def test_an_unchanged_recompute_writes_no_rows_and_advances_computed_at(f):
     uid, jobs = _board(f)
     assert visibility.recompute(uid) == 3

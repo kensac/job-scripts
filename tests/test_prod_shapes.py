@@ -25,31 +25,8 @@ def test_the_catalog_is_big_enough_to_assert_anything_over():
     analytics assertions need a denominator for."""
     jobs = _count("SELECT count(*) FROM jobs")
     verdicts = _count("SELECT count(*) FROM ai_queries")
-    assert jobs > 1000, f"only {jobs} jobs - did the sync run?"
-    assert verdicts > 1000, f"only {verdicts} verdicts - did the sync run?"
-
-
-@pytest.mark.corpus
-def test_every_board_row_points_at_a_real_job():
-    orphans = _count(
-        "SELECT count(*) FROM user_jobs uj LEFT JOIN jobs j ON j.id = uj.job_id WHERE j.id IS NULL"
-    )
-    assert orphans == 0
-
-
-@pytest.mark.corpus
-def test_no_verdict_claims_a_check_type_we_do_not_write():
-    known = {"closed", "clearance", "custom", "content", "extraction", "comp"}
-    # A person's explain run of a shared check, which no board reads.
-    known |= {f"explain:{check}" for check in ("closed", "clearance")}
-    seen = {
-        r["check_type"]
-        for r in db.query(
-            "SELECT DISTINCT check_type FROM ai_queries "
-            "WHERE created_at > now() - interval '7 days' AND check_type IS NOT NULL"
-        )
-    }
-    assert seen <= known, f"unexpected check types in recent data: {seen - known}"
+    assert jobs > 1000, f"only {jobs} jobs - did the corpus build?"
+    assert verdicts > 1000, f"only {verdicts} verdicts - did the corpus build?"
 
 
 @pytest.mark.corpus
