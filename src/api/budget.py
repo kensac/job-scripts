@@ -65,8 +65,9 @@ def access_message(reason: AccessReason, ent: Entitlement) -> str:
     cap = ent.weekly_token_budget or 0
     return (
         f"The shared weekly AI budget is used up: {ent.spent_this_week:,} of {cap:,} tokens "
-        "spent this week. It resets weekly. To keep going now, add your own API key under "
-        "AI & keys; your own key has no cap and is billed to you."
+        "counted over the last seven days. Tokens free up as older use passes seven days. "
+        "To keep going now, add your own API key under AI & keys; your own key has no cap "
+        "and is billed to you."
     )
 
 

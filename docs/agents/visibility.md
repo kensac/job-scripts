@@ -138,7 +138,7 @@ condition, and a new account's first pass judges the whole open catalog
 once per enabled filter (23,000 postings and 10 dollars for one account on
 2026-09-08), so the rule is a cost rule as much as a product one. When the
 shared weekly budget is spent, every refusal says so in numbers (spent of
-cap, resets weekly) and names the way past it: the person's own key,
+cap, counted over the last seven days) and names the way past it: the person's own key,
 under AI & keys, which has no cap and is billed to them; the frontend's
 onboarding checklist carries that as its fifth step.
 
