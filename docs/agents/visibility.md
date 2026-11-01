@@ -236,7 +236,7 @@ which the request itself rejected 5 of 5 times on re-asking).
 **A backfill names its postings and passes the screens.** A screened posting
 has no verdict, so its path records nothing. To buy one, name the postings:
 `verify_new` with a `urls` payload verifies them past the reachability gate
-and the per-cycle cap (`new_postings.listed_sql`). A `run_filter_batch_chunk`
+and the per-cycle cap (`tasks.verification.selection.listed_sql`). A `run_filter_batch_chunk`
 built from an explicit job list never meets the filter's title screen. Every
 other condition still applies: available, a verdict missing, not in flight,
 page text present.
