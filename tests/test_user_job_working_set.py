@@ -10,6 +10,7 @@ from alembic.operations import Operations
 
 from api import db
 from api.orm import Base, UserJob, UserJobWorkingSet
+from tests.factories import user_id_for_subject
 
 
 def test_working_set_model_is_a_narrow_idempotent_association():
@@ -75,7 +76,7 @@ def test_automated_materialization_does_not_mark_person_state(f):
 
 
 def test_an_accepted_noop_person_patch_marks_an_existing_legacy_row(client, user_headers, f):
-    user_id = db.query_one("SELECT id FROM users WHERE sub = 'test-user'")["id"]
+    user_id = user_id_for_subject("test-user")
     job_id = f.make_job()
     db.execute("INSERT INTO user_jobs (user_id, job_id) VALUES (%s, %s)", (user_id, job_id))
     assert (

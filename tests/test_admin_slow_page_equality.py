@@ -12,6 +12,7 @@ import json
 
 from api import db, signals
 from api.routers import companies
+from tests.factories import user_id_for_subject
 from tests.job_board_support import _insert_job
 
 _OLD_REPOST_SQL = """
@@ -113,9 +114,7 @@ def test_total_on_the_page_matches_the_separate_count(client, admin_headers):
         body = client.get("/v1/admin/companies", params=params, headers=admin_headers).json()
         cut = {
             "q": f"%{params['q']}%" if "q" in params else None,
-            "user_id": db.query_one(
-                "SELECT id FROM users WHERE sub = %s", (admin_headers["X-User-Sub"],)
-            )["id"],
+            "user_id": user_id_for_subject("test-admin"),
             "applied": False,
             "has_comp": False,
             "repost": params.get("repost") == "true",

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from api import db
 from api.apply.fields import Field_, ResolvedField
 from api.apply.options import pick_option
-from api.apply.profile import CONSENT, load_profile, profile_value
+from api.apply.profile import CONSENT, Profile, load_profile, profile_value
 from api.apply.rules import YESNO_FACTS, normalize, rule_for
+
+_CHOICE_KINDS = ("select", "yesno", "multiselect")
 
 
 def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[ResolvedField]:
@@ -35,30 +38,9 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[Reso
     resolved_fields = []
     for form_field in fields:
         normalized_label = normalize(form_field.label)
-        rung, value = "", None
-        if form_field.kind == "file":
-            rung, value = (
-                ("resume", str(profile.default_resume_id))
-                if (profile.default_resume_id and re.search(r"resume|cv\b", normalized_label))
-                else ("", None)
-            )
-        elif normalized_label in saved_answers_by_label:
-            rung, value = "bank", saved_answers_by_label[normalized_label]["value"]
-        elif (
-            form_field.fact
-            and form_field.fact != "resume"
-            and (profile_answer := profile_value(profile, form_field.fact))
-        ):
-            # The reader named the fact; no label to read.
-            rung, value = "profile", profile_answer
-        elif (
-            (fact := rule_for(form_field.label))
-            and (form_field.kind != "yesno" or fact in YESNO_FACTS)
-            and (fact not in YESNO_FACTS or form_field.kind in ("yesno", "select", "multiselect"))
-            and (profile_answer := profile_value(profile, fact))
-        ):
-            rung, value = "profile", profile_answer
-        # A consent with one box is that box, whatever it is called.
+        rung, value = _stored_answer(form_field, normalized_label, profile, saved_answers_by_label)
+        # A consent with one box is that box, whatever it is called. Otherwise
+        # a draft for this job outranks every stored answer.
         if (
             rung == "profile"
             and value == CONSENT
@@ -71,15 +53,11 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[Reso
         elif normalized_label in drafts_by_question:
             rung, value = "draft", drafts_by_question[normalized_label]
         hint = None
-        if value is not None and form_field.kind not in ("select", "yesno", "multiselect"):
+        if value is not None and form_field.kind not in _CHOICE_KINDS:
             # Alternatives are for choosing among options; a text box takes
             # the first.
             value = value.split("|")[0].strip()
-        if (
-            value is not None
-            and form_field.kind in ("select", "yesno", "multiselect")
-            and form_field.options
-        ):
+        elif value is not None and form_field.options:
             picked = pick_option(value, form_field.options)
             if picked is None:
                 # The fact is known but none of the options is recognisably
@@ -91,3 +69,34 @@ def resolve(user_id: int, job_id: int | None, fields: list[Field_]) -> list[Reso
             ResolvedField(**form_field.model_dump(), rung=rung, value=value, hint=hint)
         )
     return resolved_fields
+
+
+def _stored_answer(
+    form_field: Field_,
+    normalized_label: str,
+    profile: Profile,
+    saved_answers_by_label: dict[str, dict[str, Any]],
+) -> tuple[str, str | None]:
+    """The rung and value from the resume, answer bank or profile, in that
+    order, or ("", None)."""
+    if form_field.kind == "file":
+        if profile.default_resume_id and re.search(r"resume|cv\b", normalized_label):
+            return "resume", str(profile.default_resume_id)
+        return "", None
+    if normalized_label in saved_answers_by_label:
+        return "bank", saved_answers_by_label[normalized_label]["value"]
+    if (
+        form_field.fact
+        and form_field.fact != "resume"
+        and (profile_answer := profile_value(profile, form_field.fact))
+    ):
+        # The reader named the fact; no label to read.
+        return "profile", profile_answer
+    if (
+        (fact := rule_for(form_field.label))
+        and (form_field.kind != "yesno" or fact in YESNO_FACTS)
+        and (fact not in YESNO_FACTS or form_field.kind in _CHOICE_KINDS)
+        and (profile_answer := profile_value(profile, fact))
+    ):
+        return "profile", profile_answer
+    return "", None

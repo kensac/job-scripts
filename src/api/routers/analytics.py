@@ -27,7 +27,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from api import db
-from api.analytics.assembly import collect_source_analytics as _collect
+from api.analytics.assembly import collect_source_analytics
 from api.analytics.models import (
     BoardAnalyticsDetail,
     BoardAnalyticsList,
@@ -63,7 +63,7 @@ def source_analytics(
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsList:
     return BoardAnalyticsList(
-        rows=_collect(min_sample),
+        rows=collect_source_analytics(min_sample),
         min_sample=min_sample,
         caveats=_CAVEATS,
     )
@@ -75,7 +75,7 @@ def source_detail(
     min_sample: int = Query(DEFAULT_MIN_SAMPLE, ge=1, le=10_000),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsDetail:
-    row = next((r for r in _collect(min_sample) if r.source == source), None)
+    row = next((r for r in collect_source_analytics(min_sample) if r.source == source), None)
     if row is None:
         raise refuse(404, "NOT_FOUND", "unknown source")
     return BoardAnalyticsDetail(

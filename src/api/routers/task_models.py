@@ -28,7 +28,13 @@ from api.routers.admin import require_admin
 from api.task_config import configured_shape
 from core import providers
 from core.providers.spec import StructuredOutput
-from core.routing import ModelChangeEffect, NoEligibleModel, candidates_for, resolve
+from core.routing import (
+    ModelChangeEffect,
+    NoEligibleModel,
+    TaskShape,
+    candidates_for,
+    resolve,
+)
 from core.shapes import SHAPES
 
 router = APIRouter(prefix="/admin")
@@ -98,9 +104,21 @@ def _history(purpose: str, limit: int) -> list[TaskModelChange]:
     )
 
 
-def _current(purpose: str) -> TaskModelChange | None:
+def _override(purpose: str) -> str | None:
+    """The model the latest decision set, or None when it cleared the override
+    or no decision exists."""
     rows = _history(purpose, 1)
-    return rows[0] if rows else None
+    return rows[0].model if rows else None
+
+
+def _running_model(shape: TaskShape, override: str | None) -> str | None:
+    """The override when one is set, else the first sanctioned model."""
+    return override or (shape.candidates[0] if shape.candidates else None)
+
+
+def _known_purpose(purpose: str) -> None:
+    if purpose not in SHAPES:
+        raise refuse(404, "NOT_FOUND", "unknown task")
 
 
 # How far back per-model health looks. Derived from the provider's own
@@ -288,10 +306,9 @@ class TaskModel(BaseModel):
 
 def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
     shape = configured_shape(SHAPES[purpose])
-    latest = _current(purpose)
-    override = latest.model if latest else None
+    override = _override(purpose)
     candidacies = candidates_for(shape)
-    current_model = override or (shape.candidates[0] if shape.candidates else None)
+    current_model = _running_model(shape, override)
     current_cycle = next(
         (c.est_cycle_cost_usd for c in candidacies if c.model == current_model), None
     )
@@ -363,7 +380,7 @@ def _view(purpose: str, health: dict[str, BatchHealth]) -> TaskModel:
     )
 
 
-def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> None:
+def _require_cost_acknowledgement(purpose: str, shape: TaskShape, body: TaskModelPut) -> None:
     """Refuse a large increase unless it was acknowledged, and say how large.
 
     At the moment of the decision, where the number is exactly known - not
@@ -377,10 +394,7 @@ def _require_cost_acknowledgement(purpose: str, shape, body: TaskModelPut) -> No
         return
     candidacies = {c.model: c for c in candidates_for(shape)}
     new = candidacies.get(body.model or "")
-    latest = _current(purpose)
-    current_name = (latest.model if latest else None) or (
-        shape.candidates[0] if shape.candidates else None
-    )
+    current_name = _running_model(shape, _override(purpose))
     current = candidacies.get(current_name or "")
     if new is None or current is None:
         return
@@ -429,8 +443,7 @@ def list_task_models(_: AuthedUser = Depends(require_admin)) -> TaskModelList:
 
 @router.get("/task-models/{purpose}")
 def get_task_model(purpose: str, _: AuthedUser = Depends(require_admin)) -> TaskModel:
-    if purpose not in SHAPES:
-        raise refuse(404, "NOT_FOUND", "unknown task")
+    _known_purpose(purpose)
     return _view(purpose, _model_health())
 
 
@@ -446,8 +459,7 @@ def put_task_model(
     the row itself says an override was made rather than leaving it to be
     re-derived later against a sanctioned list that has since moved.
     """
-    if purpose not in SHAPES:
-        raise refuse(404, "NOT_FOUND", "unknown task")
+    _known_purpose(purpose)
     shape = configured_shape(SHAPES[purpose])
     if body.model is not None:
         if providers.model(body.model) is None:
@@ -481,6 +493,5 @@ def task_model_history(purpose: str, _: AuthedUser = Depends(require_admin)) -> 
     review is looking for the switch that explains a regression noticed weeks
     later, which only works if the switch is still here.
     """
-    if purpose not in SHAPES:
-        raise refuse(404, "NOT_FOUND", "unknown task")
+    _known_purpose(purpose)
     return TaskModelHistory(purpose=purpose, changes=_history(purpose, 200))

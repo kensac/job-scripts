@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from api import db
 from api.models import FilterPatch
+from tests.factories import user_id_for_subject
 
 
 @pytest.mark.parametrize("field", ["name", "prompt", "on_ambiguous", "fail_closed", "enabled"])
@@ -19,7 +20,7 @@ def test_filter_patch_rejects_null_but_preserves_omission(field):
     "field,value", [("ai_model", "gpt-5-nano"), ("writing_style", "Be direct.")]
 )
 def test_nullable_setting_reset_distinguishes_omission(client, user_headers, field, value):
-    uid = db.query_one("SELECT id FROM users WHERE sub=%s", (user_headers["X-User-Sub"],))["id"]
+    uid = user_id_for_subject("test-user")
     db.execute(
         f"INSERT INTO user_settings(user_id,{field}) VALUES (%s,%s) "
         f"ON CONFLICT (user_id) DO UPDATE SET {field}=EXCLUDED.{field}",
