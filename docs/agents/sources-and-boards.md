@@ -756,8 +756,15 @@ state the count ("1-12 of 348 results"), others none (Two Sigma, Koch) or
 Siemens an empty page). A pull is complete when it reaches the stated count,
 or, with no count, ends under that window; meeting a posting it already read
 (the list moved or wrapped) or an article it cannot parse is partial too.
-Fields sit wherever the template puts them: a place is a `list-item-location`
-span, a field labelled Location, or an unlabelled span under the title, and
+Results are `article--result` elements, or rows of a `table--jobs` table
+(National Bank); a detail link is `JobDetail/<slug>/<id>` or, at Macquarie,
+`JobDetail?jobId=<id>`. A row whose link has no title is unparsed, so the pull
+is partial: National Bank's English list left 2 of 411 titles blank on
+2026-11-01 (French only), while its `fr_CA` list is complete. The count may be
+"result(s)" or "résultats". Fields sit wherever the template puts them: a
+place is a `list-item-location` span, a field labelled Location, a detail
+whose icon is labelled "Office Location:" (Macquarie), the column headed
+"Location(s)" (National Bank), or an unlabelled span under the title, and
 Pomerleau shows none. IBM's and Delta's tenants answer every page with a 202
 challenge, also to a browser-fingerprinted client, so they are not sources
 (IBM is read through its own search API, `_ibm`).
@@ -966,6 +973,13 @@ A successful detail response can retain a closed posting's description.
 SmartRecruiters `active=false` or `visibility=INTERNAL` means unavailable to
 the public-board audience, even at HTTP 200. Missing flags are not evidence
 of closure. The resolver returns `GONE` before extracting retained text.
+
+Greenhouse's EU boards (`job-boards.eu.greenhouse.io/<board>`) are read through
+the same `boards-api.greenhouse.io/v1/boards/<board>/jobs` listing, posting and
+question endpoints as US boards; the API answers for both and its
+`absolute_url` keeps the EU host (measured 2026-11-01 on Ebury, 161 of 161).
+`boards-api.eu.greenhouse.io` does not resolve. An EU board is an ordinary
+`gh_<board>` source, so there is no EU format.
 
 Embedded Greenhouse URLs carry a job ID but may omit the board token.
 `refresh_page` resolves that token from the job's configured catalog source

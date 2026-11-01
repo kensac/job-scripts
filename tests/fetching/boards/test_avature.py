@@ -88,6 +88,37 @@ AV_POMERLEAU = (
     '<span class="list-item-ref">Ref #7144</span><span aria-hidden="true" class="separator"> • '
     '</span><span class="list-item-posted">Posted 02-Oct-2026</span></div></div></div></article>'
 )
+# Copied from the live pages on 2026-11-01. Macquarie links its detail page
+# by query (JobDetail?jobId=) and labels the place with an icon; National Bank
+# lists results as rows of a table under a header row.
+AV_MACQUARIE = (
+    '<article class="article article--result clearfix"><div class="article__container">'
+    '<div class="article__header"><h3 class="article__header__text__title title title--02">'
+    '<a class="link" href="https://recruitment.macquarie.com/en_US/careers/JobDetail?jobId={id}">'
+    ' {title} </a></h3></div><div class="article__content"><div class="article__content__details">'
+    '<div class="article__details__data"><p class="icon">ID</p><p> {id} </p></div>'
+    '<div class="article__details__data"><img alt="Office Location:" aria-hidden="true" '
+    'src="https://recruitment.macquarie.com/portal/46/images/icon-location.svg"/><p> London Office '
+    '</p></div><div class="article__details__data"><img alt="Posted Date:" aria-hidden="true" '
+    'src="https://recruitment.macquarie.com/portal/46/images/icon--date.svg"/><p> 30 Oct 2026 '
+    "</p></div></div></div></div></article>"
+)
+AV_BNC_ROW = (
+    '<tr><th scope="row"><a class="link fw--500" data-map="job-detail-link" '
+    'href="https://emplois.bnc.ca/en_CA/careers/JobDetail/{slug}/{id}" title="{title}"> {title} '
+    '</a><a class="visibility--only-mobile table__row__toggle"></a></th>'
+    "<td> Surrey, British Columbia </td><td> On-Site </td></tr>"
+)
+
+
+def _av_table(rows: str) -> str:
+    return (
+        '<table class="table table--default table--jobs"><thead><tr>'
+        '<th class="sort__item" scope="col"> Name </th>'
+        '<th class="sort__item" scope="col"> Location(s) </th>'
+        '<th class="sort__item" scope="col"> Attendance </th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
 
 
 def _av_article(template: str, n: int) -> str:
@@ -251,6 +282,7 @@ def test_an_uncounted_avature_walk_under_the_window_is_complete(monkeypatch):
         # The label is a <strong> inside the location span.
         (AV_HARMAN, ["Aarhus - Central Jutland, Denmark"]),
         (AV_CDCN, ["MT - Missoula"]),
+        (AV_MACQUARIE, ["London Office"]),
         # No place on the list page: nothing, not the reference number.
         (AV_POMERLEAU, []),
     ],
@@ -261,3 +293,35 @@ def test_avature_reads_the_place_from_each_template(monkeypatch, template, expec
     [posting] = boards.fetch_listings("https://x.avature.net/careers/SearchJobs", "X")
     assert posting.title == "Role 1"
     assert posting.locations == expected
+
+
+def test_avature_reads_a_table_of_results(monkeypatch):
+    """National Bank on 2026-11-01: results are table rows, the place is the
+    column headed Location(s), and the legend counts "411 result(s)"."""
+    rows = "".join(_av_article(AV_BNC_ROW, n) for n in (1, 2))
+    legend = '<div aria-label="2 result(s)" class="list-controls__text__legend"> 1-2 of 2 </div>'
+    _av_serve(monkeypatch, lambda url: _AvResp(url, _av_page(_av_table(rows), "", legend)))
+    out = boards.fetch_listings("https://bnc.avature.net/en_CA/careers/SearchJobs", "National Bank")
+    assert [p.title for p in out] == ["Role 1", "Role 2"]
+    assert out[0].url == "https://emplois.bnc.ca/en_CA/careers/JobDetail/Role-1/1"
+    assert out[0].locations == ["Surrey, British Columbia"]
+
+
+def test_an_avature_row_without_a_title_is_partial(monkeypatch):
+    """National Bank's English list left two of 411 titles blank on
+    2026-11-01, posted only in French. The row exists, so the pull is short."""
+    rows = _av_article(AV_BNC_ROW, 1) + AV_BNC_ROW.format(slug="Role-2", id=2, title="")
+    legend = '<div aria-label="2 result(s)" class="list-controls__text__legend"> 1-2 of 2 </div>'
+    _av_serve(monkeypatch, lambda url: _AvResp(url, _av_page(_av_table(rows), "", legend)))
+    with pytest.raises(boards.PartialPull) as raised:
+        boards.fetch_listings("https://bnc.avature.net/en_CA/careers/SearchJobs", "National Bank")
+    assert [p.title for p in raised.value.postings] == ["Role 1"]
+
+
+def test_avature_counts_a_french_legend(monkeypatch):
+    """ "411 résultats": a count the walk must reach, so one row short is partial."""
+    legend = '<div aria-label="3 résultats" class="list-controls__text__legend"> 1-2 de 3 </div>'
+    body = "".join(_av_article(AV_BLOOMBERG, n) for n in (1, 2))
+    _av_serve(monkeypatch, lambda url: _AvResp(url, _av_page(body, "", legend)))
+    with pytest.raises(boards.PartialPull):
+        boards.fetch_listings("https://bnc.avature.net/fr_CA/careers/SearchJobs", "National Bank")
