@@ -31,7 +31,8 @@ def _avature(url: str, company: str) -> list[JobPosting]:
     Bloomberg, folderOffset at Siemens, which answers its first page to every
     jobOffset). Some templates state the count ("1-12 of 348 results") and
     some do not (Two Sigma, Koch); where there is one, it is what proves the
-    walk complete. The text is not on the list page.
+    walk complete. Most templates list each result as an article; National
+    Bank's lists them as rows of a table. The text is not on the list page.
     """
     seen: dict[str, JobPosting] = {}
     stated: int | None = None
@@ -46,7 +47,7 @@ def _avature(url: str, company: str) -> list[JobPosting]:
         soup = BeautifulSoup(resp.text, "html.parser")
         if not seen:
             stated = _avature_stated(soup)
-        articles = soup.select("article.article--result")
+        articles = soup.select(_AVATURE_RESULT)
         fresh = [
             p for p in (_avature_posting(a, company) for a in articles) if p and p.url not in seen
         ]
@@ -75,8 +76,11 @@ def _avature(url: str, company: str) -> list[JobPosting]:
 # it against cannot tell the end of the list from the end of the window.
 _AVATURE_WINDOW = 2000
 
+_AVATURE_RESULT = "article.article--result, table.table--jobs tbody tr"
+
 # "999+ results" (Siemens) states no count, and the pattern does not match it.
-_AVATURE_COUNT = re.compile(r"([\d,]+)\s+results", re.I)
+# National Bank says "411 result(s)" in English and "411 résultats" in French.
+_AVATURE_COUNT = re.compile(r"([\d,]+)\s+r[eé]sult", re.I)
 
 
 def _avature_stated(soup: BeautifulSoup) -> int | None:
@@ -90,7 +94,8 @@ def _avature_stated(soup: BeautifulSoup) -> int | None:
 
 
 def _avature_posting(article: Tag, company: str) -> JobPosting | None:
-    for link in article.select('a[href*="/JobDetail/"]'):
+    # Macquarie links JobDetail?jobId=24902; the others JobDetail/{slug}/{id}.
+    for link in article.select('a[href*="/JobDetail"]'):
         title = " ".join(link.get_text(" ").split())
         if title and "button" not in (link.get("class") or []):
             return posting_from_listing(
@@ -106,9 +111,28 @@ def _avature_locations(article: Tag) -> list[str]:
     list-item-location span (Bloomberg, Harman and ManTech behind a
     "Location:" label, MetLife, Siemens as city, state and country spans
     inside it), a field labelled Location (Koch), or an unlabelled first span
-    under the title (Two Sigma, CDCN). Pomerleau lists no place at all, and
-    returns nothing rather than a guess.
+    under the title (Two Sigma, CDCN). Measured 2026-11-01: a detail whose
+    icon is labelled "Office Location:" (Macquarie), or the table column
+    headed "Location(s)" (National Bank). Pomerleau lists no place at all,
+    and returns nothing rather than a guess.
     """
+    if article.name == "tr":
+        table = article.find_parent("table")
+        heads = (
+            [th.get_text(" ", strip=True).lower() for th in table.select("thead th")]
+            if table
+            else []
+        )
+        cells = article.find_all(["th", "td"], recursive=False)
+        return [
+            cell.get_text(" ", strip=True)
+            for head, cell in zip(heads, cells, strict=False)
+            if head.startswith("location")
+        ][:1]
+    for icon in article.select(".article__details__data img[alt]"):
+        value = icon.find_next_sibling("p")
+        if "location" in str(icon["alt"]).lower() and value:
+            return [value.get_text(" ", strip=True)]
     if el := article.select_one(".list-item-location"):
         return [re.sub(r"^location:\s*", "", " ".join(el.get_text().split()), flags=re.I)]
     for label in article.select(".article__content__field__label"):
