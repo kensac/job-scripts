@@ -8,8 +8,9 @@ import pytest
 from api import db
 from core.fetching import forms
 from tasks import application as drafts
-from tests.application_support import GREENHOUSE, _job_for, _owner_config, _user_id
+from tests.application_support import GREENHOUSE, _job_for, _owner_config
 from tests.application_support import _available_owner_key as _available_owner_key
+from tests.factories import user_id_for_subject
 from tests.resume_support import create_text_resume
 
 
@@ -18,7 +19,7 @@ class TestDrafting:
     async def test_the_task_reads_the_form_and_writes_one_draft_per_question(
         self, client, user_headers, f, monkeypatch
     ):
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/1")
         create_text_resume(
             client,
@@ -78,7 +79,7 @@ class TestDrafting:
     async def test_a_pasted_question_is_drafted_where_the_form_cannot_be_read(
         self, client, user_headers, f, monkeypatch
     ):
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://nvidia.wd5.myworkdayjobs.com/en-US/x/job/y")
         create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         r = client.post(
@@ -126,7 +127,7 @@ class TestDrafting:
     ):
         from api import ai
 
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/2")
         create_text_resume(client, json={"name": "master", "text": "Alice."}, headers=user_headers)
         monkeypatch.setattr(forms, "_get", lambda url: GREENHOUSE)
@@ -153,7 +154,7 @@ class TestDrafting:
     async def test_drafting_needs_a_resume_and_a_visible_job(
         self, client, user_headers, other_user_headers, f
     ):
-        uid = _user_id()
+        uid = user_id_for_subject("test-user")
         job_id = _job_for(f, uid, "https://job-boards.greenhouse.io/anthropic/jobs/3")
         r = client.post(f"/v1/user/jobs/{job_id}/application/draft", json={}, headers=user_headers)
         assert r.status_code == 400 and r.json()["detail"]["code"] == "NO_RESUME"

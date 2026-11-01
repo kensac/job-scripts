@@ -37,7 +37,12 @@ class JobProfilePopulation(BaseModel):
 
 class JobProfileReport(BaseModel):
     classifier_version: str
+    # The model that classified the reported population: the latest stored
+    # under this classifier version, else run_model when nothing is stored.
     model: str
+    # The model the next pass pins. When it differs from model, the next pass
+    # re-derives every profile, because a profile is keyed by its model.
+    run_model: str
     classifications: int
     distinct_jobs: int
     superseded_observations: int
@@ -53,6 +58,11 @@ class JobProfileReport(BaseModel):
 @dataclass(frozen=True)
 class _TaskId:
     id: int
+
+
+@dataclass(frozen=True)
+class _Model:
+    model: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,15 @@ def run_job_profiles(user: AuthedUser = Depends(require_admin)) -> JobProfileAdm
 
 @router.get("/job-profiles/report")
 def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileReport:
+    # Report the stored population, not the model the next pass pins. The pin
+    # can move while collection is paused, and keying on it would show zero
+    # classifications beside a full table.
+    latest = db.query_one_as(
+        _Model,
+        "SELECT model FROM job_profiles WHERE classifier_version = %s ORDER BY id DESC LIMIT 1",
+        (CLASSIFIER_VERSION,),
+    )
+    model = latest.model if latest else JOB_PROFILE_MODEL
     counts = db.query_one_as(
         _Counts,
         """
@@ -118,7 +137,7 @@ def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileR
           )) AS superseded_observations
         FROM job_profiles p WHERE classifier_version = %s AND model = %s
         """,
-        (CLASSIFIER_VERSION, JOB_PROFILE_MODEL),
+        (CLASSIFIER_VERSION, model),
     )
     assert counts is not None
     output_stats = db.query_one_as(
@@ -146,11 +165,12 @@ def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileR
             "primary_role_family": "SELECT primary_role_family AS value, count(*) AS count FROM job_profiles WHERE classifier_version = %s AND model = %s GROUP BY primary_role_family ORDER BY count DESC, value",
             "career_stage": "SELECT career_stage AS value, count(*) AS count FROM job_profiles WHERE classifier_version = %s AND model = %s GROUP BY career_stage ORDER BY count DESC, value",
         }[column]
-        return db.query_as(JobProfilePopulation, statement, (CLASSIFIER_VERSION, JOB_PROFILE_MODEL))
+        return db.query_as(JobProfilePopulation, statement, (CLASSIFIER_VERSION, model))
 
     return JobProfileReport(
         classifier_version=CLASSIFIER_VERSION,
-        model=JOB_PROFILE_MODEL,
+        model=model,
+        run_model=JOB_PROFILE_MODEL,
         classifications=counts.classifications,
         distinct_jobs=counts.distinct_jobs,
         superseded_observations=counts.superseded_observations,

@@ -78,7 +78,7 @@ def _resync_applications(message_id: int) -> list[int]:
     return affected
 
 
-def _apply_classification(
+def apply_classification(
     message: dict[str, Any], body: Reclassification, *, actor_user_id: int
 ) -> Reclassified:
     """Append a corrected classification, recording WHO corrected it.
@@ -119,7 +119,7 @@ def _apply_classification(
     )
 
 
-def _apply_revert(message_id: int, *, actor_user_id: int) -> Reverted:
+def apply_revert(message_id: int, *, actor_user_id: int) -> Reverted:
     """Restore the model's last answer, recording who asked for the restore."""
     model_answer = db.query_one(
         "SELECT kind, confidence, detail, model FROM email_events "
@@ -228,7 +228,7 @@ class Candidates(BaseModel):
 _SAME_COMPANY = "same company as this mail"
 
 
-def _candidates_payload(
+def candidates_payload(
     message: dict[str, Any], owner_id: int, q: str | None, limit: int
 ) -> Candidates:
     """Candidates for a message, scoped to the message's OWNER.
@@ -406,7 +406,7 @@ def _mention(body: str | None, needle: str | None) -> Mention | None:
     )
 
 
-def _evidence_for(message_ids: list[int]) -> dict[int, Evidence]:
+def evidence_for(message_ids: list[int]) -> dict[int, Evidence]:
     """What each match actually rested on.
 
     The rationale field says what the matcher concluded; this says what it
