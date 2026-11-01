@@ -177,8 +177,8 @@ async def run_held(
         db.execute(
             "UPDATE tasks SET status = 'pending', started_at = NULL, last_heartbeat = NULL, "
             "worker = NULL, attempts = GREATEST(attempts - 1, 0), not_before = %s "
-            "WHERE id = %s AND status = 'running' AND worker = %s",
-            (d.not_before, claim.task_id, claim.worker),
+            "WHERE id = %s AND status = 'running' AND worker = %s AND attempts = %s",
+            (d.not_before, claim.task_id, claim.worker, claim.attempts),
         )
         metrics.TASKS_PROCESSED.labels(task["kind"], "deferred").inc()
         logger.info(f"Task {task['id']} {d}")
