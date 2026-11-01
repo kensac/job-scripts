@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ from api import db, source_selection
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin import require_admin
+from api.updates import NonNullUpdate
 from core.fetching import boards
 
 router = APIRouter()
@@ -60,16 +62,16 @@ _SOURCE_COLS = (
 
 
 class SourceBody(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=80)
-    listings_url: str | None = Field(default=None, max_length=1000)
-    description: str | None = Field(default=None, max_length=500)
-    active: bool | None = None
+    name: NonNullUpdate[Annotated[str, Field(min_length=1, max_length=80)]] = None
+    listings_url: NonNullUpdate[Annotated[str, Field(max_length=1000)]] = None
+    description: NonNullUpdate[Annotated[str, Field(max_length=500)]] = None
+    active: NonNullUpdate[bool] = None
     company: str | None = Field(default=None, max_length=200)
     # Bounded by _check_source, which lets a stored pattern through unchanged.
     title_pattern: str | None = None
     # Hours between pulls; 1 is the hourly cycle. Bounded above by a week so a
     # typo cannot park a board for a year while it reads as active.
-    ingest_interval_hours: int | None = Field(default=None, ge=1, le=168)
+    ingest_interval_hours: NonNullUpdate[Annotated[int, Field(ge=1, le=168)]] = None
 
 
 # The limit since #315. It binds what an admin writes, not what is stored:

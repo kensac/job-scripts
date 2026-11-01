@@ -108,7 +108,7 @@ def test_a_filter_save_waits_for_the_sweep_unless_the_group_rejudges_on_change(
     and queues nothing; the hourly sweep judges the board. With "*" in
     filter_rejudge_on_change_groups the save queues the run as before, or
     names the budget (Kanishk, 2026-09-09)."""
-    from api.routers.filters import DEFERRED_MESSAGE, REJUDGE_GROUPS_KEY
+    from api.routers.filtering.run_controls import DEFERRED_MESSAGE, REJUDGE_GROUPS_KEY
 
     def gate(groups):
         db.execute(

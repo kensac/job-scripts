@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from api import db, scoping
 from api import params as params_
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin import require_admin
 from api.routers.filtering.insight_breakdowns import (
     DECISION_WINDOW_SQL,
@@ -97,9 +98,16 @@ def phrasings(
             for g in GROUPS:
                 where.append(f"reason !~* %(ng_{g.key})s")
                 params[f"ng_{g.key}"] = reason_taxonomy.sql_pattern(g.key)
-        else:
+        elif group in GROUP_LABELS:
             where.append("reason ~* %(group)s")
             params["group"] = reason_taxonomy.sql_pattern(group)
+        else:
+            raise refuse(
+                400,
+                "UNKNOWN_REASON_GROUP",
+                f"unknown group: {group}",
+                valid=[g.key for g in GROUPS] + [UNGROUPED_REASON_KEY],
+            )
     clause = " AND ".join(where)
 
     totals = db.query_one(
