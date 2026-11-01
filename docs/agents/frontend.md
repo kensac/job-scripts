@@ -275,7 +275,8 @@ provider calls were recorded.
 
 The old top-level totals and breakdowns remain compatibility fields for
 `verdict_diagnostics`, not ledger spend. Verdict rows need not correspond to
-unique calls; current source reach is not historical reach. The legacy
+unique calls; current source reach is not historical reach. `by_source_reach`
+itemizes unreachable sources only; `by_reach` totals all three buckets. The legacy
 `batching.unrealized_savings_usd` is a hypothetical half-cost scenario. Missing
 batch IDs and recorded batch flags do not establish historical transport, and
 superseded verdicts do not establish wasted spend.

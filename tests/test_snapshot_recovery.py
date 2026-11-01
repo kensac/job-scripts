@@ -243,7 +243,7 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
                     consumed.append((restored.text, restored.request.input))
                     receipt.outcome = "written"
 
-    monkeypatch.setattr(batch, "submit_responses_batches", forbidden)
+    monkeypatch.setattr(batch, "submit_batches", forbidden)
     monkeypatch.setitem(worker.HANDLERS, "test_kind", handler)
     await worker.run_once()
     assert consumed == []

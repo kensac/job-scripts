@@ -417,11 +417,10 @@ class TaskModelHistory(BaseModel):
 def list_task_models(_: AuthedUser = Depends(require_admin)) -> TaskModelList:
     """Every configurable task, with its eligible models and what each costs.
 
-    Costs are per CALL at the shape's own declared token profile, not per
-    cycle. A cycle figure would need each handler's per-cycle cap, which lives
-    in its own module and moves; multiplying a real number by a guessed one
-    produces a confident wrong total, which is worse on a spending screen than
-    an honest small one.
+    `est_cost_usd` is per call at the shape's declared token profile.
+    `est_cycle_cost_usd` is that times the task's per-cycle cap, read from
+    app_config through configured_shape, the same value the sweep reads. A
+    task with no cap has no cycle figure: None, never a guessed total.
     """
     # Health spans every model, so one read serves every task.
     health = _model_health()
