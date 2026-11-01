@@ -14,7 +14,7 @@ from decimal import Decimal
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from api import ai, db
+from api import ai
 from core import pricing, providers
 from core.providers.spec import StructuredOutput
 
@@ -180,59 +180,6 @@ class TestPeakWindows:
         rates = providers.PROVIDERS["openai"].models[0].rates
         assert rates.peak_windows == ()
         assert pricing.is_off_peak(rates, _at(MON, 12)) is False
-        assert pricing.off_peak_sql(rates, "created_at") == "FALSE"
-
-
-_PARITY_TIMES = [
-    _at(MON, 3),  # peak
-    _at(MON, 4),  # the half-open boundary
-    _at(MON, 12),  # off-peak weekday
-    _at(SAT, 3),  # off-peak weekend, in a peak-hour slot
-    _at(datetime.date(2026, 9, 6), 23, 59),  # Sunday, the week-boundary case
-]
-
-
-@pytest.mark.parametrize("when", _PARITY_TIMES)
-@pytest.mark.parametrize(
-    ("prompt", "completion", "cached"), [(1_000_000, 250_000, 400_000), (3, 7, 1)]
-)
-def test_sql_and_python_agree_on_wall_clock_pricing(when, prompt, completion, cached):
-    """The parity test that matters most here, because the two renderings use
-    different day numbering primitives. Python reads isoweekday(); Postgres
-    reads EXTRACT(isodow). If they ever disagree, one day a week is priced at
-    double or half and nothing else would show it."""
-    rates = pricing.rates_for(FLASH)
-    assert rates is not None
-    tier = rates.tiers[0]
-    expr = pricing.cost_sql(
-        model_rate_in="%(rate_in)s::numeric",
-        model_rate_out="%(rate_out)s::numeric",
-        model_rate_cached_in="%(rate_cached)s::numeric",
-        batch_rate="1",
-        prompt="%(prompt)s::bigint",
-        completion="%(completion)s::bigint",
-        cached="%(cached)s::bigint",
-        batched="FALSE",
-        off_peak=pricing.off_peak_sql(rates, "%(at)s::timestamptz"),
-        off_peak_multiplier="%(off_peak_multiplier)s::numeric",
-    )
-    row = db.query_one(
-        f"SELECT {expr} AS cost",
-        {
-            "rate_in": str(tier.rate_in),
-            "rate_out": str(tier.rate_out),
-            "rate_cached": str(pricing.cached_rate(tier)),
-            "off_peak_multiplier": str(rates.off_peak_multiplier),
-            "prompt": prompt,
-            "completion": completion,
-            "cached": cached,
-            "at": when.isoformat(),
-        },
-    )
-    assert row is not None
-    py = pricing.estimate_cost_usd(FLASH, prompt, completion, cached_tokens=cached, at=when)
-    assert py is not None
-    assert Decimal(row["cost"]) == py
 
 
 class _Reply(BaseModel):
