@@ -46,7 +46,7 @@ dependencies = [
     "soupsieve==3.0.4",
     "SQLAlchemy==2.1.6",
     "trio-websocket==0.12.2",
-    "trio==0.34.0",
+    "trio==0.35.0",
     "typing-inspection==0.4.4",
     "typing_extensions==4.16.0",
     "urllib3==2.8.0",
