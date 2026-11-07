@@ -47,7 +47,7 @@ dependencies = [
     "SQLAlchemy==2.1.8",
     "trio-websocket==0.12.2",
     "trio==0.35.0",
-    "typing-inspection==0.4.4",
+    "typing-inspection==0.4.5",
     "typing_extensions==4.16.0",
     "urllib3==2.8.0",
     "uvicorn==0.54.0",
