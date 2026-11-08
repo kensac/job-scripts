@@ -16,12 +16,73 @@ read `PRODUCTION_DATABASE_URL`. Pointing anything else at production is a
 command that says so:
 
 ```
-set -a && . ./.env && set +a
-DATABASE_URL="$PRODUCTION_DATABASE_URL" python tools/publish_recipes.py
+DATABASE_URL='postgresql:///?service=jobtracker_prod' python tools/publish_recipes.py
 ```
 
 Keep it that way: no module loads `.env` on import. `.env.example` lists
 every variable the code reads.
+
+Importing `api` or `core` opens the pool, so a script that only needs the code
+sets a DSN that cannot connect, as `api/export_schema.py` does:
+`DATABASE_URL=postgresql://unused:unused@127.0.0.1:1/no_database_here`.
+
+## Reaching it
+
+The database is the `jobtracker-db` container on hetzner and listens on the
+tailnet only, so GitHub's runners cannot reach it. A connection that times out
+from the laptop means the tailnet is down: say so rather than probing
+addresses. Host addresses and ssh users are in homelab-config's
+`docs/ansible-inventory/hosts.yml`, and the fleet's layout is its
+`docs/jobtracker/README.md`. This repository is public, so neither is copied
+here.
+
+Pick the route by the size of the job:
+
+- **A short lookup from the laptop:** `psql service=jobtracker_prod` (defined in
+  `~/.pg_service.conf`) with
+  `PGOPTIONS='-c default_transaction_read_only=on'`. From Python the DSN is
+  `postgresql:///?service=jobtracker_prod`; a bare `service=` string is not a
+  URL and alembic's env refuses it. Worktree sessions refuse `. ./.env`, so use
+  the service, not the variable.
+- **Anything heavier runs on hetzner**, next to the data: pipe SQL into
+  `docker exec -i jobtracker-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`,
+  starting with `SET default_transaction_read_only = on;`, under
+  `systemd-run --collect` when it is long. From the laptop, a scan over
+  `page_fetches` ran past ten minutes, and a 14-minute read held up a
+  migration's `DROP VIEW` during a roll. Cancel the backend of any laptop query
+  you abandon.
+- **Repository code against production** runs inside `jobtracker-api`:
+  `docker exec -i jobtracker-api python - < script.py`. That code is the
+  deployed release, so it matches the schema, and its environment already
+  names the database. A laptop checkout can be ahead of or behind the fleet.
+
+## Where an answer already lives
+
+Read these before writing SQL from table names:
+
+- **AI spend:** `model_calls` (`purpose`, `cost_usd`, `created_at`), and per
+  check type `answer_usage_hourly`. Never `api_usage`
+  ([observability.md](observability.md)).
+- **A person's sources:** the view `user_source_set`. `user_sources` alone
+  misses every source that reaches them through a bundle
+  ([sources-and-boards.md](sources-and-boards.md)).
+- **A person's board:** `board_visible` ([visibility.md](visibility.md)).
+  `posting_path.for_user` explains one posting; it rescans the verdict ledger
+  each call, so a bulk "why is it missing" is set-based SQL instead.
+- **Which commit each worker runs:** `worker_status.release` for rows with a
+  recent `last_seen` ([deployment.md](deployment.md)).
+- **Column names:** `src/api/orm/` or `\d`, never a guess.
+
+## Writing as an admin would
+
+When a write is authorised (rule 5 in AGENTS.md), make it through the code the
+admin route runs, inside `jobtracker-api`, so the validation, locks and history
+rows happen. A hand `UPDATE` skips them. A setting goes through `put_config`'s
+transaction ([config-registry.md](config-registry.md)). An off-cycle task goes
+through `task_admission.enqueue` with a `manual-` cycle, as `trigger_ingest`
+does, so the scheduled cycle's dedupe is untouched. No task can be pinned to
+one worker; which kinds a host runs is its environment
+([config-registry.md](config-registry.md)).
 
 ## A long read blocks schema changes
 

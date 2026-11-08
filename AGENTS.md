@@ -38,12 +38,12 @@ These are instructions, not history. Follow them.
 | [architecture.md](docs/agents/architecture.md) | Change the mail pipeline, the matcher, pricing, or a named place |
 | [sources-and-boards.md](docs/agents/sources-and-boards.md) | Add a board, change ingest, or touch how a posting is fetched |
 | [visibility.md](docs/agents/visibility.md) | Change who sees a posting, who owns a row, or a list response shape |
-| [observability.md](docs/agents/observability.md) | Add a task, batch model calls, or add a metric, alert or event |
-| [reading-production.md](docs/agents/reading-production.md) | Point anything at the production database |
+| [observability.md](docs/agents/observability.md) | Add a task, batch model calls, add a metric, alert or event, or change application answers or assisted apply |
+| [reading-production.md](docs/agents/reading-production.md) | Point anything at the production database, answer a question from its data (spend, a person's sources or board), or write to it as an admin would |
 | [architecture-migration.md](docs/agents/architecture-migration.md) | Take a phase of the move to facts, derivations and projections |
 | [testing.md](docs/agents/testing.md) | Write a test or trust one |
 | [migrations.md](docs/agents/migrations.md) | Touch the schema |
-| [deployment.md](docs/agents/deployment.md) | Claim anything is deployed |
+| [deployment.md](docs/agents/deployment.md) | Claim anything is deployed, or need a roll |
 | [generated-files.md](docs/agents/generated-files.md) | Change a route, a model, or anything CI regenerates |
 | [frontend.md](docs/agents/frontend.md) | Change any user-visible surface |
 | [extension-runtime.md](docs/agents/extension-runtime.md) | Change the extension application runtime |
@@ -71,8 +71,9 @@ These are instructions, not history. Follow them.
   construction;
   `tasks.verify` keeps the worker-facing handler exports. `tasks.runtime` owns
   worker execution.
-- `src/core/`: provider datasheets, pricing, routing, task shapes, storage
-  primitives.
+- `src/core/`: provider datasheets, pricing, routing, task shapes
+  (`core.shapes.SHAPES`), storage primitives, and the batch transport in
+  `src/core/batch/` (architecture.md, "Structured batch transport").
 - `alembic/`: migrations. See migrations.md before adding one.
 - `tests/`: two populations against a real database: hermetic, and the
   generated corpus. No test reads production. See testing.md.

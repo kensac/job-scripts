@@ -70,11 +70,39 @@ The pin is a snapshot, not a follow. Automation proposes pin updates, but its
 registry lookups are cached, so a pin proposal can sit frozen on a stale digest
 for a long time while the automation is demonstrably alive and running.
 
-Do not wait on it. If a specific commit needs to reach a host, push the pin
-bump and let the automation rebase onto it.
+Do not wait on it. If a specific commit needs to reach a host, ask Kanishk for
+a roll. Do not push a pin bump or merge the digest pull requests yourself: one
+person rolls, so every host stays on one digest (homelab-config `AGENTS.md`).
 
 The deployed digest does not need to equal the newest build. It needs to
 contain the commits you care about.
+
+The pins live in the per-host config repositories (`hetzner-vps-config`, which
+pins the api and both of hetzner's workers, plus the other worker hosts'), and
+Renovate proposes each digest as an automerged pull request. The host list,
+how a roll runs, the laptop worker, and where runtime secrets live (Infisical,
+copied per host) are homelab-config's `docs/jobtracker/README.md` and the
+"Hosts" and "Secrets" sections of its `docs/CLAUDE.md`. Do not search `.env`
+files for keys, and never trace (`bash -x`) a script that decrypts the vault.
+
+## Is it live, read from the database
+
+Without host access, each worker reports its commit:
+
+```
+SELECT name, release, last_seen FROM worker_status
+WHERE last_seen > now() - interval '10 minutes' ORDER BY name;
+```
+
+A commit is live on a worker when it is an ancestor of that `release`
+(`git merge-base --is-ancestor <commit> <release>`, both from this repository).
+The api reports nowhere and `/healthz` carries no release; it shares hetzner's
+pin, so the `hetzner` workers' release is its release. A migration is live when
+`alembic_version` holds its revision. A fetcher change shows up only at each
+source's next pull: its last `ingest_source` task plus `ingest_interval_hours`,
+and a board on a whole-day interval pulls at the fixed daily hour
+([sources-and-boards.md](sources-and-boards.md), "Scheduling and counts").
+Check when that is before watching for the effect.
 
 ## Interrupting work
 
@@ -104,7 +132,9 @@ checkout: no pin, no supervisor, no CD, no metrics. If it is updated by
 Update it with
 `git checkout <the fleet's commit>`, never with `git pull`, so it matches
 the container digest by construction. And ask for one roll per batch of
-merges rather than one per merge: each laptop restart is manual.
+merges rather than one per merge: each laptop restart is manual. How to
+restart it without losing its environment is in homelab-config's
+`docs/jobtracker/README.md`, "The MacBook worker".
 
 ## After a roll
 
