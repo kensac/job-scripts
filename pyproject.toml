@@ -35,7 +35,7 @@ dependencies = [
     "posthog==7.83.2",
     "psycopg-pool==3.3.3",
     "psycopg[binary]==3.3.8",
-    "pydantic==2.14.2",
+    "pydantic==2.14.3",
     "PySocks==1.7.1",
     "python-dotenv==1.2.4",
     "requests==2.34.2",
