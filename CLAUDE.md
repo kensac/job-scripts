@@ -16,4 +16,6 @@ here is a rule; rules go in `docs/agents/`.
 
 - Scale: roughly 67k mail messages, 49k jobs, 74k AI query rows, ~476MB.
 - The frontend deploys via Vercel on push to main, outside the fleet that runs
-  this application.
+  this application. The project is near its Vercel plan limits, so a merge may
+  not deploy: verify frontend changes locally, push and merge sparingly, and
+  never take the live site as running main.
