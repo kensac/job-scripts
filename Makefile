@@ -7,19 +7,17 @@ sync:           ## install exactly the lockfile into .venv (then activate it)
 
 # The same gates as .github/workflows/ci.yml. Where a gate is more than one
 # command it is a target here that CI calls, so the two cannot drift apart.
-check:          ## everything CI gates on: lint, format, types, compile, prose, migrations, extension, tests
+check:          ## the static gates CI runs: lint, format, types, compile, prose, extension (database gates run in CI only)
 	ruff check src tests
 	ruff format --check src tests
 	pyright
 	PYTHONPATH=src lint-imports
 	python -m compileall -q src
 	$(MAKE) prose
-	$(MAKE) migrations-check
 	npm --prefix extension ci
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
 	npm --prefix extension test
-	$(MAKE) test-par
 
 prose:          ## fail on an em dash anywhere in the repository
 	@if git grep -InF -e "—" -e "\\u2014" -- . ':!Makefile' ':!extension/adapters/recipes/*' ; then echo "em dash found: write a comma, a colon, or a new sentence"; exit 1; fi
