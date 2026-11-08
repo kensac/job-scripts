@@ -56,8 +56,8 @@ is self-consistent and wrong.
 
 `make migrations-check` applies every migration to the test database and runs
 `alembic check`, which fails when autogenerate would emit any operation. A
-failure means the ORM models and the migrations disagree. CI and `make check`
-both run that target; it writes no file.
+failure means the ORM models and the migrations disagree. CI runs that
+target; it writes no file.
 
 The usual cause is a column defined one way in the model and another in the
 migration: a server default without a matching `nullable=False` is the common

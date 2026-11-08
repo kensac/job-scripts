@@ -348,7 +348,7 @@ interpreter the image runs (`deploy/Dockerfile`), because typeshed's stubs
 differ between versions.
 
 `tests` is in the list too, so a test that imports a name that no longer
-exists fails `make check` instead of failing collection in every CI lane at
+exists fails `make check` (pyright) instead of failing collection in every CI lane at
 once. Its execution environment turns off six rules that `src` keeps:
 `reportArgumentType` and the five `reportOptional*` rules. Measured
 2026-11-01, they were 929 of the 972 errors in `tests`. A test reads

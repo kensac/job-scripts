@@ -87,11 +87,14 @@ These are instructions, not history. Follow them.
 ## Commands
 
 - `make check`: lint, format, types, the import contract, compile, em dashes,
-  migrations (apply and match the models), the extension, and the tests in
-  parallel. CI gates on
-  the same list; a gate that is more than one command is a make target CI
-  calls.
-- `make testdb-up` / `make testdb-down`: disposable test database.
+  and the extension. This is everything to run locally.
+- **Database gates run in CI only**: the Python tests and the migration check
+  (`make migrations-check`). Push and read the run; do not start a local test
+  database for them. Parallel agents each starting one hung Docker and piled
+  up dozens of containers. A gate that is more than one command is a make
+  target CI calls.
+- `make testdb-up` / `make testdb-down`: disposable test database, for
+  debugging one failing test CI already reported. Take it down when done.
 - `make profile`: re-measure production into `tests/production_profile.json`,
   which is what the generated test corpus is built from. See testing.md.
 - Regenerate `openapi.json` when routes change.

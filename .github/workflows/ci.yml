@@ -158,7 +158,7 @@ jobs:
         run: lint-imports
       - name: Compile all sources
         run: python -m compileall -q src
-      # The same targets `make check` runs, so the two cannot drift apart.
+      # Make targets, so a local run of either matches CI's.
       # On a pull request this tree is the branch merged into main, which is
       # where two migration heads from parallel branches first exist.
       - name: Migrations apply cleanly and match the models

@@ -259,7 +259,7 @@ obviously right and was not.
 - **xdist inside a CI shard.** The lanes' pytest step went 31/28/26 s to
   27/28/26 s with `-n auto` on a four-vCPU runner: four workers spend on a
   database create, a migration and an interpreter start about what they win
-  by overlapping. It earns its keep locally, where it runs the WHOLE suite:
+  by overlapping. It earns its keep where one process runs the WHOLE suite:
   about half the serial time (`make test-par`).
 - **`synchronous_commit = off` on the test database.** 139 tests took
   7.90 s and 8.06 s with it on, 9.39 s and 8.41 s with it off. The time is
