@@ -187,12 +187,23 @@ class Sort(BaseModel):
     dir: str
 
 
+class FacetValue(BaseModel):
+    value: str
+    count: int
+
+
 class Facets(BaseModel):
     """Counts under every OTHER filter the page has on. Taken before the ats
     clause joins the rest, because a board-wide "rippling 4" beside a lens
-    that holds none of them reads as a lie."""
+    that holds none of them reads as a lie. `place` and `company` likewise
+    leave out their own column conditions, so a pick never hides its siblings.
+
+    A `place` value is a pick the place column filter takes: "remote", or
+    "COUNTRY", "COUNTRY/REGION", "COUNTRY/REGION/CITY" (REGION may be empty)."""
 
     ats: list[AtsCount]
+    place: list[FacetValue] = []
+    company: list[FacetValue] = []
 
 
 class Board(BaseModel):
@@ -235,6 +246,63 @@ def _ats_counts(filter_sql: str, params: dict) -> list[AtsCount]:
         ),
         params,
     )
+
+
+def _place_counts(filter_sql: str, params: dict) -> list[FacetValue]:
+    """Rows per place on the board under `filter_sql`, at every level a
+    classified location names, and the remote rows, most first."""
+    board = visibility.FAST.format(columns="j.id, j.locations", extra=filter_sql)
+    rows = db.query(
+        f"""
+        WITH b AS ({board}),
+        p AS (
+            SELECT b.id, l.remote, pl->>'country' AS c, pl->>'region' AS r, pl->>'city' AS ci
+            FROM b, unnest(b.locations) loc
+            JOIN locations l ON l.text = btrim(loc)
+            LEFT JOIN LATERAL jsonb_array_elements(l.places) pl ON TRUE
+        )
+        SELECT c, r, ci, GROUPING(r, ci) AS level, COUNT(DISTINCT id) AS n
+        FROM p WHERE c IS NOT NULL GROUP BY GROUPING SETS ((c), (c, r), (c, r, ci))
+        UNION ALL
+        SELECT NULL, NULL, NULL, -1, COUNT(DISTINCT id) FROM p WHERE remote
+        """,
+        params,
+    )
+    out = []
+    for row in rows:
+        level, n = row["level"], row["n"]
+        if level == -1:
+            value = column_filters_.REMOTE if n else None
+        elif level == 3:
+            value = row["c"]
+        elif level == 1:
+            value = f"{row['c']}/{row['r']}" if row["r"] else None
+        else:
+            value = f"{row['c']}/{row['r'] or ''}/{row['ci']}" if row["ci"] else None
+        if value:
+            out.append(FacetValue(value=value, count=n))
+    return sorted(out, key=lambda f: (-f.count, f.value))
+
+
+def _company_counts(filter_sql: str, params: dict) -> list[FacetValue]:
+    return db.query_as(
+        FacetValue,
+        visibility.FAST.format(
+            columns="min(btrim(j.company)) AS value, COUNT(*) AS count",
+            extra=f"{filter_sql}\nAND btrim(j.company) <> ''\n"
+            "GROUP BY lower(btrim(j.company)) ORDER BY 2 DESC, 1",
+        ),
+        params,
+    )
+
+
+def _facets(
+    rules: list[column_filters_.ColumnFilter], other: list[str], params: dict
+) -> tuple[str, dict]:
+    """`other` and every column condition except those on the facet's field,
+    so the counts beside a pick are what adding a sibling would add."""
+    clauses, column_params = column_filters_.compile_rules(rules, catalog_only=False)
+    return "\n".join(clauses + other), {**params, **column_params}
 
 
 @router.get("/user/jobs/options")
@@ -323,7 +391,18 @@ def list_jobs(
         extra.append("AND j.source = ANY(%(sources)s)")
         params["sources"] = wanted_sources
     # Counted before the ats clause joins `extra`; see Facets (2026-09-07).
-    facets = Facets(ats=_ats_counts("\n".join(extra), params)) if with_facets else None
+    facets = None
+    if with_facets:
+        other = extra[len(column_clauses) :]
+
+        def without(field: str) -> tuple[str, dict]:
+            return _facets([r for r in column_rules if r.field != field], other, params)
+
+        facets = Facets(
+            ats=_ats_counts("\n".join(extra), params),
+            place=_place_counts(*without("place")),
+            company=_company_counts(*without("company")),
+        )
     if wanted_ats:
         extra.append(f"AND ({ATS_SQL}) = ANY(%(ats)s)")
         params["ats"] = wanted_ats

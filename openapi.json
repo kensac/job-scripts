@@ -37346,7 +37346,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 1000
+                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -39178,6 +39178,24 @@
         ],
         "title": "ExtensionConfig"
       },
+      "FacetValue": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "FacetValue"
+      },
       "Facets": {
         "properties": {
           "ats": {
@@ -39186,6 +39204,22 @@
             },
             "type": "array",
             "title": "Ats"
+          },
+          "place": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "type": "array",
+            "title": "Place",
+            "default": []
+          },
+          "company": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "type": "array",
+            "title": "Company",
+            "default": []
           }
         },
         "type": "object",
@@ -39193,7 +39227,7 @@
           "ats"
         ],
         "title": "Facets",
-        "description": "Counts under every OTHER filter the page has on. Taken before the ats\nclause joins the rest, because a board-wide \"rippling 4\" beside a lens\nthat holds none of them reads as a lie."
+        "description": "Counts under every OTHER filter the page has on. Taken before the ats\nclause joins the rest, because a board-wide \"rippling 4\" beside a lens\nthat holds none of them reads as a lie. `place` and `company` likewise\nleave out their own column conditions, so a pick never hides its siblings.\n\nA `place` value is a pick the place column filter takes: \"remote\", or\n\"COUNTRY\", \"COUNTRY/REGION\", \"COUNTRY/REGION/CITY\" (REGION may be empty)."
       },
       "FailedCheck": {
         "properties": {
@@ -39847,7 +39881,8 @@
               "text",
               "date",
               "number",
-              "boolean"
+              "boolean",
+              "place"
             ],
             "title": "Kind"
           },

@@ -101,6 +101,19 @@ values; negative text conditions do not include empty values. Private fields
 such as notes are scoped to the current user's joined row. The field mapping
 and parameterized compiler live in `api/board/column_filters.py`.
 
+A field whose values are a known set is picked, not typed. `any_of` and
+`none_of` take a JSON array in `value`: OR within the condition, AND across
+conditions, and `none_of` is the exclusion. Text fields compare them
+case-insensitively and whole. The `place` field matches the classified
+`locations` rows, never the raw text: a pick is `remote` or
+`COUNTRY[/REGION[/CITY]]` (REGION may be empty), and a country takes every
+region and city in it, by jsonb containment on `locations.places`. A location
+not yet classified matches no pick. Offer picks from the list's
+`facets.place` and `facets.company` (on `with_facets=true`), which count the
+board under every other condition except the field's own, so a selected pick
+never hides its siblings. Labels are the client's: country codes through
+`Intl.DisplayNames`.
+
 **A refusal is `{detail: {code, message, ...}}`, built by `api.problem.refuse`.**
 `code` is what a client branches on and stays stable; `message` is for a
 person and may be reworded. Extra keys (a `task_id`, the `in_flight` run) ride
