@@ -77,9 +77,10 @@ def test_a_slot_is_taken_once_per_gap_and_the_gap_learns():
     # An unpaced host that gets refused starts at the minimum gap, capped.
     hosts.refused("api.ashbyhq.com", "a")
     assert _budget("api.ashbyhq.com", "a")["pace_seconds"] == hosts.REFUSED_MIN_SECONDS
+    _config("host_pace_cap_seconds", 900)
     for _ in range(10):
         hosts.refused("api.ashbyhq.com", "a")
-    assert _budget("api.ashbyhq.com", "a")["pace_seconds"] == hosts.CAP_SECONDS
+    assert _budget("api.ashbyhq.com", "a")["pace_seconds"] == 900
 
 
 def test_the_claim_skips_a_throttled_host_and_a_task_that_is_not_due(f):
@@ -107,6 +108,26 @@ def test_the_claim_skips_a_throttled_host_and_a_task_that_is_not_due(f):
         "UPDATE tasks SET not_before = now() - interval '1 second' WHERE id = %s", (claimed["id"],)
     )
     assert worker._claim_task() is not None
+
+
+def test_a_deferred_pull_waits_behind_pulls_made_after_it(f):
+    """A refused pull is due again in seconds. Counted from its creation it was
+    the oldest again and took every slot the host opened."""
+    for name in ("old", "young"):
+        f.make_source(name)
+    refused = db.query_one(
+        "INSERT INTO tasks (kind, payload, status, created_at, not_before) "
+        "VALUES ('ingest_source', %s, 'pending', now() - interval '2 days', "
+        "now() - interval '1 second') RETURNING id",
+        (db.jsonb({"source": "old", "host": "myworkdayjobs.com"}),),
+    )["id"]
+    db.execute(
+        "INSERT INTO tasks (kind, payload, status, created_at) "
+        "VALUES ('ingest_source', %s, 'pending', now() - interval '1 day')",
+        (db.jsonb({"source": "young", "host": "myworkdayjobs.com"}),),
+    )
+    assert worker._claim_task()["payload"]["source"] == "young"
+    assert worker._claim_task()["id"] == refused
 
 
 @pytest.mark.asyncio
