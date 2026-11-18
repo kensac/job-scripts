@@ -72,8 +72,9 @@ there.
 
 **Eligible tasks are claimed by age, and a scheduled pull counts as one of
 its source's intervals younger.** The order is `api.worker_lifecycle.claims.CLAIM_ORDER`:
-`created_at`, plus `sources.ingest_interval_hours` when the payload names a
-host, then `id`. Only the scheduler's pulls name a host (it is what `api.hosts`
+`created_at` (or `not_before` when later, so a deferred task counts from
+when it is due again), plus `sources.ingest_interval_hours` when the payload
+names a host, then `id`. Only the scheduler's pulls name a host (it is what `api.hosts`
 paces on), and they are the one kind enqueued hundreds at a time; every other
 kind is at most one pending task per key. In plain id order a burst of pulls
 held everything enqueued after it: on 2026-10-10 a `poll_batches` waited 95

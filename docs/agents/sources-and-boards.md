@@ -251,7 +251,12 @@ host's own rate drains.
 
 A 429 doubles the gap and defers the pull (`Deferred`: back to pending with
 `not_before`, no attempt spent); a good pull narrows it toward the floor in
-`ingest_host_pace_seconds`. A response carrying `x-amzn-waf-action` is the
+`ingest_host_pace_seconds`. The gap never passes `host_pace_cap_seconds`
+(a day). A deferred pull is claimed by when it is due again, not by when it
+was made (`CLAIM_ORDER`), so a refused tenant goes behind the host's other
+pulls instead of taking every slot the host opens. A 429 is per host and
+address, but a host can refuse one tenant and serve the rest: on 2026-11-17
+Workday refused gdit and answered kohls from the same address. A response carrying `x-amzn-waf-action` is the
 same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
 Counted as a failure it would switch the board off.
 

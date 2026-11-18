@@ -59,10 +59,16 @@ EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
 # is claimed before any task created after T plus its interval. A source pull
 # a person asked for carries no host and is not shifted.
 #
+# A deferred task counts from when it is due again, not from when it was
+# made. A refused pull is deferred five seconds; counted from its creation it
+# was again the oldest, so every slot the host opened went to the same refused
+# tenant: from 2026-11-16 Workday's slot went to gdit about every 15 minutes
+# while 727 other Workday pulls waited, kohls among them answering 200.
+#
 # A scalar subquery, not a join, so FOR UPDATE locks only the task row and
 # never a sources row that admission locks.
 CLAIM_ORDER = """
-    created_at + CASE WHEN payload ? 'host' THEN COALESCE(
+    GREATEST(created_at, not_before) + CASE WHEN payload ? 'host' THEN COALESCE(
         (SELECT make_interval(hours => s.ingest_interval_hours) FROM sources s
           WHERE s.name = tasks.payload->>'source'), interval '0') ELSE interval '0' END,
     id"""

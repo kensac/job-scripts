@@ -115,6 +115,17 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "host and address from refusals (GET /admin/host-budgets); this is the "
         "floor it never goes under, not a ceiling.",
     ),
+    # Each refusal doubles a host's gap for that address, up to this. 900 s
+    # held every Workday address at one refused pull per 15 minutes from
+    # 2026-11-16 with no success between them; a host that refuses that far
+    # apart should be probed about daily, not four times an hour.
+    "host_pace_cap_seconds": ConfigKey(
+        section="Fetching",
+        default=86400,
+        value_type=PositiveInt,
+        help="Longest gap in seconds that refusals can push one address's pulls "
+        "from one host to. A refused host is retried at this interval at worst.",
+    ),
     # Which engine fetches a posting page after the ATS resolvers decline.
     # static_first tries a browserless fetch with a real Chrome fingerprint
     # and falls through to the browser unless the page plainly came back

@@ -22,10 +22,9 @@ EGRESS_GROUP = (
     or socket.gethostname()
 )
 
-# A refusal opens at least this gap, and no gap grows past the cap: a host
-# that refuses at 15 minutes apart is a host to drop, not to wait on.
+# A refusal opens at least this gap. No gap grows past host_pace_cap_seconds
+# in app_config.
 REFUSED_MIN_SECONDS = 30.0
-CAP_SECONDS = 900.0
 # How much of the gap a success gives back. 0.9 takes a 30 s gap to under
 # 5 s in twenty good pulls and never below the floor.
 DECAY = 0.9
@@ -73,7 +72,7 @@ def take(host: str, egress: str | None = None) -> datetime.datetime | None:
 
 def refused(host: str, egress: str | None = None) -> datetime.datetime:
     """The host said too many: double the gap (at least REFUSED_MIN, at most
-    CAP) and hold this address off until it has passed."""
+    host_pace_cap_seconds) and hold this address off until it has passed."""
     row = db.query_one(
         """
         UPDATE host_budget
@@ -84,7 +83,12 @@ def refused(host: str, egress: str | None = None) -> datetime.datetime:
          WHERE host = %(h)s AND egress_group = %(e)s
         RETURNING next_allowed_at
         """,
-        {"h": host, "e": egress or EGRESS_GROUP, "cap": CAP_SECONDS, "min": REFUSED_MIN_SECONDS},
+        {
+            "h": host,
+            "e": egress or EGRESS_GROUP,
+            "cap": float(db.get_config("host_pace_cap_seconds")),
+            "min": REFUSED_MIN_SECONDS,
+        },
     )
     if row:
         return row["next_allowed_at"]
