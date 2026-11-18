@@ -188,3 +188,115 @@ def test_private_column_predicates_cannot_read_another_users_notes(client, user_
         )
         assert response.status_code == 200
         assert response.json()["total"] == count
+
+
+def _board_job(f, company: str, locations: list[str]) -> int:
+    jid = f.make_job(company=company)
+    db.execute("UPDATE jobs SET locations=%s WHERE id=%s", (locations, jid))
+    db.execute(
+        "INSERT INTO user_jobs(user_id,job_id,status) VALUES (%s,%s,'saved')",
+        (user_id_for_subject("test-user"), jid),
+    )
+    return jid
+
+
+def _place(text: str, places: list[dict], remote: bool = False) -> None:
+    db.execute(
+        "INSERT INTO locations (text, country, remote, places) VALUES (%s,%s,%s,%s)",
+        (text, places[0]["country"] if places else None, remote, json.dumps(places)),
+    )
+
+
+@pytest.fixture
+def placed_board(f):
+    _place("San Francisco, CA", [{"country": "US", "region": "CA", "city": "San Francisco"}])
+    _place("NYC", [{"country": "US", "region": "NY", "city": "New York"}])
+    _place("London", [{"country": "GB", "region": None, "city": "London"}])
+    _place("Remote (Canada)", [{"country": "CA", "region": None, "city": None}], remote=True)
+    return {
+        "sf": _board_job(f, "Acme", ["San Francisco, CA"]),
+        "ny": _board_job(f, "acme ", ["NYC", "London"]),
+        "london": _board_job(f, "Globex", ["London"]),
+        "remote": _board_job(f, "Initech", ["Remote (Canada)"]),
+        "unclassified": _board_job(f, "Hooli", ["Somewhere new"]),
+    }
+
+
+def _ids(client, user_headers, rules) -> set[int]:
+    response = client.get(
+        "/v1/user/jobs", headers=user_headers, params={"column_filters": json.dumps(rules)}
+    )
+    assert response.status_code == 200, response.text
+    return {row["job_id"] for row in response.json()["rows"]}
+
+
+@pytest.mark.parametrize(
+    ("operator", "picks", "expected"),
+    [
+        # A country takes every region and city in it; picks OR together.
+        ("any_of", ["US"], {"sf", "ny"}),
+        ("any_of", ["US/CA", "remote"], {"sf", "remote"}),
+        ("any_of", ["GB//London"], {"ny", "london"}),
+        ("any_of", ["us/ny/New York"], {"ny"}),
+        # Excluded: any matching location hides the posting; a location not
+        # yet classified has nothing to match.
+        ("none_of", ["GB"], {"sf", "remote", "unclassified"}),
+    ],
+)
+def test_place_filter_matches_classified_places(
+    client, user_headers, placed_board, operator, picks, expected
+):
+    rules = [{"field": "place", "operator": operator, "value": json.dumps(picks)}]
+    assert _ids(client, user_headers, rules) == {placed_board[k] for k in expected}
+
+
+def test_place_and_company_conditions_combine_with_and(client, user_headers, placed_board):
+    rules = [
+        {"field": "place", "operator": "any_of", "value": json.dumps(["US", "GB"])},
+        {"field": "company", "operator": "any_of", "value": json.dumps(["ACME"])},
+    ]
+    assert _ids(client, user_headers, rules) == {placed_board["sf"], placed_board["ny"]}
+    rules[1]["operator"] = "none_of"
+    assert _ids(client, user_headers, rules) == {placed_board["london"]}
+
+
+def test_facets_count_places_and_companies_without_their_own_condition(
+    client, user_headers, placed_board
+):
+    rules = [{"field": "place", "operator": "any_of", "value": json.dumps(["US/CA"])}]
+    response = client.get(
+        "/v1/user/jobs",
+        headers=user_headers,
+        params={"column_filters": json.dumps(rules), "with_facets": "true"},
+    )
+    assert response.status_code == 200
+    facets = response.json()["facets"]
+    place = {item["value"]: item["count"] for item in facets["place"]}
+    # The place pick does not narrow its own facet.
+    assert place["US"] == 2
+    assert place["US/CA"] == 1
+    assert place["US/NY/New York"] == 1
+    assert place["GB"] == 2
+    assert place["GB//London"] == 2
+    assert place["remote"] == 1
+    assert "GB/" not in place
+    # It does narrow the company facet: only the SF row is left.
+    assert {item["value"]: item["count"] for item in facets["company"]} == {"Acme": 1}
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"field": "place", "operator": "any_of", "value": "US"},
+        {"field": "place", "operator": "any_of", "value": json.dumps([])},
+        {"field": "place", "operator": "any_of", "value": json.dumps(["Atlantis"])},
+        {"field": "place", "operator": "contains", "value": "US"},
+        {"field": "company", "operator": "any_of", "value": json.dumps([""])},
+    ],
+)
+def test_malformed_list_conditions_are_refused(client, user_headers, rule):
+    response = client.get(
+        "/v1/user/jobs", headers=user_headers, params={"column_filters": json.dumps([rule])}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "INVALID_COLUMN_FILTER"
