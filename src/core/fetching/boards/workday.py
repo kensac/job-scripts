@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse, urlunparse
 
 from core.fetching.boards.common import (
     PartialPull,
-    _post,
+    _post_stdlib,
     posting_from_listing,
 )
 from core.fetching.boards.dates import posted_ts
@@ -105,7 +105,7 @@ def _workday_slice(
     total: int | None = None
     available: list[dict] = []
     while True:
-        resp = _post(
+        resp = _post_stdlib(
             endpoint,
             json={
                 "appliedFacets": facets,

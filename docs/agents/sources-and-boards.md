@@ -260,6 +260,16 @@ Workday refused gdit and answered kohls from the same address. A response carryi
 same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
 Counted as a failure it would switch the board off.
 
+**Workday listing pulls go through the standard library, not the requests
+session** (`client.stdlib_session`, used by `_post_stdlib`). From
+2026-11-16 Workday's Cloudflare answered the session 429 from every fleet
+address while urllib from the same address got 200; on 2026-11-20 FHLBNY
+refused the session four times in four and served urllib four in four,
+alternated 15 seconds apart. It returns a `requests.Response`, so the
+refusal handling above reads it unchanged, and the pulls still wait on the
+`myworkdayjobs.com` floor in `ingest_host_pace_seconds` (5 seconds) and the
+host budget.
+
 **A pace is kept under one key, and `core.fetching.hosts.pace_key` is the
 only thing that computes it.** The `host_budget` row a pull takes, the
 `ingest_host_pace_seconds` entry, the page pace inside a pull

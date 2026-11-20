@@ -49,7 +49,7 @@ def test_workday_pages_until_the_first_pages_total_and_builds_the_public_url(mon
         # every later page says 0 (Boeing, 2026-10-05: 752, then 0, then 0).
         return _Resp({"total": 4 if json["offset"] == 0 else 0, "jobPostings": page})
 
-    monkeypatch.setattr(boards._session, "post", post)
+    monkeypatch.setattr(boards._stdlib_session, "post", post)
     out = boards.fetch_listings(
         "https://boeing.wd1.myworkdayjobs.com/wday/cxs/boeing/EXTERNAL_CAREERS/jobs?searchText=new+grad",
         "Boeing",
@@ -118,7 +118,7 @@ def test_a_workday_tenant_capped_at_the_window_is_read_in_facet_slices(monkeypat
             {"total": total if first else 0, "jobPostings": page, "facets": facets if first else []}
         )
 
-    monkeypatch.setattr(boards._session, "post", post)
+    monkeypatch.setattr(boards._stdlib_session, "post", post)
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings("https://ag.wd3.myworkdayjobs.com/wday/cxs/ag/Airbus/jobs", "Airbus")
     assert sorted(p.title for p in raised.value.postings) == ["a", "b", "c", "d", "e", "f"]
@@ -139,7 +139,7 @@ def test_a_workday_tenant_under_the_window_is_one_complete_pull(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(boards._session, "post", post)
+    monkeypatch.setattr(boards._stdlib_session, "post", post)
     out = boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
     assert [p.title for p in out] == ["t"]
 
@@ -163,19 +163,19 @@ def _paged(total, rows, wrap_at=None):
 def test_a_workday_tenant_stating_more_than_the_window_is_read_to_its_total(monkeypatch):
     """CVS and O'Reilly page straight past 2,000. Stopping there called the
     first 2,000 complete and retired every posting after them."""
-    monkeypatch.setattr(boards._session, "post", _paged(2100, 2100))
+    monkeypatch.setattr(boards._stdlib_session, "post", _paged(2100, 2100))
     out = boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
     assert len({p.url for p in out}) == 2100
 
 
 def test_a_workday_tenant_that_wraps_past_the_window_is_a_partial_pull(monkeypatch):
-    monkeypatch.setattr(boards._session, "post", _paged(2100, 2100, wrap_at=2000))
+    monkeypatch.setattr(boards._stdlib_session, "post", _paged(2100, 2100, wrap_at=2000))
     with pytest.raises(boards.PartialPull) as raised:
         boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
     assert len(raised.value.postings) == 2000
 
 
 def test_a_workday_tenant_that_ends_short_of_a_total_past_the_window_is_partial(monkeypatch):
-    monkeypatch.setattr(boards._session, "post", _paged(2100, 2050))
+    monkeypatch.setattr(boards._stdlib_session, "post", _paged(2100, 2050))
     with pytest.raises(boards.PartialPull):
         boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")

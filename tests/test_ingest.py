@@ -331,6 +331,11 @@ def test_a_partial_pull_admits_what_it_saw_and_retires_nothing(monkeypatch, f):
         "UPDATE sources SET company = 'Capped', listings_url = %s WHERE name = 'capped'",
         ("https://capped.wd5.myworkdayjobs.com/wday/cxs/capped/External/jobs",),
     )
+    # Three pulls back to back; the Workday floor would defer the second.
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('ingest_host_pace_seconds', '{}') "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+    )
     seen, missed = _posting("Propulsion Engineer I"), _posting("Structures Engineer I")
     pulls = [[seen, missed], boards.PartialPull([seen]), [seen]]
 
