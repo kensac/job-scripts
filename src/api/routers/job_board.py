@@ -187,9 +187,7 @@ class Sort(BaseModel):
     dir: str
 
 
-class FacetValue(BaseModel):
-    value: str
-    count: int
+FacetValue = column_filters_.FacetValue
 
 
 class Facets(BaseModel):
@@ -249,51 +247,14 @@ def _ats_counts(filter_sql: str, params: dict) -> list[AtsCount]:
 
 
 def _place_counts(filter_sql: str, params: dict) -> list[FacetValue]:
-    """Rows per place on the board under `filter_sql`, at every level a
-    classified location names, and the remote rows, most first."""
+    """Rows per place on the board under `filter_sql`."""
     board = visibility.FAST.format(columns="j.id, j.locations", extra=filter_sql)
-    rows = db.query(
-        f"""
-        WITH b AS ({board}),
-        p AS (
-            SELECT b.id, l.remote, pl->>'country' AS c, pl->>'region' AS r, pl->>'city' AS ci
-            FROM b, unnest(b.locations) loc
-            JOIN locations l ON l.text = btrim(loc)
-            LEFT JOIN LATERAL jsonb_array_elements(l.places) pl ON TRUE
-        )
-        SELECT c, r, ci, GROUPING(r, ci) AS level, COUNT(DISTINCT id) AS n
-        FROM p WHERE c IS NOT NULL GROUP BY GROUPING SETS ((c), (c, r), (c, r, ci))
-        UNION ALL
-        SELECT NULL, NULL, NULL, -1, COUNT(DISTINCT id) FROM p WHERE remote
-        """,
-        params,
-    )
-    out = []
-    for row in rows:
-        level, n = row["level"], row["n"]
-        if level == -1:
-            value = column_filters_.REMOTE if n else None
-        elif level == 3:
-            value = row["c"]
-        elif level == 1:
-            value = f"{row['c']}/{row['r']}" if row["r"] else None
-        else:
-            value = f"{row['c']}/{row['r'] or ''}/{row['ci']}" if row["ci"] else None
-        if value:
-            out.append(FacetValue(value=value, count=n))
-    return sorted(out, key=lambda f: (-f.count, f.value))
+    return column_filters_.place_counts(board, params)
 
 
 def _company_counts(filter_sql: str, params: dict) -> list[FacetValue]:
-    return db.query_as(
-        FacetValue,
-        visibility.FAST.format(
-            columns="min(btrim(j.company)) AS value, COUNT(*) AS count",
-            extra=f"{filter_sql}\nAND btrim(j.company) <> ''\n"
-            "GROUP BY lower(btrim(j.company)) ORDER BY 2 DESC, 1",
-        ),
-        params,
-    )
+    board = visibility.FAST.format(columns="j.company", extra=filter_sql)
+    return column_filters_.company_counts(board, params)
 
 
 def _facets(
