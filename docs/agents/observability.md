@@ -434,6 +434,11 @@ place in the pipeline, or the page and the pipeline disagree. One board's 30
 days ran 7 to 47 seconds on production (2026-11-20), so answers are served
 stale for `data_flow_cache_seconds`. The volume gate's skips are not counted
 apart: they read as not yet verified.
+A person's flow (`user_id`) is the same walk over the sources they follow,
+with their criteria, their enabled filter's title screen and verdict, and
+`board_visible`: the predicate api.board.visibility builds their board with,
+so a change to that predicate changes `USER_STAGE_SQL` with it. People are
+the product and come first on the page; the public boards come after.
 
 Distinguish submission rejection from per-request failure using the stored
 provider errors. Failure counts alone do not establish the cause. A submission
