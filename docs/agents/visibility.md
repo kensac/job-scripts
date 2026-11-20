@@ -283,6 +283,19 @@ associate partner titles with the levels. On production 2026-11-01, over
 the board's 61,624 available postings inside its criteria, it passed 889
 (v1 892), skipped none of the board's 49 keeps and 28 of its 619 rejects,
 and matched `skips_sql` on 2,082 titles.
+`finance_experienced_v1` gates both experienced finance boards (Finance
+Mid-Level and Finance Senior); which level a posting is stays the model's
+call. It keeps v2's role rules and turns its level rules around:
+internships, apprenticeships and named early-career programs go, and so do
+executive titles (chief, managing director, head of, managing, general or
+equity partner, president but not vice president). Vice president, director
+and manager are corporate titles and stay. Experienced consulting, tax and
+audit titles that name the discipline after the level ("Senior Consultant,
+Strategy", "Senior Tax Manager") are kept by their own rule. On production
+2026-11-20, over the 81,601 postings Finance New Grad's sources and criteria
+admit in 30 days, it passed 5,455 (about 180 a day) and matched `skips_sql`
+on 10,000 of them. Tech Mid-Level and Tech Senior run without a gate, as
+Tech New Grad does: about 12,900 candidates in 7 days, 330 a day.
 
 **A new board is not culled by another target's screens.** `title_screens`,
 the verification volume gate's `scopes` and every board's `title_gate` key on

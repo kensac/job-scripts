@@ -17,6 +17,7 @@ PINNED = {
     "levels_roles_occupations_v1": "d982585295f110b1",
     "finance_new_grad_v1": "a2ad2a46a1acf548",
     "finance_new_grad_v2": "e405e39cbd660fab",
+    "finance_experienced_v1": "1d57087eb89dd09e",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -66,6 +67,9 @@ TITLES = [
     "Asset & Wealth Management, Portfolio Manager, Analyst - New York",
     "Relationship Manager",
     "Quantitative Developer",
+    "Vice President, Portfolio Management",
+    "President, Wealth Management",
+    "Senior Tax Manager",
 ]
 SOURCES = ["other", "internships", None]
 
@@ -281,3 +285,31 @@ def test_finance_new_grad_keeps_early_career_finance_titles_only(title, skip):
 )
 def test_finance_new_grad_v2_adds_consulting_audit_and_tax(title, skip):
     assert screen("finance_new_grad_v2", title=title, source=None).skip is skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("Vice President, Portfolio Management", False),
+        ("Senior Financial Analyst", False),
+        ("Investment Banking Associate", False),
+        ("Director, FP&A", False),
+        ("Portfolio Manager III", False),
+        ("Quantitative Researcher", False),
+        ("Senior Consultant, Strategy", False),
+        ("Senior Tax Manager", False),
+        ("Managing Director, Leveraged Finance", True),
+        ("Chief Financial Officer", True),
+        ("President, Wealth Management", True),
+        ("Head of Tax", True),
+        ("Summer Analyst - Global Markets", True),
+        ("2027 Analyst Program - Investment Banking", True),
+        ("Senior Software Engineer, Trading", True),
+        ("Senior Consultant, IT Strategy", True),
+        ("SAP FICO Senior Consultant", True),
+        ("Relationship Banker", True),
+        ("", True),
+    ],
+)
+def test_finance_experienced_v1_keeps_experienced_finance_without_executives(title, skip):
+    assert screen("finance_experienced_v1", title=title, source=None).skip is skip
