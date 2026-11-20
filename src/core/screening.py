@@ -34,6 +34,7 @@ Recipe = Literal[
     "finance_new_grad_v2",
     "finance_experienced_v1",
     "finance_experienced_v2",
+    "finance_experienced_v3",
 ]
 BoardRecipe = Literal[
     "internship_v1",
@@ -43,6 +44,7 @@ BoardRecipe = Literal[
     "finance_new_grad_v2",
     "finance_experienced_v1",
     "finance_experienced_v2",
+    "finance_experienced_v3",
 ]
 
 
@@ -446,6 +448,41 @@ RECIPES["finance_experienced_v2"] = (
         _keep("core_finance_title", title=_CORE_FINANCE_V2),
         _skip("technology_consulting_title", title=_TECH_CONSULTING),
         _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _skip("non_finance_auditor_title", title=_NON_FINANCE_AUDITOR),
+        _keep("experienced_advisory_title", title=_EXPERIENCED_ADVISORY_V2),
+        _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
+    ),
+    Screen(True, "no_finance_title_signal"),
+)
+
+
+# finance_experienced_v2 let the model see wealth advisors and branch-side
+# relationship managers, which both experienced boards' prompts leave out
+# (financial advisors, personal and relationship bankers), and the model kept
+# some: on 2026-11-20 about 60 of Finance Senior's 928 postings and 13 of
+# Finance Mid's 631 were wealth, investment and trust advisors, business and
+# regional banking relationship managers, wealth relationship managers,
+# treasury sales officers and branch area managers. Commercial and corporate
+# banking relationship managers are kept by the core finance rule before this
+# one, and business banking credit analysts and underwriters do not match it.
+_WEALTH_AND_BRANCH = _words(
+    r"\b(?:wealth|investment|trust)\s+(?:\w+\s+)?advis(?:or|er)s?\b"
+    r"|\b(?:business|regional|consumer) banking\s+(?:\S+\s+){0,2}?(?:relationship manager"
+    r"|rel\.? mgr|rm|area manager|market executive)\b|\brm,? business banking\b"
+    r"|\b(?:wealth|private client) relationship manager|\btrust officer|\bprivate banking officer"
+    r"|\btreasury sales|\bwealth planner|\bfinancial planning specialist|\blawyer|\battorney"
+    r"|\barea manager\b"
+)
+RECIPES["finance_experienced_v3"] = (
+    (
+        _skip("internship_title_signal", title=_FINANCE_INTERNSHIP),
+        _skip("early_career_title_signal", title=_EARLY_CAREER_PROGRAM),
+        _skip("executive_title_signal", title=_FINANCE_EXECUTIVE),
+        _skip("technical_title", title=_NON_QUANT_TECHNICAL),
+        _keep("core_finance_title", title=_CORE_FINANCE_V2),
+        _skip("technology_consulting_title", title=_TECH_CONSULTING),
+        _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _skip("wealth_or_branch_title", title=_WEALTH_AND_BRANCH),
         _skip("non_finance_auditor_title", title=_NON_FINANCE_AUDITOR),
         _keep("experienced_advisory_title", title=_EXPERIENCED_ADVISORY_V2),
         _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
