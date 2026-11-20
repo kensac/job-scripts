@@ -418,7 +418,6 @@ RECIPES["finance_experienced_v1"] = (
 )
 
 
-
 # finance_experienced_v1 read "audit" only as a whole word, so auditor titles
 # ("Senior Internal Auditor", "Staff Auditor") fell to no signal, and it read
 # tax and audit levels as senior, manager or director only, so "Assurance
