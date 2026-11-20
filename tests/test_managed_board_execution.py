@@ -96,9 +96,9 @@ def test_a_board_on_an_anthropic_model_is_admitted_with_the_transport_effort(
 
     response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
     assert response.status_code == 200, response.text
-    payload = db.query_one("SELECT payload FROM tasks WHERE id = %s", (response.json()["task_id"],))[
-        "payload"
-    ]
+    payload = db.query_one(
+        "SELECT payload FROM tasks WHERE id = %s", (response.json()["task_id"],)
+    )["payload"]
     assert payload["requested_model"] == "claude-haiku-5-5"
     assert payload["reasoning_effort"] == "medium"
 
