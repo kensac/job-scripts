@@ -23336,11 +23336,6 @@
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                24,
-                168,
-                720
-              ],
               "type": "integer",
               "default": 168,
               "title": "Hours"

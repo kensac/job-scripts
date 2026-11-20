@@ -19,8 +19,6 @@ being the cost, so answers are served stale (`data_flow_cache_seconds`).
 
 from __future__ import annotations
 
-from typing import Literal
-
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
@@ -36,7 +34,10 @@ from core.screening import Recipe
 
 router = APIRouter()
 
-Window = Literal[24, 168, 720]
+# The page's window menu. A Literal[24, 168, 720] query parameter refused
+# every request: the query string arrives as "168", and a Literal of ints
+# does not take a string.
+WINDOWS = (24, 168, 720)
 SAMPLES = 6
 
 # Every stage a posting can stop at, in pipeline order, with what it means.
@@ -304,7 +305,7 @@ _flows: StaleByKey[tuple, DataFlow] = StaleByKey(
 
 @router.get("/data-flow")
 def data_flow(
-    hours: Window = 168,
+    hours: int = 168,
     board_id: int | None = Query(None),
     user: AuthedUser = Depends(require_admin),
 ) -> DataFlow:
@@ -312,6 +313,8 @@ def data_flow(
 
     A board's stages count the postings its sources brought in during the
     window, each at the first gate it stops at."""
+    if hours not in WINDOWS:
+        raise refuse(422, "INVALID_WINDOW", f"hours must be one of {WINDOWS}")
     if board_id is not None and not db.query_one(
         "SELECT 1 FROM managed_boards WHERE id = %s", (board_id,)
     ):
