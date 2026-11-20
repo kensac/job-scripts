@@ -75,6 +75,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # scans of ai_queries per call when measured (one scan since 2026-10-04),
     # a quarter of all server time on the box for lifetime totals that move
     # once an hour. 1 is as good as off.
+    # The data-flow page re-runs every gate over a window's postings: 7 to 47
+    # seconds a board on production (2026-11-20). Fifteen minutes keeps a
+    # watched page from re-running it back to back.
+    "data_flow_cache_seconds": ConfigKey(
+        section="Health",
+        default=900,
+        value_type=PositiveInt,
+        help="Seconds GET /admin/data-flow serves the same counts before recounting in the background.",
+    ),
     "admin_stats_cache_seconds": ConfigKey(
         section="Health",
         default=60,

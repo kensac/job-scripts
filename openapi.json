@@ -23325,6 +23325,168 @@
         }
       }
     },
+    "/v1/admin/data-flow": {
+      "get": {
+        "summary": "Data Flow",
+        "description": "Sources to pulls to postings, and one board's gates, over the window.\n\nA board's stages count the postings its sources brought in during the\nwindow, each at the first gate it stops at.",
+        "operationId": "data_flow_v1_admin_data_flow_get",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                24,
+                168,
+                720
+              ],
+              "type": "integer",
+              "default": 168,
+              "title": "Hours"
+            }
+          },
+          {
+            "name": "board_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Board Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataFlow"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/sources": {
       "get": {
         "summary": "Admin List Sources",
@@ -35267,6 +35429,71 @@
         "title": "BoardDrill",
         "description": "Where the frontend goes to see the rows behind a number, built on the\nserver so the filter that produced an aggregate and the filter that\nfetches its members cannot drift apart.\n\n`checked_jobs` is deliberately the funnel denominator and not the posting\ncount: /v1/admin/jobs aggregates ai_queries and only knows postings that\nhave a verdict."
       },
+      "BoardFlow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "title_gate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Gate"
+          },
+          "title_screen": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Screen"
+          },
+          "sources": {
+            "type": "integer",
+            "title": "Sources"
+          },
+          "entered": {
+            "type": "integer",
+            "title": "Entered"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageCount"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "model",
+          "title_gate",
+          "title_screen",
+          "sources",
+          "entered",
+          "stages"
+        ],
+        "title": "BoardFlow"
+      },
       "BoardFreshness": {
         "properties": {
           "with_date_posted": {
@@ -35939,6 +36166,34 @@
         ],
         "title": "BoardStatusCount",
         "description": "`status` is 'not_applied' where the row has none, so every board row is\ncounted under some heading."
+      },
+      "BoardSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "published": {
+            "type": "boolean",
+            "title": "Published"
+          },
+          "listed": {
+            "type": "integer",
+            "title": "Listed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "published",
+          "listed"
+        ],
+        "title": "BoardSummary"
       },
       "BoardYield": {
         "properties": {
@@ -38412,6 +38667,42 @@
         "title": "CustomCheckStage",
         "description": "Custom filters are per user and one posting can be judged by several,\nso there are two honest denominators and both are here. `checked` and\n`pass_rate` are job-level - a posting passed every filter it was put in\nfront of - and `evaluations` counts the judgements behind them."
       },
+      "DataFlow": {
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "title": "Hours"
+          },
+          "intake": {
+            "$ref": "#/components/schemas/Intake"
+          },
+          "boards": {
+            "items": {
+              "$ref": "#/components/schemas/BoardSummary"
+            },
+            "type": "array",
+            "title": "Boards"
+          },
+          "board": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoardFlow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "hours",
+          "intake",
+          "boards",
+          "board"
+        ],
+        "title": "DataFlow"
+      },
       "DataHealth": {
         "properties": {
           "suppressed": {
@@ -38874,6 +39165,39 @@
           "school"
         ],
         "title": "Education"
+      },
+      "EgressBudget": {
+        "properties": {
+          "egress_group": {
+            "type": "string",
+            "title": "Egress Group"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "ok": {
+            "type": "integer",
+            "title": "Ok"
+          },
+          "refused": {
+            "type": "integer",
+            "title": "Refused"
+          },
+          "pace_seconds": {
+            "type": "number",
+            "title": "Pace Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "egress_group",
+          "host",
+          "ok",
+          "refused",
+          "pace_seconds"
+        ],
+        "title": "EgressBudget"
       },
       "Evidence": {
         "properties": {
@@ -41773,6 +42097,72 @@
         ],
         "title": "Ingesting",
         "description": "The pull queued or running for a board, so the page can disable its\nbutton from server state rather than guessing."
+      },
+      "Intake": {
+        "properties": {
+          "sources_on": {
+            "type": "integer",
+            "title": "Sources On"
+          },
+          "sources_off": {
+            "type": "integer",
+            "title": "Sources Off"
+          },
+          "pulls_done": {
+            "type": "integer",
+            "title": "Pulls Done"
+          },
+          "pulls_failed": {
+            "type": "integer",
+            "title": "Pulls Failed"
+          },
+          "pulls_deferred_now": {
+            "type": "integer",
+            "title": "Pulls Deferred Now"
+          },
+          "listings_fetched": {
+            "type": "integer",
+            "title": "Listings Fetched"
+          },
+          "listings_admitted": {
+            "type": "integer",
+            "title": "Listings Admitted"
+          },
+          "listings_title_pattern_matched": {
+            "type": "integer",
+            "title": "Listings Title Pattern Matched"
+          },
+          "new_postings": {
+            "type": "integer",
+            "title": "New Postings"
+          },
+          "retired": {
+            "type": "integer",
+            "title": "Retired"
+          },
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/EgressBudget"
+            },
+            "type": "array",
+            "title": "Budgets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources_on",
+          "sources_off",
+          "pulls_done",
+          "pulls_failed",
+          "pulls_deferred_now",
+          "listings_fetched",
+          "listings_admitted",
+          "listings_title_pattern_matched",
+          "new_postings",
+          "retired",
+          "budgets"
+        ],
+        "title": "Intake"
       },
       "Invite": {
         "properties": {
@@ -53367,6 +53757,45 @@
         "title": "RunningTask",
         "description": "A task a worker holds right now. `source` is lifted out of the payload\nbecause an ingest is most of the queue and the board is what identifies\nit; every other kind has none."
       },
+      "Sample": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "title",
+          "company",
+          "source"
+        ],
+        "title": "Sample"
+      },
       "SavedAnswerPut": {
         "properties": {
           "value": {
@@ -55089,6 +55518,42 @@
         ],
         "title": "SpendWindow",
         "description": "What the figures cover: the requested window, and the first and last\ncall actually inside it."
+      },
+      "StageCount": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/Sample"
+            },
+            "type": "array",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "kind",
+          "label",
+          "count",
+          "samples"
+        ],
+        "title": "StageCount"
       },
       "Stats": {
         "properties": {

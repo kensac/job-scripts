@@ -21,6 +21,7 @@ from api.routers.admin import (
     catalog,
     checks,
     config,
+    data_flow,
     filters,
     fleet,
     health,
@@ -47,5 +48,6 @@ router.include_router(managed_boards.router)
 router.include_router(config.router)
 router.include_router(queries.router)
 router.include_router(review_gates.router)
+router.include_router(data_flow.router)
 
 __all__ = ["require_admin", "router"]

@@ -416,6 +416,19 @@ SELECT, and the posting path and the admin funnel run it again when read. The
 stored alternative, one decision row per task and posting with an outcome row
 per paid verdict, reached 9.76M rows by 2026-10-10, 93.6% repeats.
 
+**The data-flow page counts the gates by running them again.**
+`GET /admin/data-flow` (api/routers/admin/data_flow.py) is posting_path
+aggregated: one CASE built from the pipeline's own predicates (board criteria
+`CONDITIONS`, `screening.skips_sql`, the latest closed, clearance and board
+verdicts, `managed_board_jobs`) puts each posting a board's sources brought in
+during the window at the first gate it stops at. The order is the pipeline's,
+title gate and screen before the closed and clearance checks, because a gated
+posting is never verified; a new gate goes into `STAGES` and the CASE at its
+place in the pipeline, or the page and the pipeline disagree. One board's 30
+days ran 7 to 47 seconds on production (2026-11-20), so answers are served
+stale for `data_flow_cache_seconds`. The volume gate's skips are not counted
+apart: they read as not yet verified.
+
 Distinguish submission rejection from per-request failure using the stored
 provider errors. Failure counts alone do not establish the cause. A submission
 the provider refuses outright has no batch id to store an error under, so
