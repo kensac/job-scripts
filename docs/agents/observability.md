@@ -238,6 +238,10 @@ one shape. Its rules:
 - Effort is checked against the model's declared set before anything is
   sent, and a request the transport cannot express fails the whole
   submission rather than one wave.
+- A managed board may name an Anthropic model as its `requested_model`, and
+  its runs submit through this transport. A model that declares no default
+  effort runs at medium, the transport's own default (`filter_effort`),
+  which admission writes into the run's snapshot.
 - The vendor's states map to the poller's: `ended` is `completed`,
   `canceling` is `cancelling`, anything else is `in_progress`. Its errored,
   canceled and expired requests count as failed, and none of them is billed.
