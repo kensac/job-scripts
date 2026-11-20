@@ -9,6 +9,7 @@ serving 12 in one hour.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -210,3 +211,44 @@ async def test_a_submission_the_provider_refuses_fails_with_its_reason(monkeypat
     monkeypatch.setattr(batch, "_submit_chunk", refuse)
     with pytest.raises(RuntimeError, match=r"accepted by the provider: .*Billing hard limit"):
         await batch.submit_batches([batch.BatchSpec("one", "text")], "gpt-6-luna", "low", 256)
+
+
+LONG_URL = "https://globalhr.wd5.myworkdayjobs.com/REC_RTX_Ext_Gateway/job/" + "x" * 500
+
+
+def _answer_line(custom_id: str) -> str:
+    body = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}]}
+    return json.dumps(
+        {"custom_id": custom_id, "error": None, "response": {"status_code": 200, "body": body}}
+    )
+
+
+def test_an_id_over_openais_limit_goes_under_a_hash():
+    line = batch._build_line(batch.BatchSpec(LONG_URL), "m", "low", 10)
+    assert line["custom_id"].startswith("h-") and len(line["custom_id"]) <= 512
+    assert batch._build_line(batch.BatchSpec("u1"), "m", "low", 10)["custom_id"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_a_hashed_line_answers_the_request_it_was_sent_for():
+    wire = batch._build_line(batch.BatchSpec(LONG_URL), "m", "low", 10)["custom_id"]
+    fake = SimpleNamespace(
+        id="b-long", status="completed", output_file_id="o1", error_file_id=None, errors=None
+    )
+    results = {LONG_URL: batch.BatchResult(LONG_URL)}
+    await batch._collect_batch(_Client(_answer_line(wire)), fake, results)  # type: ignore[arg-type]
+    assert list(results) == [LONG_URL] and results[LONG_URL].text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a_later_collection_maps_a_hashed_line_through_the_frozen_requests(monkeypatch):
+    from core import store
+
+    wire = batch._build_line(batch.BatchSpec(LONG_URL), "m", "low", 10)["custom_id"]
+    monkeypatch.setattr(store, "submitted_custom_ids", lambda batch_id: ["u1", LONG_URL])
+    fake = SimpleNamespace(
+        id="b-later", status="completed", output_file_id="o1", error_file_id=None, errors=None
+    )
+    results: dict = {}
+    await batch._collect_batch(_Client(_answer_line(wire)), fake, results, create_missing=True)  # type: ignore[arg-type]
+    assert list(results) == [LONG_URL] and results[LONG_URL].text == "ok"

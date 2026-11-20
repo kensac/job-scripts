@@ -10,7 +10,7 @@ lazy from openai import AsyncOpenAI
 lazy from openai.types import Batch
 
 from core import store
-from core.batch.specs import BATCH_ENDPOINT, BatchResult
+from core.batch.specs import BATCH_ENDPOINT, BatchResult, wire_id
 
 logger = logging.getLogger(__name__)
 
@@ -104,17 +104,35 @@ def _read_response(result: BatchResult, body: dict) -> None:
         result.error = "no output text"
 
 
+def _originals(results: dict[str, BatchResult], batch_id: str):
+    """Maps the id a line names back to the id it was submitted for. Only a
+    hashed id (specs.wire_id) differs; the first one read loads the
+    submitting task's frozen ids when the caller passed none."""
+    known = {wire_id(custom_id): custom_id for custom_id in results}
+    loaded = False
+
+    def original(custom_id: str | None) -> str | None:
+        nonlocal loaded
+        if custom_id and custom_id.startswith("h-") and custom_id not in known and not loaded:
+            loaded = True
+            known.update({wire_id(c): c for c in store.submitted_custom_ids(batch_id)})
+        return known.get(custom_id, custom_id) if custom_id else custom_id
+
+    return original
+
+
 async def _collect_batch(
     client: AsyncOpenAI,
     batch: Batch,
     results: dict[str, BatchResult],
     create_missing: bool = False,
 ) -> dict[str, BatchResult]:
+    original = _originals(results, batch.id)
     if batch.output_file_id:
         embeddings = getattr(batch, "endpoint", BATCH_ENDPOINT) == "/v1/embeddings"
         content = await client.files.content(batch.output_file_id)
         for obj in _jsonl(content.text):
-            result = _result_for(results, obj.get("custom_id"), create_missing)
+            result = _result_for(results, original(obj.get("custom_id")), create_missing)
             if result is None:
                 continue
             resp = obj.get("response")
@@ -129,7 +147,7 @@ async def _collect_batch(
         try:
             err_content = await client.files.content(batch.error_file_id)
             for obj in _jsonl(err_content.text):
-                result = _result_for(results, obj.get("custom_id"), create_missing)
+                result = _result_for(results, original(obj.get("custom_id")), create_missing)
                 if result is not None and _unanswered(result):
                     result.error = _line_error(obj) or "batch error"
         except Exception as exc:

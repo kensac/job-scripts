@@ -218,6 +218,12 @@ A terminal batch may be collected without waiting for unrelated unfinished
 batches. The event hook reports progress and estimates; it does not book
 model cost.
 
+OpenAI refuses a `custom_id` over 512 characters, and a few Workday posting
+urls are longer (three live ones ran 544 to 997 on 2026-11-20). Such an id is
+sent as a digest (`core.batch.specs.wire_id`), and collection maps it back
+through the request it answers or, when collecting later, the submitting
+task's `batch_requests` rows.
+
 **Two vendors' batches run here: OpenAI and Anthropic.** `core.batch` picks
 the transport from the model's provider at submission, and from the batch id
 afterwards: an Anthropic id starts `msgbatch_`, so status and collection need

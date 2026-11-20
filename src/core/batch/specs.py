@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -16,6 +17,17 @@ BATCH_ENDPOINT: BatchEndpoint = "/v1/responses"
 BATCH_MAX_REQUESTS = 50_000
 BATCH_TOKEN_BUDGET = 1_800_000
 BATCH_CHARS_PER_TOKEN = 4
+# OpenAI refuses a custom_id longer than this, and a posting url can be: three
+# live Workday urls ran 544 to 997 characters on 2026-11-20. Such an id goes
+# under a hash and collection maps it back (core.batch.collection), as the
+# Anthropic transport does under its own rule.
+MAX_CUSTOM_ID = 512
+
+
+def wire_id(custom_id: str) -> str:
+    if len(custom_id) <= MAX_CUSTOM_ID:
+        return custom_id
+    return "h-" + hashlib.sha256(custom_id.encode()).hexdigest()[:40]
 
 
 @dataclass
@@ -122,7 +134,7 @@ def cached_prompt(
 def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_tokens: int) -> dict:
     if spec.endpoint == "/v1/embeddings":
         return {
-            "custom_id": spec.custom_id,
+            "custom_id": wire_id(spec.custom_id),
             "method": "POST",
             "url": spec.endpoint,
             "body": {
@@ -140,7 +152,7 @@ def _build_line(spec: BatchSpec, model: str, reasoning_effort: str, max_output_t
         (spec.context or {}).get("prompt_cache_policy"),
     )
     return {
-        "custom_id": spec.custom_id,
+        "custom_id": wire_id(spec.custom_id),
         "method": "POST",
         "url": spec.endpoint,
         "body": {
