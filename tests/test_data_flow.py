@@ -67,3 +67,12 @@ def test_a_board_counts_each_posting_at_the_first_gate_it_stops_at(f):
     assert why["restricted"] == "clearance said rejected"
     assert why["rejected"] == "custom said rejected"
     assert flow.entered == 7
+
+
+def test_the_window_arrives_as_a_query_string(client, admin_headers):
+    # A Literal[24, 168, 720] parameter refused "168" from the query string,
+    # so the page could never load.
+    ok = client.get("/v1/admin/data-flow?hours=168", headers=admin_headers)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["hours"] == 168
+    assert client.get("/v1/admin/data-flow?hours=5", headers=admin_headers).status_code == 422
