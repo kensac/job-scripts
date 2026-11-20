@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 
 import pytest
 
@@ -345,3 +346,46 @@ def test_public_job_detail_is_projection_scoped_and_exposes_cached_content(clien
     assert missing.status_code == 404
     for private_field in ("status", "date_applied", "notes", "recruiter", "documents", "hidden"):
         assert private_field not in detail.text
+
+
+def test_public_place_and_company_picks_filter_and_count(client):
+    board = _published_board()
+    now = datetime.datetime.now(datetime.UTC)
+    ids = [_job(board, i, now - datetime.timedelta(minutes=i)) for i in range(1, 4)]
+    for text, places, remote in [
+        ("San Francisco, CA", [{"country": "US", "region": "CA", "city": "San Francisco"}], False),
+        ("London", [{"country": "GB", "region": None, "city": "London"}], False),
+        ("Remote", [], True),
+    ]:
+        db.execute(
+            "INSERT INTO locations (text, remote, places) VALUES (%s, %s, %s)",
+            (text, remote, json.dumps(places)),
+        )
+    for job_id, loc in zip(ids, ["San Francisco, CA", "London", "Remote"], strict=True):
+        db.execute("UPDATE jobs SET locations=ARRAY[%s] WHERE id=%s", (loc, job_id))
+
+    def shown(**params):
+        body = client.get("/v1/public/job-lists/engineering", params=params).json()
+        return [j["job_id"] for j in body["jobs"]], body
+
+    assert shown(place="US")[0] == [ids[0]]
+    assert shown(place=["US", "remote"])[0] == [ids[0], ids[2]]
+    assert shown(not_place="GB")[0] == [ids[0], ids[2]]
+    assert shown(company="company 2")[0] == [ids[1]]
+    assert shown(not_company=["Company 1", "Company 3"])[0] == [ids[1]]
+    picked, body = shown(place="US", with_facets="true")
+    assert picked == [ids[0]]
+    facets = body["facets"]
+    # The place pick does not narrow its own counts; it narrows the others.
+    assert {f["value"]: f["count"] for f in facets["place"]} == {
+        "US": 1,
+        "US/CA": 1,
+        "US/CA/San Francisco": 1,
+        "GB": 1,
+        "GB//London": 1,
+        "remote": 1,
+    }
+    assert facets["company"] == [{"value": "Company 1", "count": 1}]
+    assert facets["terms"] == [{"value": "full-time", "count": 1}]
+    assert shown()[1]["facets"] is None
+    assert client.get("/v1/public/job-lists/engineering?place=nowhere").status_code == 422

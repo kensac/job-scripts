@@ -14,6 +14,7 @@ from fastapi import APIRouter, Header, Query, Response
 from pydantic import BaseModel
 
 from api import db
+from api.board import column_filters as column_filters_
 from api.board.ats import ATS_SQL, AtsName
 from api.params import csv
 from api.problem import refuse
@@ -63,6 +64,15 @@ class PublicJobCard(BaseModel):
     url: str
 
 
+class PublicFacets(BaseModel):
+    """Counts on the list under every other filter the viewer has on, so a
+    pick never hides its siblings. A place value is a pick `place` takes."""
+
+    place: list[column_filters_.FacetValue]
+    company: list[column_filters_.FacetValue]
+    terms: list[column_filters_.FacetValue]
+
+
 class PublicJobList(BaseModel):
     slug: str
     name: str
@@ -73,6 +83,7 @@ class PublicJobList(BaseModel):
     jobs: list[PublicJobCard]
     next_cursor: str | None
     has_more: bool
+    facets: PublicFacets | None = None
 
 
 class PublicJobDetail(BaseModel):
@@ -350,9 +361,33 @@ def get_public_job_list(
     comp_currency: str | None = Query(default=None, pattern="^[A-Z]{3}$"),
     comp_period: PayPeriodParam | None = None,
     hide_restricted: bool = False,
+    place: list[str] = Query(default=[], max_length=50),
+    not_place: list[str] = Query(default=[], max_length=50),
+    company: list[str] = Query(default=[], max_length=50),
+    not_company: list[str] = Query(default=[], max_length=50),
+    with_facets: bool = False,
     if_none_match: str | None = Header(default=None),
 ) -> PublicJobList | Response:
     wanted_terms = csv(terms)
+    # Picks from the counted menus, the same conditions the tracker's place
+    # and company filters compile (api.board.column_filters).
+    picks = [
+        column_filters_.ColumnFilter(field=field, operator=operator, value=json.dumps(values))
+        for field, operator, values in (
+            ("place", "any_of", place),
+            ("place", "none_of", not_place),
+            ("company", "any_of", company),
+            ("company", "none_of", not_company),
+        )
+        if values
+    ]
+
+    def compiled(rules: list[column_filters_.ColumnFilter]) -> tuple[list[str], dict]:
+        try:
+            return column_filters_.compile_rules(rules, catalog_only=True)
+        except ValueError as error:
+            raise refuse(422, "INVALID_FILTER", str(error)) from error
+
     if min_comp is not None and (comp_currency is None or comp_period is None):
         raise refuse(
             422, "COMP_UNITS_REQUIRED", "a compensation minimum requires currency and period"
@@ -369,6 +404,10 @@ def get_public_job_list(
         comp_period=comp_period,
         hide_restricted=hide_restricted,
     )
+    pick_clauses, pick_params = compiled(picks)
+    viewer = list(filters)
+    filters += pick_clauses
+    params.update(pick_params)
     params["fetch_limit"] = limit + 1
     selection = " ".join(filters)
     if cursor:
@@ -401,6 +440,29 @@ def get_public_job_list(
         )
         matched_count = count["n"] if count else 0
         rows = db.query_as(_JobRow, jobs_sql, params)
+        facets = None
+        if with_facets:
+
+            def scope(field: str, columns: str) -> tuple[str, dict]:
+                clauses, extra = compiled([r for r in picks if r.field != field])
+                return (
+                    f"SELECT {columns} FROM managed_board_jobs mj JOIN jobs j ON j.id=mj.job_id "
+                    "LEFT JOIN job_comp pay ON pay.url = j.url "
+                    f"WHERE mj.managed_board_id = %(board_id)s {' '.join(viewer + clauses)}",
+                    {**params, **extra},
+                )
+
+            terms_sql, terms_params = scope("terms", "j.terms")
+            facets = PublicFacets(
+                place=column_filters_.place_counts(*scope("place", "j.id, j.locations")),
+                company=column_filters_.company_counts(*scope("company", "j.company")),
+                terms=db.query_as(
+                    column_filters_.FacetValue,
+                    f"SELECT t AS value, COUNT(*) AS count FROM ({terms_sql}) b, unnest(b.terms) t "
+                    "GROUP BY t ORDER BY 2 DESC, 1",
+                    terms_params,
+                ),
+            )
     page = rows[:limit]
     has_more = len(rows) > limit
     next_cursor = (
@@ -428,6 +490,8 @@ def get_public_job_list(
             str(matched_count),
             "\0".join(wanted_terms),
             next_cursor or "",
+            *(rule.model_dump_json() for rule in picks),
+            facets.model_dump_json() if facets else "",
             *(card.model_dump_json() for card in cards),
         ]
     )
@@ -444,6 +508,7 @@ def get_public_job_list(
         jobs=cards,
         next_cursor=next_cursor,
         has_more=has_more,
+        facets=facets,
     )
 
 

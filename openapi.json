@@ -1324,6 +1324,72 @@
             }
           },
           {
+            "name": "place",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "default": [],
+              "title": "Place"
+            }
+          },
+          {
+            "name": "not_place",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "default": [],
+              "title": "Not Place"
+            }
+          },
+          {
+            "name": "company",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "default": [],
+              "title": "Company"
+            }
+          },
+          {
+            "name": "not_company",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "default": [],
+              "title": "Not Company"
+            }
+          },
+          {
+            "name": "with_facets",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "With Facets"
+            }
+          },
+          {
             "name": "if-none-match",
             "in": "header",
             "required": false,
@@ -49293,6 +49359,39 @@
         ],
         "title": "PublicCompensation"
       },
+      "PublicFacets": {
+        "properties": {
+          "place": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "type": "array",
+            "title": "Place"
+          },
+          "company": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "type": "array",
+            "title": "Company"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/FacetValue"
+            },
+            "type": "array",
+            "title": "Terms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "place",
+          "company",
+          "terms"
+        ],
+        "title": "PublicFacets",
+        "description": "Counts on the list under every other filter the viewer has on, so a\npick never hides its siblings. A place value is a pick `place` takes."
+      },
       "PublicJobCard": {
         "properties": {
           "job_id": {
@@ -49511,6 +49610,16 @@
           "has_more": {
             "type": "boolean",
             "title": "Has More"
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicFacets"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

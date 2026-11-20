@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api import db
 from api.mail import applications
 from api.problem import refuse
 from core import catalog
@@ -22,6 +23,11 @@ class ColumnFilter(BaseModel):
 
 
 FilterKind = Literal["text", "date", "number", "boolean", "place"]
+
+
+class FacetValue(BaseModel):
+    value: str
+    count: int
 
 
 class FilterField(BaseModel):
@@ -236,3 +242,49 @@ def compile_rules(rules: list[ColumnFilter], catalog_only: bool) -> tuple[list[s
             clauses.append(f"AND {expression} {op} %({name})s")
         params[name] = value
     return clauses, params
+
+
+def place_counts(board_sql: str, params: dict) -> list[FacetValue]:
+    """Rows of `board_sql` (selecting `id, locations`) per place, at every
+    level a classified location names, and the remote rows, most first. A
+    value is a pick the place filter takes."""
+    rows = db.query(
+        f"""
+        WITH b AS ({board_sql}),
+        p AS (
+            SELECT b.id, l.remote, pl->>'country' AS c, pl->>'region' AS r, pl->>'city' AS ci
+            FROM b, unnest(b.locations) loc
+            JOIN locations l ON l.text = btrim(loc)
+            LEFT JOIN LATERAL jsonb_array_elements(l.places) pl ON TRUE
+        )
+        SELECT c, r, ci, GROUPING(r, ci) AS level, COUNT(DISTINCT id) AS n
+        FROM p WHERE c IS NOT NULL GROUP BY GROUPING SETS ((c), (c, r), (c, r, ci))
+        UNION ALL
+        SELECT NULL, NULL, NULL, -1, COUNT(DISTINCT id) FROM p WHERE remote
+        """,
+        params,
+    )
+    out = []
+    for row in rows:
+        level, n = row["level"], row["n"]
+        if level == -1:
+            value = REMOTE if n else None
+        elif level == 3:
+            value = row["c"]
+        elif level == 1:
+            value = f"{row['c']}/{row['r']}" if row["r"] else None
+        else:
+            value = f"{row['c']}/{row['r'] or ''}/{row['ci']}" if row["ci"] else None
+        if value:
+            out.append(FacetValue(value=value, count=n))
+    return sorted(out, key=lambda f: (-f.count, f.value))
+
+
+def company_counts(board_sql: str, params: dict) -> list[FacetValue]:
+    """Rows of `board_sql` (selecting `company`) per company, most first."""
+    return db.query_as(
+        FacetValue,
+        f"""SELECT min(btrim(b.company)) AS value, COUNT(*) AS count FROM ({board_sql}) b
+        WHERE btrim(b.company) <> '' GROUP BY lower(btrim(b.company)) ORDER BY 2 DESC, 1""",
+        params,
+    )

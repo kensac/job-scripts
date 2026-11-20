@@ -188,6 +188,14 @@ rejected on clearance, citizenship or ITAR. A viewer of a published list can
 take those rows back out with `hide_restricted=true`, which drops a posting
 whose latest clearance verdict is a rejection and keeps one with no verdict.
 
+**A published list filters by the tracker's place and company picks.** The
+public list takes `place`, `not_place`, `company` and `not_company`, each
+repeatable, and compiles them with the same rules as the board's place and
+company column filters (`api.board.column_filters`), so a pick means the same
+thing on both. `with_facets=true` returns the place, company and terms counts
+on the list under every other filter but the field's own, which is what the
+public page builds its menus from instead of the loaded page.
+
 **Every title screen is a named recipe in `core/screening.py`.** A recipe
 decides from title and source alone. It is an ordered rule list that `screen`
 reads in Python and `skips_sql` writes as SQL, so the two spellings come from
