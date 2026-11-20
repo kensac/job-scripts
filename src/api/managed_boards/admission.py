@@ -146,11 +146,6 @@ def _plan(board_id: int) -> _Plan:
         provider = providers.provider_of(board.requested_model)
         if not owner or provider is None or not routing.server_key(provider):
             raise RunRefusal("NO_SERVER_KEY", "the sponsor has no server-key allowance")
-        if provider != "openai":
-            raise RunRefusal(
-                "BATCH_UNSUPPORTED",
-                "requested model cannot execute through the managed batch collector",
-            )
         if board.requested_model not in budget.owner_allowed_models(sponsor.groups):
             raise RunRefusal("MODEL_NOT_ALLOWED", "requested model is not allowed for the sponsor")
         try:
@@ -160,7 +155,12 @@ def _plan(board_id: int) -> _Plan:
                 "BATCH_UNSUPPORTED",
                 "requested model cannot execute managed-board batches",
             ) from exc
-        reasoning_effort = choice.params.get("reasoning_effort")
+        # OpenAI routes name it reasoning_effort and Anthropic ones effort; a
+        # model with no declared default gets the transport's own, medium
+        # (tasks.filtering.execution.filter_effort), which the run task requires.
+        reasoning_effort = (
+            choice.params.get("reasoning_effort") or choice.params.get("effort") or "medium"
+        )
         # A screened posting never enters the run: it gets no verdict, and the
         # projection shows only what the run holds. Kept in the run's list, it
         # was carried, partitioned and recorded as a skip on every run.

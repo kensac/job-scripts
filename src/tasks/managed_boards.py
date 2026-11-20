@@ -57,8 +57,6 @@ async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) 
     # A resumed run collects what it already submitted, so it needs no key.
     resumed = has_batch_work(task_id)
     provider = _provider(payload)
-    if provider != "openai":
-        raise ValueError("managed board batch snapshot names an unsupported provider")
     # A board whose model's provider is out of credit runs on a model grouped
     # with it for custom verdicts, whose answers the board reads as its own.
     cfg = (

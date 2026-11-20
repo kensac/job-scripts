@@ -32,9 +32,15 @@ Recipe = Literal[
     "levels_roles_occupations_v1",
     "finance_new_grad_v1",
     "finance_new_grad_v2",
+    "finance_experienced_v1",
 ]
 BoardRecipe = Literal[
-    "internship_v1", "new_grad_v1", "aero_major_v1", "finance_new_grad_v1", "finance_new_grad_v2"
+    "internship_v1",
+    "new_grad_v1",
+    "aero_major_v1",
+    "finance_new_grad_v1",
+    "finance_new_grad_v2",
+    "finance_experienced_v1",
 ]
 
 
@@ -366,6 +372,44 @@ RECIPES["finance_new_grad_v2"] = (
         _keep("core_finance_title", title=_CORE_FINANCE_V2),
         _skip("technology_consulting_title", title=_TECH_CONSULTING),
         _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
+    ),
+    Screen(True, "no_finance_title_signal"),
+)
+
+
+# The gate of the experienced finance boards (Finance Mid-Level, Finance
+# Senior), shared by both: mid against senior is the model's call.
+# finance_new_grad_v2's role rules with its level rules turned around:
+# internships, apprenticeships and named early-career programs go, and so do
+# executive titles (chief, managing director, head of, managing, general or
+# equity partner, president but not vice president). Vice president,
+# director and manager are corporate titles, not executive ones, and stay.
+# Sized on production 2026-11-20 (see docs/agents/visibility.md).
+_EARLY_CAREER_PROGRAM = _words(_EARLY_CAREER_V2)
+_FINANCE_EXECUTIVE = _words(
+    r"\b(?:chief|managing director|head of|global head|managing partner|general partner"
+    r"|equity partner|cfo|ceo|coo|cio|cro)\b|^(?!.*\b(?:vice|vp)\b).*\bpresident\b"
+)
+# Experienced consulting, tax and audit titles name the discipline after the
+# level ("Senior Consultant, Strategy", "Senior Tax Manager"), which the
+# early-career signal words do not read.
+_EXPERIENCED_ADVISORY = _words(
+    r"\b(?:tax|audit|assurance)\b.*\b(?:senior|manager|director)\b"
+    r"|\b(?:senior|manager|director)\b.*\b(?:tax|audit|assurance)\b"
+    r"|\bconsult\w*\b.*\b(?:strategy|management|economic|financial|restructuring|transaction"
+    r"|deals?|valuation)\b"
+)
+RECIPES["finance_experienced_v1"] = (
+    (
+        _skip("internship_title_signal", title=_FINANCE_INTERNSHIP),
+        _skip("early_career_title_signal", title=_EARLY_CAREER_PROGRAM),
+        _skip("executive_title_signal", title=_FINANCE_EXECUTIVE),
+        _skip("technical_title", title=_NON_QUANT_TECHNICAL),
+        _keep("core_finance_title", title=_CORE_FINANCE_V2),
+        _skip("technology_consulting_title", title=_TECH_CONSULTING),
+        _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _keep("experienced_advisory_title", title=_EXPERIENCED_ADVISORY),
         _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
     ),
     Screen(True, "no_finance_title_signal"),

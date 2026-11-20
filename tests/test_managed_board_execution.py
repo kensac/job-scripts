@@ -77,6 +77,32 @@ def test_run_admission_snapshots_board_candidates_and_refuses_overlap(
     }
 
 
+def test_a_board_on_an_anthropic_model_is_admitted_with_the_transport_effort(
+    client, admin_headers, f, monkeypatch
+):
+    """Haiku declares no default effort; the run task requires one, so the
+    batch transport's own default, medium, is snapshotted."""
+    _admissible(monkeypatch)
+    monkeypatch.setattr(
+        "api.budget.owner_allowed_models", lambda groups: ["gpt-6-luna", "claude-haiku-5-5"]
+    )
+    board, _job_id, _url = _board_and_job(client, admin_headers, f)
+    patched = client.patch(
+        f"/v1/admin/managed-boards/{board['id']}",
+        headers=admin_headers,
+        json={"expected_revision": board["revision"], "requested_model": "claude-haiku-5-5"},
+    )
+    assert patched.status_code == 200, patched.text
+
+    response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
+    assert response.status_code == 200, response.text
+    payload = db.query_one(
+        "SELECT payload FROM tasks WHERE id = %s", (response.json()["task_id"],)
+    )["payload"]
+    assert payload["requested_model"] == "claude-haiku-5-5"
+    assert payload["reasoning_effort"] == "medium"
+
+
 def test_sponsor_budget_reserves_across_managed_boards(client, admin_headers, f, monkeypatch):
     _admissible(monkeypatch)
     boards = _board_and_job(client, admin_headers, f)[0]
