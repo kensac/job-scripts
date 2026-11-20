@@ -307,6 +307,17 @@ titles. On production 2026-11-20, over the 693,890 live postings the boards'
 sources created in 30 days, v1 passed 43,168 and v2 43,714 (546 more, the
 same in Python and in `skips_sql`), and v2 dropped 3 that v1 kept (hotel
 income auditors).
+`finance_experienced_v3` replaces v2 on both boards after a full check of
+every listed posting on 2026-11-20. Levels held (about 1 to 2% of Finance
+Senior asked for 3 or 4 years), but the role family did not: about 60 of
+Finance Senior's 928 postings and 13 of Finance Mid's 631 were wealth,
+investment and trust advisors, business and regional banking relationship
+managers, wealth relationship managers, treasury sales officers and branch
+area managers, which both prompts leave out. v3 skips those titles before
+the model sees them. Commercial and corporate banking relationship managers
+still pass on the core finance rule, and business banking credit analysts and
+underwriters match nothing new. Over the 30-day pool it skips 1,005 postings
+v2 passed and passes none v2 skipped.
 Tech Mid-Level and Tech Senior run without a gate, as
 Tech New Grad does: about 12,900 candidates in 7 days, 330 a day.
 

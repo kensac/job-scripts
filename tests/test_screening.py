@@ -19,6 +19,7 @@ PINNED = {
     "finance_new_grad_v2": "e405e39cbd660fab",
     "finance_experienced_v1": "1d57087eb89dd09e",
     "finance_experienced_v2": "90039d35f8e38bc8",
+    "finance_experienced_v3": "d27ab8bd27ab2052",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -338,3 +339,26 @@ def test_finance_experienced_v1_keeps_experienced_finance_without_executives(tit
 )
 def test_finance_experienced_v2_reads_auditor_and_tax_levels(title, skip):
     assert screen("finance_experienced_v2", title=title, source=None).skip is skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("Senior Wealth Investment Advisor", True),
+        ("PWM Private Wealth Advisor", True),
+        ("Business Banking Sr. Relationship Manager - Pensacola, FL", True),
+        ("Regional Banking Relationship Manager IV", True),
+        ("RM Business Banking II", True),
+        ("Wealth Relationship Manager | DMV Market", True),
+        ("Treasury Sales Officer II - Global Payment Solutions", True),
+        ("Wealth Management- Trust Officer 4", True),
+        ("Sr. Relationship Manager - Global Commercial Banking (Middle Market)", False),
+        ("Corporate Banking Relationship Manager - Associate", False),
+        ("Business Banking Credit Analyst 4", False),
+        ("Business Banking Underwriter IV", False),
+        ("Senior Internal Auditor", False),
+        ("Vice President, Portfolio Management", False),
+    ],
+)
+def test_finance_experienced_v3_drops_wealth_advisors_and_branch_bankers(title, skip):
+    assert screen("finance_experienced_v3", title=title, source=None).skip is skip
