@@ -45,7 +45,7 @@ def test_a_board_counts_each_posting_at_the_first_gate_it_stops_at(f):
         (board, listed),
     )
 
-    flow = data_flow._flow(24, board).board
+    flow = data_flow._flow(24, board, None).board
     assert flow is not None
     counts = {s.stage: s.count for s in flow.stages}
     assert counts == {
@@ -67,6 +67,52 @@ def test_a_board_counts_each_posting_at_the_first_gate_it_stops_at(f):
     assert why["restricted"] == "clearance said rejected"
     assert why["rejected"] == "custom said rejected"
     assert flow.entered == 7
+
+
+def test_a_person_counts_each_posting_at_the_first_gate_it_stops_at(f):
+    uid = f.make_user()
+    source = f.make_source()
+    db.execute("INSERT INTO user_sources (user_id, source) VALUES (%s, %s)", (uid, source))
+    f.make_job(source=f.make_source(), title="Not followed")
+    db.execute(
+        "INSERT INTO user_filters (user_id, name, prompt, prompt_hash, enabled) "
+        "VALUES (%s, 'mine', 'p', 'hash-a', TRUE)",
+        (uid,),
+    )
+
+    def job(title: str, **verdicts: str) -> int:
+        job_id = f.make_job(source=source, title=title)
+        url = db.query_one("SELECT url FROM jobs WHERE id = %s", (job_id,))["url"]
+        for key, status in verdicts.items():
+            check, _, prompt_hash = key.partition("_")
+            f.make_verdict(
+                url,
+                check,
+                status,
+                prompt_hash=f"hash-{prompt_hash}" if prompt_hash else None,
+                reason=f"{check} said {status}",
+            )
+        return job_id
+
+    structural = {"closed": "passed", "clearance": "passed"}
+    job("Waiting")
+    job("Not judged", **structural)
+    job("Said no", **structural, custom_a="rejected")
+    job("Kept", **structural, custom_a="passed")
+    listed = job("On the board", **structural, custom_a="passed")
+    db.execute("INSERT INTO board_visible (user_id, job_id) VALUES (%s, %s)", (uid, listed))
+
+    flow = data_flow._flow(24, None, uid).board
+    assert flow is not None and flow.filters == 1 and flow.sources == 1
+    assert {s.stage: s.count for s in flow.stages} == {
+        "awaiting_open_check": 1,
+        "not_judged": 1,
+        "rejected": 1,
+        "kept_not_listed": 1,
+        "listed": 1,
+    }
+    rejected = next(s for s in flow.stages if s.stage == "rejected")
+    assert rejected.samples[0].why == "custom said rejected"
 
 
 def test_the_window_arrives_as_a_query_string(client, admin_headers):

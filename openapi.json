@@ -23328,7 +23328,7 @@
     "/v1/admin/data-flow": {
       "get": {
         "summary": "Data Flow",
-        "description": "Sources to pulls to postings, and one board's gates, over the window.\n\nA board's stages count the postings its sources brought in during the\nwindow, each at the first gate it stops at.",
+        "description": "Sources to pulls to postings, and one board's or one person's gates,\nover the window.\n\nThe stages count the postings the board's sources, or the sources the\nperson follows, brought in during the window, each at the first gate it\nstops at.",
         "operationId": "data_flow_v1_admin_data_flow_get",
         "parameters": [
           {
@@ -23355,6 +23355,22 @@
                 }
               ],
               "title": "Board Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
             }
           },
           {
@@ -35474,6 +35490,17 @@
             },
             "type": "array",
             "title": "Stages"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filters"
           }
         },
         "type": "object",
@@ -38671,6 +38698,13 @@
           "intake": {
             "$ref": "#/components/schemas/Intake"
           },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/UserSummary"
+            },
+            "type": "array",
+            "title": "Users"
+          },
           "boards": {
             "items": {
               "$ref": "#/components/schemas/BoardSummary"
@@ -38693,6 +38727,7 @@
         "required": [
           "hours",
           "intake",
+          "users",
           "boards",
           "board"
         ],
@@ -58799,6 +58834,34 @@
           "unpriced_calls"
         ],
         "title": "UserSpendPurpose"
+      },
+      "UserSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "filters": {
+            "type": "integer",
+            "title": "Filters"
+          },
+          "listed": {
+            "type": "integer",
+            "title": "Listed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "filters",
+          "listed"
+        ],
+        "title": "UserSummary"
       },
       "ValidationError": {
         "properties": {
