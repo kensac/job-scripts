@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     chromium-driver \
+    tini \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,6 +32,13 @@ ARG GIT_SHA=unknown
 ENV PATH="/app/.venv/bin:/usr/lib/chromium:${PATH}" \
     PYTHONPATH="/app/src" \
     JOBTRACKER_REVISION=${GIT_SHA}
+
+# tini is PID 1 so exited processes are reaped. Python as PID 1 never reaped
+# the browser's: on 2026-11-20 each hetzner worker held about 14,000 zombie
+# chromium processes five hours after a restart, and transmission's hit its
+# 4,518-task limit, failing every task that started a thread. Compose files
+# set only `command`, so this entrypoint applies to every container.
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Every fleet compose file names its own command (uvicorn for the api,
 # `python -m api.worker` for workers), so this is only the bare `docker run`
