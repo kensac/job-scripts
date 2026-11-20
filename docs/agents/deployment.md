@@ -104,6 +104,12 @@ and a board on a whole-day interval pulls at the fixed daily hour
 ([sources-and-boards.md](sources-and-boards.md), "Scheduling and counts").
 Check when that is before watching for the effect.
 
+The image's entrypoint is `tini`, so every container has an init that reaps
+exited processes. Without it the worker is PID 1 and every browser it closes
+stays a zombie that still counts against the container's task limit; a worker
+at that limit fails each task that starts a thread. A compose file sets only
+`command`, never `entrypoint`, or it loses the reaper.
+
 ## Interrupting work
 
 A deploy recreates containers, which kills in-flight work gracefully: the task
