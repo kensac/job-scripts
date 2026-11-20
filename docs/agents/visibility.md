@@ -294,7 +294,20 @@ audit titles that name the discipline after the level ("Senior Consultant,
 Strategy", "Senior Tax Manager") are kept by their own rule. On production
 2026-11-20, over the 81,601 postings Finance New Grad's sources and criteria
 admit in 30 days, it passed 5,455 (about 180 a day) and matched `skips_sql`
-on 10,000 of them. Tech Mid-Level and Tech Senior run without a gate, as
+on 10,000 of them. `finance_experienced_v2` replaces it on both boards. v1 read "audit" only as
+a whole word, so auditor titles ("Senior Internal Auditor", "Staff Auditor")
+had no signal, and read tax and audit levels as senior, manager or director
+only, so "Experienced Associate", "Supervisor" and "Principal" titles in tax,
+audit and assurance were dropped. v2 keeps those, and skips the hotel,
+quality, field, premium and other non-finance auditors the wider word reaches
+first. Most of what both gates drop is outside the boards' prompts by
+design: general accounting and controllers, financial advisors, insurance and
+mortgage underwriting, quality assurance, and managing director and C-level
+titles. On production 2026-11-20, over the 693,890 live postings the boards'
+sources created in 30 days, v1 passed 43,168 and v2 43,714 (546 more, the
+same in Python and in `skips_sql`), and v2 dropped 3 that v1 kept (hotel
+income auditors).
+Tech Mid-Level and Tech Senior run without a gate, as
 Tech New Grad does: about 12,900 candidates in 7 days, 330 a day.
 
 **A new board is not culled by another target's screens.** `title_screens`,

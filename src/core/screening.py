@@ -33,6 +33,7 @@ Recipe = Literal[
     "finance_new_grad_v1",
     "finance_new_grad_v2",
     "finance_experienced_v1",
+    "finance_experienced_v2",
 ]
 BoardRecipe = Literal[
     "internship_v1",
@@ -41,6 +42,7 @@ BoardRecipe = Literal[
     "finance_new_grad_v1",
     "finance_new_grad_v2",
     "finance_experienced_v1",
+    "finance_experienced_v2",
 ]
 
 
@@ -410,6 +412,43 @@ RECIPES["finance_experienced_v1"] = (
         _skip("technology_consulting_title", title=_TECH_CONSULTING),
         _skip("non_finance_title", title=_NON_FINANCE_V2),
         _keep("experienced_advisory_title", title=_EXPERIENCED_ADVISORY),
+        _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
+    ),
+    Screen(True, "no_finance_title_signal"),
+)
+
+
+
+# finance_experienced_v1 read "audit" only as a whole word, so auditor titles
+# ("Senior Internal Auditor", "Staff Auditor") fell to no signal, and it read
+# tax and audit levels as senior, manager or director only, so "Assurance
+# Experienced Associate", "Tax Supervisor" and "Tax Principal" fell too. The
+# hotel, quality and safety auditors that the wider word now reaches go first.
+# Sized on production 2026-11-20 (see docs/agents/visibility.md).
+_NON_FINANCE_AUDITOR = _words(
+    r"\b(?:night|income|rooms?|hotel|quality|calidad|campo|field|safety|food|freelance|claims?"
+    r"|clinical|coding|medical|environmental|energy|inventory|premium|warranty|stockroom"
+    r"|invoice|tire|security|data collector)\b.*\bauditor"
+    r"|\bauditor.*\b(?:calidad|campo|data collector)\b"
+)
+_EXPERIENCED_ADVISORY_V2 = _words(
+    _EXPERIENCED_ADVISORY.pattern
+    + r"|\b(?:tax|audit\w*|assurance)\b.*\b(?:supervisor|principal|experienced|in[- ]charge)\b"
+    r"|\b(?:supervisor|principal|experienced|in[- ]charge)\b.*\b(?:tax|audit\w*|assurance)\b"
+    r"|\b(?:senior|sr|staff|internal|external|financial|sox|lead|principal)\b.*\bauditors?\b"
+    r"|^auditors?$"
+)
+RECIPES["finance_experienced_v2"] = (
+    (
+        _skip("internship_title_signal", title=_FINANCE_INTERNSHIP),
+        _skip("early_career_title_signal", title=_EARLY_CAREER_PROGRAM),
+        _skip("executive_title_signal", title=_FINANCE_EXECUTIVE),
+        _skip("technical_title", title=_NON_QUANT_TECHNICAL),
+        _keep("core_finance_title", title=_CORE_FINANCE_V2),
+        _skip("technology_consulting_title", title=_TECH_CONSULTING),
+        _skip("non_finance_title", title=_NON_FINANCE_V2),
+        _skip("non_finance_auditor_title", title=_NON_FINANCE_AUDITOR),
+        _keep("experienced_advisory_title", title=_EXPERIENCED_ADVISORY_V2),
         _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
     ),
     Screen(True, "no_finance_title_signal"),

@@ -18,6 +18,7 @@ PINNED = {
     "finance_new_grad_v1": "a2ad2a46a1acf548",
     "finance_new_grad_v2": "e405e39cbd660fab",
     "finance_experienced_v1": "1d57087eb89dd09e",
+    "finance_experienced_v2": "90039d35f8e38bc8",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
@@ -313,3 +314,27 @@ def test_finance_new_grad_v2_adds_consulting_audit_and_tax(title, skip):
 )
 def test_finance_experienced_v1_keeps_experienced_finance_without_executives(title, skip):
     assert screen("finance_experienced_v1", title=title, source=None).skip is skip
+
+
+@pytest.mark.parametrize(
+    ("title", "skip"),
+    [
+        ("Senior Internal Auditor", False),
+        ("Staff Auditor II", False),
+        ("Auditor", False),
+        ("Assurance Experienced Associate", False),
+        ("Tax Supervisor - Private Company", False),
+        ("Tax Principal, Real Estate", False),
+        ("Senior Tax Manager", False),
+        ("Night Auditor", True),
+        ("Income Auditor", True),
+        ("Auditor de Calidad", True),
+        ("Senior Quality Auditor", True),
+        ("Premium Auditor II", True),
+        ("Tax Managing Director, Core Tax Services", True),
+        ("Audit Intern", True),
+        ("", True),
+    ],
+)
+def test_finance_experienced_v2_reads_auditor_and_tax_levels(title, skip):
+    assert screen("finance_experienced_v2", title=title, source=None).skip is skip
