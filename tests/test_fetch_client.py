@@ -83,3 +83,36 @@ def test_every_board_format_waits_out_its_hosts_floor(monkeypatch):
     finally:
         client.set_pace({})
     assert slept and 4.0 < slept[-1] <= 5.0
+
+
+def test_the_stdlib_post_hands_a_refusal_back_as_a_response(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+
+    import requests
+
+    from core.fetching import client
+
+    headers = email.message.Message()
+    headers["Retry-After"] = "60"
+
+    def refuse(request, timeout):
+        assert request.get_method() == "POST" and request.data == b'{"offset": 0}'
+        raise urllib.error.HTTPError(
+            request.full_url, 429, "Too Many Requests", headers, io.BytesIO(b"slow down")
+        )
+
+    monkeypatch.setattr(client.urllib.request, "urlopen", refuse)
+    response = client.stdlib_session.post(
+        "https://x.wd1.myworkdayjobs.com/wday/cxs/x/y/jobs", json={"offset": 0}
+    )
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert response.text == "slow down"
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        assert error.response is response
+    else:
+        raise AssertionError("a 429 must raise")

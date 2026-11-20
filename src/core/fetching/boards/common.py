@@ -13,6 +13,7 @@ import requests
 
 from core.fetching.client import pace
 from core.fetching.client import session as _session
+from core.fetching.client import stdlib_session as _stdlib_session
 from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
 
@@ -26,6 +27,11 @@ def _get(url: str, **kwargs: Any) -> requests.Response:
 def _post(url: str, **kwargs: Any) -> requests.Response:
     pace(url)
     return _session.post(url, **kwargs)
+
+
+def _post_stdlib(url: str, **kwargs: Any) -> requests.Response:
+    pace(url)
+    return _stdlib_session.post(url, **kwargs)
 
 
 # The listing fields that are the posting's text, or bulk that duplicates it.

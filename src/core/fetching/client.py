@@ -4,7 +4,9 @@ Board pulls, ATS resolvers, form reads and the aggregator feeds all send
 their requests through `session`, so what a request looks like to a host and
 what happens when it fails are decided here, once. A new board format or
 resolver builds a request and parses the answer; it does not pick a user
-agent, a timeout or a retry. Four copies of those choices had drifted: two
+agent, a timeout or a retry. Workday's listing search is the one
+exception, sent through the standard library (`stdlib_session`) because its
+Cloudflare refuses the requests session. Four copies of those choices had drifted: two
 user agents, timeouts of 10, 20 and 30 seconds, and retry in only the board
 pulls and a hand-rolled backoff in the aggregator feeds.
 
@@ -21,12 +23,16 @@ hosts.pace_key like the budget row.
 
 from __future__ import annotations
 
+import json as _json
 import threading
 import time
+import urllib.error
+import urllib.request
 from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
+from requests.structures import CaseInsensitiveDict
 from urllib3.util.retry import Retry
 
 from core.fetching.hosts import pace_key
@@ -70,6 +76,53 @@ session = _Session()
 session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json, text/plain, */*"})
 for _prefix in ("https://", "http://"):
     session.mount(_prefix, HTTPAdapter(max_retries=_RETRY))
+
+
+class _StdlibSession:
+    """A JSON POST through the standard library, answered as a requests.Response.
+
+    Workday's Cloudflare refuses this module's requests session from the
+    fleet's addresses and lets the standard library through. Measured from
+    hetzner on 2026-11-20, alternating the two 15 seconds apart: FHLBNY
+    answered the session 429 four times out of four and urllib 200 four out
+    of four. No Workday pull succeeded from 2026-11-16 to that day. The
+    reply keeps the requests shape so the refusal handling in the ingest
+    task (a 429 widens the host budget) reads it unchanged. No retry here,
+    as with the session.
+    """
+
+    def post(self, url: str, json: Any = None, timeout: float = TIMEOUT, **_: Any):
+        if not url.startswith("https://"):
+            raise ValueError(f"not an https url: {url}")
+        request = urllib.request.Request(  # noqa: S310 - https only, checked above
+            url,
+            data=_json.dumps(json).encode(),
+            method="POST",
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as reply:  # noqa: S310
+                status, reason, headers, body = (
+                    reply.status,
+                    reply.reason,
+                    reply.headers,
+                    reply.read(),
+                )
+        except urllib.error.HTTPError as error:
+            status, reason, headers, body = error.code, error.reason, error.headers, error.read()
+        response = requests.Response()
+        response.status_code, response.reason, response.url = status, reason, url
+        response.headers = CaseInsensitiveDict(headers.items())
+        response._content = body
+        response.encoding = "utf-8"
+        return response
+
+
+stdlib_session = _StdlibSession()
 
 
 # A worker running several pulls at once (api.worker) calls these from

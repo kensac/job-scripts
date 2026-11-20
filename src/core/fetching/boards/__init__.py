@@ -22,7 +22,7 @@ import logging
 import requests
 
 from core.fetching.boards.apple import _APPLE_PAGE
-from core.fetching.boards.common import PartialPull, _session
+from core.fetching.boards.common import PartialPull, _session, _stdlib_session
 from core.fetching.boards.common import posting_from_listing as _posting
 from core.fetching.boards.dates import posted_ts
 from core.fetching.boards.formats import FORMATS, BoardFormat, format_for_url
@@ -41,6 +41,7 @@ __all__ = [
     "PartialPull",
     "_posting",
     "_session",
+    "_stdlib_session",
     "_workday_locations",
     "fetch_listings",
     "format_for_url",
