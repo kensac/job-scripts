@@ -1,6 +1,6 @@
-"""A live worker on a different release from the api, past a roll's
-duration, is a host that did not deploy. gcp-vps ran two rolls behind for
-an hour on 2026-09-04 and every other signal said it was fine."""
+"""A live worker on a different release from most of the fleet, past a roll's
+duration, is a host whose pin is not following. gcp-vps ran two rolls behind
+for an hour on 2026-09-04 and every other signal said it was fine."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def clean():
 # Restoring 120 below does NOT reproduce the failure on demand; it passed six
 # runs for six. So this is the arithmetic that fits, not a proven cause. The
 # margin costs nothing and removes the sensitivity either way.
-PAST_ROLL = 240
+PAST_ROLL = 600
 INSIDE_ROLL = 5
 
 
@@ -48,9 +48,9 @@ def _mixed():
     return {f["subject"]: f for f in health.detect() if f["kind"] == "fleet_mixed_release"}
 
 
-def test_only_a_fresh_worker_on_another_release_past_the_roll_window_alerts(clean, monkeypatch):
-    monkeypatch.setattr(telemetry, "RELEASE", "abc1234")
-    _worker("test-same", "abc1234", PAST_ROLL)
+def test_only_a_fresh_worker_off_the_fleet_release_past_the_roll_window_alerts(clean):
+    _worker("test-a", "abc1234", PAST_ROLL)
+    _worker("test-b", "abc1234", PAST_ROLL)
     _worker("test-behind", "0ld0000", PAST_ROLL)
     _worker("test-rolling", "0ld0000", INSIDE_ROLL)
     _worker("test-dead", "0ld0000", PAST_ROLL, fresh=False)
@@ -60,7 +60,7 @@ def test_only_a_fresh_worker_on_another_release_past_the_roll_window_alerts(clea
     assert found["test-behind"]["detail"] == {
         "worker": "test-behind",
         "worker_release": "0ld0000",
-        "api_release": "abc1234",
+        "fleet_release": "abc1234",
         "minutes": found["test-behind"]["detail"]["minutes"],
     }
     assert (
@@ -70,7 +70,16 @@ def test_only_a_fresh_worker_on_another_release_past_the_roll_window_alerts(clea
     assert health.subject_kind_for("fleet_mixed_release") == health.SUBJECT_WORKER
 
 
-def test_a_local_build_compares_nothing(clean, monkeypatch):
-    monkeypatch.setattr(telemetry, "RELEASE", "unknown")
-    _worker("test-behind", "0ld0000", PAST_ROLL)
+def test_the_worker_running_the_check_is_not_the_reference(clean, monkeypatch):
+    """data_health runs on whichever worker claims it. On 2026-11-21 one a
+    bump behind flagged hetzner, a bump ahead, as a host that did not deploy."""
+    monkeypatch.setattr(telemetry, "RELEASE", "0ld0000")
+    _worker("test-a", "abc1234", PAST_ROLL)
+    _worker("test-b", "abc1234", PAST_ROLL)
+    assert _mixed() == {}
+
+
+def test_a_local_build_is_not_compared(clean):
+    _worker("test-a", "abc1234", PAST_ROLL)
+    _worker("test-local", "unknown", PAST_ROLL)
     assert _mixed() == {}

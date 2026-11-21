@@ -90,17 +90,16 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=PositiveInt,
         help="Seconds GET /admin/stats serves the same answer.",
     ),
-    # Minutes a worker may heartbeat on a release other than the api's before
-    # that is a host that did not deploy. A lockstep roll finishes inside ten,
-    # but gcp-vps is deployed by hand until its runner exists, so the window
-    # covers a person noticing a roll request; tighten it when every host
-    # self-deploys. gcp-vps ran an hour behind on 2026-09-04 unnoticed.
+    # Minutes a worker may run before its release is compared with the rest of
+    # the fleet's. Renovate moves each host's pin on its own, and from
+    # 2026-11-12 to 11-21 hosts sat one bump apart for three to six hours,
+    # every time cleared by the next roll, so the window spans that.
     "fleet_roll_minutes": ConfigKey(
         section="Health",
-        default=120,
+        default=480,
         value_type=PositiveInt,
-        help="Minutes a worker may run a different release from the api before it counts as a "
-        "host that did not deploy.",
+        help="Minutes a worker may run a different release from most of the fleet before it "
+        "counts as a host whose pin is not following.",
     ),
     # Neither provider reports a remaining prepaid balance, so a balance is
     # only ever derived from a grant an admin enters here, minus what the
