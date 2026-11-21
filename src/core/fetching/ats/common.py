@@ -27,6 +27,9 @@ class Status(enum.Enum):
     GONE = "gone"
     UNSUPPORTED = "unsupported"
     ERROR = "error"
+    # The board answered 429: too many from this address. Not an error to
+    # fall back from, since the browser would hit the same host.
+    REFUSED = "refused"
 
 
 @dataclass(frozen=True)
@@ -244,6 +247,8 @@ class AtsResolver(ABC):
             return AtsResult(Status.ERROR, source=self.name)
         if resp.status_code in (404, 410):
             return AtsResult(Status.GONE, source=self.name)
+        if resp.status_code == 429:
+            return AtsResult(Status.REFUSED, source=self.name)
         if resp.status_code != 200:
             return AtsResult(Status.ERROR, source=self.name)
         return None

@@ -10,10 +10,10 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from api import ai, budget, db, metrics, telemetry
+from api import ai, budget, db, hosts, metrics, telemetry
 from api.ai import AIConfig
 from core import catalog, page_fetches, pricing
-from core.fetching.hosts import hostname
+from core.fetching.hosts import hostname, pace_key
 from core.store import Page, add_ai_result, add_ai_results, ai_result_row
 
 logger = logging.getLogger(__name__)
@@ -383,6 +383,12 @@ async def refresh_page(
         if listings_url
         else asyncio.to_thread(ats.resolve, ats_url)
     )
+    if ats_res.status is ats.Status.REFUSED:
+        # Too many from this address: the browser would ask the same host
+        # again. The host's gap widens for the listing pulls too, and the
+        # read is deferred like host_paced below.
+        hosts.refused(pace_key(ats_url))
+        return None, None
     if ats_res.status is ats.Status.GONE:
         record_manual(
             url=url,
