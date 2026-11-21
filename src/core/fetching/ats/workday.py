@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from typing import Any
 from urllib.parse import urlparse
+
+import requests
 
 from core.fetching.ats.common import (
     UNSUPPORTED,
@@ -14,11 +17,17 @@ from core.fetching.ats.common import (
     join_posting_sections,
     parse_posted_date,
 )
+from core.fetching.client import stdlib_session
 
 
 class Workday(AtsResolver):
     name = "workday"
     markers = ("myworkdayjobs.com",)
+
+    def get(self, url: str, **kwargs: Any) -> requests.Response | None:
+        # Through the standard library, as the listing pulls are: Workday's
+        # Cloudflare refuses the requests session (client.stdlib_session).
+        return self._send(stdlib_session.get, url, **kwargs)
 
     def canonical(self, url: str) -> str | None:
         parsed = urlparse(url)

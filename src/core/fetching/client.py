@@ -4,8 +4,8 @@ Board pulls, ATS resolvers, form reads and the aggregator feeds all send
 their requests through `session`, so what a request looks like to a host and
 what happens when it fails are decided here, once. A new board format or
 resolver builds a request and parses the answer; it does not pick a user
-agent, a timeout or a retry. Workday's listing search is the one
-exception, sent through the standard library (`stdlib_session`) because its
+agent, a timeout or a retry. Workday (listing search and posting reads) is
+the one exception, sent through the standard library (`stdlib_session`) because its
 Cloudflare refuses the requests session. Four copies of those choices had drifted: two
 user agents, timeouts of 10, 20 and 30 seconds, and retry in only the board
 pulls and a hand-rolled backoff in the aggregator feeds.
@@ -79,7 +79,7 @@ for _prefix in ("https://", "http://"):
 
 
 class _StdlibSession:
-    """A JSON POST through the standard library, answered as a requests.Response.
+    """A JSON request through the standard library, answered as a requests.Response.
 
     Workday's Cloudflare refuses this module's requests session from the
     fleet's addresses and lets the standard library through. Measured from
@@ -88,21 +88,26 @@ class _StdlibSession:
     of four. No Workday pull succeeded from 2026-11-16 to that day. The
     reply keeps the requests shape so the refusal handling in the ingest
     task (a 429 widens the host budget) reads it unchanged. No retry here,
-    as with the session.
+    as with the session. The posting reads (ats.Workday) came through here on
+    2026-11-21, when the session got 429 for every tenant from both fleet
+    addresses and urllib 200, and half of Workday's postings had gone to the
+    browser instead.
     """
 
+    def get(self, url: str, timeout: float = TIMEOUT, **_: Any):
+        return self._send("GET", url, None, timeout)
+
     def post(self, url: str, json: Any = None, timeout: float = TIMEOUT, **_: Any):
+        return self._send("POST", url, _json.dumps(json).encode(), timeout)
+
+    def _send(self, method: str, url: str, data: bytes | None, timeout: float):
         if not url.startswith("https://"):
             raise ValueError(f"not an https url: {url}")
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
         request = urllib.request.Request(  # noqa: S310 - https only, checked above
-            url,
-            data=_json.dumps(json).encode(),
-            method="POST",
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
+            url, data=data, method=method, headers=headers
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as reply:  # noqa: S310

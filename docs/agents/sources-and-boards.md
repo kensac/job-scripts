@@ -260,15 +260,24 @@ Workday refused gdit and answered kohls from the same address. A response carryi
 same refusal: an AWS WAF challenge, which Eightfold answers with a 405.
 Counted as a failure it would switch the board off.
 
-**Workday listing pulls go through the standard library, not the requests
-session** (`client.stdlib_session`, used by `_post_stdlib`). From
+**Workday listing pulls and posting reads go through the standard library,
+not the requests session** (`client.stdlib_session`, used by `_post_stdlib`
+and `ats.Workday.get`). From
 2026-11-16 Workday's Cloudflare answered the session 429 from every fleet
 address while urllib from the same address got 200; on 2026-11-20 FHLBNY
 refused the session four times in four and served urllib four in four,
-alternated 15 seconds apart. It returns a `requests.Response`, so the
-refusal handling above reads it unchanged, and the pulls still wait on the
-`myworkdayjobs.com` floor in `ingest_host_pace_seconds` (5 seconds) and the
-host budget.
+alternated 15 seconds apart. The posting reads stayed on the session until
+2026-11-21, when it got 429 for every tenant from both fleet addresses while
+urllib got 200, so half of Workday's postings went to the browser and fired
+`ats_text_collapse` on dozens of tenants. It returns a `requests.Response`,
+so the refusal handling above reads it unchanged, and the pulls still wait
+on the `myworkdayjobs.com` floor in `ingest_host_pace_seconds` (2 seconds;
+with no floor the gap decays to zero) and the host budget.
+
+A posting read the board answers 429 (`ats.Status.REFUSED`) widens the
+host's gap like a refused pull and is deferred like `host_paced`: no row is
+written and it does not go on to the browser, which would ask the same host
+again.
 
 **A pace is kept under one key, and `core.fetching.hosts.pace_key` is the
 only thing that computes it.** The `host_budget` row a pull takes, the

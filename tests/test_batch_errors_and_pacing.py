@@ -252,3 +252,35 @@ async def test_a_later_collection_maps_a_hashed_line_through_the_frozen_requests
     results: dict = {}
     await batch._collect_batch(_Client(_answer_line(wire)), fake, results, create_missing=True)  # type: ignore[arg-type]
     assert list(results) == [LONG_URL] and results[LONG_URL].text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_posting_read_backs_the_host_off_instead_of_scraping(monkeypatch):
+    """On 2026-11-21 Workday answered posting reads 429 from every fleet
+    address, and each refusal went on to the browser against the same host."""
+    from api import fetching, hosts
+    from core.fetching import ats
+
+    db.execute(
+        "INSERT INTO app_config (key, value) VALUES ('ingest_host_pace_seconds', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        (db.jsonb({"myworkdayjobs.com": 2}),),
+    )
+    fetched: list[str] = []
+
+    async def fetch_page(url):
+        fetched.append(url)
+        return "page", False
+
+    monkeypatch.setattr(fetching, "fetch_page", fetch_page)
+    monkeypatch.setattr(ats, "resolve", lambda url: ats.AtsResult(ats.Status.REFUSED))
+    hosts.take("myworkdayjobs.com")
+    url = "https://acme.wd5.myworkdayjobs.com/Ext/job/NY/Engineer_1"
+    assert await verdicts.refresh_content(url) == (None, None)
+    assert fetched == []
+    row = db.query_one(
+        "SELECT pace_seconds, refused FROM host_budget WHERE host = 'myworkdayjobs.com' "
+        "AND egress_group = %s",
+        (hosts.EGRESS_GROUP,),
+    )
+    assert row["refused"] == 1 and row["pace_seconds"] >= hosts.REFUSED_MIN_SECONDS

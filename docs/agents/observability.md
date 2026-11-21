@@ -882,6 +882,14 @@ Each section of `health.detect()` runs on its own. One that raises opens
 `detector_failed` for itself, rather than taking the hour's run down and
 letting every open alert auto-resolve.
 
+**A detector reads the fleet's state, never the state of the worker it runs
+on.** `data_health` is a queued task, so any worker runs it. The fleet
+release check compares each worker that has run past `fleet_roll_minutes`
+with the release most of those run. It once used its own release, and a
+worker a Renovate bump behind flagged the ones ahead as hosts that did not
+deploy. A commit cannot be ordered, so it names both releases and calls
+neither older.
+
 The `_detect_silent` section watches for success that did nothing: a sweep
 finished with work in front of it and none completed, a task kind failing
 three times in three hours, a task the reaper keeps handing back, an open
