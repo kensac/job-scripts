@@ -3,6 +3,7 @@ against a real local server so the transport retry is the real one."""
 
 from __future__ import annotations
 
+import io
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -118,19 +119,19 @@ def test_the_stdlib_post_hands_a_refusal_back_as_a_response(monkeypatch):
         raise AssertionError("a 429 must raise")
 
 
+class _Reply(io.BytesIO):
+    status, reason, headers = 200, "OK", {}
+
+
 def test_a_workday_posting_read_goes_through_the_standard_library(monkeypatch):
     """The session got 429 for every Workday tenant from the fleet on
     2026-11-21 while urllib from the same address got 200."""
-    import io
-
     from core.fetching import ats, client
 
     def answer(request, timeout):
         assert request.get_method() == "GET" and request.data is None
         assert request.full_url == "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/Ext/job/NY/E_1"
-        reply = io.BytesIO(b'{"jobPostingInfo": {"title": "Engineer", "jobDescription": "x"}}')
-        reply.status, reply.reason, reply.headers = 200, "OK", {}
-        return reply
+        return _Reply(b'{"jobPostingInfo": {"title": "Engineer", "jobDescription": "x"}}')
 
     monkeypatch.setattr(client.urllib.request, "urlopen", answer)
     monkeypatch.setattr(client.session, "get", lambda *a, **k: pytest.fail("requests session"))
