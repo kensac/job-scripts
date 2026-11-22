@@ -237,11 +237,14 @@ THREADED_KINDS = frozenset({"ingest_source"})
 
 
 class _Slots:
-    """Several tasks at once on one worker, under an AIMD limit
-    (tasks.runtime.AdaptiveLimiter): it grows by one while a window of
-    completions comes faster than the last, and halves when a task fails on
+    """Several tasks at once on one worker, under an AIMD limit: it grows by
+    one with each task that ends normally, and halves when a task fails on
     the host running out of memory or threads, or when free memory falls under
-    worker_memory_reserve_mb. A task's weight (worker_task_weights) is the
+    worker_memory_reserve_mb. Growth does not judge throughput: the queue
+    mixes five-second pulls with half-hour ones and with main-loop kinds, so a
+    window's completion rate measured which tasks it drew, and the limit
+    walked down to one (hetzner and oci at 1 of 4 with 4,000 pulls waiting,
+    2026-11-22). A task's weight (worker_task_weights) is the
     slots it takes. Nothing is claimed beyond the limit, nothing but the first
     task is claimed without the reserve free, and a worker holding nothing
     always claims one, so the floor is the worker as it was.
@@ -271,7 +274,7 @@ class _Slots:
         while not self.ended.empty():
             task_id, exhausted = self.ended.get()
             self.held.pop(task_id, None)
-            self.limiter.record(rate_limited=exhausted)
+            self._settle(exhausted)
         free = available_memory_mb()
         short = free is not None and free < self.reserve_mb
         if short and self.held:
@@ -289,12 +292,18 @@ class _Slots:
             self.wake.clear()
             return
         if task["kind"] not in THREADED_KINDS:
-            self.limiter.record(rate_limited=runner.run(run_task(task)))
+            self._settle(runner.run(run_task(task)))
             return
         self.held[task["id"]] = self.weights.get(task["kind"], 1)
         threading.Thread(
             target=self._run, args=(task,), name=f"task-{task['id']}", daemon=True
         ).start()
+
+    def _settle(self, exhausted: bool) -> None:
+        if exhausted:
+            self.limiter.record(rate_limited=True)
+        else:
+            self.limiter.limit = min(self.limiter.max_c, self.limiter.limit + 1)
 
     def _run(self, task: dict[str, Any]) -> None:
         exhausted = False
