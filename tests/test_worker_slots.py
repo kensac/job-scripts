@@ -254,3 +254,14 @@ def test_host_task_slots_still_back_off_on_memory(monkeypatch, set_config, f):
         deadline = time.monotonic() + 10
         while worker._in_flight and time.monotonic() < deadline:
             time.sleep(0.02)
+
+
+def test_a_slow_task_does_not_walk_the_limit_down(slots):
+    """The limit fell to 1 of 4 on hetzner and oci (2026-11-22) because a
+    window holding a half-hour pull read as a throughput drop."""
+    slots.limiter.limit = 1
+    for _ in range(5):
+        slots._settle(exhausted=False)
+    assert slots.limiter.limit == slots.limiter.max_c
+    slots._settle(exhausted=True)
+    assert slots.limiter.limit == slots.limiter.max_c // 2

@@ -116,12 +116,15 @@ wins, so the admin page can lower a host without a deploy but cannot raise it
 past what the host was sized for; with neither, the worker runs one task at a
 time. Either way the ceiling is capped at half the connection pool because
 each task can hold a connection and its heartbeat another
-(`api.worker._task_ceiling`). Under it an `AdaptiveLimiter` sets the live
+(`api.worker._task_ceiling`). Under it an AIMD limit sets the live
 limit. It starts at the ceiling when `JOBTRACKER_TASK_SLOTS` is set, because
 the host's value is known at start and climbing from one after every deploy
 cost each worker a window of completions per step; with only the
-`worker_task_slots` entry it starts at one. It grows by one while a window
-of completions comes faster than the last, and halves when a task fails on the host running out of memory, threads or
+`worker_task_slots` entry it starts at one. It grows by one with each task
+that ends normally, never by comparing completion rates: the queue mixes
+five-second pulls with half-hour ones, so a window's rate measured which
+tasks it drew, and on 2026-11-22 hetzner and oci sat at 1 of 4 with 4,000
+pulls waiting. It halves when a task fails on the host running out of memory, threads or
 disk (`_TRANSIENT_MARKERS`, `MemoryError`) or when free memory, the
 tighter of the cgroup's headroom and the host's `MemAvailable`, falls under
 `worker_memory_reserve_mb`. A task costs its kind's `worker_task_weights`
