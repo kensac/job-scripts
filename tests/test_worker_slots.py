@@ -8,6 +8,7 @@ limit backs off when memory runs short.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import threading
 import time
@@ -19,6 +20,16 @@ from api import db, worker
 from tasks.runtime import lifecycle
 
 KIND = "slots_probe"
+MAIN_KIND = "slots_main_probe"
+
+
+@contextlib.contextmanager
+def _runner():
+    loop = worker._MainLoop()
+    try:
+        yield loop
+    finally:
+        loop.close()
 
 
 @pytest.fixture
@@ -39,7 +50,7 @@ def slots(monkeypatch):
 
 def _drive(s: worker._Slots, until, seconds: float = 10) -> None:
     deadline = time.monotonic() + seconds
-    with asyncio.Runner() as runner:
+    with _runner() as runner:
         while not until():
             assert time.monotonic() < deadline, "the worker did not get there"
             s.step(runner)
@@ -118,7 +129,7 @@ def test_sigterm_releases_every_task_it_holds(monkeypatch, slots, f):
         await asyncio.to_thread(release.wait, 5)
 
     monkeypatch.setitem(worker.HANDLERS, KIND, probe)
-    with asyncio.Runner() as runner:
+    with _runner() as runner:
         for _ in range(3):
             slots.step(runner)
     started.wait()
@@ -154,7 +165,7 @@ def test_memory_pressure_halves_the_limit_and_stops_claims(monkeypatch, slots, f
 
     monkeypatch.setitem(worker.HANDLERS, KIND, probe)
     slots.limiter.limit = 4
-    with asyncio.Runner() as runner:
+    with _runner() as runner:
         slots.step(runner)
         slots.step(runner)
         assert sorted(slots.held) == running
@@ -241,7 +252,7 @@ def test_host_task_slots_still_back_off_on_memory(monkeypatch, set_config, f):
     _, s = worker._refresh_slots(None)
     assert s is not None and s.limiter.limit == 4
     try:
-        with asyncio.Runner() as runner:
+        with _runner() as runner:
             s.step(runner)
             s.step(runner)
             assert sorted(s.held) == running
@@ -265,3 +276,38 @@ def test_a_slow_task_does_not_walk_the_limit_down(slots):
     assert slots.limiter.limit == slots.limiter.max_c
     slots._settle(exhausted=True)
     assert slots.limiter.limit == slots.limiter.max_c // 2
+
+
+def test_pulls_keep_starting_while_a_main_loop_task_runs(monkeypatch, slots, f):
+    """A main-loop kind ran on the claiming thread, so a worker in a filter
+    run started no pull until it ended (optiplex, 3 of 10 slots, 2026-11-22)."""
+    release = threading.Event()
+    main_id = f.make_task(MAIN_KIND)
+    pulls = [f.make_task(KIND) for _ in range(4)]
+
+    async def main_probe(task_id, payload):
+        await asyncio.to_thread(release.wait, 10)
+
+    async def pull(task_id, payload):
+        await asyncio.sleep(0.01)
+
+    monkeypatch.setitem(worker.HANDLERS, MAIN_KIND, main_probe)
+    monkeypatch.setitem(worker.HANDLERS, KIND, pull)
+
+    def done(ids):
+        row = db.query_one(
+            "SELECT COUNT(*) AS n FROM tasks WHERE id = ANY(%s) AND status = 'done'", (ids,)
+        )
+        return row["n"] == len(ids)
+
+    with _runner() as runner:
+        deadline = time.monotonic() + 10
+        while not done(pulls):
+            assert time.monotonic() < deadline, "pulls waited on the main-loop task"
+            slots.step(runner)
+        assert _row(main_id)["status"] == "running"
+        release.set()
+        while slots.held:
+            assert time.monotonic() < deadline
+            slots.step(runner)
+    assert _row(main_id)["status"] == "done"
