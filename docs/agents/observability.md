@@ -150,6 +150,15 @@ pacing in `core.fetching.client`) needs a lock. Only `ingest_source` is
 listed: it makes no model call, holds no loop-bound global, and is the
 volume. Add a kind to the list with the same audit written beside it.
 
+The main loop is `api.worker._MainLoop`: one event loop for the worker's
+life, on a thread of its own, so the claiming thread is never inside a task.
+While a main-loop task runs, a worker with slots keeps claiming threaded
+kinds and skips the other main-loop kinds. Before, the claiming thread ran
+the task itself, and a worker in `run_all_filters` or
+`fetch_missing_content` started no pull until it ended: on 2026-11-22
+optiplex held 3 of its 10 slots through a filter run with 2,300 pulls
+waiting.
+
 Every in-flight task keeps its own claim (the runtime contextvar is per
 task) and its own heartbeat thread, and is mirrored in `api.worker._in_flight`
 for the one reader outside every task's context, the SIGTERM handler, which

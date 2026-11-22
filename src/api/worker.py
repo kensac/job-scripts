@@ -7,6 +7,7 @@ Handlers live in src/tasks/.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import datetime
 import logging
 import os
@@ -236,6 +237,35 @@ async def run_task(task: dict[str, Any]) -> bool:
 THREADED_KINDS = frozenset({"ingest_source"})
 
 
+class _MainLoop:
+    """The one event loop every kind outside THREADED_KINDS runs on, on a
+    thread of its own, with asyncio.Runner's run() so the one-at-a-time path
+    reads as it did.
+
+    One loop for the worker's life, as before: provider clients keep pooled
+    connections bound to it, which is why those kinds are not threaded. It
+    left the main thread because a main-loop task there blocked claiming: a
+    worker in run_all_filters or fetch_missing_content started no pull until
+    it ended, and on 2026-11-22 optiplex ran 3 of its 10 slots for whole
+    filter runs while 2,300 pulls waited."""
+
+    def __init__(self) -> None:
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self.loop.run_forever, name="main-loop", daemon=True)
+        self.thread.start()
+
+    def close(self) -> None:
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(timeout=10)
+        self.loop.close()
+
+    def submit(self, coro: Any) -> concurrent.futures.Future[Any]:
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def run(self, coro: Any) -> Any:
+        return self.submit(coro).result()
+
+
 class _Slots:
     """Several tasks at once on one worker, under an AIMD limit: it grows by
     one with each task that ends normally, and halves when a task fails on
@@ -260,6 +290,8 @@ class _Slots:
         self.held: dict[int, int] = {}
         self.ended: SimpleQueue[tuple[int, bool]] = SimpleQueue()
         self.wake = threading.Event()
+        # The task on the main loop, if any; only one runs there at a time.
+        self.main_task: int | None = None
 
     def configure(self, ceiling: int, weights: dict[str, int], reserve_mb: int) -> None:
         self.limiter.max_c = ceiling
@@ -267,13 +299,15 @@ class _Slots:
         self.weights = weights
         self.reserve_mb = reserve_mb
 
-    def step(self, runner: asyncio.Runner) -> None:
+    def step(self, runner: _MainLoop) -> None:
         """One pass: settle what ended, then claim one task if there is room,
         else wait for a task to end or a poll to pass."""
         global _task_limit
         while not self.ended.empty():
             task_id, exhausted = self.ended.get()
             self.held.pop(task_id, None)
+            if task_id == self.main_task:
+                self.main_task = None
             self._settle(exhausted)
         free = available_memory_mb()
         short = free is not None and free < self.reserve_mb
@@ -285,16 +319,22 @@ class _Slots:
         if not self.held:
             task = _claim_task()
         elif room > 0 and not short:
-            task = _claim_task([k for k, w in self.weights.items() if w > room])
+            skip = [k for k, w in self.weights.items() if w > room]
+            if self.main_task is not None:
+                skip += [k for k in HANDLERS if k not in THREADED_KINDS]
+            task = _claim_task(skip)
         if task is None:
             _report_worker_status()
             self.wake.wait(POLL_SECONDS)
             self.wake.clear()
             return
-        if task["kind"] not in THREADED_KINDS:
-            self._settle(runner.run(run_task(task)))
-            return
         self.held[task["id"]] = self.weights.get(task["kind"], 1)
+        if task["kind"] not in THREADED_KINDS:
+            self.main_task = task["id"]
+            runner.submit(run_task(task)).add_done_callback(
+                lambda done, task_id=task["id"]: self._main_ended(task_id, done)
+            )
+            return
         threading.Thread(
             target=self._run, args=(task,), name=f"task-{task['id']}", daemon=True
         ).start()
@@ -304,6 +344,17 @@ class _Slots:
             self.limiter.record(rate_limited=True)
         else:
             self.limiter.limit = min(self.limiter.max_c, self.limiter.limit + 1)
+
+    def _main_ended(self, task_id: int, done: concurrent.futures.Future[Any]) -> None:
+        exhausted = False
+        try:
+            exhausted = bool(done.result())
+        except BaseException:
+            # As in _run: the claim stays running with its beat stopped, and
+            # the reaper requeues it.
+            logger.exception(f"Task {task_id} ended abnormally on the main loop")
+        self.ended.put((task_id, exhausted))
+        self.wake.set()
 
     def _run(self, task: dict[str, Any]) -> None:
         exhausted = False
@@ -389,7 +440,8 @@ def main() -> None:
     )
     # Provider clients retain pooled connections across tasks. Their loop must
     # live as long as the worker, not be closed after each run_once call.
-    with asyncio.Runner() as runner:
+    runner = _MainLoop()
+    try:
         last_housekeeping = 0.0
         ceiling = 1
         slots: _Slots | None = None
@@ -417,6 +469,8 @@ def main() -> None:
                     time.sleep(POLL_SECONDS)
             else:
                 slots.step(runner)
+    finally:
+        runner.close()
 
 
 # The container entrypoint is `python -m api.worker`. Without this the module
