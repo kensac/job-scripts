@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from api import db, health
 from api.auth import AuthedUser
+from api.problem import refuse
 from api.routers.admin.shared import SUMMARY_MAX_HOURS, require_admin
 from api.task_admission import TaskProgress
 
@@ -80,6 +81,30 @@ def list_workers(user: AuthedUser = Depends(require_admin)) -> FleetWorkers:
         {"fresh": health.WORKER_FRESH},
     )
     return FleetWorkers(rows=rows)
+
+
+class WorkerForgotten(BaseModel):
+    ok: bool
+    forgotten: str
+
+
+@router.delete("/workers/{name}")
+def forget_worker(name: str, user: AuthedUser = Depends(require_admin)) -> WorkerForgotten:
+    """Drop a worker that stopped heartbeating from the fleet list. A host
+    retired or renamed (laptop, desktop, hetzner-2) otherwise stays listed
+    as offline forever. A live worker is refused: it would re-register on
+    its next beat, so forgetting it only hides it for a minute. Its tasks
+    keep the name they ran under."""
+    row = db.query_one(
+        "DELETE FROM worker_status WHERE name = %(name)s "
+        "AND last_seen <= now() - %(fresh)s::interval RETURNING name",
+        {"name": name, "fresh": health.WORKER_FRESH},
+    )
+    if row:
+        return WorkerForgotten(ok=True, forgotten=name)
+    if db.query_one("SELECT 1 FROM worker_status WHERE name = %s", (name,)):
+        raise refuse(409, "WORKER_ALIVE", f"{name} is still heartbeating")
+    raise refuse(404, "NOT_FOUND", "unknown worker")
 
 
 class PendingKind(BaseModel):
