@@ -132,6 +132,10 @@ limit and every held task id are in `worker_status.task_limit` and
 `current_task_ids`; `current_task_id` stays the oldest, so "idle" reads the
 same.
 
+A `worker_status` row outlives its host. `DELETE /admin/workers/{name}`
+forgets a worker past `health.WORKER_FRESH` and refuses a live one with 409
+`WORKER_ALIVE`, since it would re-register on its next beat.
+
 Kinds in `api.worker.THREADED_KINDS` run in a thread of their own on an event
 loop of their own; every other kind runs on the main loop one at a time
 beside them. A thread, because handlers call the database synchronously and

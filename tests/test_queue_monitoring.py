@@ -194,3 +194,17 @@ def test_the_two_thresholds_are_admin_config(client, admin_headers):
     assert r.status_code == 200 and db.get_config("ingest_backlog_cycles") == 3
     r = client.put("/v1/admin/config/queue_stall_minutes", json={"value": 0}, headers=admin_headers)
     assert r.status_code == 400
+
+
+def test_a_worker_that_stopped_can_be_forgotten_and_a_live_one_cannot(client, admin_headers):
+    _worker("test-gone", idle=True, seen_minutes_ago=60 * 24 * 40)
+    _worker("test-live", idle=True)
+    gone = client.delete("/v1/admin/workers/test-gone", headers=admin_headers)
+    assert gone.status_code == 200 and gone.json()["forgotten"] == "test-gone"
+    live = client.delete("/v1/admin/workers/test-live", headers=admin_headers)
+    assert live.status_code == 409 and live.json()["detail"]["code"] == "WORKER_ALIVE"
+    assert client.delete("/v1/admin/workers/test-gone", headers=admin_headers).status_code == 404
+    names = {
+        w["name"] for w in client.get("/v1/admin/workers", headers=admin_headers).json()["rows"]
+    }
+    assert "test-gone" not in names and "test-live" in names
