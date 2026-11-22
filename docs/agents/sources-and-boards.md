@@ -1167,7 +1167,12 @@ cycle. One success ends the run. One more failure switches it off again.
 The run is derived from the `ingest_source` tasks, never stored
 (`queue.failure_runs`): failed tasks since the source's last done one. A task
 that failed because the source was already off (`INACTIVE_SOURCE_ERROR`) never
-asked the board, so it does not count. A 429 is a deferral, not a failure. The
+asked the board, so it does not count. A 429 is a deferral, not a failure, and
+so is a name lookup that failed on the worker for a board that pulled fine in
+the last two days (`ingest._worker_could_not_resolve`): oci's resolver dropped
+out in bursts, 12 boards in one minute on 2026-11-21, and each burst counted
+against every board in it. A board with no recent success fails as before,
+because its domain may really be gone. The
 `ingest_failing` alert reads the same run instead of a time window, because a
 daily board's third failure now lands three days after its first.
 
