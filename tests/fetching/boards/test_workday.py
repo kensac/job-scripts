@@ -179,3 +179,36 @@ def test_a_workday_tenant_that_ends_short_of_a_total_past_the_window_is_partial(
     monkeypatch.setattr(boards._stdlib_session, "post", _paged(2100, 2050))
     with pytest.raises(boards.PartialPull):
         boards.fetch_listings("https://x.wd1.myworkdayjobs.com/wday/cxs/x/Ext/jobs", "X")
+
+
+def test_an_unreadable_workday_page_is_asked_for_once_more(monkeypatch):
+    """Walmart answered a sliced search with an empty 200 (2026-11-22)."""
+
+    class Empty(_Resp):
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    answers = [
+        Empty(""),
+        _Resp(
+            {
+                "total": 1,
+                "jobPostings": [
+                    {
+                        "externalPath": "/job/x/Engineer_1",
+                        "locationsText": "Austin, TX",
+                        "postedOn": "Posted Today",
+                        "title": "Engineer",
+                    }
+                ],
+            }
+        ),
+    ]
+    monkeypatch.setattr(boards._stdlib_session, "post", lambda url, json, **kw: answers.pop(0))
+    out = boards.fetch_listings("https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/Ext/jobs", "Acme")
+    assert [p.title for p in out] == ["Engineer"]
+
+    # Unreadable twice: the pull fails rather than reading the page as empty.
+    answers[:] = [Empty(""), Empty("")]
+    with pytest.raises(ValueError):
+        boards.fetch_listings("https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/Ext/jobs", "Acme")
