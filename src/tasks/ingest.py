@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
 from typing import Any
 
 from api import ai_pause, db, filter_runs, hosts, metrics, queue, telemetry, user_settings
@@ -19,6 +20,33 @@ from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, set_progress
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_could_not_resolve(source: str, exc: BaseException) -> bool:
+    """The pull failed because this worker could not look the host up, and the
+    board pulled fine within the last two days. That is the worker's network:
+    oci's resolver dropped out in bursts on 2026-11-21 and 22 (12 boards in
+    one minute), and each burst counted a failure against every board caught
+    in it toward switching them off. A board with no recent success may have a
+    domain that is really gone, so it fails as before."""
+    seen: set[int] = set()
+    cause: BaseException | None = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, socket.gaierror) or isinstance(
+            getattr(cause, "reason", None), socket.gaierror
+        ):
+            break
+        cause = cause.__cause__ or cause.__context__
+    else:
+        return False
+    return bool(
+        db.query_one(
+            "SELECT 1 FROM tasks WHERE kind = 'ingest_source' AND payload->>'source' = %s "
+            "AND status = 'done' AND finished_at > now() - interval '2 days' LIMIT 1",
+            (source,),
+        )
+    )
 
 
 def _switch_off_if_given_up(source: str, exc: Exception) -> None:
@@ -185,6 +213,9 @@ async def _pull(source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
             # until the refused address reopened kept work waiting on the one
             # address that could not do it (hetzner, 0 for 18, 2026-09-06).
             hosts.refused(host)
+            raise Deferred(hosts.soon()) from exc
+        if _worker_could_not_resolve(source["name"], exc):
+            logger.warning(f"Ingest {source['name']}: name lookup failed on this worker; deferred")
             raise Deferred(hosts.soon()) from exc
         # The board itself failed to answer: the source, the host and the
         # HTTP status when there was one, so a board going dark is a query

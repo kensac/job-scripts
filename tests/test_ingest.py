@@ -363,3 +363,33 @@ def test_a_partial_pull_admits_what_it_saw_and_retires_nothing(monkeypatch, f):
         task_id = f.make_task("ingest_source", {"source": "capped"})
         asyncio.run(ingest.handle_ingest_source(task_id, {"source": "capped"}))
         assert active() == expected
+
+
+def test_a_name_lookup_failure_defers_only_a_board_that_pulled_recently():
+    """oci's resolver dropped out in bursts (12 boards in one minute,
+    2026-11-21); each counted toward switching healthy boards off."""
+    import socket
+    import urllib.error
+
+    import requests
+
+    from tasks import ingest
+
+    lookup = urllib.error.URLError(socket.gaierror(-5, "No address associated with hostname"))
+    try:
+        try:
+            raise socket.gaierror(-3, "Temporary failure in name resolution")
+        except socket.gaierror as inner:
+            raise requests.exceptions.ConnectionError("pool exhausted") from inner
+    except requests.exceptions.ConnectionError as wrapped:
+        via_requests = wrapped
+    db.execute(
+        "INSERT INTO tasks (kind, payload, status, finished_at) "
+        "VALUES ('ingest_source', '{\"source\": \"dns-fresh\"}', 'done', now() - interval '3 hours')"
+    )
+    assert ingest._worker_could_not_resolve("dns-fresh", lookup)
+    assert ingest._worker_could_not_resolve("dns-fresh", via_requests)
+    # Never pulled recently: the domain may be gone, so it fails as before.
+    assert not ingest._worker_could_not_resolve("dns-stale", lookup)
+    # Not a lookup failure at all.
+    assert not ingest._worker_could_not_resolve("dns-fresh", ValueError("bad json"))
