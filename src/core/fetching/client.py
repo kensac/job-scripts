@@ -57,10 +57,14 @@ TIMEOUT = 30.0
 # Only idempotent methods, which is urllib3's default: a POST search is not
 # replayed. raise_on_status=False hands the last 5xx back as a response, so
 # its status reaches the caller instead of a RetryError without one.
+# A 5xx is tried three more times, one, two and four seconds apart, by the
+# session's adapter and by stdlib_session alike.
+_RETRIES = 3
+_RETRY_STATUSES = (500, 502, 503, 504)
 _RETRY = Retry(
-    total=3,
+    total=_RETRIES,
     backoff_factor=1,
-    status_forcelist=(500, 502, 503, 504),
+    status_forcelist=_RETRY_STATUSES,
     respect_retry_after_header=False,
     raise_on_status=False,
 )
@@ -87,8 +91,8 @@ class _StdlibSession:
     answered the session 429 four times out of four and urllib 200 four out
     of four. No Workday pull succeeded from 2026-11-16 to that day. The
     reply keeps the requests shape so the refusal handling in the ingest
-    task (a 429 widens the host budget) reads it unchanged. No retry here,
-    as with the session. The posting reads (ats.Workday) came through here on
+    task (a 429 widens the host budget) reads it unchanged. A 5xx is retried
+    as the session retries one; a 429 never is. The posting reads (ats.Workday) came through here on
     2026-11-21, when the session got 429 for every tenant from both fleet
     addresses and urllib 200, and half of Workday's postings had gone to the
     browser instead.
@@ -101,6 +105,18 @@ class _StdlibSession:
         return self._send("POST", url, _json.dumps(json).encode(), timeout)
 
     def _send(self, method: str, url: str, data: bytes | None, timeout: float):
+        """One request, retried on a 5xx as the session's adapter retries one. Without
+        it a tenant read through thousands of sliced searches failed whole on
+        one server hiccup: Walmart failed every pull from 2026-11-21, on a 502
+        and then an empty answer. A 429 is still returned at once."""
+        for attempt in range(_RETRIES):
+            response = self._once(method, url, data, timeout)
+            if response.status_code not in _RETRY_STATUSES:
+                return response
+            time.sleep(2**attempt)
+        return self._once(method, url, data, timeout)
+
+    def _once(self, method: str, url: str, data: bytes | None, timeout: float):
         if not url.startswith("https://"):
             raise ValueError(f"not an https url: {url}")
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}

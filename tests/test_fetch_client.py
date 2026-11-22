@@ -136,3 +136,36 @@ def test_a_workday_posting_read_goes_through_the_standard_library(monkeypatch):
     monkeypatch.setattr(client.urllib.request, "urlopen", answer)
     monkeypatch.setattr(client.session, "get", lambda *a, **k: pytest.fail("requests session"))
     assert ats.Workday().fetch("https://acme.wd1.myworkdayjobs.com/en-US/Ext/job/NY/E_1").ok
+
+
+def test_the_stdlib_session_retries_a_5xx_and_never_a_429(monkeypatch):
+    """Walmart failed every pull from 2026-11-21 on one 502 among thousands
+    of sliced searches; the requests session would have retried it."""
+    import email.message
+    import urllib.error
+
+    answers = [502, 503, 200]
+    asked: list[int] = []
+
+    def reply(request, timeout):
+        status = answers.pop(0)
+        asked.append(status)
+        if status != 200:
+            raise urllib.error.HTTPError(
+                request.full_url, status, "err", email.message.Message(), io.BytesIO(b"")
+            )
+        return _Reply(b'{"total": 1}')
+
+    monkeypatch.setattr(client.urllib.request, "urlopen", reply)
+    monkeypatch.setattr(client.time, "sleep", lambda s: None)
+    assert (
+        client.stdlib_session.post("https://x.wd1.myworkdayjobs.com/j", json={}).status_code == 200
+    )
+    assert asked == [502, 503, 200]
+
+    answers[:] = [429, 200]
+    asked.clear()
+    assert (
+        client.stdlib_session.post("https://x.wd1.myworkdayjobs.com/j", json={}).status_code == 429
+    )
+    assert asked == [429]

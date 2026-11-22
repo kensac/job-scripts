@@ -115,7 +115,23 @@ def _workday_slice(
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:
+            # Walmart answered a sliced search with an empty 200 on
+            # 2026-11-22; asked again it answers. Once, so a tenant that only
+            # ever answers this way still fails the pull.
+            resp = _post_stdlib(
+                endpoint,
+                json={
+                    "appliedFacets": facets,
+                    "limit": _WORKDAY_PAGE,
+                    "offset": offset,
+                    "searchText": search,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
         page = data.get("jobPostings") or []
         page_paths = {j.get("externalPath") for j in page}
         if page_paths & paths:

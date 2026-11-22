@@ -274,6 +274,13 @@ so the refusal handling above reads it unchanged, and the pulls still wait
 on the `myworkdayjobs.com` floor in `ingest_host_pace_seconds` (2 seconds;
 with no floor the gap decays to zero) and the host budget.
 
+The standard-library client retries a 5xx as the session's adapter does
+(three more tries, one, two and four seconds apart) and never a 429, and the
+Workday pager asks once more for a page whose body is not JSON. A tenant read
+through thousands of sliced searches otherwise fails whole on one server
+hiccup: Walmart failed every pull from 2026-11-21, on a 502 and then an empty
+answer.
+
 A posting read the board answers 429 (`ats.Status.REFUSED`) widens the
 host's gap like a refused pull and is deferred like `host_paced`: no row is
 written and it does not go on to the browser, which would ask the same host
