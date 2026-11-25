@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from api import db
 from api.problem import refuse
-from api.reports import REPORT_KINDS
+from api.reports import public_report_kinds
 
 router = APIRouter(prefix="/public/job-lists", tags=["public-job-lists"])
 
@@ -70,7 +70,9 @@ class PublicJobReport(BaseModel):
 
 
 class FeedbackReceived(BaseModel):
-    id: int
+    """No id: the report ids are one sequence with people's own reports, so
+    handing one to an anonymous caller would tell them how many are filed."""
+
     created_at: datetime.datetime
 
 
@@ -81,27 +83,38 @@ def _published_board(slug: str) -> int:
     return row["id"]
 
 
-def _admit() -> None:
-    """Refuse when the hour's anonymous intake, across every list, is at the
-    administrator's limit. Call inside the transaction that inserts, so the
-    lock holds until the row is visible to the next caller's count."""
-    db.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (_INTAKE_LOCK,))
-    limit = db.get_config("public_feedback_hourly_limit")
+_HOUR_COUNT = """
+SELECT (SELECT count(*) FROM job_list_feedback
+        WHERE created_at > now() - interval '1 hour')
+     + (SELECT count(*) FROM reports
+        WHERE user_id IS NULL AND created_at > now() - interval '1 hour') AS n
+"""
+
+
+def _refuse_past(limit: int) -> None:
     if limit == 0:
         raise refuse(503, "FEEDBACK_CLOSED", "feedback is not being accepted right now")
-    row = db.query_one(
-        """
-        SELECT (SELECT count(*) FROM job_list_feedback
-                WHERE created_at > now() - interval '1 hour')
-             + (SELECT count(*) FROM reports
-                WHERE user_id IS NULL AND created_at > now() - interval '1 hour') AS n
-        """
-    )
+    row = db.query_one(_HOUR_COUNT)
     assert row is not None  # an aggregate with no GROUP BY is one row
     if row["n"] >= limit:
         raise refuse(
             429, "FEEDBACK_BUSY", "too much feedback arrived in the last hour; try again later"
         )
+
+
+def _admit() -> None:
+    """Refuse when the hour's anonymous intake, across every list, is at the
+    administrator's limit. Call inside the transaction that inserts.
+
+    The first check takes no lock, so a flood past the limit is refused
+    without queueing on it or holding a connection while it waits. Only a
+    request that would be admitted takes the lock and counts again, so two
+    cannot both pass at the limit; the lock is held until the insert commits.
+    """
+    limit = db.get_config("public_feedback_hourly_limit")
+    _refuse_past(limit)
+    db.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (_INTAKE_LOCK,))
+    _refuse_past(limit)
 
 
 @router.post("/{slug}/feedback")
@@ -112,7 +125,7 @@ def leave_list_feedback(slug: str, body: ListFeedback) -> FeedbackReceived:
         row = db.query_one_as(
             FeedbackReceived,
             "INSERT INTO job_list_feedback (managed_board_id, message, contact) "
-            "VALUES (%s, %s, %s) RETURNING id, created_at",
+            "VALUES (%s, %s, %s) RETURNING created_at",
             (board_id, body.message, body.contact),
         )
     assert row is not None  # an insert with RETURNING always yields its row
@@ -121,9 +134,11 @@ def leave_list_feedback(slug: str, body: ListFeedback) -> FeedbackReceived:
 
 @router.post("/{slug}/jobs/{job_id}/report")
 def report_public_job(slug: str, job_id: int, body: PublicJobReport) -> FeedbackReceived:
-    if body.kind not in REPORT_KINDS:
-        raise refuse(400, "INVALID_KIND", f"kind must be one of {REPORT_KINDS}")
-    if body.kind == "other" and not body.message.strip():
+    kinds = {k.kind: k for k in public_report_kinds()}
+    kind = kinds.get(body.kind)
+    if kind is None:
+        raise refuse(400, "INVALID_KIND", f"kind must be one of {sorted(kinds)}")
+    if kind.message_required and not body.message.strip():
         raise refuse(400, "MESSAGE_REQUIRED", "say what is wrong with this posting")
     board = db.query_one(
         """
@@ -140,7 +155,7 @@ def report_public_job(slug: str, job_id: int, body: PublicJobReport) -> Feedback
         row = db.query_one_as(
             FeedbackReceived,
             "INSERT INTO reports (managed_board_id, job_id, kind, message, contact) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
+            "VALUES (%s, %s, %s, %s, %s) RETURNING created_at",
             (board["id"], job_id, body.kind, body.message.strip(), body.contact),
         )
     assert row is not None  # an insert with RETURNING always yields its row

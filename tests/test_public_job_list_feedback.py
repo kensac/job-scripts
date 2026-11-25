@@ -69,7 +69,7 @@ def test_a_list_note_is_stored_anonymously_and_reaches_the_inbox(client, admin_h
     assert _users() == users
     inbox = client.get("/v1/admin/job-list-feedback", headers=admin_headers).json()
     [note] = inbox["rows"]
-    assert note["id"] == sent.json()["id"]
+    assert set(sent.json()) == {"created_at"}
     assert note["message"] == "More roles in Toronto, please"
     assert note["contact"] == "me@example.com"
     assert (note["job_list_slug"], note["job_list_name"]) == ("engineering", "Engineering")
@@ -84,6 +84,17 @@ def test_a_list_note_is_stored_anonymously_and_reaches_the_inbox(client, admin_h
     assert client.get("/v1/admin/job-list-feedback", headers=admin_headers).json()["rows"] == []
     every = client.get("/v1/admin/job-list-feedback?status=all", headers=admin_headers).json()
     assert every["rows"][0]["resolution_note"] == "added a Toronto source"
+
+    again = client.post(
+        f"/v1/admin/job-list-feedback/{note['id']}/resolve",
+        json={"action": "dismissed"},
+        headers=admin_headers,
+    )
+    assert again.status_code == 409
+    assert again.json()["detail"]["code"] == "ALREADY_ANSWERED"
+    kept = client.get("/v1/admin/job-list-feedback?status=all", headers=admin_headers).json()
+    assert kept["rows"][0]["status"] == "resolved"
+    assert kept["rows"][0]["resolution_note"] == "added a Toronto source"
 
 
 def test_the_inbox_is_admin_only(client, user_headers):
@@ -143,7 +154,7 @@ def test_a_posting_report_joins_the_report_queue_and_queues_no_recheck(client, a
     assert db.query("SELECT id FROM tasks WHERE kind = 'reverify_chunk'") == []
     queue = client.get("/v1/admin/reports", headers=admin_headers).json()
     [report] = queue["rows"]
-    assert report["id"] == sent.json()["id"]
+    assert set(sent.json()) == {"created_at"}
     assert report["job_id"] == job_id
     assert report["user_id"] is None
     assert report["reporter_email"] is None
@@ -187,7 +198,11 @@ def test_a_report_names_a_posting_on_that_published_list(client):
 
 @pytest.mark.parametrize(
     "body,code",
-    [({"kind": "fake"}, "INVALID_KIND"), ({"kind": "other"}, "MESSAGE_REQUIRED")],
+    [
+        ({"kind": "fake"}, "INVALID_KIND"),
+        ({"kind": "other"}, "MESSAGE_REQUIRED"),
+        ({"kind": "wrong_data", "message": "  "}, "MESSAGE_REQUIRED"),
+    ],
 )
 def test_a_report_must_name_a_kind_and_say_what_else(client, body, code):
     job_id = _job(1, _board())
@@ -249,5 +264,5 @@ def test_the_public_job_detail_serves_the_report_vocabulary(client):
     job_id = _job(1, _board())
     detail = client.get(f"/v1/public/job-lists/engineering/jobs/{job_id}")
     assert detail.status_code == 200
-    kinds = [k["kind"] for k in detail.json()["report_kinds"]]
-    assert kinds == ["stale", "wrong_data", "closed", "other"]
+    kinds = {k["kind"]: k["message_required"] for k in detail.json()["report_kinds"]}
+    assert kinds == {"stale": False, "wrong_data": True, "closed": False, "other": True}

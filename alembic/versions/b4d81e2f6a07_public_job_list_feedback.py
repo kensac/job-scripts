@@ -8,9 +8,12 @@ names the list it came from in `managed_board_id` instead, with the optional
 attributable to one or the other.
 
 Additive for every image already running: they write `user_id` on every
-report, and their readers inner-join `users`, so they skip anonymous rows
-rather than failing on them. `reports` holds one row per person's report,
-so the constraint's validation scan is short.
+report. Their report queue lists rows through an inner join on `users`, so it
+skips anonymous rows rather than failing on them, while its total counts
+them: until the fleet runs this release, an older API's queue can report a
+total and `has_more` one page longer than the rows it returns. `reports`
+held 2 rows when the test profile was measured (2026-09-04), so the
+constraint's validation scan and the plain index builds are short.
 
 Revision ID: b4d81e2f6a07
 Revises: 7c3e9a1f4b20
@@ -66,9 +69,35 @@ def upgrade() -> None:
     op.create_index(
         "idx_job_list_feedback_status", "job_list_feedback", ["status", "id"], unique=False
     )
+    op.create_index(
+        "idx_job_list_feedback_created", "job_list_feedback", ["created_at"], unique=False
+    )
+    op.create_index(
+        "idx_reports_anonymous_created",
+        "reports",
+        ["created_at"],
+        unique=False,
+        postgresql_where=sa.text("user_id IS NULL"),
+    )
 
 
 def downgrade() -> None:
+    # An anonymous report has no user to restore NOT NULL with, and dropping
+    # it would delete a visitor's report. Refuse rather than decide.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM reports WHERE user_id IS NULL) THEN
+                RAISE EXCEPTION 'reports holds anonymous rows (user_id IS NULL); '
+                    'downgrading would need to delete visitor reports. '
+                    'Export and remove them deliberately first.';
+            END IF;
+        END $$
+        """
+    )
+    op.drop_index("idx_reports_anonymous_created", table_name="reports")
+    op.drop_index("idx_job_list_feedback_created", table_name="job_list_feedback")
     op.drop_index("idx_job_list_feedback_status", table_name="job_list_feedback")
     op.drop_table("job_list_feedback")
     op.drop_constraint("ck_reports_has_origin", "reports", type_="check")

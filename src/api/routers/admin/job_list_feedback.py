@@ -104,15 +104,20 @@ def resolve_job_list_feedback(
     feedback_id: int, body: ResolveListFeedback, user: AuthedUser = Depends(require_admin)
 ) -> ListFeedbackResolved:
     """The same two answers a posting report takes, so the two queues read
-    alike: resolved when acted on, dismissed when there was nothing to do."""
+    alike: resolved when acted on, dismissed when there was nothing to do.
+    Only an open note takes one, so a second answer (a double click, another
+    administrator on a stale inbox) cannot overwrite the first."""
     if body.action not in ("resolved", "dismissed"):
         raise refuse(400, "INVALID_ACTION", "action must be resolved or dismissed")
     row = db.query_one_as(
         ListFeedbackResolved,
         "UPDATE job_list_feedback SET status = %s, resolution_note = %s, resolved_at = now() "
-        "WHERE id = %s RETURNING id, status",
+        "WHERE id = %s AND status = 'open' RETURNING id, status",
         (body.action, body.note or None, feedback_id),
     )
-    if not row:
+    if row:
+        return row
+    current = db.query_one("SELECT status FROM job_list_feedback WHERE id = %s", (feedback_id,))
+    if current is None:
         raise refuse(404, "NOT_FOUND", "unknown feedback")
-    return row
+    raise refuse(409, "ALREADY_ANSWERED", f"this note is already {current['status']}")

@@ -309,6 +309,12 @@ class Report(Base):
     __tablename__ = "reports"
     __table_args__ = (
         Index("idx_reports_status", "status", "id"),
+        # The public intake's hourly count reads anonymous rows by age.
+        Index(
+            "idx_reports_anonymous_created",
+            "created_at",
+            postgresql_where=text("user_id IS NULL"),
+        ),
         CheckConstraint(
             "user_id IS NOT NULL OR managed_board_id IS NOT NULL", name="ck_reports_has_origin"
         ),

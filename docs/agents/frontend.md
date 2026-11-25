@@ -117,7 +117,9 @@ never hides its siblings. Labels are the client's: country codes through
 **A public list takes feedback without an identity.** `POST
 /public/job-lists/{slug}/feedback` stores a note about the list;
 `POST /public/job-lists/{slug}/jobs/{job_id}/report` stores a report about a
-posting on it, with a kind from the detail response's `report_kinds`. Both
+posting on it, with a kind from the detail response's `report_kinds`, whose
+`message_required` says whether that kind needs words. Both answer only
+`created_at`: report ids are shared with people's own reports. Both
 take an optional `contact`, an email address, stored as typed and shown only
 to administrators. Neither authenticates, and the proxy must not add a
 session: an authenticated request provisions a user. The intake is one

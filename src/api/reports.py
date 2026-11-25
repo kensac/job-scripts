@@ -21,6 +21,26 @@ _REPORT_LABELS = {
 }
 
 
+class PublicReportKind(ReportKind):
+    """A kind as the public report form offers it. `message_required` is
+    whether a visitor must say more: an anonymous report carries no
+    corrections and no one to ask, so a kind whose meaning is not
+    self-contained is useless without words."""
+
+    message_required: bool
+
+
+# A visitor's report of these says everything by its kind alone.
+_SELF_CONTAINED = frozenset({"stale", "closed"})
+
+
+def public_report_kinds() -> list[PublicReportKind]:
+    return [
+        PublicReportKind(kind=k.kind, label=k.label, message_required=k.kind not in _SELF_CONTAINED)
+        for k in report_kinds()
+    ]
+
+
 def report_kinds() -> list[ReportKind]:
     """The kinds a report can carry, with the label the form shows; one copy,
     served to the board's report modal and the admin reports page."""

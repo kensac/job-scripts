@@ -116,7 +116,11 @@ class JobListFeedback(Base):
     queue the administrator already works through."""
 
     __tablename__ = "job_list_feedback"
-    __table_args__ = (Index("idx_job_list_feedback_status", "status", "id"),)
+    __table_args__ = (
+        Index("idx_job_list_feedback_status", "status", "id"),
+        # The public intake's hourly count reads rows by age.
+        Index("idx_job_list_feedback_created", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     managed_board_id: Mapped[int] = mapped_column(
