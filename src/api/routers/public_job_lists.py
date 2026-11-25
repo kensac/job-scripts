@@ -75,6 +75,10 @@ class PublicFacets(BaseModel):
 
 
 class PublicJobList(BaseModel):
+    """`accepts_feedback` is whether the list's feedback and report forms
+    are open now: false while the administrator has intake switched off. Its
+    presence is also what tells a page this API has them at all."""
+
     slug: str
     name: str
     description: str
@@ -85,6 +89,7 @@ class PublicJobList(BaseModel):
     next_cursor: str | None
     has_more: bool
     facets: PublicFacets | None = None
+    accepts_feedback: bool
 
 
 class PublicJobDetail(BaseModel):
@@ -474,6 +479,7 @@ def get_public_job_list(
         _encode_cursor(sort, dir, page[-1].sort_value, page[-1].job_id) if has_more else None
     )
     cards = [_card(row) for row in page]
+    accepts_feedback = db.get_config("public_feedback_hourly_limit") > 0
     # Projection revisions identify membership, but posting facts and closure
     # evidence can change between projection runs. Hash the rendered page so a
     # revalidation cannot preserve stale public facts under an unchanged revision.
@@ -498,6 +504,7 @@ def get_public_job_list(
             *(rule.model_dump_json() for rule in picks),
             facets.model_dump_json() if facets else "",
             *(card.model_dump_json() for card in cards),
+            str(accepts_feedback),
         ]
     )
     unchanged = _not_modified(if_none_match, etag, response)
@@ -514,6 +521,7 @@ def get_public_job_list(
         next_cursor=next_cursor,
         has_more=has_more,
         facets=facets,
+        accepts_feedback=accepts_feedback,
     )
 
 

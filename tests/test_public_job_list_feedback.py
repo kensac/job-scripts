@@ -266,3 +266,11 @@ def test_the_public_job_detail_serves_the_report_vocabulary(client):
     assert detail.status_code == 200
     kinds = {k["kind"]: k["message_required"] for k in detail.json()["report_kinds"]}
     assert kinds == {"stale": False, "wrong_data": True, "closed": False, "other": True}
+
+
+def test_the_list_says_whether_it_takes_feedback(client, set_config):
+    _board()
+    assert client.get("/v1/public/job-lists/engineering").json()["accepts_feedback"] is True
+    set_config("public_feedback_hourly_limit", 0)
+    closed = client.get("/v1/public/job-lists/engineering")
+    assert closed.json()["accepts_feedback"] is False

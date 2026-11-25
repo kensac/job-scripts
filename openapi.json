@@ -50899,6 +50899,10 @@
                 "type": "null"
               }
             ]
+          },
+          "accepts_feedback": {
+            "type": "boolean",
+            "title": "Accepts Feedback"
           }
         },
         "type": "object",
@@ -50911,9 +50915,11 @@
           "updated_at",
           "jobs",
           "next_cursor",
-          "has_more"
+          "has_more",
+          "accepts_feedback"
         ],
-        "title": "PublicJobList"
+        "title": "PublicJobList",
+        "description": "`accepts_feedback` is whether the list's feedback and report forms\nare open now: false while the administrator has intake switched off. Its\npresence is also what tells a page this API has them at all."
       },
       "PublicJobListIndex": {
         "properties": {
