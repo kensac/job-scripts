@@ -18,6 +18,7 @@ from api.board import column_filters as column_filters_
 from api.board.ats import ATS_SQL, AtsName
 from api.params import csv
 from api.problem import refuse
+from api.reports import PublicReportKind, public_report_kinds
 from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
 from core.verdict_reads import Openness
@@ -74,6 +75,10 @@ class PublicFacets(BaseModel):
 
 
 class PublicJobList(BaseModel):
+    """`accepts_feedback` is whether the list's feedback and report forms
+    are open now: false while the administrator has intake switched off. Its
+    presence is also what tells a page this API has them at all."""
+
     slug: str
     name: str
     description: str
@@ -84,12 +89,17 @@ class PublicJobList(BaseModel):
     next_cursor: str | None
     has_more: bool
     facets: PublicFacets | None = None
+    accepts_feedback: bool
 
 
 class PublicJobDetail(BaseModel):
+    """`report_kinds` is what the posting's report form offers, served so the
+    page keeps no copy of the vocabulary."""
+
     job: PublicJobCard
     content: str | None
     content_fetched_at: datetime.datetime | None
+    report_kinds: list[PublicReportKind]
 
 
 @dataclass(frozen=True)
@@ -469,6 +479,7 @@ def get_public_job_list(
         _encode_cursor(sort, dir, page[-1].sort_value, page[-1].job_id) if has_more else None
     )
     cards = [_card(row) for row in page]
+    accepts_feedback = db.get_config("public_feedback_hourly_limit") > 0
     # Projection revisions identify membership, but posting facts and closure
     # evidence can change between projection runs. Hash the rendered page so a
     # revalidation cannot preserve stale public facts under an unchanged revision.
@@ -493,6 +504,7 @@ def get_public_job_list(
             *(rule.model_dump_json() for rule in picks),
             facets.model_dump_json() if facets else "",
             *(card.model_dump_json() for card in cards),
+            str(accepts_feedback),
         ]
     )
     unchanged = _not_modified(if_none_match, etag, response)
@@ -509,6 +521,7 @@ def get_public_job_list(
         next_cursor=next_cursor,
         has_more=has_more,
         facets=facets,
+        accepts_feedback=accepts_feedback,
     )
 
 
@@ -537,5 +550,8 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
         [{"content": row.content, "ref": row.content_ref}], "content", "ref"
     )
     return PublicJobDetail(
-        job=_card(row), content=page["content"], content_fetched_at=row.content_fetched_at
+        job=_card(row),
+        content=page["content"],
+        content_fetched_at=row.content_fetched_at,
+        report_kinds=public_report_kinds(),
     )

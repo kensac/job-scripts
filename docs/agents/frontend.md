@@ -114,6 +114,23 @@ board under every other condition except the field's own, so a selected pick
 never hides its siblings. Labels are the client's: country codes through
 `Intl.DisplayNames`.
 
+**A public list takes feedback without an identity.** `POST
+/public/job-lists/{slug}/feedback` stores a note about the list;
+`POST /public/job-lists/{slug}/jobs/{job_id}/report` stores a report about a
+posting on it, with a kind from the detail response's `report_kinds`, whose
+`message_required` says whether that kind needs words. Both answer only
+`created_at`: report ids are shared with people's own reports. Both
+take an optional `contact`, an email address, stored as typed and shown only
+to administrators. Neither authenticates, and the proxy must not add a
+session: an authenticated request provisions a user. The intake is one
+hourly limit across every visitor (`public_feedback_hourly_limit`): 429
+`FEEDBACK_BUSY` past it, 503 `FEEDBACK_CLOSED` when it is zero. Say so as
+the service's state, keep what the person wrote in the form, and never show
+either as a problem with their message. Notes read in
+`GET /admin/job-list-feedback`; posting reports read in `/admin/reports`
+beside people's own, where an anonymous one has no `user_id` and names its
+`job_list_slug` instead.
+
 **A refusal is `{detail: {code, message, ...}}`, built by `api.problem.refuse`.**
 `code` is what a client branches on and stays stable; `message` is for a
 person and may be reworded. Extra keys (a `task_id`, the `in_flight` run) ride

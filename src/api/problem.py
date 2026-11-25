@@ -71,6 +71,11 @@ REFUSALS = _problems(400, 401, 403, 404, 409)
 # Public reads do not authenticate and therefore cannot return an auth refusal.
 PUBLIC_REFUSALS = _problems(400, 404)
 
+# Anonymous writes. 429 is the hourly intake limit across every visitor, and
+# 503 is intake switched off; neither is about the request itself, so a client
+# says so rather than asking the person to change what they wrote.
+PUBLIC_WRITE_REFUSALS = _problems(400, 404, 429, 503)
+
 # A route that depends on something outside this application answering
 # sensibly: a model, or the identity provider. The tokens or the round trip
 # are already spent when it does not, so this has to read as a real outcome

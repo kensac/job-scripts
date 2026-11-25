@@ -159,10 +159,14 @@ class ReportedPosting(BaseModel):
     kind of report, so it is not declared further. `posting_closed` is not a
     column: it is the latest closed verdict for the url, which is what decides
     whether the drawer offers to close it.
+
+    A report from a visitor to a public list has no `user_id`; it names the
+    list (`job_list_slug`, `job_list_name`) and carries the `contact` the
+    visitor chose to leave, which is null when they left none.
     """
 
     id: int
-    user_id: int
+    user_id: int | None
     job_id: int
     kind: str
     message: str
@@ -173,6 +177,9 @@ class ReportedPosting(BaseModel):
     resolved_at: datetime.datetime | None
     reporter_email: str | None
     reporter_name: str | None
+    job_list_slug: str | None
+    job_list_name: str | None
+    contact: str | None
     url: str
     company: str
     title: str
@@ -220,11 +227,13 @@ def list_reports(
         SELECT r.id, r.user_id, r.job_id, r.kind, r.message, r.corrections, r.status,
                r.resolution_note, r.created_at, r.resolved_at,
                u.email AS reporter_email, u.name AS reporter_name,
+               b.slug AS job_list_slug, b.name AS job_list_name, r.contact,
                j.url, j.company, j.title, j.source,
                (SELECT p.status FROM posting_uploads p WHERE p.job_id = j.id) AS extraction_status,
                COALESCE(c.status = 'rejected', FALSE) AS posting_closed
         FROM reports r
-        JOIN users u ON u.id = r.user_id
+        LEFT JOIN users u ON u.id = r.user_id
+        LEFT JOIN managed_boards b ON b.id = r.managed_board_id
         JOIN jobs j ON j.id = r.job_id
         LEFT JOIN LATERAL ({verdict_reads.latest("j.url", "closed")}) c ON TRUE
         {where}

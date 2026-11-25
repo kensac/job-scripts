@@ -1521,6 +1521,199 @@
         }
       }
     },
+    "/v1/public/job-lists/{slug}/feedback": {
+      "post": {
+        "tags": [
+          "public-job-lists"
+        ],
+        "summary": "Leave List Feedback",
+        "operationId": "leave_list_feedback_v1_public_job_lists__slug__feedback_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListFeedback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackReceived"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/job-lists/{slug}/jobs/{job_id}/report": {
+      "post": {
+        "tags": [
+          "public-job-lists"
+        ],
+        "summary": "Report Public Job",
+        "operationId": "report_public_job_v1_public_job_lists__slug__jobs__job_id__report_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicJobReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackReceived"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/views": {
       "get": {
         "summary": "List Views",
@@ -23638,6 +23831,332 @@
         }
       }
     },
+    "/v1/admin/job-list-feedback": {
+      "get": {
+        "summary": "List Job List Feedback",
+        "operationId": "list_job_list_feedback_v1_admin_job_list_feedback_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "list",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "List"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFeedbackInbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/job-list-feedback/{feedback_id}/resolve": {
+      "post": {
+        "summary": "Resolve Job List Feedback",
+        "description": "The same two answers a posting report takes, so the two queues read\nalike: resolved when acted on, dismissed when there was nothing to do.\nOnly an open note takes one, so a second answer (a double click, another\nadministrator on a stale inbox) cannot overwrite the first.",
+        "operationId": "resolve_job_list_feedback_v1_admin_job_list_feedback__feedback_id__resolve_post",
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Feedback Id"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveListFeedback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListFeedbackResolved"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/sources": {
       "get": {
         "summary": "Admin List Sources",
@@ -40137,6 +40656,21 @@
         ],
         "title": "FeatureAvailability"
       },
+      "FeedbackReceived": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created_at"
+        ],
+        "title": "FeedbackReceived",
+        "description": "No id: the report ids are one sequence with people's own reports, so\nhanding one to an anonymous caller would tell them how many are filed."
+      },
       "Field_": {
         "properties": {
           "key": {
@@ -43729,6 +44263,182 @@
           "postings"
         ],
         "title": "LevelCount"
+      },
+      "ListFeedback": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Message"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ListFeedback"
+      },
+      "ListFeedbackInbox": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ListFeedbackNote"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "filters": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Filters"
+          },
+          "filterable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Filterable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "page",
+          "page_size",
+          "total",
+          "has_more",
+          "filters",
+          "filterable"
+        ],
+        "title": "ListFeedbackInbox"
+      },
+      "ListFeedbackNote": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_list_slug": {
+            "type": "string",
+            "title": "Job List Slug"
+          },
+          "job_list_name": {
+            "type": "string",
+            "title": "Job List Name"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_list_slug",
+          "job_list_name",
+          "message",
+          "contact",
+          "status",
+          "resolution_note",
+          "created_at",
+          "resolved_at"
+        ],
+        "title": "ListFeedbackNote",
+        "description": "`contact` is what the visitor typed, null when they left nothing; it is\nthe only thing that identifies them."
+      },
+      "ListFeedbackResolved": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ListFeedbackResolved"
       },
       "LocationPlace": {
         "properties": {
@@ -50105,15 +50815,24 @@
               }
             ],
             "title": "Content Fetched At"
+          },
+          "report_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/PublicReportKind"
+            },
+            "type": "array",
+            "title": "Report Kinds"
           }
         },
         "type": "object",
         "required": [
           "job",
           "content",
-          "content_fetched_at"
+          "content_fetched_at",
+          "report_kinds"
         ],
-        "title": "PublicJobDetail"
+        "title": "PublicJobDetail",
+        "description": "`report_kinds` is what the posting's report form offers, served so the\npage keeps no copy of the vocabulary."
       },
       "PublicJobList": {
         "properties": {
@@ -50180,6 +50899,10 @@
                 "type": "null"
               }
             ]
+          },
+          "accepts_feedback": {
+            "type": "boolean",
+            "title": "Accepts Feedback"
           }
         },
         "type": "object",
@@ -50192,9 +50915,11 @@
           "updated_at",
           "jobs",
           "next_cursor",
-          "has_more"
+          "has_more",
+          "accepts_feedback"
         ],
-        "title": "PublicJobList"
+        "title": "PublicJobList",
+        "description": "`accepts_feedback` is whether the list's feedback and report forms\nare open now: false while the administrator has intake switched off. Its\npresence is also what tells a page this API has them at all."
       },
       "PublicJobListIndex": {
         "properties": {
@@ -50252,6 +50977,61 @@
           "updated_at"
         ],
         "title": "PublicJobListLink"
+      },
+      "PublicJobReport": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Message",
+            "default": ""
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "PublicJobReport"
+      },
+      "PublicReportKind": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "message_required": {
+            "type": "boolean",
+            "title": "Message Required"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "message_required"
+        ],
+        "title": "PublicReportKind",
+        "description": "A kind as the public report form offers it. `message_required` is\nwhether a visitor must say more: an anonymous report carries no\ncorrections and no one to ask, so a kind whose meaning is not\nself-contained is useless without words."
       },
       "PurposeFallback": {
         "properties": {
@@ -52147,7 +52927,14 @@
             "title": "Id"
           },
           "user_id": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Id"
           },
           "job_id": {
@@ -52228,6 +53015,39 @@
             ],
             "title": "Reporter Name"
           },
+          "job_list_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job List Slug"
+          },
+          "job_list_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job List Name"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
           "url": {
             "type": "string",
             "title": "Url"
@@ -52274,6 +53094,9 @@
           "resolved_at",
           "reporter_email",
           "reporter_name",
+          "job_list_slug",
+          "job_list_name",
+          "contact",
           "url",
           "company",
           "title",
@@ -52282,7 +53105,7 @@
           "posting_closed"
         ],
         "title": "ReportedPosting",
-        "description": "A report somebody filed about a posting, with enough of the posting and\nthe person beside it that the queue reads without a second request.\n\n`corrections` is what the reporter says the right answer is, shaped by the\nkind of report, so it is not declared further. `posting_closed` is not a\ncolumn: it is the latest closed verdict for the url, which is what decides\nwhether the drawer offers to close it."
+        "description": "A report somebody filed about a posting, with enough of the posting and\nthe person beside it that the queue reads without a second request.\n\n`corrections` is what the reporter says the right answer is, shaped by the\nkind of report, so it is not declared further. `posting_closed` is not a\ncolumn: it is the latest closed verdict for the url, which is what decides\nwhether the drawer offers to close it.\n\nA report from a visitor to a public list has no `user_id`; it names the\nlist (`job_list_slug`, `job_list_name`) and carries the `contact` the\nvisitor chose to leave, which is null when they left none."
       },
       "Repost": {
         "properties": {
@@ -52897,6 +53720,24 @@
           "choices"
         ],
         "title": "ResolveItem"
+      },
+      "ResolveListFeedback": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "ResolveListFeedback"
       },
       "ResolveMatch": {
         "properties": {

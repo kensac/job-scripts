@@ -475,6 +475,10 @@ answer disagrees with the standing verdict, and whenever a person files a
 day. The fleet's answer is the one boards read. `tests/test_cross_user_writes.py`
 pins it.
 
+A report from an anonymous visitor to a public list never queues one. It
+joins the same queue, and the administrator decides; otherwise whoever submits
+the public form sets the fleet's spend.
+
 ## A person's settings have one owner
 
 `user_settings` is read and written only by `api/user_settings.py`. It holds
