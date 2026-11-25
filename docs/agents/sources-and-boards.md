@@ -271,8 +271,8 @@ alternated 15 seconds apart. The posting reads stayed on the session until
 urllib got 200, so half of Workday's postings went to the browser and fired
 `ats_text_collapse` on dozens of tenants. It returns a `requests.Response`,
 so the refusal handling above reads it unchanged, and the pulls still wait
-on the `myworkdayjobs.com` floor in `ingest_host_pace_seconds` (2 seconds;
-with no floor the gap decays to zero) and the host budget.
+on the `myworkdayjobs.com` floor in `ingest_host_pace_seconds` (with no
+floor the gap decays to zero) and the host budget.
 
 The standard-library client retries a 5xx as the session's adapter does
 (three more tries, one, two and four seconds apart) and never a 429, and the
@@ -288,10 +288,28 @@ again.
 
 **A pace is kept under one key, and `core.fetching.hosts.pace_key` is the
 only thing that computes it.** The `host_budget` row a pull takes, the
-`ingest_host_pace_seconds` entry, the page pace inside a pull
+`ingest_host_pace_seconds` entry, the floor of the page pace inside a pull
 (`client.pace`, which every pull request waits on whatever its format) and a
 form read's budget all ask it, so a refusal learned by one is the pace of the
-others. A key can cover many hosts: Workday tenants are `myworkdayjobs.com`,
+others.
+
+**Whose turn a page waits for is `hosts.slot_key`, and only Workday splits
+it.** Inside a worker a page waits out the floor since the last request of
+the same slot. Workday refuses per tenant (gdit and kohls above), so each
+tenant is its own slot under the shared floor and budget. With one slot,
+every Workday pull in a worker took turns at one page a second: from
+2026-11-20 Walmart's pull averaged 182 minutes (114 before), Citi's 67 (18)
+and Accenture's 50 (3), with up to 10 pulls on one worker queued behind it.
+A worker now asks Workday at most its concurrent pulls times the floor's
+rate, at most 4 to 10 a second (peak concurrency 2026-11-22 to 11-25), which
+the platform served unpaced until 2026-11-19. Eightfold and Greenhouse keep
+one slot: one WAF fronts the Eightfold tenants.
+
+**A pull reports its requests while it runs.** `client.on_request` sees
+every request of the pull it wraps, and ingest writes the count as the
+task's progress at most once a minute (`total` is 0 until the pull ends).
+Before, progress moved only after the pull, and a sliced tenant read for an
+hour or more raised `task_progress_stalled` on a pull that was working. A key can cover many hosts: Workday tenants are `myworkdayjobs.com`,
 every Greenhouse host is `boards-api.greenhouse.io`, and every Eightfold
 tenant is `eightfold.ai` whatever domain it serves from. One WAF fronts the
 Eightfold tenants, and once it challenged an address on 2026-10-05, Lockheed

@@ -4,10 +4,13 @@
 a host it was configured with: fetch_host_limits counts a host's page fetches
 by URL prefix, so its key is the literal host.
 
-`pace_key` is the host a request is paced under: the host_budget row, the
-ingest_host_pace_seconds entry, and the page pace inside a pull. A platform
-that serves many hosts from one upstream is one key, because the upstream is
-what refuses. Every caller that paces asks here; when the Workday fold lived
+`pace_key` is the host a request is paced under: the host_budget row and the
+ingest_host_pace_seconds entry. A platform that serves many hosts from one
+upstream is one key, because the upstream is what refuses.
+
+`slot_key` is whose turn a page waits for inside a worker: the floor comes
+from `pace_key`, the last request from `slot_key`. They differ only for a
+platform that refuses per tenant. Every caller that paces asks here; when the Workday fold lived
 in two places, and the Eightfold one in a third, the budget row a pull took
 and the floor its pages waited on were different keys.
 """
@@ -60,3 +63,25 @@ def pace_key(url: str) -> str:
     ):
         return "eightfold.ai"
     return host
+
+
+def slot_key(url: str) -> str:
+    """The requests that take turns at the floor `pace_key` sets.
+
+    Workday refuses per tenant: on 2026-11-17 it answered gdit 429 and kohls
+    200 from the same address. Its all-tenant refusals (2026-11-16 to 11-21)
+    were the HTTP client, which the standard-library path fixed. A tenant
+    therefore waits only on its own last page. One shared slot made every
+    Workday pull in a worker take turns at one page a second: from 2026-11-20
+    Walmart's pull went from 114 to 182 minutes on average, Citi's from 18 to
+    67 and Accenture's from 3 to 50, with up to 10 pulls queued on the slot.
+    The pull budget stays shared under `pace_key`, so a refusal still holds
+    every tenant on that address.
+
+    Every other folded key keeps one slot: one WAF fronts every Eightfold
+    tenant and challenged them all at once on 2026-10-05.
+    """
+    key = pace_key(url)
+    if key == "myworkdayjobs.com":
+        return hostname(url)
+    return key

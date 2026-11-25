@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import socket
+import time
 from typing import Any
 
 from api import ai_pause, db, filter_runs, hosts, metrics, queue, telemetry, user_settings
@@ -86,7 +87,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     opens = hosts.take(host)
     if opens is not None:
         raise Deferred(opens)
-    listed, complete = await _pull(source, host)
+    listed, complete = await _pull(task_id, source, host)
     hosts.succeeded(host)
     fetched = len(listed)
     pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
@@ -186,15 +187,51 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     schedule_filter_runs(payload.get("cycle", "manual"))
 
 
-async def _pull(source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
+# How often a pull reports the requests it has made. The stall detector waits
+# task_progress_stall_minutes (30) for progress to move, and one write a
+# minute keeps a pull of thousands of requests from writing per request.
+PULL_PROGRESS_SECONDS = 60.0
+
+
+class _PullProgress:
+    """Counts a pull's requests and reports them, at most once a minute, as
+    the task's progress. A pull of a sliced tenant makes thousands of requests
+    over an hour or more; without this its progress did not move until the
+    pull ended, and `task_progress_stalled` fired on pulls that were working
+    (8 to 19 a night from 2026-11-20). The total is unknown until the pull
+    ends, so it is 0 and the queue shows no bar."""
+
+    def __init__(self, task_id: int, source: str) -> None:
+        self.task_id, self.source = task_id, source
+        self.requests = 0
+        self.reported_at = time.monotonic()
+
+    def __call__(self) -> None:
+        self.requests += 1
+        now = time.monotonic()
+        if now - self.reported_at < PULL_PROGRESS_SECONDS:
+            return
+        self.reported_at = now
+        set_progress(
+            self.task_id,
+            self.requests,
+            0,
+            f"{self.source}: reading the board, {self.requests} requests so far",
+            extra={"pull_requests": self.requests},
+        )
+
+
+async def _pull(task_id: int, source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
     """The board's postings and whether the pull saw all of them. A refusal
     defers the task; any other failure is recorded and raised."""
-    from core.fetching import boards
+    from core.fetching import boards, client
+
+    def read() -> list[Any]:
+        with client.on_request(_PullProgress(task_id, source["name"])):
+            return boards.fetch_listings(source["listings_url"], source["company"])
 
     try:
-        listed = await asyncio.to_thread(
-            boards.fetch_listings, source["listings_url"], source["company"]
-        )
+        listed = await asyncio.to_thread(read)
         return listed, True
     except boards.PartialPull as partial:
         return partial.postings, False
