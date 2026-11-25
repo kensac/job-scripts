@@ -248,6 +248,61 @@ class _PullProgress:
             raise PullStopped(self.source)
 
 
+# How far back another address's good pull of the same board still shows the
+# board is up and this address is the one refused. Every source pulls at
+# least weekly, so a month holds several of its pulls.
+OTHER_ADDRESS_DAYS = 30
+
+
+def refused_here(task_id: int, source: str) -> bool:
+    """A 403 that only this address gets: another address pulled this board
+    within OTHER_ADDRESS_DAYS and has not refused this task. Then this
+    address goes on the task's `refused_by`, which the claim skips, and the
+    pull is deferred for one of the others, spending no attempt and no
+    failure. With no such address the 403 is the board's, and fails as
+    before, so a board that refuses everyone is still switched off.
+
+    oracle_inova answered hetzner 403 on every pull from 2026-10-29 while oci
+    and transmission were never refused (host_budget ok 10 and 18, refused 0),
+    and it reached 7 of the 8 failures that switch a board off (2026-11-25). The refusal is the address's
+    for this board alone, so it widens no host gap: one host key covers every
+    Workday tenant.
+    """
+    row = db.query_one(
+        """
+        SELECT COALESCE(t.payload->'refused_by', '[]'::jsonb) AS refused_by,
+               EXISTS (
+                 SELECT 1 FROM tasks d
+                 JOIN worker_status w ON w.name = d.worker
+                 WHERE d.kind = 'ingest_source' AND d.status = 'done'
+                   AND d.payload->>'source' = %(source)s
+                   AND d.finished_at > now() - make_interval(days => %(days)s)
+                   AND COALESCE(w.egress_group, w.name) <> %(egress)s
+                   AND NOT (COALESCE(t.payload->'refused_by', '[]'::jsonb)
+                            ? COALESCE(w.egress_group, w.name))
+               ) AS served_elsewhere
+        FROM tasks t WHERE t.id = %(task)s
+        """,
+        {
+            "source": source,
+            "days": OTHER_ADDRESS_DAYS,
+            "egress": hosts.EGRESS_GROUP,
+            "task": task_id,
+        },
+    )
+    if not row or not row["served_elsewhere"]:
+        return False
+    db.execute(
+        "UPDATE tasks SET payload = jsonb_set(payload, '{refused_by}', %s) WHERE id = %s",
+        (db.jsonb(sorted({*row["refused_by"], hosts.EGRESS_GROUP})), task_id),
+    )
+    logger.warning(f"Ingest {source}: refused (403) on {hosts.EGRESS_GROUP} only; deferred")
+    telemetry.capture(
+        "ingest_address_refused", properties={"source": source, "egress": hosts.EGRESS_GROUP}
+    )
+    return True
+
+
 async def _pull(task_id: int, source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
     """The board's postings and whether the pull saw all of them. A refusal
     defers the task; any other failure is recorded and raised."""
@@ -279,6 +334,8 @@ async def _pull(task_id: int, source: dict[str, Any], host: str) -> tuple[list[A
             # until the refused address reopened kept work waiting on the one
             # address that could not do it (hetzner, 0 for 18, 2026-09-06).
             hosts.refused(host)
+            raise Deferred(hosts.soon()) from exc
+        if getattr(response, "status_code", None) == 403 and refused_here(task_id, source["name"]):
             raise Deferred(hosts.soon()) from exc
         if _worker_could_not_resolve(source["name"], exc):
             logger.warning(f"Ingest {source['name']}: name lookup failed on this worker; deferred")

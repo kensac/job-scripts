@@ -100,6 +100,10 @@ def claim_task(worker_name: str, too_heavy: list[str] | None = None) -> dict[str
                           WHERE b.host = tasks.payload->>'host'
                             AND b.egress_group = %(egress)s
                             AND b.next_allowed_at > now())
+                      -- Nor a pull this address was refused, which another
+                      -- address can make (tasks.ingest.refused_here).
+                      AND NOT (COALESCE(tasks.payload->'refused_by', '[]'::jsonb)
+                               ? %(egress)s)
                     ORDER BY {CLAIM_ORDER} LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, payload, attempts, worker, {RETRIES_SPENT} AS retries_spent
         """,
