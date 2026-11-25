@@ -6,13 +6,14 @@ by URL prefix, so its key is the literal host.
 
 `pace_key` is the host a request is paced under: the host_budget row and the
 ingest_host_pace_seconds entry. A platform that serves many hosts from one
-upstream is one key, because the upstream is what refuses.
+upstream is one key, because the upstream is what refuses. Every caller that
+paces asks here; when the Workday fold lived in two places, and the Eightfold
+one in a third, the budget row a pull took and the floor its pages waited on
+were different keys.
 
 `slot_key` is whose turn a page waits for inside a worker: the floor comes
 from `pace_key`, the last request from `slot_key`. They differ only for a
-platform that refuses per tenant. Every caller that paces asks here; when the Workday fold lived
-in two places, and the Eightfold one in a third, the budget row a pull took
-and the floor its pages waited on were different keys.
+platform that refuses per tenant.
 """
 
 from __future__ import annotations

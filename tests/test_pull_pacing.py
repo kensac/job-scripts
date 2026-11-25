@@ -65,14 +65,25 @@ def test_eightfold_tenants_still_take_turns(clock):
     assert clock == [2.0]
 
 
-def test_a_watcher_counts_its_own_pulls_requests_paced_or_not(clock):
+def test_a_watcher_sees_its_own_pulls_requests_paced_or_not(clock):
     seen: list[str] = []
     client.set_pace({"myworkdayjobs.com": 1})
-    with client.on_request(lambda: seen.append("x")):
-        client.pace(WALMART)
+    with client.on_request(seen.append):
+        client.pace(WALMART, "walmart page 1")
         client.pace("https://api.lever.co/v0/postings/a")
     client.pace(CITI)
-    assert seen == ["x", "x"]
+    assert seen == ["walmart page 1", "https://api.lever.co/v0/postings/a"]
+
+
+def test_a_request_is_named_by_its_body_and_parameters_not_its_url_alone():
+    from core.fetching.boards.common import _request
+
+    first = _request(WALMART, {"json": {"offset": 0, "limit": 20}})
+    again = _request(WALMART, {"json": {"limit": 20, "offset": 0}})
+    second = _request(WALMART, {"json": {"offset": 20, "limit": 20}})
+    assert first == again
+    assert first != second
+    assert _request(WALMART, {}) == WALMART
 
 
 def test_a_pull_reports_its_requests_while_it_runs(monkeypatch):
@@ -89,8 +100,8 @@ def test_a_pull_reports_its_requests_while_it_runs(monkeypatch):
     monkeypatch.setattr(ingest, "PULL_PROGRESS_SECONDS", 0.0)
     watch = ingest._PullProgress(row["id"], "wd_walmart")
     with client.on_request(watch):
-        for _ in range(3):
-            client.pace("https://api.lever.co/v0/postings/a")
+        for offset in (0, 20, 40):
+            client.pace(WALMART, f"offset={offset}")
 
     task = db.query_one("SELECT progress, progress_at FROM tasks WHERE id = %s", (row["id"],))
     assert task is not None and task["progress_at"] is not None
@@ -98,13 +109,67 @@ def test_a_pull_reports_its_requests_while_it_runs(monkeypatch):
     assert task["progress"]["total"] == 0
 
 
+def test_a_pull_asking_the_same_page_again_does_not_advance(monkeypatch):
+    """A looping pager must still read as stalled."""
+    from tasks import ingest
+
+    writes: list[int] = []
+    monkeypatch.setattr(ingest, "PULL_PROGRESS_SECONDS", 0.0)
+    monkeypatch.setattr(
+        ingest, "checkpoint", lambda tid, done, *a, **kw: writes.append(done) or True
+    )
+    watch = ingest._PullProgress(1, "wd_walmart")
+    for _ in range(5):
+        watch("offset=20")
+    assert writes == [1, 1, 1, 1, 1]
+
+
+def test_a_cancelled_task_stops_its_pull(monkeypatch):
+    from tasks import ingest
+
+    monkeypatch.setattr(ingest, "PULL_PROGRESS_SECONDS", 0.0)
+    monkeypatch.setattr(ingest, "checkpoint", lambda *a, **kw: False)
+    with pytest.raises(ingest.PullStopped):
+        ingest._PullProgress(1, "wd_walmart")("offset=0")
+
+
+def test_a_failed_progress_write_never_fails_the_pull(monkeypatch):
+    from tasks import ingest
+
+    def broken(*a, **kw):
+        raise RuntimeError("pool timeout")
+
+    monkeypatch.setattr(ingest, "PULL_PROGRESS_SECONDS", 0.0)
+    monkeypatch.setattr(ingest, "checkpoint", broken)
+    watch = ingest._PullProgress(1, "wd_walmart")
+    watch("offset=0")
+    assert watch.requests == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_pull_is_not_a_failed_pull(monkeypatch):
+    """Stopping must not reach the failure path, which switches boards off."""
+    from core.fetching import boards
+    from tasks import ingest
+
+    def stop(*a, **kw):
+        raise ingest.PullStopped("wd_walmart")
+
+    switched: list[str] = []
+    monkeypatch.setattr(boards, "fetch_listings", stop)
+    monkeypatch.setattr(ingest, "_switch_off_if_given_up", lambda s, e: switched.append(s))
+    with pytest.raises(ingest.PullStopped):
+        await ingest._pull(1, {"name": "wd_walmart", "listings_url": WALMART, "company": "W"}, "h")
+    assert switched == []
+
+
 def test_a_pull_reports_at_most_once_an_interval(monkeypatch):
     from tasks import ingest
 
     writes: list[int] = []
-    monkeypatch.setattr(ingest, "set_progress", lambda *a, **kw: writes.append(a[1]))
+    monkeypatch.setattr(ingest, "checkpoint", lambda *a, **kw: writes.append(a[1]) or True)
     watch = ingest._PullProgress(1, "wd_walmart")
-    for _ in range(500):
-        watch()
+    for offset in range(500):
+        watch(f"offset={offset}")
     assert writes == []
     assert watch.requests == 500

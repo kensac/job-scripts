@@ -156,16 +156,17 @@ stdlib_session = _StdlibSession()
 _PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
 _pace_lock = threading.Lock()
-# Called once per request a pull makes, before its wait. A pull runs in one
-# thread (asyncio.to_thread copies the context), so the caller that sets this
-# sees every request of its own pull and none of another's.
-_on_request: contextvars.ContextVar[Callable[[], None] | None] = contextvars.ContextVar(
+# Called once per request a pull makes, before its wait, with the request's
+# identity. A pull runs in one thread (asyncio.to_thread copies the context),
+# so the caller that sets this sees every request of its own pull and none of
+# another's.
+_on_request: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
     "on_request", default=None
 )
 
 
 @contextlib.contextmanager
-def on_request(watcher: Callable[[], None]) -> Iterator[None]:
+def on_request(watcher: Callable[[str], None]) -> Iterator[None]:
     """Call `watcher` on every request a pull inside this block makes."""
     token = _on_request.set(watcher)
     try:
@@ -179,13 +180,14 @@ def set_pace(floors: dict) -> None:
     _PACE_SECONDS = {str(h): float(s) for h, s in (floors or {}).items() if s}
 
 
-def pace(url: str) -> None:
+def pace(url: str, request: str | None = None) -> None:
     """Wait out this host's floor since this process last asked the same slot
-    (`hosts.slot_key`), then count the request for whoever is watching the
-    pull (`on_request`)."""
+    (`hosts.slot_key`), and tell whoever is watching the pull (`on_request`)
+    which request this is: `request` names it whole (its parameters and
+    body), the url alone when the caller passes nothing."""
     watcher = _on_request.get()
     if watcher is not None:
-        watcher()
+        watcher(request or url)
     wait = _PACE_SECONDS.get(pace_key(url))
     if not wait:
         return

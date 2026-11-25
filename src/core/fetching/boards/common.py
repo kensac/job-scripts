@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import json as _json
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -18,19 +19,30 @@ from core.fetching.posting import JobPosting
 from core.fetching.urls import normalize_url
 
 
+def _request(url: str, kwargs: dict[str, Any]) -> str:
+    """What makes this request this one: the url with its query parameters
+    and body. A pager that asks the same page again names the same request,
+    which is how a pull's progress tells advancing from looping."""
+    parts = [url]
+    for key in ("params", "json", "data"):
+        if kwargs.get(key) is not None:
+            parts.append(f"{key}={_json.dumps(kwargs[key], sort_keys=True, default=str)}")
+    return " ".join(parts)
+
+
 # Every request in a pull waits out its host floor, including paginated calls.
 def _get(url: str, **kwargs: Any) -> requests.Response:
-    pace(url)
+    pace(url, _request(url, kwargs))
     return _session.get(url, **kwargs)
 
 
 def _post(url: str, **kwargs: Any) -> requests.Response:
-    pace(url)
+    pace(url, _request(url, kwargs))
     return _session.post(url, **kwargs)
 
 
 def _post_stdlib(url: str, **kwargs: Any) -> requests.Response:
-    pace(url)
+    pace(url, _request(url, kwargs))
     return _stdlib_session.post(url, **kwargs)
 
 
