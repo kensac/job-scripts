@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pydantic import NonNegativeInt
+
 from api.admin_groups import ADMIN_GROUPS
 from api.config_types import ConfigKey
 
@@ -21,5 +23,17 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         value_type=list[str],
         kind="groups",
         help="Authentik groups whose members may connect a mailbox.",
+    ),
+    # A judgment, not a measurement: nothing anonymous was accepted before
+    # this key, so there is no volume to derive it from. It bounds what a
+    # script can put in the inbox in an hour, across every list. Revisit it
+    # against the inbox's real hourly counts once there are some.
+    "public_feedback_hourly_limit": ConfigKey(
+        section="Access",
+        default=60,
+        value_type=NonNegativeInt,
+        help="How many anonymous notes and posting reports the public job lists accept in any "
+        "hour, across every list together. Past it, visitors are told to try again later and "
+        "nothing is stored. Zero turns the forms off.",
     ),
 }

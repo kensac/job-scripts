@@ -14,7 +14,13 @@ from api.ai import access as ai_access
 from api.auth import require_user
 from api.board import visibility
 from api.models import Ok
-from api.problem import PUBLIC_REFUSALS, REFUSALS, Problem, ProblemResponse
+from api.problem import (
+    PUBLIC_REFUSALS,
+    PUBLIC_WRITE_REFUSALS,
+    REFUSALS,
+    Problem,
+    ProblemResponse,
+)
 from api.routers import (
     admin,
     analytics,
@@ -26,6 +32,7 @@ from api.routers import (
     gmail,
     jobs,
     mail,
+    public_job_list_feedback,
     public_job_lists,
     requirements,
     resolve,
@@ -151,6 +158,7 @@ async def _capture_unhandled(request: Request, call_next):
 
 app.include_router(users.router, prefix="/v1", responses=REFUSALS)
 app.include_router(public_job_lists.router, prefix="/v1", responses=PUBLIC_REFUSALS)
+app.include_router(public_job_list_feedback.router, prefix="/v1", responses=PUBLIC_WRITE_REFUSALS)
 app.include_router(
     saved_views.router, prefix="/v1", dependencies=[Depends(require_user)], responses=REFUSALS
 )

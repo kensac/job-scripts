@@ -108,3 +108,23 @@ Index(
     ManagedBoardJob.sort_at.desc(),
     ManagedBoardJob.job_id.desc(),
 )
+
+
+class JobListFeedback(Base):
+    """A note an anonymous visitor left about a public list as a whole. A note
+    about one posting is a `reports` row instead, so it joins the posting
+    queue the administrator already works through."""
+
+    __tablename__ = "job_list_feedback"
+    __table_args__ = (Index("idx_job_list_feedback_status", "status", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    managed_board_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("managed_boards.id", ondelete="RESTRICT")
+    )
+    message: Mapped[str] = mapped_column(Text)
+    contact: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    resolved_at: Mapped[datetime.datetime | None]

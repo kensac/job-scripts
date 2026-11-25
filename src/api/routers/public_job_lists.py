@@ -18,6 +18,7 @@ from api.board import column_filters as column_filters_
 from api.board.ats import ATS_SQL, AtsName
 from api.params import csv
 from api.problem import refuse
+from api.reports import ReportKind, report_kinds
 from core import catalog, page_fetches, verdict_reads
 from core.derivations.compensation import PayPeriodParam, canonical_compensation_period
 from core.verdict_reads import Openness
@@ -87,9 +88,13 @@ class PublicJobList(BaseModel):
 
 
 class PublicJobDetail(BaseModel):
+    """`report_kinds` is what the posting's report form offers, served so the
+    page keeps no copy of the vocabulary."""
+
     job: PublicJobCard
     content: str | None
     content_fetched_at: datetime.datetime | None
+    report_kinds: list[ReportKind]
 
 
 @dataclass(frozen=True)
@@ -537,5 +542,8 @@ def get_public_job(slug: str, job_id: int, response: Response) -> PublicJobDetai
         [{"content": row.content, "ref": row.content_ref}], "content", "ref"
     )
     return PublicJobDetail(
-        job=_card(row), content=page["content"], content_fetched_at=row.content_fetched_at
+        job=_card(row),
+        content=page["content"],
+        content_fetched_at=row.content_fetched_at,
+        report_kinds=report_kinds(),
     )

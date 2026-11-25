@@ -25,6 +25,7 @@ from api.routers.admin import (
     filters,
     fleet,
     health,
+    job_list_feedback,
     job_profiles,
     managed_boards,
     people,
@@ -49,5 +50,6 @@ router.include_router(config.router)
 router.include_router(queries.router)
 router.include_router(review_gates.router)
 router.include_router(data_flow.router)
+router.include_router(job_list_feedback.router)
 
 __all__ = ["require_admin", "router"]

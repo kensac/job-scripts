@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Identity,
@@ -301,11 +302,26 @@ class HealthAlert(Base):
 
 
 class Report(Base):
+    """A report about a posting. A signed-in person's names them in `user_id`;
+    an anonymous visitor's names the public list it came from in
+    `managed_board_id` and carries only the `contact` they chose to leave."""
+
     __tablename__ = "reports"
-    __table_args__ = (Index("idx_reports_status", "status", "id"),)
+    __table_args__ = (
+        Index("idx_reports_status", "status", "id"),
+        CheckConstraint(
+            "user_id IS NOT NULL OR managed_board_id IS NOT NULL", name="ck_reports_has_origin"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    managed_board_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("managed_boards.id", ondelete="RESTRICT")
+    )
+    contact: Mapped[str | None] = mapped_column(Text)
     job_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(Text)
     message: Mapped[str] = mapped_column(Text, server_default=text("''"))

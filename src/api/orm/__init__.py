@@ -65,7 +65,12 @@ from api.orm.mail import (
     GmailScanCursor,
     UserOAuthToken,
 )
-from api.orm.managed_boards import ManagedBoard, ManagedBoardJob, ManagedBoardSource
+from api.orm.managed_boards import (
+    JobListFeedback,
+    ManagedBoard,
+    ManagedBoardJob,
+    ManagedBoardSource,
+)
 from api.orm.platform import (
     AppConfig,
     AppConfigChange,
@@ -112,6 +117,7 @@ __all__ = [
     "HostBudget",
     "Job",
     "JobEmbedding",
+    "JobListFeedback",
     "JobListingEvent",
     "JobProfile",
     "JobRequirements",
