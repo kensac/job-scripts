@@ -105,7 +105,9 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
     # thirteen tenants pulled at once with no pace put that address behind a
     # captcha on every tenant tried but Microsoft. The limit itself was not
     # measured. One second keeps a worker near 60 a minute.
-    # "myworkdayjobs.com" spaces Workday pages five seconds apart per worker.
+    # "myworkdayjobs.com" spaces each Workday tenant's pages this far apart
+    # per worker (core.fetching.hosts.slot_key): concurrent pulls of different
+    # tenants on one worker do not wait on each other.
     # It had no floor until 2026-11-20, when its pulls came back after four
     # days of refusals (core.fetching.client.stdlib_session); the floor is a
     # margin, not a measured limit, and the budget still widens on a 429.

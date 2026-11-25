@@ -23,11 +23,14 @@ hosts.pace_key like the budget row.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json as _json
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import requests
@@ -35,7 +38,7 @@ from requests.adapters import HTTPAdapter
 from requests.structures import CaseInsensitiveDict
 from urllib3.util.retry import Retry
 
-from core.fetching.hosts import pace_key
+from core.fetching.hosts import pace_key, slot_key
 
 # The resolvers sent this user agent with "*/*" and the board pulls sent
 # "Mozilla/5.0" with JSON first. The first request to three active sources of
@@ -153,6 +156,23 @@ stdlib_session = _StdlibSession()
 _PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
 _pace_lock = threading.Lock()
+# Called once per request a pull makes, before its wait, with the request's
+# identity. A pull runs in one thread (asyncio.to_thread copies the context),
+# so the caller that sets this sees every request of its own pull and none of
+# another's.
+_on_request: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
+    "on_request", default=None
+)
+
+
+@contextlib.contextmanager
+def on_request(watcher: Callable[[str], None]) -> Iterator[None]:
+    """Call `watcher` on every request a pull inside this block makes."""
+    token = _on_request.set(watcher)
+    try:
+        yield
+    finally:
+        _on_request.reset(token)
 
 
 def set_pace(floors: dict) -> None:
@@ -160,15 +180,21 @@ def set_pace(floors: dict) -> None:
     _PACE_SECONDS = {str(h): float(s) for h, s in (floors or {}).items() if s}
 
 
-def pace(url: str) -> None:
-    """Wait out this host's floor since this process last asked it."""
-    host = pace_key(url)
-    wait = _PACE_SECONDS.get(host)
+def pace(url: str, request: str | None = None) -> None:
+    """Wait out this host's floor since this process last asked the same slot
+    (`hosts.slot_key`), and tell whoever is watching the pull (`on_request`)
+    which request this is: `request` names it whole (its parameters and
+    body), the url alone when the caller passes nothing."""
+    watcher = _on_request.get()
+    if watcher is not None:
+        watcher(request or url)
+    wait = _PACE_SECONDS.get(pace_key(url))
     if not wait:
         return
+    slot = slot_key(url)
     with _pace_lock:
-        at = max(time.monotonic(), _last_call.get(host, 0.0) + wait)
-        _last_call[host] = at
+        at = max(time.monotonic(), _last_call.get(slot, 0.0) + wait)
+        _last_call[slot] = at
     ahead = at - time.monotonic()
     if ahead > 0:
         time.sleep(ahead)

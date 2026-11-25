@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import socket
+import time
 from typing import Any
 
 from api import ai_pause, db, filter_runs, hosts, metrics, queue, telemetry, user_settings
@@ -17,7 +18,7 @@ from api.ai import verdicts
 from core import page_fetches
 from core.fetching.hosts import pace_key
 from tasks.board import content_ready_urls
-from tasks.runtime import Deferred, cancelled, set_progress
+from tasks.runtime import Deferred, cancelled, checkpoint, set_progress
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,11 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     opens = hosts.take(host)
     if opens is not None:
         raise Deferred(opens)
-    listed, complete = await _pull(source, host)
+    try:
+        listed, complete = await _pull(task_id, source, host)
+    except PullStopped:
+        logger.info(f"Ingest {source['name']}: stopped mid-pull, the task is no longer ours")
+        return
     hosts.succeeded(host)
     fetched = len(listed)
     pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
@@ -186,18 +191,79 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     schedule_filter_runs(payload.get("cycle", "manual"))
 
 
-async def _pull(source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
+# How often a pull reports the requests it has made. The stall detector waits
+# task_progress_stall_minutes (30) for progress to move, and one write a
+# minute keeps a pull of thousands of requests from writing per request.
+PULL_PROGRESS_SECONDS = 60.0
+
+
+class PullStopped(Exception):
+    """The task is no longer this worker's to run (cancelled, or claimed
+    elsewhere): the pull stops without counting as a failed pull."""
+
+
+class _PullProgress:
+    """Reports, at most once a minute, how many distinct requests a pull has
+    made, as the task's progress.
+
+    A sliced tenant's pull makes thousands of requests over an hour or more;
+    before this, progress moved only after the pull, and
+    `task_progress_stalled` fired on pulls that were working (8 to 19 a night
+    from 2026-11-20). Distinct, not every request: a pager re-asking the same
+    page adds nothing, so a looping pull still reads as stalled. The total is
+    unknown until the pull ends, so it is 0 and the queue shows no bar.
+
+    The write is best effort: a database error is logged, never raised into
+    the pull, which would record a board that answered as a failed pull. A
+    write the task refuses (cancelled, or no longer ours) stops the pull.
+    """
+
+    def __init__(self, task_id: int, source: str) -> None:
+        self.task_id, self.source = task_id, source
+        self.seen: set[int] = set()
+        self.reported_at = time.monotonic()
+
+    @property
+    def requests(self) -> int:
+        return len(self.seen)
+
+    def __call__(self, request: str) -> None:
+        self.seen.add(hash(request))
+        now = time.monotonic()
+        if now - self.reported_at < PULL_PROGRESS_SECONDS:
+            return
+        self.reported_at = now
+        try:
+            ours = checkpoint(
+                self.task_id,
+                self.requests,
+                0,
+                f"{self.source}: reading the board, {self.requests} requests so far",
+                extra={"pull_requests": self.requests},
+            )
+        except Exception:
+            logger.exception(f"Ingest {self.source}: could not record pull progress")
+            return
+        if not ours:
+            raise PullStopped(self.source)
+
+
+async def _pull(task_id: int, source: dict[str, Any], host: str) -> tuple[list[Any], bool]:
     """The board's postings and whether the pull saw all of them. A refusal
     defers the task; any other failure is recorded and raised."""
-    from core.fetching import boards
+    from core.fetching import boards, client
+
+    def read() -> list[Any]:
+        with client.on_request(_PullProgress(task_id, source["name"])):
+            return boards.fetch_listings(source["listings_url"], source["company"])
 
     try:
-        listed = await asyncio.to_thread(
-            boards.fetch_listings, source["listings_url"], source["company"]
-        )
+        listed = await asyncio.to_thread(read)
         return listed, True
     except boards.PartialPull as partial:
         return partial.postings, False
+    except PullStopped:
+        raise
     except Exception as exc:
         response = getattr(exc, "response", None)
         # An AWS WAF challenge is the same refusal in another shape: Eightfold
