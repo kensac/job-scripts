@@ -47,6 +47,8 @@ def _detect_queue() -> list[dict[str, Any]]:
                   WHERE b.host = t.payload->>'host'
                     AND b.egress_group = COALESCE(w.egress_group, w.name)
                     AND b.next_allowed_at > now())
+              AND NOT (COALESCE(t.payload->'refused_by', '[]'::jsonb)
+                       ? COALESCE(w.egress_group, w.name))
         ) o
         WHERE w.current_task_id IS NULL
           AND w.last_seen > now() - %(fresh)s::interval

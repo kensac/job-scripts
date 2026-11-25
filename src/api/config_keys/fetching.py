@@ -83,6 +83,17 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "retired. Switch it back on once its listings URL is fixed; one more failure "
         "switches it off again, and one success ends the run.",
     ),
+    # Every source pulls at least weekly, so 30 days holds several of its
+    # pulls: one address's good pull that recent still shows the board is up.
+    "ingest_other_address_days": ConfigKey(
+        section="Fetching",
+        default=30,
+        value_type=PositiveInt,
+        help="Days back another address's good pull of a board still shows the board is up. "
+        "A 403 on one address while a live address pulled the board this recently is that "
+        "address's refusal: the pull goes to another address and no failure counts. "
+        "Otherwise the 403 counts toward switching the board off.",
+    ),
     # Host -> page fetches per hour, fleet-wide. Empty means no host is paced;
     # a host that blocks bursts (www.tesla.com blocked 19 of 32 in a day
     # after 12 in an hour) is added here, from the alert, at the rate it
