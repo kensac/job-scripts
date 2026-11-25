@@ -284,12 +284,15 @@ answer.
 **A Workday posting its tenant took down answers 403 with error S22.** The
 body is Workday's own JSON (`{"errorCode": "S22", "message": "permission
 denied"}`), and `ats.Workday` reads it as gone, as it reads the 404 (S21) of
-an id that never existed. Any other 403, a Cloudflare challenge among them,
-stays an error, so a blocked address never closes a posting. Read as an
-error, the takedown fell through to the browser and was recorded as a fetch
-that returned nothing: on 2026-11-24 advanceauto had 661 such postings,
-none ever closed, and Workday as a whole had 1,578 available postings
-retrying and 255 given up (2026-11-25).
+an id that never existed. S22 belongs to the posting, not the career site:
+the read ignores the site segment, so under a site name that does not exist
+a live posting still answered 200 and a taken-down one S22 (2026-11-25), and
+a renamed or private site cannot close live postings. Any other 403 stays an
+error, so a blocked address never closes a posting. Read as an error, the
+takedown fell through to the browser and was recorded as a fetch that
+returned nothing: advanceauto's 661 failed reads of 2026-11-24 all answered
+S22 a day later, none had been closed, and Workday as a whole had 1,578
+available postings retrying and 255 given up (2026-11-25).
 
 A posting read the board answers 429 (`ats.Status.REFUSED`) widens the
 host's gap like a refused pull and is deferred like `host_paced`: no row is

@@ -70,11 +70,14 @@ class Workday(AtsResolver):
 
 # Workday's own answer for a posting the tenant took down: 403 with a JSON
 # body naming error S22, "permission denied". An id that never existed is 404
-# S21, which `from_response` already reads as gone. Read on 2026-11-25 from
-# advanceauto: 661 postings answered S22 and were recorded as fetches that
-# returned nothing, so none was ever closed, while its live postings answered
-# 200. A block is Cloudflare's HTML challenge, never this body, so a refused
-# address is not read as a closure.
+# S21, which `from_response` already reads as gone. advanceauto's 661 failed
+# reads of 2026-11-24 all answered S22 when read again on 2026-11-25, while
+# its live postings answered 200. S22 belongs to the posting, not the career
+# site: the read ignores the site segment, so a live posting answered 200 and
+# a taken-down one S22 under a site name that does not exist (2026-11-25). A
+# renamed or private site therefore cannot close live postings. Only this
+# exact body is gone; any other 403, whatever a block looks like, stays an
+# error and never closes a posting.
 UNPUBLISHED = "S22"
 
 

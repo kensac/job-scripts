@@ -1,5 +1,8 @@
 """core.fetching.ats.Workday: what a posting read answers, over bodies copied
-from Workday's API on 2026-11-25."""
+from Workday's API on 2026-11-25.
+
+Only the takedown test fails without S22 handling. The others guard its
+edges: a 404, any other 403 and a 429 must keep the meaning they had."""
 
 from __future__ import annotations
 
