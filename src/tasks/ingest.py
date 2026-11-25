@@ -19,7 +19,7 @@ from api.health.evidence import WORKER_FRESH
 from core import page_fetches
 from core.fetching.hosts import pace_key
 from tasks.board import content_ready_urls
-from tasks.runtime import Deferred, cancelled, checkpoint, claim_guard, set_progress
+from tasks.runtime import Deferred, cancelled, checkpoint, set_progress
 
 logger = logging.getLogger(__name__)
 
@@ -299,17 +299,14 @@ def refused_here(task_id: int, source: str) -> bool:
     )
     if not row or not row["served_elsewhere"]:
         return False
-    owned, owned_params = claim_guard(task_id)
-    written = db.execute_count(
-        "UPDATE tasks SET payload = jsonb_set(payload, '{refused_by}', %(refused)s) "
-        f"WHERE id = %(task)s AND status = 'running'{owned}",
-        {
-            "refused": db.jsonb(sorted({*row["refused_by"], hosts.EGRESS_GROUP})),
-            "task": task_id,
-            **owned_params,
-        },
-    )
-    if not written:
+    # checkpoint writes only while the task is running and still ours.
+    if not checkpoint(
+        task_id,
+        0,
+        0,
+        f"{source}: refused (403) on {hosts.EGRESS_GROUP}; going to another address",
+        payload={"refused_by": sorted({*row["refused_by"], hosts.EGRESS_GROUP})},
+    ):
         raise PullStopped(source)
     logger.warning(f"Ingest {source}: refused (403) on {hosts.EGRESS_GROUP} only; deferred")
     telemetry.capture(
