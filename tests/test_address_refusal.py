@@ -75,7 +75,7 @@ async def test_a_403_every_address_gets_is_the_boards_and_fails(monkeypatch, f):
     """No other address has pulled it lately, so nothing says it is up."""
     f.make_source("gone")
     _worker("oci", ELSEWHERE)
-    _pulled("gone", "oci", days_ago=ingest.OTHER_ADDRESS_DAYS + 5)
+    _pulled("gone", "oci", days_ago=31)
     task = _running("gone")
     _forbidden(monkeypatch)
 
@@ -134,3 +134,46 @@ def test_an_idle_worker_beside_a_pull_it_was_refused_is_not_stalled(f):
     assert not [a for a in health._detect_queue() if a["kind"] == "queue_stalled"]
     db.execute("UPDATE tasks SET payload = payload - 'refused_by'")
     assert [a["subject"] for a in health._detect_queue() if a["kind"] == "queue_stalled"] == ["w1"]
+
+
+@pytest.mark.asyncio
+async def test_an_address_with_no_live_worker_left_is_not_elsewhere(monkeypatch, f):
+    """Deferred to an address nobody can claim from, the pull would wait
+    forever and no new one would be made while it is pending."""
+    f.make_source("inova")
+    _worker("oci", ELSEWHERE)
+    db.execute("UPDATE worker_status SET last_seen = now() - interval '1 hour' WHERE name = 'oci'")
+    _pulled("inova", "oci")
+    task = _running("inova")
+    _forbidden(monkeypatch)
+
+    with pytest.raises(requests.HTTPError):
+        await ingest.handle_ingest_source(task, {"source": "inova"})
+
+
+@pytest.mark.asyncio
+async def test_an_address_that_no_longer_claims_ingest_is_not_elsewhere(monkeypatch, f):
+    f.make_source("inova")
+    _worker("oci", ELSEWHERE)
+    db.execute(
+        "UPDATE worker_status SET excluded_kinds = ARRAY['ingest_source'] WHERE name = 'oci'"
+    )
+    _pulled("inova", "oci")
+    task = _running("inova")
+    _forbidden(monkeypatch)
+
+    with pytest.raises(requests.HTTPError):
+        await ingest.handle_ingest_source(task, {"source": "inova"})
+
+
+def test_a_task_that_is_no_longer_ours_is_not_written(f):
+    f.make_source("inova")
+    _worker("oci", ELSEWHERE)
+    _pulled("inova", "oci")
+    task = _running("inova")
+    db.execute("UPDATE tasks SET status = 'pending' WHERE id = %s", (task,))
+
+    with pytest.raises(ingest.PullStopped):
+        ingest.refused_here(task, "inova")
+    row = db.query_one("SELECT payload FROM tasks WHERE id = %s", (task,))
+    assert row is not None and "refused_by" not in row["payload"]

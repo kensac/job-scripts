@@ -15,10 +15,11 @@ from typing import Any
 
 from api import ai_pause, db, filter_runs, hosts, metrics, queue, telemetry, user_settings
 from api.ai import verdicts
+from api.health.evidence import WORKER_FRESH
 from core import page_fetches
 from core.fetching.hosts import pace_key
 from tasks.board import content_ready_urls
-from tasks.runtime import Deferred, cancelled, checkpoint, set_progress
+from tasks.runtime import Deferred, cancelled, checkpoint, claim_guard, set_progress
 
 logger = logging.getLogger(__name__)
 
@@ -248,25 +249,21 @@ class _PullProgress:
             raise PullStopped(self.source)
 
 
-# How far back another address's good pull of the same board still shows the
-# board is up and this address is the one refused. Every source pulls at
-# least weekly, so a month holds several of its pulls.
-OTHER_ADDRESS_DAYS = 30
-
-
 def refused_here(task_id: int, source: str) -> bool:
     """A 403 that only this address gets: another address pulled this board
-    within OTHER_ADDRESS_DAYS and has not refused this task. Then this
-    address goes on the task's `refused_by`, which the claim skips, and the
-    pull is deferred for one of the others, spending no attempt and no
-    failure. With no such address the 403 is the board's, and fails as
-    before, so a board that refuses everyone is still switched off.
+    within `ingest_other_address_days`, has a live worker that claims
+    ingest, and has not refused this task. Then this address goes on the
+    task's `refused_by`, which the claim skips, and the pull is deferred for
+    that address, spending no attempt and no failure. With no such address
+    the 403 is the board's and fails as before, so a board that refuses
+    everyone is still switched off, and a pull is never left waiting for an
+    address with no live worker to take it.
 
     oracle_inova answered hetzner 403 on every pull from 2026-10-29 while oci
     and transmission were never refused (host_budget ok 10 and 18, refused 0),
-    and it reached 7 of the 8 failures that switch a board off (2026-11-25). The refusal is the address's
-    for this board alone, so it widens no host gap: one host key covers every
-    Workday tenant.
+    and it reached 7 of the 8 failures that switch a board off (2026-11-25).
+    The refusal is the address's for this board alone, so it widens no host
+    gap: one host key covers every Workday tenant.
     """
     row = db.query_one(
         """
@@ -280,22 +277,40 @@ def refused_here(task_id: int, source: str) -> bool:
                    AND COALESCE(w.egress_group, w.name) <> %(egress)s
                    AND NOT (COALESCE(t.payload->'refused_by', '[]'::jsonb)
                             ? COALESCE(w.egress_group, w.name))
+                   -- That address can still take the pull: a worker on it is
+                   -- alive and claims ingest.
+                   AND EXISTS (
+                     SELECT 1 FROM worker_status live
+                     WHERE COALESCE(live.egress_group, live.name)
+                           = COALESCE(w.egress_group, w.name)
+                       AND live.last_seen > now() - %(fresh)s::interval
+                       AND (cardinality(live.kinds) = 0 OR 'ingest_source' = ANY(live.kinds))
+                       AND NOT ('ingest_source' = ANY(live.excluded_kinds)))
                ) AS served_elsewhere
         FROM tasks t WHERE t.id = %(task)s
         """,
         {
             "source": source,
-            "days": OTHER_ADDRESS_DAYS,
+            "days": int(db.get_config("ingest_other_address_days")),
             "egress": hosts.EGRESS_GROUP,
+            "fresh": WORKER_FRESH,
             "task": task_id,
         },
     )
     if not row or not row["served_elsewhere"]:
         return False
-    db.execute(
-        "UPDATE tasks SET payload = jsonb_set(payload, '{refused_by}', %s) WHERE id = %s",
-        (db.jsonb(sorted({*row["refused_by"], hosts.EGRESS_GROUP})), task_id),
+    owned, owned_params = claim_guard(task_id)
+    written = db.execute_count(
+        "UPDATE tasks SET payload = jsonb_set(payload, '{refused_by}', %(refused)s) "
+        f"WHERE id = %(task)s AND status = 'running'{owned}",
+        {
+            "refused": db.jsonb(sorted({*row["refused_by"], hosts.EGRESS_GROUP})),
+            "task": task_id,
+            **owned_params,
+        },
     )
+    if not written:
+        raise PullStopped(source)
     logger.warning(f"Ingest {source}: refused (403) on {hosts.EGRESS_GROUP} only; deferred")
     telemetry.capture(
         "ingest_address_refused", properties={"source": source, "egress": hosts.EGRESS_GROUP}

@@ -340,10 +340,12 @@ Before, progress moved only after the pull, and a sliced tenant read for an
 hour or more raised `task_progress_stalled` on a pull that was working.
 
 **A 403 only one address gets is that address's, for that board.** When a
-pull is answered 403 and another address pulled the same source in the last
-30 days without being refused on this task, the address goes on the task's
+pull is answered 403 and another address pulled the same source within
+`ingest_other_address_days`, still has a live worker that claims ingest, and
+has not been refused on this task, the address goes on the task's
 `refused_by` and the pull is deferred, spending no attempt and no failure
-(`tasks.ingest.refused_here`). The claim and `queue_stalled` skip a task for
+(`tasks.ingest.refused_here`). Without a live worker on the other address the
+pull would wait for nobody, and no new pull is made while one is pending. The claim and `queue_stalled` skip a task for
 an address it lists. With no such address the 403 is the board's and fails
 as before, so a board that refuses everyone is still switched off. It widens
 no host gap, because one host key covers every Workday tenant. oracle_inova
