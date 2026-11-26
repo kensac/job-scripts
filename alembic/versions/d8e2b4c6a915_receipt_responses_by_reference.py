@@ -94,12 +94,23 @@ def downgrade() -> None:
         )
     with op.get_context().autocommit_block():
         op.drop_index(_INDEX, table_name=_TABLE, postgresql_concurrently=True, if_exists=True)
+        # SET NOT NULL through a validated CHECK, so the scan runs under SHARE
+        # UPDATE EXCLUSIVE and the SET itself proves the column from it
+        # (migrations.md).
+        op.execute(
+            f"ALTER TABLE {_TABLE} ADD CONSTRAINT ck_batch_result_receipts_response_present "
+            "CHECK (response IS NOT NULL) NOT VALID"
+        )
+        op.execute(
+            f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT ck_batch_result_receipts_response_present"
+        )
+    op.alter_column(_TABLE, "response", nullable=False)
+    op.execute(f"ALTER TABLE {_TABLE} DROP CONSTRAINT ck_batch_result_receipts_response_present")
     op.execute(
         f"ALTER TABLE {_TABLE} RESET (autovacuum_vacuum_scale_factor, "
         "autovacuum_analyze_scale_factor)"
     )
     op.execute(f"ALTER TABLE {_TABLE} DROP CONSTRAINT {_CHECK}")
-    op.alter_column(_TABLE, "response", nullable=False)
     for column in (
         "output_tokens",
         "finish_reason",

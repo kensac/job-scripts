@@ -199,8 +199,12 @@ class PayloadStore:
             raise PayloadUnavailable("Payload round-trip mismatch")
         return ref
 
-    def put_bundle(self, members: dict[str, Any]) -> dict[str, BundleMemberRef]:
-        """Upload many values as one verified object, returning a reference per member."""
+    def put_bundle(
+        self, members: dict[str, Any], cache: BundleCache | None = None
+    ) -> dict[str, BundleMemberRef]:
+        """Upload many values as one verified object, returning a reference per
+        member. The bundle as read back is left in `cache` when one is given,
+        so a caller that reads its members next does not fetch it again."""
         if not members or not all(isinstance(name, str) and name for name in members):
             raise PayloadUnavailable("A bundle needs named members")
         raw = encode_payload(members)
@@ -220,7 +224,7 @@ class PayloadStore:
             )
         self._put(raw, key)
         # Read every member back through the reader, not only the bundle digest.
-        cache: BundleCache = {}
+        cache = {} if cache is None else cache
         if any(self.get_member(ref, cache) != members[name] for name, ref in refs.items()):
             raise PayloadUnavailable("Payload round-trip mismatch")
         return refs
@@ -326,18 +330,22 @@ type Link = tuple[bytes, int]
 
 
 def put_values(
-    values: Mapping[str, Any], store: PayloadStore, max_bytes: int | None = None
+    values: Mapping[str, Any],
+    store: PayloadStore,
+    max_bytes: int | None = None,
+    cache: BundleCache | None = None,
 ) -> dict[str, Link]:
     """Upload values keyed by their own digest as verified bundles, split at
     `max_bytes` (bundle_groups' default unless given) and uploaded concurrently up to the store's connection pool.
-    Returns each digest's bundle digest and size. Outside transactions."""
+    Returns each digest's bundle digest and size, and leaves the bundles as
+    read back in `cache` when one is given. Outside transactions."""
     if in_transaction():
         raise RuntimeError("Payloads cannot be uploaded inside a database transaction")
     groups = bundle_groups(values.items(), lambda item: len(encode_payload(item[1])), max_bytes)
     if not groups:
         return {}
     with ThreadPoolExecutor(max_workers=min(len(groups), MAX_CONNECTIONS)) as executor:
-        uploaded = list(executor.map(lambda group: store.put_bundle(dict(group)), groups))
+        uploaded = list(executor.map(lambda group: store.put_bundle(dict(group), cache), groups))
     return {
         name: (bytes.fromhex(ref.sha256), ref.size)
         for refs in uploaded

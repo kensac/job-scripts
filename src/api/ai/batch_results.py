@@ -133,14 +133,20 @@ def response_digest(response: dict[str, Any]) -> str:
     return hashlib.sha256(encode_payload(response)).hexdigest()
 
 
-def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) -> None:
+def checkpoint(
+    task_id: int,
+    results: list[BatchResult],
+    unfinished: list[str],
+    cache: BundleCache | None = None,
+) -> None:
     """Record collected results before their provider batches stop being pending.
 
     Each response is a member of a verified bundle and each embedding's
     vectors a verified object, both read back before the receipt exists; the
     receipt holds the references. A storage failure raises PayloadUnavailable
     before any receipt is written or any batch ID is removed, so the batch is
-    collected again from the provider once storage is back. While an older
+    collected again from the provider once storage is back. The response
+    bundles as read back are left in `cache`, for unconsumed. While an older
     image runs (api.data_level), the response is written inline instead,
     which that image reads, and tasks.receipt_responses moves it later.
     """
@@ -165,6 +171,7 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         links = put_values(
             {response_digest(response): response for response in responses},
             store or shared_store(),
+            cache=cache,
         )
     with db.transaction():
         for result, response in zip(results, responses, strict=True):
@@ -244,8 +251,8 @@ def response_payload(response: dict[str, Any], store: PayloadStore | None = None
     return payload
 
 
-def unconsumed(task_id: int) -> list[BatchResult]:
-    cache: BundleCache = {}
+def unconsumed(task_id: int, cache: BundleCache | None = None) -> list[BatchResult]:
+    cache = {} if cache is None else cache
     rows = db.query(
         f"SELECT r.*, {request_snapshots.REF} AS snapshot_ref FROM batch_result_receipts r "
         f"LEFT JOIN ({request_snapshots.FROM}) "

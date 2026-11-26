@@ -69,8 +69,8 @@ def _step() -> list[dict[str, Any]]:
 def move(store: PayloadStore) -> int:
     """Move one step of inline responses, returning how many. Uploaded and
     read back before any row changes (PayloadStore.put_bundle), and the
-    update only touches rows still inline. A response is never rewritten
-    once received."""
+    update only touches rows still inline and not held by a consumer. A
+    response is never rewritten once received."""
     rows = _step()
     if not rows:
         return 0
@@ -87,7 +87,15 @@ def move(store: PayloadStore) -> int:
                     %(objects)s::bytea[], %(sizes)s::int[], %(tokens)s::int[])
              AS m(provider_batch_id, custom_id, member, object, size, output_tokens)
         WHERE r.provider_batch_id = m.provider_batch_id AND r.custom_id = m.custom_id
-          AND r.response IS NOT NULL
+          AND (r.provider_batch_id, r.custom_id) IN (
+              -- Locked in key order, the order consume_results locks in, and
+              -- skipping a receipt a consumer holds: it moves on a later step.
+              SELECT provider_batch_id, custom_id FROM batch_result_receipts
+              WHERE (provider_batch_id, custom_id) IN (
+                  SELECT * FROM unnest(%(batches)s::text[], %(customs)s::text[]))
+                AND response IS NOT NULL
+              ORDER BY provider_batch_id, custom_id
+              FOR UPDATE SKIP LOCKED)
         """,
         {
             "batches": [row["provider_batch_id"] for row in rows],
@@ -116,6 +124,10 @@ async def handle_move_receipt_responses(task_id: int, payload: dict[str, Any]) -
     total = await asyncio.to_thread(inline_count)
     moved = 0
     while db.get_config("receipt_response_move_enabled") and not cancelled(task_id):
+        # Again before every step: a host rolled back mid-run reads the
+        # response column, so the move stops for it as it never started.
+        if await asyncio.to_thread(data_level.behind, data_level.LEVEL):
+            break
         n = await asyncio.to_thread(move, store)
         if not n:
             break
