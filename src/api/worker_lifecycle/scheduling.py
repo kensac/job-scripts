@@ -218,11 +218,13 @@ def schedule_ingest_cycle() -> None:
     day = now.strftime("%Y-%m-%d")
     if ai_on:
         enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
-    # The latest-answer projection's daily check (tasks.latest_posting_checks).
+    # The latest-answer projection (tasks.latest_posting_checks): the urls
+    # changed this cycle, and once a day every job.
+    enqueue("fold_latest_posting_checks", {"cycle": cycle}, dedupe_key=f"lpc:{cycle}")
     enqueue(
-        "reconcile_latest_posting_checks",
-        {"cycle": day},
-        dedupe_key=f"latest-posting-checks:{day}",
+        "fold_latest_posting_checks",
+        {"cycle": day, "everything": True},
+        dedupe_key=f"lpc-all:{day}",
     )
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync

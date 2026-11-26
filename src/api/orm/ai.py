@@ -152,15 +152,16 @@ class AiQuery(Base):
 
 class LatestPostingCheck(Base):
     """Each posting's latest answer to each check that is not a custom
-    filter, as `verdicts` would give it: the answer with the highest id for
-    the posting's url and the check. A projection of `verdicts`, kept exact
-    in the same transaction by triggers on ai_queries and jobs and rebuilt
-    by tasks.latest_posting_checks, so a reader never sees it behind.
+    filter, as `verdicts` gives it: the answer with the highest id for the
+    posting's url and the check. Written only by tasks.latest_posting_checks,
+    which folds in the urls latest_posting_checks_dirty names; a reader takes
+    a url with a dirty row from `verdicts` instead, so it is never behind
+    (core.latest_posting_checks).
 
     Read per posting, the latest answer was an index probe into ai_queries
     for every candidate, the largest single cost of a scan over the
     catalog: 461,746 probes, 11.6 s, for one month of available postings,
-    against 0.8 s hashing this table's passing rows (production copy,
+    against 0.8 s hashing a table of latest answers (production copy,
     2026-11-26). Keyed by job id rather than url, which is 90 bytes on
     average: a url key made the table and its indexes 606 MB.
     """
@@ -173,6 +174,18 @@ class LatestPostingCheck(Base):
     check_type: Mapped[str] = mapped_column(Text, primary_key=True)
     verdict_id: Mapped[int] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(Text)
+
+
+class LatestPostingCheckDirty(Base):
+    """A url whose answers or posting changed since the projection last took
+    it in. Appended by triggers on ai_queries and jobs, with no unique key so
+    a writer never waits on another; removed by the fold that took it in."""
+
+    __tablename__ = "latest_posting_checks_dirty"
+    __table_args__ = (Index("idx_latest_posting_checks_dirty_url", "url"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    url: Mapped[str] = mapped_column(Text)
 
 
 class AiInstructionText(Base):
