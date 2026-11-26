@@ -393,6 +393,23 @@ def task_span(task: dict[str, Any], worker: str) -> Iterator[dict[str, str]]:
         yield ids
 
 
+@contextlib.contextmanager
+def untraced() -> Iterator[None]:
+    """Nothing done inside is traced: no span for a statement or an outbound
+    call, in this thread. For the per-item calls of a loop that runs inside
+    one task, which that task's span already stands for: embed_postings_local
+    made two requests a posting, each a span, 130 spans a second from
+    hetzner during the corpus backfill (2026-11-26), and building them
+    competed for the interpreter with the calls themselves."""
+    if _tracer is None:
+        yield
+        return
+    from opentelemetry.instrumentation.utils import suppress_instrumentation
+
+    with suppress_instrumentation():
+        yield
+
+
 def _props(properties: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "host": HOST,

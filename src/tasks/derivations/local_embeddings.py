@@ -43,7 +43,7 @@ from typing import Any
 
 import requests
 
-from api import db
+from api import db, telemetry
 from api.board import visibility
 from core import page_fetches
 from core.derivations import company_text, text_process
@@ -481,19 +481,22 @@ def _embed_all(
     results: queue.Queue[tuple[str, str, dict[str, Any] | None, Any]] = queue.Queue()
 
     def serve(url: str) -> None:
+        # Two requests a posting to our own servers: the task's span stands
+        # for them (telemetry.untraced).
         try:
-            while (job := work.take(url)) is not None:
-                try:
-                    vector = embed_document(_session(), url, job["text"]).vector
-                except ServerUnreachable:
-                    logger.warning("embedding server %s stopped answering", url, exc_info=True)
-                    results.put(("downed", url, job, None))
-                    return
-                except Exception:
-                    logger.warning("embedding %s failed on %s", job["url"], url, exc_info=True)
-                    results.put(("error", url, job, None))
-                else:
-                    results.put(("stored", url, job, vector))
+            with telemetry.untraced():
+                while (job := work.take(url)) is not None:
+                    try:
+                        vector = embed_document(_session(), url, job["text"]).vector
+                    except ServerUnreachable:
+                        logger.warning("embedding server %s stopped answering", url, exc_info=True)
+                        results.put(("downed", url, job, None))
+                        return
+                    except Exception:
+                        logger.warning("embedding %s failed on %s", job["url"], url, exc_info=True)
+                        results.put(("error", url, job, None))
+                    else:
+                        results.put(("stored", url, job, vector))
         finally:
             results.put(("stopped", url, None, None))
 
