@@ -19,13 +19,18 @@ CONTENT = "a long job description " * 20
 DIMS = core.LOCAL_EMBEDDING_DIMENSIONS
 
 
+# The fake's special tokens, framing text as llama-server frames it.
+OPEN, CLOSE = -1, -2
+
+
 class FakeServer:
-    """llama-server's /props, /tokenize, /detokenize and /v1/embeddings: one
-    token per word, and a vector whose first component is the chunk's token
-    count. `down` names servers that refuse connections."""
+    """llama-server's /props, /tokenize and /v1/embeddings: one token per
+    word (framed by OPEN and CLOSE when asked for special tokens), and a
+    vector whose first component is the count of a chunk's own tokens. `down`
+    names servers that refuse connections."""
 
     def __init__(self, down: frozenset[str] = frozenset(), slots: int = 2):
-        self.embedded: list[str] = []
+        self.embedded: list[list[int]] = []
         self.down = down
         self.slots = slots
 
@@ -40,15 +45,19 @@ class FakeServer:
     def post(self, url, json, timeout):
         path = url.split("/", 3)[-1]
         if path == "tokenize":
-            body = {"tokens": list(range(len(json["content"].split())))}
-        elif path == "detokenize":
-            body = {"content": " ".join("w" for _ in json["tokens"])}
+            tokens = list(range(len(json["content"].split())))
+            if json.get("add_special"):
+                tokens = [OPEN, *tokens, CLOSE]
+            body = {"tokens": tokens}
         else:
             self.embedded.extend(json["input"])
             body = {
                 "data": [
-                    {"index": i, "embedding": [float(len(t.split())), 1.0] + [0.0] * (DIMS - 2)}
-                    for i, t in enumerate(json["input"])
+                    {
+                        "index": i,
+                        "embedding": [float(sum(t >= 0 for t in ids)), 1.0] + [0.0] * (DIMS - 2),
+                    }
+                    for i, ids in enumerate(json["input"])
                 ]
             }
         return _Response(body)
@@ -73,13 +82,34 @@ def test_a_long_posting_is_embedded_whole_in_weighted_chunks(monkeypatch):
     embedded = core.embed_document(server, "http://emb", "word " * 25)
 
     assert embedded.chunks == 3
-    assert all(text.startswith(core.DOCUMENT_PREFIX) for text in server.embedded)
+    # Each chunk is its own tokens, framed as the server frames the prefixed
+    # text: OPEN, the prefix's one token, the chunk, CLOSE.
+    assert all(ids[:2] == [OPEN, 0] and ids[-1] == CLOSE for ids in server.embedded)
+    assert [len(ids) - 3 for ids in server.embedded] == [10, 10, 5]
     # Chunks of 10, 10 and 5 tokens, each embedded with the one-word prefix,
     # so the fake's first component reads 11, 11 and 6: weighted by the
     # chunks' token counts.
     first = (10 * 11 + 10 * 11 + 5 * 6) / 25
     norm = math.hypot(first, 1.0)
     assert embedded.vector[:2] == pytest.approx([first / norm, 1.0 / norm])
+
+
+def test_a_posting_costs_two_requests_and_the_frame_is_read_once_per_server():
+    core._frames.clear()
+    paths: list[str] = []
+
+    class Counting(FakeServer):
+        def post(self, url, json, timeout):
+            paths.append(url.split("/", 3)[-1])
+            return super().post(url, json, timeout)
+
+    server = Counting()
+    for words in (5, 12, 30):
+        core.embed_document(server, "http://emb", "word " * words)
+    frame = 2  # the prefix tokenized with and without special tokens, once
+    assert paths.count("tokenize") == 3 + frame
+    assert paths.count("v1/embeddings") == 3
+    assert len(paths) == 3 * 2 + frame
 
 
 def test_a_vector_of_another_width_is_refused():

@@ -32,6 +32,7 @@ shared text, is core.derivations.company_text.
 from __future__ import annotations
 
 import math
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -125,21 +126,52 @@ def slots(session: requests.Session, url: str) -> int:
     return total
 
 
+_frames: dict[str, tuple[list[int], list[int]]] = {}
+_frames_lock = threading.Lock()
+
+
+def _frame(session: requests.Session, url: str) -> tuple[list[int], list[int]]:
+    """The token ids the server at `url` puts before and after a document's
+    own when given text: its opening special token and DOCUMENT_PREFIX, and
+    its closing special token. Read from the server, once per server, so
+    nothing about the model's vocabulary is written here."""
+    with _frames_lock:
+        frame = _frames.get(url)
+    if frame is None:
+        framed = _post(session, url, "/tokenize", {"content": DOCUMENT_PREFIX, "add_special": True})
+        prefix = _post(session, url, "/tokenize", {"content": DOCUMENT_PREFIX})["tokens"]
+        tokens = framed["tokens"]
+        starts = [i for i in range(len(tokens)) if tokens[i : i + len(prefix)] == prefix]
+        if not starts:
+            raise EmbeddingUnavailable(f"embedding server {url} frames the prefix unexpectedly")
+        end = starts[0] + len(prefix)
+        frame = (tokens[:end], tokens[end:])
+        with _frames_lock:
+            _frames[url] = frame
+    return frame
+
+
 def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
-    """One posting's vector from the server at `url`: chunked to the model's
-    window, chunk vectors averaged by token count, normalised."""
+    """One posting's vector from the server at `url`: its text tokenized
+    once, cut into chunks the model's window holds, each chunk embedded as
+    exactly those tokens (framed as the server frames text: the prefix and
+    special tokens around them), and the chunk vectors averaged by token
+    count, then normalised. Two requests a posting; embedding the tokens
+    rather than text made from them again means what is embedded is the
+    posting's own tokenization (turning a chunk back into text and that text
+    back into tokens changed 2 of 200 postings' tokens, 2026-11-26)."""
     text = text[:EMBEDDING_INPUT_CHARS]
     tokens: Sequence[int] = _post(session, url, "/tokenize", {"content": text})["tokens"]
     spans = [tokens[s : s + CHUNK_TOKENS] for s in range(0, len(tokens), CHUNK_TOKENS)] or [[]]
-    chunks = [
-        _post(session, url, "/detokenize", {"tokens": list(span)})["content"] if span else ""
-        for span in spans
-    ]
-    data = _post(session, url, "/v1/embeddings", {"input": [DOCUMENT_PREFIX + c for c in chunks]})[
-        "data"
-    ]
+    opening, closing = _frame(session, url)
+    data = _post(
+        session,
+        url,
+        "/v1/embeddings",
+        {"input": [[*opening, *span, *closing] for span in spans]},
+    )["data"]
     vectors = [item["embedding"] for item in sorted(data, key=lambda item: item["index"])]
-    if len(vectors) != len(chunks) or any(len(v) != LOCAL_EMBEDDING_DIMENSIONS for v in vectors):
+    if len(vectors) != len(spans) or any(len(v) != LOCAL_EMBEDDING_DIMENSIONS for v in vectors):
         raise EmbeddingUnavailable("embedding server returned vectors of another shape")
     weights = [max(1, len(span)) for span in spans]
     mean = [
@@ -149,4 +181,4 @@ def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
     norm = math.sqrt(sum(x * x for x in mean))
     if not norm or not math.isfinite(norm):
         raise EmbeddingUnavailable("embedding server returned a zero or non-finite vector")
-    return Embedded([x / norm for x in mean], len(chunks))
+    return Embedded([x / norm for x in mean], len(spans))

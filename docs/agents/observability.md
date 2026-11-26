@@ -1004,7 +1004,10 @@ nearest OpenAI neighbours were its own employer's).
 
 **A posting is embedded whole.** Its text up to `EMBEDDING_INPUT_CHARS` is
 cut into chunks of the model's window, and the chunk vectors are averaged by
-token count, then normalised. Nothing is truncated to fit the window: over
+token count, then normalised. A chunk is sent as its own token ids, framed
+as the server frames text (`_frame`), not turned back into text: two
+requests a posting, and what is embedded is exactly the posting's
+tokenization. Nothing is truncated to fit the window: over
 150 postings, truncating to the window dropped 7% of the text and left 95% of
 top-10 neighbours unchanged, but the whole posting is what the vector claims
 to stand for.
