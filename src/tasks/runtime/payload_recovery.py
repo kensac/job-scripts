@@ -52,7 +52,7 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
         for row in requests:
             if not collection_finished or row["custom_id"] in required_ids:
                 request_snapshots.resolve(row, store, cache)
-        for row in unconsumed:
+        for row in batch_results.resolve_responses(unconsumed, store, cache):
             batch_results.response_payload(row["response"], store)
     except PayloadUnavailable:
         return "unavailable"
@@ -73,7 +73,9 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
             "ORDER BY provider_batch_id,custom_id FOR UPDATE",
             (task_id,),
         )
-        if current_requests != requests or current_receipts != receipts:
+        if current_requests != requests or _receipt_states(current_receipts) != _receipt_states(
+            receipts
+        ):
             return "conflict"
         # A provider ledger without preserved replay state is ambiguous. Never
         # convert that ambiguity into a fresh paid submission.
@@ -99,6 +101,17 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
     if parent_id is not None:
         events.publish_task(parent_id)
     return "pending"
+
+
+def _receipt_states(rows: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """What a receipt decides recovery by. Where its response is held is not
+    part of it: tasks.receipt_responses moving a response between the two
+    reads changes no value, as tasks.batch_objects compacting a request
+    reference does not."""
+    return [
+        (r["provider_batch_id"], r["custom_id"], r["task_id"], r["outcome"], r["consumed_at"])
+        for r in rows
+    ]
 
 
 def _recoverable_parent(parent: dict[str, Any]) -> bool:

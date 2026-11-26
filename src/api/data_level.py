@@ -14,13 +14,16 @@ agree: a host rolled back is below the level again on its next beat.
    (tasks.page_text_tiering). An older image resolves every candidate's page
    of a managed-board run one bundle at a time, and its own tier_page_text
    run brings recent held text back inline.
+3: receipt responses move to object storage (tasks.receipt_responses), and
+   checkpoints write them by reference. An older image reads the response
+   column itself.
 """
 
 from __future__ import annotations
 
 from api import db
 
-LEVEL = 2
+LEVEL = 3
 
 # A worker beats every 60 seconds (api.worker.HEARTBEAT_SECONDS) and the
 # fleet screen calls it dead after two minutes (health.WORKER_FRESH); five

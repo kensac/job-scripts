@@ -12,6 +12,7 @@ from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.payloads.objects import BundleMemberRef, PayloadRef, PayloadStore
 from tasks import runtime
 from tasks.derivations import embeddings
+from tests.factories import change_receipt_responses, receipt_response
 
 
 def _spec():
@@ -181,10 +182,7 @@ def test_responses_snapshots_and_receipts_retain_legacy_shape(f):
     ref = db.query_one(request_snapshots.ROWS, (task_id,))["snapshot_ref"]
     snapshot = PayloadStore.from_env().get_member(BundleMemberRef.parse(ref))
     assert "endpoint" not in snapshot and "inputs" not in snapshot
-    assert (
-        "embedding_vectors"
-        not in db.query_one("SELECT response FROM batch_result_receipts")["response"]
-    )
+    assert "embedding_vectors" not in receipt_response(task_id)
 
 
 def test_embedding_input_limit_applies_across_packed_requests(monkeypatch):
@@ -195,10 +193,7 @@ def test_embedding_input_limit_applies_across_packed_requests(monkeypatch):
 @pytest.mark.asyncio
 async def test_rejected_packed_request_is_acknowledged_without_live_fallback(f, monkeypatch):
     task_id, _ = _receipt(f)
-    db.execute(
-        'UPDATE batch_result_receipts SET response=response || \'{"error":"input too long"}\'::jsonb WHERE task_id=%s',
-        (task_id,),
-    )
+    change_receipt_responses(task_id, lambda response: {**response, "error": "input too long"})
 
     async def no_submit(*args, **kwargs):
         raise AssertionError("unexpected provider retry")
@@ -279,11 +274,11 @@ def test_new_embedding_receipt_holds_only_a_verified_reference(f):
         batch_id="packed",
     )
     batch_results.checkpoint(task_id, [result], [])
-    response = db.query_one("SELECT response FROM batch_result_receipts")["response"]
+    response = receipt_response(task_id)
     assert "embedding_vectors" not in response
     ref = PayloadRef.parse(response["embedding_vectors_ref"])
     assert PayloadStore.from_env().get(ref) == vectors
-    # Exactly what the inline writer stored, which every reader is still given.
+    # Exactly what the checkpoint stored, which every reader is given.
     assert batch_results.response_payload(response) == {
         "text": None,
         "usage": result.usage,
@@ -342,7 +337,7 @@ async def test_storage_outage_writes_no_receipt_and_the_batch_is_collected_again
     await worker.run_once()
     assert collections == [["packed"], ["packed"]]
     assert db.query_one("SELECT status FROM tasks WHERE id=%s", (task_id,))["status"] == "done"
-    response = db.query_one("SELECT response FROM batch_result_receipts")["response"]
+    response = receipt_response(task_id)
     assert "embedding_vectors" not in response
     ref = PayloadRef.parse(response["embedding_vectors_ref"])
     assert PayloadStore.from_env().get(ref) == vectors

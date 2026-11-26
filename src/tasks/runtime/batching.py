@@ -9,6 +9,7 @@ of buying it twice.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from decimal import Decimal
@@ -23,6 +24,7 @@ from api.task_config import configured_model, configured_shape
 from core import providers
 from core.batch import BatchEventCounts, BatchEventHook, BatchResult
 from core.fallback import ProviderExhausted, exhaustion_reason
+from core.payloads.objects import BundleCache
 from core.pricing import estimate_cost_usd
 from core.routing import Choice, TaskShape, resolve
 from tasks.runtime.lifecycle import claim_guard
@@ -448,6 +450,9 @@ async def collect_pending(task_id: int, hook: BatchEventHook) -> list[BatchResul
     """Checkpoint paid responses before clearing provider IDs; replay until consumed."""
     from core.batch import collect_finished_batches
 
+    # Checkpointing and reading back hold object storage round trips, so both
+    # run off the event loop; the bundles the checkpoint verified are reused.
+    cache: BundleCache = {}
     existing = pending_batch_ids(task_id)
     if existing:
         metadata = _batch_metadata(task_id, existing)
@@ -456,9 +461,9 @@ async def collect_pending(task_id: int, hook: BatchEventHook) -> list[BatchResul
             result.model = (
                 metadata.get(result.batch_id, {}).get("model") if result.batch_id else None
             )
-        batch_results.checkpoint(task_id, results, unfinished)
+        await asyncio.to_thread(batch_results.checkpoint, task_id, results, unfinished, cache)
         _mark_exhausted_results(results)
-    return batch_results.unconsumed(task_id)
+    return await asyncio.to_thread(batch_results.unconsumed, task_id, cache)
 
 
 def repark_if_unfinished(task_id: int) -> bool:

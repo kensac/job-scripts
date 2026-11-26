@@ -13,6 +13,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     Text,
     UniqueConstraint,
@@ -231,13 +232,42 @@ class BatchRequest(Base):
 
 
 class BatchResultReceipt(Base):
+    """One collected batch result, kept before its batch stops being pending
+    (api.ai.batch_results). The response is a member of a verified bundle
+    object: `response_sha256` names the member, `response_object` and
+    `response_object_size` the bundle, and `response` is NULL. It is inline
+    only on a row written while an older image ran, until
+    tasks.receipt_responses moves it. `finish_reason` and `output_tokens`
+    are the response's own, kept on the row for reports that aggregate them
+    over every receipt of a kind."""
+
     __tablename__ = "batch_result_receipts"
-    __table_args__ = (Index("idx_batch_result_receipts_task", "task_id", "consumed_at"),)
+    __table_args__ = (
+        Index("idx_batch_result_receipts_task", "task_id", "consumed_at"),
+        # The rows whose response is still inline, which
+        # tasks.receipt_responses moves, oldest first.
+        Index(
+            "idx_batch_result_receipts_inline",
+            "received_at",
+            postgresql_where=text("response IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "(response IS NULL) = (response_sha256 IS NOT NULL) "
+            "AND (response_sha256 IS NULL) = (response_object IS NULL) "
+            "AND (response_object IS NULL) = (response_object_size IS NULL)",
+            name="ck_batch_result_receipts_response_whole",
+        ),
+    )
 
     provider_batch_id: Mapped[str] = mapped_column(Text, primary_key=True)
     custom_id: Mapped[str] = mapped_column(Text, primary_key=True)
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"))
-    response: Mapped[dict]
+    response: Mapped[dict | None]
+    response_sha256: Mapped[bytes | None] = mapped_column(LargeBinary)
+    response_object: Mapped[bytes | None] = mapped_column(LargeBinary)
+    response_object_size: Mapped[int | None] = mapped_column(Integer)
+    finish_reason: Mapped[str | None] = mapped_column(Text)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
     model: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)

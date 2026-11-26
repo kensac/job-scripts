@@ -83,7 +83,10 @@ def test_store_rejects_empty_credentials_before_sdk_discovery(monkeypatch):
 
 def test_receipt_holds_only_the_reference(f):
     task_id, result = receipt(f)
-    response = row(task_id)["response"]
+    stored = row(task_id)
+    assert stored["response"] is None and stored["response_object"] is not None
+    [resolved] = batch_results.resolve_responses([stored])
+    response = resolved["response"]
     assert "embedding_vectors" not in response
     assert batch_results.response_payload(response)["embedding_vectors"] == (
         result.embedding_vectors

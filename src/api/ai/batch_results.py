@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -13,10 +14,14 @@ from core.batch import BatchResult, BatchSpec
 from core.payloads.objects import (
     MAX_CONNECTIONS,
     BundleCache,
+    Link,
     PayloadRef,
     PayloadStore,
+    PayloadUnavailable,
     bundle_groups,
     encode_payload,
+    put_values,
+    shared_store,
 )
 from core.pool import in_transaction
 
@@ -106,46 +111,89 @@ def snapshot_specs(task_id: int, specs: list[BatchSpec]) -> list[BatchSpec]:
     return frozen
 
 
-def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) -> None:
+def _response(result: BatchResult, vectors: PayloadRef | None) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "text": result.text,
+        "usage": result.usage,
+        "error": result.error,
+        "finish_reason": result.finish_reason,
+    }
+    if vectors is not None:
+        response["embedding_vectors_ref"] = dataclasses.asdict(vectors)
+    return response
+
+
+def output_tokens_of(response: dict[str, Any]) -> int | None:
+    usage = response.get("usage")
+    tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+    return tokens if type(tokens) is int else None
+
+
+def response_digest(response: dict[str, Any]) -> str:
+    return hashlib.sha256(encode_payload(response)).hexdigest()
+
+
+def checkpoint(
+    task_id: int,
+    results: list[BatchResult],
+    unfinished: list[str],
+    cache: BundleCache | None = None,
+) -> None:
     """Record collected results before their provider batches stop being pending.
 
-    Embedding vectors are verified objects before their receipt exists, and the
-    receipt holds only the reference. A storage failure raises PayloadUnavailable
+    Each response is a member of a verified bundle and each embedding's
+    vectors a verified object, both read back before the receipt exists; the
+    receipt holds the references. A storage failure raises PayloadUnavailable
     before any receipt is written or any batch ID is removed, so the batch is
-    collected again from the provider once storage is back.
+    collected again from the provider once storage is back. The response
+    bundles as read back are left in `cache`, for unconsumed. While an older
+    image runs (api.data_level), the response is written inline instead,
+    which that image reads, and tasks.receipt_responses moves it later.
     """
     if in_transaction():
-        raise RuntimeError("Receipt vectors cannot be uploaded inside a database transaction")
+        raise RuntimeError("Receipt payloads cannot be uploaded inside a database transaction")
     for result in results:
         if not result.batch_id:
             raise ValueError("a collected result must identify its provider batch")
     embedded = [result for result in results if result.embedding_vectors is not None]
     refs: dict[int, PayloadRef] = {}
+    store: PayloadStore | None = None
     if embedded:
-        store = PayloadStore.from_env()
+        store = shared_store()
         with ThreadPoolExecutor(max_workers=MAX_CONNECTIONS) as executor:
             uploaded = executor.map(
                 store.put_verified, [result.embedding_vectors for result in embedded]
             )
             refs = {id(result): ref for result, ref in zip(embedded, uploaded, strict=True)}
+    responses = [_response(result, refs.get(id(result))) for result in results]
+    links: dict[str, Link] = {}
+    if responses and data_level.behind(data_level.LEVEL) == 0:
+        links = put_values(
+            {response_digest(response): response for response in responses},
+            store or shared_store(),
+            cache=cache,
+        )
     with db.transaction():
-        for result in results:
-            response: dict[str, Any] = {
-                "text": result.text,
-                "usage": result.usage,
-                "error": result.error,
-                "finish_reason": result.finish_reason,
-            }
-            if id(result) in refs:
-                response["embedding_vectors_ref"] = dataclasses.asdict(refs[id(result)])
+        for result, response in zip(results, responses, strict=True):
+            link = links.get(response_digest(response))
+            stored = (
+                (db.jsonb(response), None, None, None)
+                if link is None
+                else (None, bytes.fromhex(response_digest(response)), *link)
+            )
             db.execute(
-                "INSERT INTO batch_result_receipts (provider_batch_id, custom_id, task_id, response, model) "
-                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (provider_batch_id, custom_id) DO NOTHING",
+                "INSERT INTO batch_result_receipts (provider_batch_id, custom_id, task_id, "
+                "response, response_sha256, response_object, response_object_size, "
+                "finish_reason, output_tokens, model) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (provider_batch_id, custom_id) DO NOTHING",
                 (
                     result.batch_id,
                     result.custom_id,
                     task_id,
-                    db.jsonb(response),
+                    *stored,
+                    result.finish_reason,
+                    output_tokens_of(response),
                     result.model,
                 ),
             )
@@ -163,35 +211,65 @@ def checkpoint(task_id: int, results: list[BatchResult], unfinished: list[str]) 
         )
 
 
+def resolve_responses(
+    rows: list[dict[str, Any]], store: PayloadStore | None = None, cache: BundleCache | None = None
+) -> list[dict[str, Any]]:
+    """Each receipt row with `response` holding its response, read from its
+    bundle where the row holds a reference. Bundles are read concurrently,
+    once each, outside any transaction; an inline row costs nothing."""
+    cache = {} if cache is None else cache
+    resolved = [dict(row) for row in rows]
+    held = [row for row in resolved if row["response"] is None]
+    if not held:
+        return resolved
+    if in_transaction():
+        raise RuntimeError("Receipt responses cannot be read inside a database transaction")
+    store = store or shared_store()
+    store.prefetch(
+        ((row["response_object"].hex(), row["response_object_size"]) for row in held), cache
+    )
+    for row in held:
+        value = store.get_digest_member(
+            row["response_object"].hex(),
+            row["response_object_size"],
+            row["response_sha256"].hex(),
+            cache,
+        )
+        if not isinstance(value, dict):
+            raise PayloadUnavailable("Receipt response is not an object")
+        row["response"] = value
+    return resolved
+
+
 def response_payload(response: dict[str, Any], store: PayloadStore | None = None) -> dict[str, Any]:
     payload = dict(response)
     reference = payload.pop("embedding_vectors_ref", None)
     if reference is not None:
         # An unavailable required input raises before consumption or accounting.
         # Consumed receipts are never hydrated by the replay path.
-        payload["embedding_vectors"] = (store or PayloadStore.from_env()).get(
-            PayloadRef.parse(reference)
-        )
+        payload["embedding_vectors"] = (store or shared_store()).get(PayloadRef.parse(reference))
     return payload
 
 
-def unconsumed(task_id: int) -> list[BatchResult]:
-    cache: BundleCache = {}
+def unconsumed(task_id: int, cache: BundleCache | None = None) -> list[BatchResult]:
+    cache = {} if cache is None else cache
+    rows = db.query(
+        f"SELECT r.*, {request_snapshots.REF} AS snapshot_ref FROM batch_result_receipts r "
+        f"LEFT JOIN ({request_snapshots.FROM}) "
+        "ON q.task_id=r.task_id AND q.custom_id=r.custom_id "
+        "WHERE r.task_id=%s AND r.consumed_at IS NULL ORDER BY r.provider_batch_id,r.custom_id",
+        (task_id,),
+    )
+    store = shared_store() if any(row["response"] is None for row in rows) else None
     return [
         BatchResult(
             custom_id=row["custom_id"],
             batch_id=row["provider_batch_id"],
             model=row["model"],
             request=request_snapshots.resolve(row, cache=cache),
-            **response_payload(row["response"]),
+            **response_payload(row["response"], store),
         )
-        for row in db.query(
-            f"SELECT r.*, {request_snapshots.REF} AS snapshot_ref FROM batch_result_receipts r "
-            f"LEFT JOIN ({request_snapshots.FROM}) "
-            "ON q.task_id=r.task_id AND q.custom_id=r.custom_id "
-            "WHERE r.task_id=%s AND r.consumed_at IS NULL ORDER BY r.provider_batch_id,r.custom_id",
-            (task_id,),
-        )
+        for row in resolve_responses(rows, store, cache)
     ]
 
 

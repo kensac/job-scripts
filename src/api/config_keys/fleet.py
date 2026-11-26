@@ -86,6 +86,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Postings per chunk when a scheduled filter run is split across the fleet. "
         "Each chunk submits its own half-price provider batch.",
     ),
+    # tasks.receipt_responses, read between steps.
+    "receipt_response_move_enabled": ConfigKey(
+        section="Fleet",
+        default=True,
+        value_type=bool,
+        help="Move batch result responses still stored in the database to object storage, "
+        "oldest first. New receipts are written to object storage either way; switched off, "
+        "a running move stops after its current step.",
+    ),
     "task_max_attempts": ConfigKey(
         section="Fleet",
         default=3,
