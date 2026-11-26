@@ -71,7 +71,11 @@ def posting_status(job: str, check: str) -> str:
     yet, so it is read live from `verdicts`; every other url's projection row
     is current (core.latest_posting_checks). An answer commits with its dirty
     row and a fold clears a dirty row with the projection write, so in any
-    snapshot this is exactly `latest_status`. The dirty test is a correlated
+    snapshot this is exactly `latest_status` for every write the triggers
+    see, which is every write the application makes. A write they cannot see
+    (a load with session_replication_role = replica, a TRUNCATE, rows loaded
+    before migration d81c5e2b7a43) is read stale until a fold over every job:
+    the daily one, or `fold(everything=True)` run after the load. The dirty test is a correlated
     probe, not a set: the planner sizes the table from its current pages when
     it plans, so a backlog the fold has not cleared turns it into an index
     probe rather than a rescan per posting.
@@ -139,8 +143,9 @@ def has_verdict(url: str, check: str) -> str:
 # decision and not an oversight.
 #
 # ai_queries is never pruned (docs/agents/engineering-standards.md, "Always
-# retain all data"); this reads the latest verdict per (url, check_type) and
-# relies on it being there.
+# retain all data"); this reads the latest verdict per (url, check_type),
+# from latest_posting_checks or, for a url not yet folded in, from verdicts
+# (posting_status), and relies on it being there.
 def verified_open(job: str) -> str:
     """For the posting whose jobs row is aliased `job` (posting_status)."""
     return (
