@@ -6,8 +6,7 @@ Create Date: 2026-11-26
 
 The local embedding sweep now covers every posting and a run drains its
 backlog batch by batch, so a run's size is no longer a per-cycle budget to
-tune: its batch is tasks.derivations.local_embeddings.BATCH_POSTINGS, sized
-by the text a batch holds. The setting's stored row goes with its key.
+tune; what an administrator tunes is the batch, local_embed_batch. The setting's stored row goes with its key.
 """
 
 from collections.abc import Sequence

@@ -10,7 +10,7 @@ visible slice is embedded once: a later page or profile does not re-select
 it, and its row's content_row_id and profiled_at say what it was embedded
 from.
 
-A run takes them BATCH_POSTINGS at a time until nothing is left, embedding
+A run takes them `local_embed_batch` at a time until nothing is left, embedding
 each batch on every server this host names that answers
 (core.derivations.local_embeddings), as many at once on each as the server
 has slots. So a backfill is one run that drains it, picking up servers that
@@ -30,12 +30,13 @@ that text unchanged is re-stamped, not embedded again.
 from __future__ import annotations
 
 import asyncio
+import collections
 import hashlib
 import logging
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal
+from typing import Any
 
 import requests
 
@@ -51,6 +52,7 @@ from core.derivations.local_embeddings import (
     server_urls,
     slots,
 )
+from core.payloads.objects import PayloadUnavailable
 from core.store import CONTENT_LATERAL
 from tasks.derivations.embeddings import candidate_sql
 from tasks.runtime import cancelled, set_progress
@@ -62,11 +64,12 @@ KIND = "embed_postings_local"
 CANDIDATES = candidate_sql(visibility.across_users("j.url"), "posting_embeddings")
 
 # Every posting with page text that has no row, newest first, below the
-# run's cursor (`below`, the last job id the run's walk reached), so one run
-# walks the corpus once. A new run walks from the top: with all 2.1M jobs
+# run's cursor (`below`: walked postings at or above it were stored or
+# refused, see _batch), so one run walks the corpus once. A new run walks from the top: with all 2.1M jobs
 # embedded but one, that took 23 s (2026-11-26, probing an embeddings table's
 # primary key per job), and the 230k jobs without page text cost one
-# page_texts probe each on top. Pages the servers refused are passed over.
+# page_texts probe each on top. Pages the servers refused, or whose text
+# cannot be read, are passed over.
 BACKFILL = f"""
     SELECT j.id AS job_id, j.url, q.content_row_id, NULL::text AS stored_hash,
            q.input_content, q.content_ref
@@ -84,13 +87,6 @@ BACKFILL = f"""
 
 # A cursor above every job id, so a run's walk starts at the newest job.
 _NO_CURSOR = 2**63 - 1
-
-# Postings a batch takes. At the 5.5 KB a page averaged (2026-11-26) that is
-# about 11 MB of text held at once. Visible postings lead every batch, so a
-# posting that has just become visible waits at most one batch during a
-# backfill: about 45 minutes on optiplex's two servers alone (0.75 postings a
-# second), half a minute with the rented GPUs (68 a second).
-BATCH_POSTINGS = 2000
 
 # Postings written per statement, so a run that stops part way keeps what it
 # embedded and progress moves as it goes.
@@ -175,20 +171,35 @@ def _restamp(rows: list[dict[str, Any]]) -> int:
     )
 
 
-def candidates(cap: int, below: int) -> tuple[list[dict[str, Any]], int]:
+def _readable(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The rows with their page text read, and the rows whose stored text
+    cannot be read. One unreadable page costs a read of each row on its own,
+    not the batch."""
+    cache: dict = {}
+    try:
+        return page_fetches.resolve(rows, cache=cache), []
+    except PayloadUnavailable:
+        readable, unreadable = [], []
+        for row in rows:
+            try:
+                readable += page_fetches.resolve([row], cache=cache)
+            except PayloadUnavailable:
+                logger.warning("page text of %s cannot be read", row["url"], exc_info=True)
+                unreadable.append(row)
+        return readable, unreadable
+
+
+def candidates(cap: int, below: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Up to `cap` postings: the visible ones that need a vector, then never
-    embedded ones below job id `below` to fill the batch; and the job id the
-    walk reached, `below` for the next batch."""
+    embedded ones below job id `below` to fill the batch (those carry their
+    `job_id`); and apart, the ones whose page text cannot be read."""
     rows = db.query(CANDIDATES, {"cap": cap})
     if len(rows) < cap:
-        walked = db.query(
+        rows += db.query(
             BACKFILL,
             {"cap": cap - len(rows), "below": below, "taken": [row["url"] for row in rows]},
         )
-        if walked:
-            below = walked[-1]["job_id"]
-        rows += walked
-    rows = page_fetches.resolve(rows)
+    rows, unreadable = _readable(rows)
     companies = {
         row["url"]: row
         for row in db.query(
@@ -201,7 +212,7 @@ def candidates(cap: int, below: int) -> tuple[list[dict[str, Any]], int]:
         job = companies.get(row["url"], {})
         row["company"] = job.get("company", "")
         row["company_key"] = job.get("company_key", "")
-    return rows, below
+    return rows, unreadable
 
 
 def _profile(stale: list[str], current: dict[str, int]) -> None:
@@ -313,19 +324,10 @@ def profiles(keys: set[str]) -> tuple[dict[str, set[bytes]], dict[str, Any]]:
     return shared, built
 
 
-def _embed(url: str, job: dict[str, Any]) -> dict[str, Any]:
-    """The row to store for `job`, or `{"refused": job}` if the server
-    refused it; raises ServerUnreachable if the server is not there."""
-    try:
-        embedded = embed_document(_session(), url, job["text"])
-    except ServerUnreachable:
-        raise
-    except Exception:
-        logger.warning("embedding failed for %s on %s", job["url"], url, exc_info=True)
-        return {"refused": job}
+def _vector_row(job: dict[str, Any], vector: list[float]) -> dict[str, Any]:
     return {
         "url": job["url"],
-        "embedding": str(embedded.vector),
+        "embedding": str(vector),
         "model": LOCAL_EMBEDDING_MODEL,
         "hash": job["hash"],
         "row_id": job["row_id"],
@@ -350,112 +352,177 @@ def _servers(urls: list[str]) -> tuple[dict[str, int], list[str]]:
     return ready, [url for url, n in answers.items() if n is None]
 
 
-# What a worker thread puts on the results queue as it exits: its server, and
-# whether that server stopped answering.
-_Retired = tuple[Literal["retired"], str, bool]
+class _Jobs:
+    """The jobs of a batch not yet with a server. A server's thread takes the
+    first job its server has not already failed on, and waits while there is
+    none; a server that has gone takes nothing more."""
+
+    def __init__(self, jobs: list[dict[str, Any]]):
+        self._waiting = collections.deque(jobs)
+        self._gone: set[str] = set()
+        self._stopped = False
+        self._changed = threading.Condition()
+
+    def take(self, url: str) -> dict[str, Any] | None:
+        with self._changed:
+            while True:
+                if self._stopped or url in self._gone:
+                    return None
+                for i, job in enumerate(self._waiting):
+                    if url not in job["tried"]:
+                        del self._waiting[i]
+                        return job
+                self._changed.wait()
+
+    def give(self, job: dict[str, Any]) -> None:
+        with self._changed:
+            self._waiting.append(job)
+            self._changed.notify_all()
+
+    def gone(self, url: str, live: set[str]) -> list[dict[str, Any]]:
+        """Retires `url`; returns, and drops, the waiting jobs no server in
+        `live` is left to try."""
+        with self._changed:
+            self._gone.add(url)
+            stranded = [job for job in self._waiting if live <= job["tried"]]
+            self._waiting = collections.deque(j for j in self._waiting if not live <= j["tried"])
+            self._changed.notify_all()
+            return stranded
+
+    def stop(self) -> None:
+        with self._changed:
+            self._stopped = True
+            self._waiting.clear()
+            self._changed.notify_all()
 
 
 def _embed_all(
     task_id: int,
     servers: dict[str, int],
     jobs: list[dict[str, Any]],
-    counts: dict[str, Any],
+    proven: set[str],
     run_counts: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Every job through one queue, one thread per server slot, each taking
-    the next job as it finishes one, results written as they land; returns
-    the jobs the servers refused. A server that stops answering hands its job
-    back and leaves; the others keep taking jobs until every job is stored
-    or refused, so a handed-back job is never stranded. Ends early when no
-    server is left or the run is cancelled."""
-    todo: queue.Queue[dict[str, Any] | None] = queue.Queue()
+) -> tuple[int, list[dict[str, Any]], set[str]]:
+    """Every job through every server, one thread per server slot, stored as
+    the vectors land. Returns how many were stored, the jobs to record as
+    refused, and the urls of the jobs that were stored or refused.
+
+    Whose fault a failure is decides what happens to the job. A server that
+    stops answering hands its job back and leaves the batch. An error from a
+    server that has stored something this run (`proven`) is the page's: the
+    job is refused. An error from one that has not hands the job back, and
+    that server is not given it again, so a misconfigured server never gets a
+    good page recorded. A page that two servers stopped answering on is the
+    page's fault too (one that crashes or outlasts the server), and is
+    refused. A job no server is left to try is set aside for a later batch.
+    """
     for job in jobs:
-        todo.put(job)
-    results: queue.Queue[dict[str, Any] | _Retired] = queue.Queue()
+        job["tried"], job["downed"] = set(), set()
+    work = _Jobs(jobs)
+    results: queue.Queue[tuple[str, str, dict[str, Any] | None, Any]] = queue.Queue()
 
-    def work(url: str) -> None:
-        gone = False
+    def serve(url: str) -> None:
         try:
-            while (job := todo.get()) is not None:
+            while (job := work.take(url)) is not None:
                 try:
-                    results.put(_embed(url, job))
+                    vector = embed_document(_session(), url, job["text"]).vector
                 except ServerUnreachable:
-                    todo.put(job)
-                    gone = True
                     logger.warning("embedding server %s stopped answering", url, exc_info=True)
+                    results.put(("downed", url, job, None))
                     return
+                except Exception:
+                    logger.warning("embedding %s failed on %s", job["url"], url, exc_info=True)
+                    results.put(("error", url, job, None))
+                else:
+                    results.put(("stored", url, job, vector))
         finally:
-            results.put(("retired", url, gone))
+            results.put(("retired", url, None, None))
 
-    threads = [
-        threading.Thread(target=work, args=(url,), daemon=True)
-        for url, slot_count in servers.items()
-        for _ in range(slot_count)
-    ]
-    for thread in threads:
-        thread.start()
-    live, done, pending, refused = len(threads), 0, [], []
+    threads = dict(servers)
+    for url, n in servers.items():
+        for _ in range(n):
+            threading.Thread(target=serve, args=(url,), daemon=True).start()
+    live = set(servers)
+    # settled: stored, refused, or set aside; finished: stored or refused.
+    stored, pending, refused = 0, [], []
+    settled: set[str] = set()
+    finished: set[str] = set()
 
-    def retired(item: _Retired) -> None:
-        if item[2] and item[1] not in run_counts["unreachable"]:
-            run_counts["unreachable"] = sorted([*run_counts["unreachable"], item[1]])
+    def leave(url: str) -> None:
+        if url not in live:
+            return
+        live.discard(url)
+        if url not in run_counts["unreachable"]:
+            run_counts["unreachable"] = sorted([*run_counts["unreachable"], url])
+        settled.update(job["url"] for job in work.gone(url, live))
+
+    def hand_back(job: dict[str, Any]) -> None:
+        if live - job["tried"]:
+            work.give(job)
+        else:
+            settled.add(job["url"])
 
     try:
-        while live and done < len(jobs):
-            item = results.get()
-            if isinstance(item, tuple):
-                live -= 1
-                retired(item)
+        while live and len(settled) < len(jobs):
+            kind, url, job, vector = results.get()
+            if kind == "retired":
+                threads[url] -= 1
+                if not threads[url]:
+                    leave(url)
                 continue
-            done += 1
-            if "refused" in item:
-                refused.append(item["refused"])
+            assert job is not None
+            if kind == "stored":
+                proven.add(url)
+                pending.append(_vector_row(job, vector))
+                settled.add(job["url"])
+                finished.add(job["url"])
+            elif kind == "error":
+                job["tried"].add(url)
+                if url in proven:
+                    refused.append(job)
+                    settled.add(job["url"])
+                    finished.add(job["url"])
+                else:
+                    hand_back(job)
             else:
-                pending.append(item)
+                job["tried"].add(url)
+                job["downed"].add(url)
+                leave(url)
+                if len(job["downed"]) > 1:
+                    refused.append(job)
+                    settled.add(job["url"])
+                    finished.add(job["url"])
+                else:
+                    hand_back(job)
             if len(pending) >= _WRITE_EVERY:
-                counts["written"] += _store(pending)
+                stored += _store(pending)
                 pending = []
-                written = run_counts["written"] + counts["written"]
+                written = run_counts["written"] + stored
                 set_progress(
                     task_id,
-                    done,
+                    len(settled),
                     len(jobs),
-                    f"batch {run_counts['batches'] + 1}: {done} of {len(jobs)}; "
+                    f"batch {run_counts['batches'] + 1}: {len(settled)} of {len(jobs)}; "
                     f"embedded {written} this run",
                 )
-            if cancelled(task_id):
-                break
+                if cancelled(task_id):
+                    break
     finally:
-        # Wakes every thread still waiting for a job; one busy with a job
-        # finishes it and stops.
-        for _ in threads:
-            todo.put(None)
+        work.stop()
         if pending:
-            counts["written"] += _store(pending)
-    if done == len(jobs):
-        # Every job is accounted for, so no thread holds one: they all stop
-        # now, and a server that stopped answering after handing its job back
-        # is still named.
-        for thread in threads:
-            thread.join()
-        while not results.empty():
-            item = results.get()
-            if isinstance(item, tuple):
-                retired(item)
-    counts["failed"] = len(refused)
-    return refused
+            stored += _store(pending)
+    return stored, refused, finished
 
 
 def _batch(
-    task_id: int, servers: dict[str, int], cap: int, below: int, counts: dict[str, Any]
+    task_id: int, servers: dict[str, int], cap: int, below: int, proven: set[str], counts: dict
 ) -> tuple[dict[str, int], int]:
     """One batch of up to `cap` candidates through `servers`, adding to
-    `counts`; returns what this batch did and the walk's new cursor.
-
-    Refused postings are recorded only when the batch stored something: a
-    batch the servers refused whole says the servers are broken, not that
-    every posting is."""
-    rows, below = candidates(cap, below)
+    `counts`; returns what this batch did and the walk's cursor for the
+    next. The cursor moves past the walked postings that were stored or
+    refused, and no further than the newest one that was not, so a posting
+    set aside is walked again."""
+    rows, unreadable = candidates(cap, below)
     # Profiles built under an older rule, whether or not their postings are
     # candidates: rebuilding one moves its profiled_at, which makes its
     # postings candidates for the next batch (embeddings._PROFILE_CHANGED).
@@ -468,7 +535,7 @@ def _batch(
     }
     keys = {row["company_key"] for row in rows} | older
     batch = {
-        "selected": len(rows),
+        "selected": len(rows) + len(unreadable),
         "written": 0,
         "failed": 0,
         "restamped": 0,
@@ -490,21 +557,30 @@ def _batch(
         (unchanged if row["stored_hash"] == job["hash"] else jobs).append(job)
     if unchanged:
         batch["restamped"] = _restamp(unchanged)
-    refused = _embed_all(task_id, servers, jobs, batch, counts)
-    if refused and (batch["written"] or batch["restamped"]):
+    batch["written"], refused, finished = _embed_all(task_id, servers, jobs, proven, counts)
+    refused += [{"url": row["url"], "row_id": row["content_row_id"]} for row in unreadable]
+    if refused:
         _refused(refused)
+    batch["failed"] = len(refused)
+    finished |= {row["url"] for row in unreadable} | {job["url"] for job in unchanged}
+    walked = [row for row in [*rows, *unreadable] if "job_id" in row]
+    left = [row["job_id"] for row in walked if row["url"] not in finished]
+    if left:
+        below = max(left) + 1
+    elif walked:
+        below = min(row["job_id"] for row in walked)
     for key in ("selected", "written", "failed", "restamped", "profiled"):
         counts[key] += batch[key]
     return batch, below
 
 
-def run(task_id: int, cap: int = BATCH_POSTINGS) -> dict[str, Any]:
-    """Batches until one selects nothing (the backlog is drained), one is
-    refused whole (the servers are broken), no server answers, or the run is
-    cancelled. The servers are asked again before each batch, so one that
-    comes back, or goes away, counts from the next batch on. `servers` and
-    `unreachable` name every server that answered, and that missed a batch,
-    in the run."""
+def run(task_id: int, cap: int) -> dict[str, Any]:
+    """Batches of up to `cap` until one stores, re-stamps and refuses nothing
+    (the backlog is drained, or what is left cannot be placed on a server),
+    no server answers, or the run is cancelled. The servers are asked again
+    before each batch, so one that comes back, or goes away, counts from the
+    next batch on. `servers` and `unreachable` name every server that
+    answered, and that missed a batch or stopped answering, in the run."""
     urls = server_urls()
     if not urls:
         raise EmbeddingUnavailable("no embedding server configured on this host")
@@ -518,6 +594,9 @@ def run(task_id: int, cap: int = BATCH_POSTINGS) -> dict[str, Any]:
         "servers": [],
         "unreachable": [],
     }
+    # Servers that have stored a vector this run, whose errors are therefore
+    # the page's (_embed_all).
+    proven: set[str] = set()
     below = _NO_CURSOR
     while not cancelled(task_id):
         servers, unreachable = _servers(urls)
@@ -527,12 +606,9 @@ def run(task_id: int, cap: int = BATCH_POSTINGS) -> dict[str, Any]:
             if not counts["batches"]:
                 raise EmbeddingUnavailable(f"no embedding server answers: {', '.join(unreachable)}")
             break
-        batch, below = _batch(task_id, servers, cap, below, counts)
+        batch, below = _batch(task_id, servers, cap, below, proven, counts)
         counts["batches"] += 1
-        if not batch["selected"]:
-            break
-        if not batch["written"] and not batch["restamped"] and batch["failed"]:
-            logger.warning("%s: every posting in a batch was refused; stopping", KIND)
+        if not (batch["written"] or batch["restamped"] or batch["failed"]):
             break
     return counts
 
@@ -541,7 +617,7 @@ async def handle_embed_postings_local(task_id: int, payload: dict[str, Any]) -> 
     if not db.get_config("local_embedding_enabled"):
         set_progress(task_id, 0, 0, "switched off")
         return
-    counts = await asyncio.to_thread(run, task_id)
+    counts = await asyncio.to_thread(run, task_id, int(db.get_config("local_embed_batch")))
     embeddable = counts["selected"] - counts["restamped"]
     set_progress(
         task_id,

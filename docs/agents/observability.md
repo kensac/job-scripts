@@ -970,13 +970,12 @@ have no similarity consumer and their membership is unaffected.
 
 ## Embeddings from the fleet's own model
 
-`embed_postings_local` (`tasks.derivations.local_embeddings`) embeds the same
-postings as `embed_postings_batch` into `posting_embeddings`, with a model
-served on fleet hardware (`core.derivations.local_embeddings`, whose
-docstring carries the judged comparison that chose it). It replaces the
-OpenAI sweep: once `posting_embeddings` covers every posting
-`job_embeddings` does, the similarity reader moves to it and the OpenAI
-sweep and table go.
+`embed_postings_local` (`tasks.derivations.local_embeddings`) embeds every
+posting with page text into `posting_embeddings`, with a model served on
+fleet hardware (`core.derivations.local_embeddings`, whose docstring carries
+the judged comparison that chose it). It replaces the OpenAI sweep
+(`embed_postings_batch`, `job_embeddings`): the similarity reader moves to
+it, and the OpenAI sweep and table go.
 
 **A kind that needs something only some hosts have is gated by the variable
 that says a host has it** (`api.worker_lifecycle.claims.NEEDS_ENV`). A
@@ -984,7 +983,7 @@ worker without `JOBTRACKER_EMBEDDING_URLS` excludes the kind, so no other
 host's denylist names it and a new host cannot claim and fail it. The
 variable is a comma list of `llama-server --embedding` addresses; a host may
 lend its GPU and its CPU as two servers. Requests in flight per server are
-the slots the servers start with (`SLOTS_PER_SERVER`).
+the slots the server reports (`/props`, llama-server's `-np`).
 
 **A posting is embedded without the text its company says about itself.**
 A paragraph is the company's when it repeats under at least two of its
@@ -1013,21 +1012,31 @@ to stand for.
 **Every posting is embedded, the visible ones kept current.** A batch takes
 the postings someone can see that need a vector first (a new page, a rebuilt
 company profile), then never-embedded postings newest first, up to
-`BATCH_POSTINGS`. A posting outside the visible slice is embedded once; its
-row's `content_row_id` and `profiled_at` say what from. A run takes batches
-until one stores nothing new, so a backfill is a single run (requeued by the
-reaper if a deploy kills it) and an idle cycle costs one candidate query.
+`local_embed_batch`. A posting outside the visible slice is embedded once;
+its row's `content_row_id` and `profiled_at` say what from. A run walks the
+corpus once, batch after batch, until a batch stores, re-stamps and refuses
+nothing, so a backfill is a single run (requeued by the reaper if a deploy
+kills it) and an idle cycle costs one candidate query.
 
 **Servers come and go.** `JOBTRACKER_EMBEDDING_URLS` may name servers on
 other machines, such as a laptop that serves only while unused. Each run
 asks every server for its slots (`/props`) before each batch and runs that
-many requests on it; a server that does not answer, or stops answering, is
-left out of the batch and its posting handed to another, so it is never a failed posting. The
+many requests on it; a server that does not answer, times out, or stops
+answering is left out of the batch and its posting handed to another. The
 run's progress names the servers that did not answer.
 
+**A failure is blamed on the page only when the page is what failed.** An
+error from a server that has stored a vector this run, or a page during
+which two servers stopped answering, is the page's: it is recorded in
+`posting_embedding_failures` against its `content_row_id` and not selected
+again until the posting has a newer page. So is a page whose stored text
+cannot be read. An error from a server that has stored nothing hands the
+posting to another server instead, so a misconfigured server never gets a
+good page recorded; a posting no server is left to try waits for a later
+batch.
+
 `local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
-is re-stamped (`tasks.rescrape`). A posting whose embedding fails is left
-without a row and selected again next run.
+is re-stamped (`tasks.rescrape`).
 
 ## Scheduled filter transport
 
