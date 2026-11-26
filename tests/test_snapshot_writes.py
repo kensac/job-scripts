@@ -17,7 +17,7 @@ from tests.factories import ObjectClient
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(ObjectClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda **_: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda *a, **kw: store)
     return store
 
 

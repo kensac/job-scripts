@@ -43,7 +43,7 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
     decided = decided_custom_urls(
         [job["url"] for job in jobs], snapshot.prompt_hash, answering_models("custom", cfg.model)
     )
-    await execute_live(task_id, cfg, snapshot, _with_pages(jobs, decided), hooks)
+    await execute_live(task_id, cfg, snapshot, _with_pages(jobs, decided), hooks, decided)
 
 
 async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) -> None:

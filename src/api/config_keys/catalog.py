@@ -47,6 +47,15 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "When disabled, every fetched posting is admitted while listings.kept still records "
         "whether the stored pattern matched, so the bypass remains measurable and reversible.",
     ),
+    # tasks.page_text_tiering, read between steps.
+    "page_text_move_enabled": ConfigKey(
+        section="Catalog",
+        default=True,
+        value_type=bool,
+        help="Move page text still stored in the database to object storage, oldest first. "
+        "New fetches are written to object storage either way; switched off, a running move "
+        "stops after its current step and inline text stays where it is.",
+    ),
     "verification_reachability_gate_enabled": ConfigKey(
         section="Catalog",
         default=False,

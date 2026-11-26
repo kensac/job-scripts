@@ -86,7 +86,10 @@ def test_the_admin_detail_rebuilds_an_answer_from_held_text(client, admin_header
     }
 
 
-def test_the_comp_hash_is_the_one_sql_computed():
+def test_the_comp_hash_matches_the_one_sql_computed_for_older_rows():
+    """Hashes stored before the hash rode in each request's context were
+    computed in SQL; an unchanged rescrape is recognised only while the two
+    agree."""
     text = "Pay: $150,000 to $180,000 a year. Ünïcode survives. " * 400
     row = db.query_one(
         "SELECT encode(sha256(convert_to(left(%s, %s), 'UTF8')), 'hex') AS h",

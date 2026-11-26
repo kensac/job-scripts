@@ -222,7 +222,7 @@ async def test_restored_task_consumes_original_receipt_without_new_submission(f,
     from tests.factories import ObjectClient
 
     objects = PayloadStore(ObjectClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: objects)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda *a, **kw: objects)
     task_id = f.make_task("test_kind", {}, status="done")
     batch_results.snapshot_specs(task_id, [batch.BatchSpec("request", input="original")])
     result = batch.BatchResult("request", text="paid answer", batch_id="paid")

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -342,3 +343,26 @@ def put_values(
         for refs in uploaded
         for name, ref in refs.items()
     }
+
+
+_shared: dict[float | None, PayloadStore] = {}
+_shared_lock = threading.Lock()
+
+
+def shared_store(timeout: float | None = None) -> PayloadStore:
+    """One store per process for each timeout, built once under a lock: a
+    boto3 client is safe to share across threads, but building one from the
+    default session is not, and building one per call costs a client's
+    setup on every read or write."""
+    with _shared_lock:
+        store = _shared.get(timeout)
+        if store is None:
+            store = _shared[timeout] = PayloadStore.from_env(timeout=timeout)
+        return store
+
+
+def forget_shared_stores() -> None:
+    """Drop the shared stores, so the next shared_store reads the
+    configuration again (tests that swap the configuration)."""
+    with _shared_lock:
+        _shared.clear()

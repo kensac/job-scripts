@@ -19,7 +19,7 @@ from tests.test_managed_board_execution import _admissible, _board_and_job
 @pytest.fixture
 def objects(monkeypatch):
     store = PayloadStore(ObjectClient(), "test-payloads")
-    monkeypatch.setattr(PayloadStore, "from_env", lambda: store)
+    monkeypatch.setattr(PayloadStore, "from_env", lambda *a, **kw: store)
     return store
 
 

@@ -29,6 +29,7 @@ from core.payloads.objects import (
     PayloadUnavailable,
     encode_payload,
     put_values,
+    shared_store,
 )
 from core.pool import connection, in_transaction
 from core.store import WORKER
@@ -43,6 +44,14 @@ logger = logging.getLogger(__name__)
 # optiplex. 256 KB stays inside that latency on both while a backfill still
 # bundles about 45 pages per PUT, at the 25 to 30 PUTs a second Garage took.
 PAGE_BUNDLE_MAX_BYTES = 256 * 1024
+
+
+# How long a fetch's write waits on each connect or read of its upload, with
+# no retry: past it the text is stored inline and moved later, so a slow store
+# delays a fetch by this much at most. On 2026-11-26 a 10 KB PUT took 1.1 s
+# from hetzner and 1.4 s from optiplex with 32 in flight at once (Garage
+# took 28 and 23 PUTs a second); this allows several times that.
+WRITE_TIMEOUT_SECONDS = 10.0
 
 
 class Fetch(NamedTuple):
@@ -64,7 +73,7 @@ def upload(texts: Iterable[str], store: PayloadStore | None = None) -> dict[str,
     values = {digest(text): text for text in texts if text}
     if not values:
         return {}
-    return put_values(values, store or PayloadStore.from_env(), PAGE_BUNDLE_MAX_BYTES)
+    return put_values(values, store or shared_store(WRITE_TIMEOUT_SECONDS), PAGE_BUNDLE_MAX_BYTES)
 
 
 def record(url: str, status: str, method: str, content: str | None = None) -> int:
@@ -131,7 +140,7 @@ def resolve(
         return resolved
     if in_transaction():
         raise RuntimeError("Page text cannot be read inside a database transaction")
-    store = store or PayloadStore.from_env()
+    store = store or shared_store()
     store.prefetch(((link["object"], link["size"]) for link in links), cache)
     for row in resolved:
         link = row.get(ref)

@@ -18,6 +18,7 @@ from api.ai import verdicts
 from api.health.evidence import WORKER_FRESH
 from core import page_fetches
 from core.fetching.hosts import pace_key
+from core.payloads.objects import encode_payload
 from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, checkpoint, set_progress
 
@@ -407,11 +408,13 @@ async def _cache_pages(task_id: int, source: str, candidates: list[Any]) -> dict
         if p.url in have_content or p.url in tried_recently:
             continue
         if p.description:
-            listed.append(page_fetches.Fetch(p.url, "passed", "listing text", p.description))
-            # Stored a page bundle at a time: each upload is one full bundle.
-            listed_bytes += len(p.description)
-            if listed_bytes >= page_fetches.PAGE_BUNDLE_MAX_BYTES:
+            # Stored a page bundle at a time: the batch is uploaded before the
+            # posting that would carry it past one bundle joins it.
+            size = len(encode_payload(p.description))
+            if listed and listed_bytes + size > page_fetches.PAGE_BUNDLE_MAX_BYTES:
                 await store_listed()
+            listed.append(page_fetches.Fetch(p.url, "passed", "listing text", p.description))
+            listed_bytes += size
             continue
         try:
             content, closure = await verdicts.refresh_content(

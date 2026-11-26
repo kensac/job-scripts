@@ -194,6 +194,9 @@ def _in_memory_object_storage(monkeypatch):
     monkeypatch.setattr(
         core.payloads.objects, "boto3", types.SimpleNamespace(client=lambda *a, **kw: client)
     )
+    core.payloads.objects.forget_shared_stores()
+    yield
+    core.payloads.objects.forget_shared_stores()
 
 
 @pytest.fixture(autouse=True)

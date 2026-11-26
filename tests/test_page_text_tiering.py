@@ -174,3 +174,13 @@ def test_the_move_waits_while_an_older_worker_runs(f, objects):
     db.execute("UPDATE worker_status SET data_level = %s WHERE name = 'old'", (data_level.LEVEL,))
     _run()
     assert _stored(fetch)["content"] is None
+
+
+def test_switching_the_move_off_leaves_inline_text_where_it_is(f, objects, set_config):
+    fetch = _inline("https://jobs.test/paused", PAGE)
+    set_config("page_text_move_enabled", False)
+    _run()
+    assert _stored(fetch)["content"] == PAGE
+    set_config("page_text_move_enabled", True)
+    _run()
+    assert _stored(fetch)["content"] is None
