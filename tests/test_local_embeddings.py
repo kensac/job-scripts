@@ -215,20 +215,51 @@ def test_a_page_whose_text_cannot_be_read_fails_alone(f, monkeypatch):
     assert counts["failed"] == 1
 
 
-def test_object_storage_down_ends_the_run(f, monkeypatch):
-    for i in range(3):
-        f.make_ready_job(content=CONTENT + f" {i}")
-
+def test_object_storage_not_answering_fails_the_run_rather_than_the_pages(monkeypatch):
     def down(rows, **kwargs):
-        if any(row.get("url") for row in rows):
-            raise local_embeddings.PayloadUnavailable("storage unreachable")
-        return [dict(row) for row in rows]
+        try:
+            raise ConnectionError("storage unreachable")
+        except ConnectionError as exc:
+            raise local_embeddings.PayloadUnavailable("unavailable") from exc
 
     monkeypatch.setattr(local_embeddings.page_fetches, "resolve", down)
-    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
-    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
-    counts = local_embeddings.run(make_task(local_embeddings.KIND, status="running"), cap=1)
-    assert counts["batches"] == 1 and counts["written"] == 0
+    with pytest.raises(local_embeddings.PayloadUnavailable):
+        local_embeddings._readable([{"url": "u1"}, {"url": "u2"}])
+
+
+def test_a_missing_bundle_member_is_the_pages_fault():
+    missing = local_embeddings.PayloadUnavailable("Payload bundle has no such member")
+    assert local_embeddings._page_fault(missing)
+    try:
+        raise TimeoutError("read timed out")
+    except TimeoutError as exc:
+        try:
+            raise local_embeddings.PayloadUnavailable("unavailable") from exc
+        except local_embeddings.PayloadUnavailable as outage:
+            assert not local_embeddings._page_fault(outage)
+
+
+def test_an_unreadable_profile_sample_is_left_out_of_the_profile(f, monkeypatch):
+    urls = []
+    for role in ["Backend Engineer", "Account Executive", "Data Analyst"]:
+        job_id, url = f.make_ready_job(content=_posting(role) * 2)
+        db.execute(
+            "UPDATE jobs SET company = 'Acme Robotics', title = %s WHERE id = %s", (role, job_id)
+        )
+        urls.append(url)
+    resolve = local_embeddings.page_fetches.resolve
+
+    def one_lost(rows, **kwargs):
+        if any(row.get("title") == "Data Analyst" for row in rows):
+            raise local_embeddings.PayloadUnavailable("bundle member missing")
+        return resolve(rows, **kwargs)
+
+    monkeypatch.setattr(local_embeddings.page_fetches, "resolve", one_lost)
+    local_embeddings.refresh_profiles({"acme robotics"})
+    profile = db.query_one(
+        "SELECT titles FROM company_text_profiles WHERE company_key = 'acme robotics'"
+    )
+    assert profile is not None
 
 
 def test_a_props_answer_that_is_not_llama_servers_leaves_the_server_out(f, monkeypatch):
@@ -308,9 +339,9 @@ def test_one_run_drains_the_backlog_visible_postings_first(f, monkeypatch):
     select = local_embeddings.candidates
 
     def recorded(cap, below, skip=None):
-        rows, unreadable = select(cap, below, skip)
+        rows, unreadable, exhausted = select(cap, below, skip)
         batches.append([row["url"] for row in rows])
-        return rows, unreadable
+        return rows, unreadable, exhausted
 
     monkeypatch.setattr(local_embeddings, "candidates", recorded)
 

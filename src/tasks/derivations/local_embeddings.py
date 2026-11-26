@@ -10,7 +10,7 @@ visible slice is embedded once: a later page or profile does not re-select
 it, and its row's content_row_id and profiled_at say what it was embedded
 from.
 
-A run takes them `local_embed_batch` at a time until nothing is left, embedding
+A run takes them `local_embed_batch` at a time, walking the corpus once, embedding
 each batch on every server this host names that answers
 (core.derivations.local_embeddings), as many at once on each as the server
 has slots. So a backfill is one run that drains it, picking up servers that
@@ -38,6 +38,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import botocore.exceptions
 import requests
 
 from api import db
@@ -148,48 +149,73 @@ def _restamp(rows: list[dict[str, Any]]) -> int:
     )
 
 
+def _page_fault(exc: PayloadUnavailable) -> bool:
+    """Whether object storage answered and the page is what is wrong (a
+    missing bundle or member, a failed integrity check, a malformed
+    reference), as against storage not answering (a connection error or a
+    timeout under the error)."""
+    cause = exc.__cause__
+    if cause is None or isinstance(cause, (ValueError, TypeError, KeyError)):
+        return True
+    if isinstance(cause, botocore.exceptions.ClientError):
+        return cause.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}
+    return False
+
+
 def _readable(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """The rows with their page text read, and the rows whose text could not
-    be read this time. One unreadable page costs a read of each row on its
-    own, not the batch; object storage being down leaves every row unread,
-    which stores nothing and so ends the run (run)."""
+    """The rows with their page text read, and the rows whose page cannot be
+    read. One bad page costs a read of each row on its own, not the batch;
+    storage that does not answer raises, failing the run, so an outage is
+    neither waited out row by row nor taken for bad pages."""
     cache: dict = {}
     try:
         return page_fetches.resolve(rows, cache=cache), []
-    except PayloadUnavailable:
-        readable, unread = [], []
-        for row in rows:
-            try:
-                readable += page_fetches.resolve([row], cache=cache)
-            except PayloadUnavailable:
-                logger.warning("page text of %s cannot be read", row["url"], exc_info=True)
-                unread.append(row)
-        return readable, unread
+    except PayloadUnavailable as exc:
+        if not _page_fault(exc):
+            raise
+    readable, unread = [], []
+    for row in rows:
+        try:
+            readable += page_fetches.resolve([row], cache=cache)
+        except PayloadUnavailable as exc:
+            if not _page_fault(exc):
+                raise
+            logger.warning("page text of %s cannot be read", row.get("url"), exc_info=True)
+            unread.append(row)
+    return readable, unread
 
 
 def candidates(
-    cap: int,
-    below: int,
-    skip: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cap: int, below: int, skip: dict[str, int | None] | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
     """Up to `cap` postings: the visible ones that need a vector, then never
     embedded ones below job id `below` to fill the batch (those carry their
-    `job_id`), leaving out the postings in `skip`; and apart, the ones whose
-    page text could not be read."""
-    skip = skip or set()
+    `job_id`), leaving out the postings in `skip` (url to job id, None for a
+    visible one); apart, the ones whose page cannot be read; and whether the
+    walk is exhausted (asked for postings and found fewer)."""
+    skip = skip or {}
+    visible_skipped = sum(1 for job_id in skip.values() if job_id is None)
     visible = [
-        row for row in db.query(CANDIDATES, {"cap": cap + len(skip)}) if row["url"] not in skip
+        row
+        for row in db.query(CANDIDATES, {"cap": cap + visible_skipped})
+        if row["url"] not in skip
     ][:cap]
-    walked = []
+    walked: list[dict[str, Any]] = []
+    exhausted = False
     if len(visible) < cap:
+        wanted = cap - len(visible)
         walked = db.query(
             BACKFILL,
             {
-                "cap": cap - len(visible),
+                "cap": wanted,
                 "below": below,
-                "taken": [row["url"] for row in visible] + sorted(skip),
+                # A failure can be walked again only from below the cursor,
+                # where a set-aside posting newer than it moved the cursor back.
+                "taken": [row["url"] for row in visible]
+                + [url for url, job_id in skip.items() if job_id is not None and job_id < below],
             },
         )
+        exhausted = len(walked) < wanted
     rows, unread = _readable(visible + walked)
     companies = {
         row["url"]: row
@@ -203,13 +229,14 @@ def candidates(
         job = companies.get(row["url"], {})
         row["company"] = job.get("company", "")
         row["company_key"] = job.get("company_key", "")
-    return rows, unread
+    return rows, unread, exhausted
 
 
 def _profile(stale: list[str], current: dict[str, int]) -> None:
     """Rebuilds the profiles of `stale` companies from the newest posting of
-    each of up to PROFILE_TITLES titles that has page text."""
-    samples = page_fetches.resolve(
+    each of up to PROFILE_TITLES titles that has page text, leaving out a
+    sample whose page cannot be read (_readable)."""
+    samples, _ = _readable(
         db.query(
             """
             SELECT s.k, s.company, s.title, q.input_content, q.content_ref FROM (
@@ -441,16 +468,21 @@ def _embed_all(
         live.discard(url)
         if url not in run_counts["unreachable"]:
             run_counts["unreachable"] = sorted([*run_counts["unreachable"], url])
-        settled.update(job["url"] for job in work.gone(url, live))
+        for job in work.gone(url, live):
+            settle_untried(job)
+
+    def settle_untried(job: dict[str, Any]) -> None:
+        """A job no server still answering has left to try: failed if one
+        errored on it, otherwise only left for a later batch."""
+        if job["tried"] - job["downed"]:
+            failed.add(job["url"])
+        settled.add(job["url"])
 
     def hand_back(job: dict[str, Any]) -> None:
         if live - job["tried"]:
             work.give(job)
-        elif job["tried"] - job["downed"]:
-            failed.add(job["url"])
-            settled.add(job["url"])
         else:
-            settled.add(job["url"])
+            settle_untried(job)
 
     try:
         while threads and len(settled) < len(jobs):
@@ -495,15 +527,21 @@ def _embed_all(
 
 
 def _batch(
-    task_id: int, servers: dict[str, int], cap: int, below: int, skip: set[str], counts: dict
-) -> tuple[dict[str, int], int]:
+    task_id: int,
+    servers: dict[str, int],
+    cap: int,
+    below: int,
+    skip: dict[str, int | None],
+    counts: dict,
+) -> tuple[dict[str, int], int, bool]:
     """One batch of up to `cap` candidates through `servers`, adding to
-    `counts` and to `skip` (the postings that failed this run);
-    returns what this batch did and the walk's cursor for the next. The
+    `counts` and to `skip` (the postings that failed this run, with their
+    job ids); returns what this batch did, the walk's cursor for the next,
+    and whether the walk is exhausted. The
     cursor moves past the walked postings that were stored or failed, and no
     further than the newest that was neither, so a posting left when its
     server went away is walked again."""
-    rows, unread = candidates(cap, below, skip)
+    rows, unread, exhausted = candidates(cap, below, skip)
     # Profiles built under an older rule, whether or not their postings are
     # candidates: rebuilding one moves its profiled_at, which makes its
     # postings candidates for the next batch (embeddings._PROFILE_CHANGED).
@@ -541,7 +579,7 @@ def _batch(
     failed |= {row["url"] for row in unread}
     batch["failed"] = len(failed)
     done = embedded | failed | {job["url"] for job in unchanged}
-    skip |= failed
+    skip.update({row["url"]: row.get("job_id") for row in [*rows, *unread] if row["url"] in failed})
     walked = [row for row in [*rows, *unread] if "job_id" in row]
     left = [row["job_id"] for row in walked if row["url"] not in done]
     if left:
@@ -550,14 +588,15 @@ def _batch(
         below = min(row["job_id"] for row in walked)
     for key in ("written", "failed", "restamped", "profiled"):
         counts[key] += batch[key]
-    return batch, below
+    return batch, below, exhausted
 
 
 def run(task_id: int, cap: int) -> dict[str, Any]:
-    """Batches of up to `cap` until one stores and re-stamps nothing (the
-    backlog is drained, object storage or every server is failing, or what
-    is left cannot be placed on a server), no server answers, or the run is
-    cancelled. The servers are asked again before each batch, so one that
+    """Batches of up to `cap` until the walk of the corpus is exhausted, a
+    batch stores and re-stamps nothing (every server is failing, or what is
+    left cannot be placed on one), no server answers, or the run is
+    cancelled. Postings that arrive after the walk passed them are the next
+    run's. The servers are asked again before each batch, so one that
     comes back, or goes away, counts from the next batch on. `servers` and
     `unreachable` name every server that answered, and that missed a batch
     or stopped answering, in the run."""
@@ -573,7 +612,8 @@ def run(task_id: int, cap: int) -> dict[str, Any]:
         "servers": [],
         "unreachable": [],
     }
-    below, skip = _NO_CURSOR, set()
+    below = _NO_CURSOR
+    skip: dict[str, int | None] = {}
     while not cancelled(task_id):
         servers, unreachable = _servers(urls)
         counts["servers"] = sorted(set(counts["servers"]) | set(servers))
@@ -582,9 +622,9 @@ def run(task_id: int, cap: int) -> dict[str, Any]:
             if not counts["batches"]:
                 raise EmbeddingUnavailable(f"no embedding server answers: {', '.join(unreachable)}")
             break
-        batch, below = _batch(task_id, servers, cap, below, skip, counts)
+        batch, below, exhausted = _batch(task_id, servers, cap, below, skip, counts)
         counts["batches"] += 1
-        if not (batch["written"] or batch["restamped"]):
+        if exhausted or not (batch["written"] or batch["restamped"]):
             break
     return counts
 

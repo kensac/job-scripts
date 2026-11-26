@@ -1014,8 +1014,10 @@ the postings someone can see that need a vector first (a new page, a rebuilt
 company profile), then never-embedded postings newest first, up to
 `local_embed_batch`. A posting outside the visible slice is embedded once;
 its row's `content_row_id` and `profiled_at` say what from. A run walks the
-corpus once, batch after batch, until a batch stores and re-stamps nothing,
-so a backfill is a single run (requeued by the reaper if a deploy kills it).
+corpus once, batch after batch, until the walk is exhausted or a batch
+stores and re-stamps nothing, so a backfill is a single run (requeued by the
+reaper if a deploy kills it), and postings that arrive meanwhile are the
+next run's.
 An idle run still walks every job to find none: 23 s over 2.1M jobs
 (2026-11-26).
 
@@ -1029,11 +1031,12 @@ run's progress names the servers that did not answer.
 **A failure lasts one run.** A posting that errors on every server still
 answering, or was in flight on two servers that went down, is skipped for
 the rest of the run and tried again by the next; so is one whose stored
-text cannot be read. Nothing records a posting as bad: whether a failure
+text cannot be read (object storage answered, and the page is missing or
+corrupt; storage that does not answer fails the run). Nothing records a
+posting as bad: whether a failure
 was the page's or a server's is a guess, and a wrong one would leave a
 good posting without a vector for good. A run stops at a batch that stores
-nothing, so a storage outage or failing servers end it rather than walk
-the corpus.
+nothing, so failing servers end it rather than walk the corpus.
 
 `local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
 is re-stamped (`tasks.rescrape`).
