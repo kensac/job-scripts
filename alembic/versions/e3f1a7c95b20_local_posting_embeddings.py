@@ -35,6 +35,7 @@ def upgrade() -> None:
         sa.Column("model", sa.Text(), nullable=False),
         sa.Column("content_hash", sa.Text(), nullable=True),
         sa.Column("content_row_id", sa.BigInteger(), nullable=True),
+        sa.Column("profiled_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),

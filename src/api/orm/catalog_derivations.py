@@ -133,10 +133,14 @@ class PostingEmbedding(Base):
     url: Mapped[str] = mapped_column(Text, primary_key=True)
     embedding: Mapped[Any] = mapped_column(HALFVEC(LOCAL_EMBEDDING_DIMENSIONS))
     model: Mapped[str] = mapped_column(Text)
-    # sha256 of the text embedded, as on job_embeddings: an unchanged
-    # re-scrape is re-stamped, not embedded again (tasks.rescrape).
+    # sha256 of the text embedded (after its company's shared text was taken
+    # out), so a re-scrape or a rebuilt profile that leaves it unchanged is
+    # re-stamped, not embedded again (tasks.derivations.local_embeddings).
     content_hash: Mapped[str | None] = mapped_column(Text)
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The company profile the text was stripped under; a newer profile makes
+    # the row a candidate again. NULL when the company had none.
+    profiled_at: Mapped[datetime.datetime | None] = mapped_column()
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 

@@ -91,7 +91,8 @@ def test_the_column_width_is_the_models():
 def test_a_host_without_a_server_never_claims_the_kind():
     from api.worker_lifecycle import claims
 
-    assert "embed_postings_local" in claims.EXCLUDE_KINDS
+    assert "embed_postings_local" in claims.unmet_needs({})
+    assert "embed_postings_local" not in claims.unmet_needs({core.URLS_ENV: "http://emb:8080"})
 
 
 def _run(monkeypatch, server) -> int:
@@ -191,7 +192,7 @@ def test_a_company_profile_is_rebuilt_when_it_gains_titles(f):
         "SELECT titles FROM company_text_profiles WHERE company_key = 'acme robotics'"
     )
     assert first == {"titles": 3}
-    shared = local_embeddings.shared_paragraphs({"acme robotics"})["acme robotics"]
+    shared = local_embeddings.profiles({"acme robotics"})[0]["acme robotics"]
     assert len(shared) == 2
     assert local_embeddings.refresh_profiles({"acme robotics"}) == 0, "nothing new, nothing reread"
 
@@ -200,3 +201,32 @@ def test_a_company_profile_is_rebuilt_when_it_gains_titles(f):
         "UPDATE jobs SET company = 'Acme Robotics', title = 'Recruiter' WHERE id = %s", (job_id,)
     )
     assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
+
+
+def test_a_rebuilt_profile_re_embeds_the_postings_it_now_strips(f, monkeypatch):
+    first, first_url = f.make_ready_job(content=_posting("Backend Engineer") * 2)
+    f.upload(first, f.make_user())
+    db.execute(
+        "UPDATE jobs SET company = 'Acme Robotics', title = 'Backend Engineer' WHERE id = %s",
+        (first,),
+    )
+    server = FakeServer()
+    _run(monkeypatch, server)
+    before = db.query_one(
+        "SELECT content_hash FROM posting_embeddings WHERE url = %s", (first_url,)
+    )
+    assert before is not None
+
+    # Two more roles make the company's about-us and EEO text shared.
+    for role in ["Account Executive", "Data Analyst"]:
+        job_id, _ = f.make_ready_job(content=_posting(role) * 2)
+        db.execute(
+            "UPDATE jobs SET company = 'Acme Robotics', title = %s WHERE id = %s", (role, job_id)
+        )
+        f.upload(job_id, f.make_user())
+    # The run that embeds them rebuilds the profile; the next one re-selects
+    # the posting embedded under the old one.
+    _run(monkeypatch, server)
+    _run(monkeypatch, server)
+    after = db.query_one("SELECT content_hash FROM posting_embeddings WHERE url = %s", (first_url,))
+    assert after is not None and after["content_hash"] != before["content_hash"]

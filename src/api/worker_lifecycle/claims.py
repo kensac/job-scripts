@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from api import db, hosts, metrics, telemetry
@@ -48,10 +49,14 @@ NEEDS_ENV: dict[str, str] = {
     "embed_postings_local": "JOBTRACKER_EMBEDDING_URLS",
 }
 
+
+def unmet_needs(environ: Mapping[str, str]) -> list[str]:
+    """The kinds in NEEDS_ENV whose variable `environ` lacks."""
+    return [kind for kind, name in NEEDS_ENV.items() if not environ.get(name, "").strip()]
+
+
 WORKER_KINDS = env_list("JOBTRACKER_WORKER_KINDS")
-EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS") + [
-    kind for kind, name in NEEDS_ENV.items() if not os.environ.get(name, "").strip()
-]
+EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS") + unmet_needs(os.environ)
 
 
 # The order eligible tasks are claimed in: by age, except that a scheduled

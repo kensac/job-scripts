@@ -234,7 +234,13 @@ async def run_task(task: dict[str, Any]) -> bool:
 # the volume: 8,388 of the 24 hours' tasks to 2026-10-11 01:45 UTC, 3,441
 # pending, p50 1 s and p90 17 s but 219 runs over 5 minutes holding the
 # worker for 41,000 s between them, most of it waiting on boards.
-THREADED_KINDS = frozenset({"ingest_source"})
+#
+# embed_postings_local, audited 2026-11-26: no model client or loop-bound
+# global (its server calls are requests, one Session per thread, in threads
+# of its own), its writes go through the thread-safe pool, and it holds the
+# worker for a run sized to the hour, which on the main loop kept every other
+# main-loop kind off the embedding host for the whole backfill.
+THREADED_KINDS = frozenset({"ingest_source", "embed_postings_local"})
 
 
 class _MainLoop:

@@ -45,6 +45,17 @@ logger = logging.getLogger(__name__)
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
+# posting_embeddings is embedded without its company's shared text
+# (core.derivations.company_text), so a row embedded before its company's
+# profile was last rebuilt is a candidate too.
+_PROFILE_CHANGED = """
+           OR EXISTS (
+               SELECT 1 FROM jobs pj
+               JOIN company_text_profiles p ON p.company_key = lower(btrim(pj.company))
+               WHERE pj.url = cr.url
+                 AND (e.profiled_at IS NULL OR p.profiled_at > e.profiled_at))"""
+
+
 def candidate_sql(
     scope: str, table: Literal["job_embeddings", "posting_embeddings"] = "job_embeddings"
 ) -> str:
@@ -62,6 +73,7 @@ def candidate_sql(
         LEFT JOIN {table} e ON e.url = cr.url
         WHERE e.url IS NULL
            OR e.content_row_id IS DISTINCT FROM cr.content_row_id
+           {_PROFILE_CHANGED if table == "posting_embeddings" else ""}
         LIMIT %(cap)s
     )
     SELECT t.url, t.content_row_id, t.stored_hash, q.input_content, q.content_ref
