@@ -31,6 +31,7 @@ from tasks.filtering.personal_runs import (
 )
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
+from tasks.latest_posting_checks import handle_fold_latest_posting_checks
 from tasks.ledger_rollup import handle_ledger_rollup
 from tasks.mail.classification.handler import handle_classify_mail
 from tasks.mail.matching.handler import handle_match_mail
@@ -69,6 +70,7 @@ HANDLERS = {
     "run_filter_batch_chunk": handle_run_filter_batch_chunk,
     "ingest_source": handle_ingest_source,
     "retire_switched_off": handle_retire_switched_off,
+    "fold_latest_posting_checks": handle_fold_latest_posting_checks,
     "tier_page_text": handle_tier_page_text,
     "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,

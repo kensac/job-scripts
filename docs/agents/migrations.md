@@ -199,6 +199,18 @@ views, and the test corpus and sync tools read base tables only.
 Do not add a column for something derivable from rows you already have
 ([data-and-truth.md](data-and-truth.md) states the principle).
 
-The answer ledger's hourly sums (`answer_usage_hourly`) are the one stored
-derivation. They are allowed because a read never returns a stale hour;
-admin-query-reads.md says how.
+Two stored derivations exist, each allowed because a read never returns it
+stale. The answer ledger's hourly sums (`answer_usage_hourly`):
+admin-query-reads.md says how. Each posting's latest answer to each posting
+check (`latest_posting_checks`), on the same pattern: statement-level
+triggers on `ai_queries` and `jobs` only append the touched urls to
+`latest_posting_checks_dirty`, a table with no unique key, so a writer takes
+no lock it did not take before; `tasks.latest_posting_checks` is the only
+writer of the projection, folding the dirty urls in one statement under an
+advisory lock each cycle and every job once a day; and a reader takes a url
+with a dirty row from `verdicts` (migration `d81c5e2b7a43`). Read per
+posting, that answer was an index probe into `ai_queries` for every
+candidate of a catalog scan: 461,746 probes and 11.6 s for one month of
+available postings, against 0.8 s hashing a table of latest answers
+(production copy, 2026-11-26). Any new stored derivation meets the same bar:
+never read stale, with a check that writes nothing while it holds.
