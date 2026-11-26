@@ -188,15 +188,19 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         default=True,
         value_type=bool,
         help="Embed postings with the model the fleet serves itself, on the hosts that run "
-        "an embedding server. Switched off, the hourly run does nothing.",
+        "an embedding server. Switched off, a run does nothing.",
     ),
-    # About an hour of optiplex's GPU and CPU together, which embedded 0.9
-    # postings a second (2026-11-26), so a run ends inside its cycle.
-    "local_embed_per_cycle": ConfigKey(
+    # At the 5.5 KB a page averaged (2026-11-26), about 11 MB of text a batch
+    # holds. Visible postings lead every batch, so a posting that has just
+    # become visible waits at most one batch during a backfill: about 45
+    # minutes on optiplex's own two servers (0.75 postings a second), half a
+    # minute with the rented GPUs (68 a second).
+    "local_embed_batch": ConfigKey(
         section="Boards",
-        default=3200,
+        default=2000,
         value_type=PositiveInt,
-        help="Postings one hourly run embeds with the fleet's own model. A run on a faster "
-        "host finishes sooner; raise it to fill the hour there.",
+        help="Postings one batch of the local embedding sweep takes. A run takes batches "
+        "until nothing is left; a smaller batch holds less text and gets a newly visible "
+        "posting its vector sooner.",
     ),
 }

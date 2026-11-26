@@ -237,9 +237,10 @@ async def run_task(task: dict[str, Any]) -> bool:
 #
 # embed_postings_local, audited 2026-11-26: no model client or loop-bound
 # global (its server calls are requests, one Session per thread, in threads
-# of its own), its writes go through the thread-safe pool, and it holds the
-# worker for a run sized to the hour, which on the main loop kept every other
-# main-loop kind off the embedding host for the whole backfill.
+# of its own), its writes go through the thread-safe pool, and one run holds
+# the worker until its backlog is drained (days, for a corpus backfill), which
+# on the main loop would keep every other main-loop kind off the embedding
+# host for all of it.
 THREADED_KINDS = frozenset({"ingest_source", "embed_postings_local"})
 
 
