@@ -22,18 +22,22 @@ from __future__ import annotations
 
 from typing import LiteralString, cast
 
+from core import verdict_reads
 from core.pool import pool
 
 # The latest answer per (job, check) of every check `verdicts` holds but
 # custom filters, which are keyed by prompt. By exclusion, as the triggers
-# select, so a newly registered posting check needs no change here.
-_LATEST: LiteralString = """
-    SELECT DISTINCT ON (j.id, v.check_type) j.id AS job_id, v.check_type,
-           v.id AS verdict_id, v.status
-    FROM verdicts v JOIN jobs j ON j.url = v.url
-    WHERE v.check_type <> 'custom' {jobs}
-    ORDER BY j.id, v.check_type, v.id DESC
-"""
+# select, so a newly registered posting check needs no change here. Keyed
+# on jobs.id through the join, as verdict_reads.latest_per describes.
+_LATEST = cast(
+    "LiteralString",
+    verdict_reads.latest_per(
+        "j.id, v.check_type",
+        "j.id AS job_id, v.check_type, v.id AS verdict_id, v.status",
+        "v.check_type <> 'custom' {jobs}",
+        join="JOIN jobs j ON j.url = v.url",
+    ),
+)
 
 _DIRTY_JOBS: LiteralString = """
     AND j.url IN (SELECT url FROM latest_posting_checks_dirty)
