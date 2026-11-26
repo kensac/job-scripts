@@ -131,3 +131,28 @@ def test_an_alert_opening_and_resolving_are_events(fake):
     assert (
         fake.events[-1][0] == "alert_resolved" and fake.events[-1][2]["subject"] == "test-subject"
     )
+
+
+def test_untraced_turns_instrumentation_off_inside_and_back_on_after(monkeypatch):
+    from opentelemetry.instrumentation.utils import is_instrumentation_enabled
+
+    from api import telemetry
+
+    monkeypatch.setattr(telemetry, "_tracer", object())
+    assert is_instrumentation_enabled()
+    with telemetry.untraced():
+        assert not is_instrumentation_enabled()
+    assert is_instrumentation_enabled()
+
+
+def test_untraced_is_a_no_op_without_tracing(monkeypatch):
+    from opentelemetry.instrumentation.utils import is_instrumentation_enabled
+
+    from api import telemetry
+
+    monkeypatch.setattr(telemetry, "_tracer", None)
+    ran = False
+    with telemetry.untraced():
+        assert is_instrumentation_enabled()
+        ran = True
+    assert ran
