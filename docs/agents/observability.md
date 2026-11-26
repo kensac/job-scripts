@@ -986,14 +986,19 @@ variable is a comma list of `llama-server --embedding` addresses; a host may
 lend its GPU and its CPU as two servers. Requests in flight per server are
 the slots the servers start with (`SLOTS_PER_SERVER`).
 
-**A posting is embedded without what its company says in every posting.**
-Paragraphs the company repeats across at least three distinct titles (and
-15% of them) are taken out and its name is masked, from a derived per-company
-profile (`company_text_profiles`, `company_shared_paragraphs`) the run
-rebuilds whenever a company has more titles than its profile counted
-(`core.derivations.company_text`, whose docstring carries the measurement:
-as written, 89% of a posting's ten nearest OpenAI neighbours were its own
-employer's).
+**A posting is embedded without the text its company says about itself.**
+A paragraph is the company's when it repeats under at least two of its
+titles and names the company (its full name, or without its legal form),
+or repeats under at least half of its titles and at least three;
+those are taken out and the name is masked. The rule was chosen by reading
+what each candidate removed: repetition across titles alone also stripped
+role requirements (a hospital's nurse titles share their licensure line),
+and exact phrasing across companies cannot tell company wording from
+company content. The profile is derived per company (`company_text_profiles`,
+`company_shared_paragraphs`), rebuilt when a company gains titles or was
+profiled under an older `PROFILE_RULE` (`core.derivations.company_text`,
+whose docstring carries the measurement: as written, 89% of a posting's ten
+nearest OpenAI neighbours were its own employer's).
 
 **A posting is embedded whole.** Its text up to `EMBEDDING_INPUT_CHARS` is
 cut into chunks of the model's window, and the chunk vectors are averaged by

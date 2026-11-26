@@ -159,7 +159,7 @@ def test_paragraphs_a_company_repeats_across_roles_are_shared_and_one_roles_are_
     postings = [(r, _posting(r)) for r in roles] + [
         ("Backend Engineer", _posting("Backend Engineer"))
     ]
-    titles, shared = company_text.shared_paragraphs(postings)
+    titles, shared = company_text.shared_paragraphs("Acme Robotics, Inc.", postings)
 
     assert titles == 4
     assert {company_text.paragraph_key(ABOUT), company_text.paragraph_key(EEO)} <= shared
@@ -172,6 +172,28 @@ def test_paragraphs_a_company_repeats_across_roles_are_shared_and_one_roles_are_
     assert ABOUT not in text and EEO not in text
     assert "acme" not in text.lower() and "the company" in text
     assert "warehouse" not in text, "the shared about-us paragraph is gone"
+
+
+LICENSE = "RN - Registered Nurse - State Licensure required for this position."
+BENEFITS = "Medical, dental and vision coverage from your first day, and a matched 401k."
+
+
+def test_a_role_requirement_repeated_by_a_few_titles_is_kept_and_unnamed_company_text_is_not():
+    """A hospital's nurse titles share their licensure line; it names no
+    company and repeats under a few of its titles, so it is the role's. The
+    benefits line repeats under most of them without naming the company,
+    and is the company's."""
+    from core.derivations import company_text
+
+    nurse = ["RN - ICU", "RN - Emergency", "RN - Surgery"]
+    other = ["Financial Analyst", "Security Officer", "Lab Technician", "Marketing Coordinator"]
+    postings = [(t, f"{t} duties for this team.\n{LICENSE}\n{BENEFITS}") for t in nurse] + [
+        (t, f"{t} duties for this team.\n{BENEFITS}") for t in other
+    ]
+    _, shared = company_text.shared_paragraphs("Mercy Health", postings)
+
+    assert company_text.paragraph_key(LICENSE) not in shared
+    assert company_text.paragraph_key(BENEFITS) in shared
 
 
 def test_masking_the_name_keeps_the_field_words_in_it():
@@ -242,3 +264,58 @@ def test_a_rebuilt_profile_re_embeds_the_postings_it_now_strips(f, monkeypatch):
     _run(monkeypatch, server)
     after = db.query_one("SELECT content_hash FROM posting_embeddings WHERE url = %s", (first_url,))
     assert after is not None and after["content_hash"] != before["content_hash"]
+
+
+def test_a_profile_built_under_an_older_rule_is_rebuilt(f):
+    from core.derivations import company_text
+
+    for role in ["Backend Engineer", "Account Executive", "Data Analyst"]:
+        job_id, _ = f.make_ready_job(content=_posting(role) * 2)
+        db.execute(
+            "UPDATE jobs SET company = 'Acme Robotics', title = %s WHERE id = %s", (role, job_id)
+        )
+    assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
+    db.execute("UPDATE company_text_profiles SET rule = %s", (company_text.PROFILE_RULE - 1,))
+    assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
+    row = db.query_one("SELECT rule FROM company_text_profiles WHERE company_key = 'acme robotics'")
+    assert row == {"rule": company_text.PROFILE_RULE}
+
+
+def test_an_older_rules_profile_is_rebuilt_without_any_new_posting(f, monkeypatch):
+    """A rule bump reaches companies whose postings are all embedded: the
+    run rebuilds their profiles, and the next run re-selects the postings."""
+    from core.derivations import company_text
+
+    job_id, url = f.make_ready_job(content=_posting("Backend Engineer") * 2)
+    f.upload(job_id, f.make_user())
+    db.execute(
+        "UPDATE jobs SET company = 'Acme Robotics', title = 'Backend Engineer' WHERE id = %s",
+        (job_id,),
+    )
+    server = FakeServer()
+    _run(monkeypatch, server)
+    db.execute("UPDATE company_text_profiles SET rule = %s", (company_text.PROFILE_RULE - 1,))
+    calls = len(server.embedded)
+
+    _run(monkeypatch, server)
+    rule = db.query_one("SELECT rule FROM company_text_profiles")
+    assert rule == {"rule": company_text.PROFILE_RULE}
+    _run(monkeypatch, server)
+    stamped = db.query_one(
+        "SELECT e.profiled_at = p.profiled_at AS current FROM posting_embeddings e "
+        "JOIN company_text_profiles p ON p.company_key = 'acme robotics' WHERE e.url = %s",
+        (url,),
+    )
+    assert stamped == {"current": True}, "re-selected and re-stamped under the rebuilt profile"
+    assert len(server.embedded) == calls, "its embedded text did not change, so nothing is paid"
+
+
+def test_the_first_word_of_a_name_alone_does_not_name_the_company():
+    from core.derivations import company_text
+
+    assert not company_text.names_company(
+        "Advanced degree in Electrical Engineering preferred.", "Advanced Micro Devices, Inc."
+    )
+    assert company_text.names_company(
+        "Advanced Micro Devices is an equal opportunity employer.", "Advanced Micro Devices, Inc."
+    )
