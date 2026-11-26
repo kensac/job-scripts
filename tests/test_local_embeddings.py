@@ -416,14 +416,15 @@ def test_the_next_batch_is_prepared_while_the_servers_embed_this_one(f, monkeypa
 
     def counting(*args):
         calls.append(args)
+        result = prepare(*args)
         if len(calls) == 2:
             prepared.set()
-        return prepare(*args)
+        return result
 
     class WaitsForTheNextBatch(FakeServer):
         def post(self, url, json, timeout):
             if url.endswith("/v1/embeddings") and len(calls) == 1:
-                assert prepared.wait(timeout=10), "batch 2 was not prepared during batch 1"
+                assert prepared.wait(timeout=10), "batch 2 was not ready during batch 1"
             return super().post(url, json, timeout)
 
     server = WaitsForTheNextBatch()
@@ -433,6 +434,52 @@ def test_the_next_batch_is_prepared_while_the_servers_embed_this_one(f, monkeypa
     counts = _direct(set_config, 1)
     assert counts["written"] == 4
     assert len(server.embedded) == 4, "the visible posting in flight is not selected again"
+
+
+def test_an_unreadable_visible_posting_fails_once_in_a_run(f, monkeypatch, set_config):
+    lost, lost_url = f.make_ready_job(content=CONTENT + " lost")
+    f.upload(lost, f.make_user())
+    for i in range(3):
+        f.make_ready_job(content=CONTENT + f" hidden {i}")
+    resolve = local_embeddings.page_fetches.resolve
+
+    def flaky(rows, **kwargs):
+        if any(row.get("url") == lost_url for row in rows):
+            raise local_embeddings.PayloadUnavailable("bundle member missing")
+        return resolve(rows, **kwargs)
+
+    monkeypatch.setattr(local_embeddings.page_fetches, "resolve", flaky)
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+    # Two a batch: the unreadable posting shares batch 1 with a readable one
+    # (a batch that stores nothing ends the run), and is in flight while
+    # batch 2 is selected.
+    counts = _direct(set_config, 2)
+    assert counts["failed"] == 1 and counts["written"] == 3
+
+
+def test_a_stopped_preparation_reads_and_writes_nothing_more(f):
+    f.make_ready_job(content=CONTENT)
+    stop = threading.Event()
+    stop.set()
+    assert (
+        local_embeddings._prepare(2000, local_embeddings._NO_CURSOR, {}, frozenset(), stop) is None
+    )
+    assert local_embeddings.refresh_profiles({"acme robotics"}, stop=stop) == 0
+    assert db.query("SELECT 1 FROM company_text_profiles") == []
+
+
+def test_a_walk_exhausted_by_an_empty_batch_starts_again_from_the_top(f, monkeypatch, set_config):
+    for i in range(2):
+        f.make_ready_job(content=CONTENT + f" {i}")
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+    _direct(set_config, 2)
+    row = db.query_one(
+        "SELECT payload FROM tasks WHERE kind = %s ORDER BY id DESC LIMIT 1",
+        (local_embeddings.KIND,),
+    )
+    assert row is not None and row["payload"]["below"] is None
 
 
 def test_a_server_that_times_out_hands_its_posting_back(f, monkeypatch, set_config):

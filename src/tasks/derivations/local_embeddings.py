@@ -67,7 +67,7 @@ KIND = "embed_postings_local"
 CANDIDATES = candidate_sql(visibility.across_users("j.url"), "posting_embeddings")
 
 # Every posting with page text that has no row, newest first, below the
-# run's cursor (`below`, see _batch), so one run walks the corpus once. A new
+# run's cursor (`below`, see _prepare and run), so one run walks the corpus once. A new
 # run walks from the top, so an idle run costs this walk: with all 2.1M jobs
 # embedded but one it took 23 s (2026-11-26, probing an embeddings table's
 # primary key per job), and the 230k jobs without page text cost one
@@ -92,8 +92,8 @@ _NO_CURSOR = 2**63 - 1
 _WRITE_EVERY = 50
 
 # Companies profiled per read: at PROFILE_TITLES texts each and the 5.5 KB a
-# page averaged (2026-11-26), about 5 MB of text held at once, with progress
-# written between batches.
+# page averaged (2026-11-26), about 5 MB of text held at once; progress (for
+# the batch a run waits on) and a stop are checked between reads.
 _PROFILE_BATCH = 25
 
 _sessions = threading.local()
@@ -303,10 +303,13 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
         )
 
 
-def refresh_profiles(keys: set[str], task_id: int | None = None) -> int:
+def refresh_profiles(
+    keys: set[str], task_id: int | None = None, stop: threading.Event | None = None
+) -> int:
     """Rebuilds the shared paragraphs of every company in `keys` whose
     distinct titles outnumber its profile's, a batch of companies at a time,
-    returning how many were rebuilt."""
+    returning how many were rebuilt; with `task_id`, reporting progress
+    between batches, and with `stop`, stopping between batches once set."""
     keys = {k for k in keys if k}
     if not keys:
         return 0
@@ -334,6 +337,8 @@ def refresh_profiles(keys: set[str], task_id: int | None = None) -> int:
         or known[k]["rule"] != company_text.PROFILE_RULE
     )
     for start in range(0, len(stale), _PROFILE_BATCH):
+        if stop is not None and stop.is_set():
+            return start
         _profile(stale[start : start + _PROFILE_BATCH], current)
         if task_id is not None:
             done = min(start + _PROFILE_BATCH, len(stale))
@@ -553,7 +558,7 @@ class _Prepared:
     """A batch ready for the servers: its jobs with their stripped text, the
     re-scrapes whose text did not change, the postings whose page could not
     be read, where its walk reached and whether that exhausted it, the
-    visible postings in it, and the profiles rebuilt for it."""
+    visible postings in it (read or not), and the profiles rebuilt for it."""
 
     jobs: list[dict[str, Any]]
     unchanged: list[dict[str, Any]]
@@ -565,14 +570,24 @@ class _Prepared:
 
 
 def _prepare(
-    cap: int, below: int, skip: dict[str, int | None], in_flight: frozenset[str]
-) -> _Prepared:
+    cap: int,
+    below: int,
+    skip: dict[str, int | None],
+    in_flight: frozenset[str],
+    stop: threading.Event,
+    task_id: int | None = None,
+) -> _Prepared | None:
     """Selects up to `cap` candidates below `below`, leaving out `skip` (the
     run's failures) and `in_flight` (the visible postings of the batch the
     servers are embedding, which still need a vector and would otherwise be
     selected twice), rebuilds the profiles they need, and strips their text.
     Reads and profile writes only, so it can run while another batch is on
-    the servers."""
+    the servers. Returns None once `stop` is set, checked between steps, so a
+    run that ends does not wait for a batch it will not embed; with
+    `task_id`, reports profile progress (the first batch, which the run
+    waits for)."""
+    if stop.is_set():
+        return None
     rows, unread, exhausted = candidates(cap, below, {**skip, **dict.fromkeys(in_flight)})
     # Profiles built under an older rule, whether or not their postings are
     # candidates: rebuilding one moves its profiled_at, which makes its
@@ -585,7 +600,11 @@ def _prepare(
         )
     }
     keys = {row["company_key"] for row in rows} | older
-    profiled = refresh_profiles(keys)
+    if stop.is_set():
+        return None
+    profiled = refresh_profiles(keys, task_id, stop)
+    if stop.is_set():
+        return None
     shared, built = profiles(keys)
     jobs, unchanged = [], []
     for row in rows:
@@ -608,7 +627,7 @@ def _prepare(
         unread=unread,
         walked_to=min(walked) if walked else below,
         exhausted=exhausted,
-        visible=frozenset(row["url"] for row in rows if "job_id" not in row),
+        visible=frozenset(row["url"] for row in [*rows, *unread] if "job_id" not in row),
         profiled=profiled,
     )
 
@@ -661,8 +680,9 @@ def run(task_id: int) -> dict[str, Any]:
 
     The next batch is prepared (selected, its companies profiled, its text
     stripped) while the servers embed the current one, so they wait only for
-    the first. Settings are read before each batch, since a backfill run
-    lasts days. The walk's cursor is checkpointed after each batch, never
+    the first. Settings are read before each batch is prepared, since a
+    backfill run lasts days, so a new batch size applies from the batch
+    after the one already prepared. The walk's cursor is checkpointed after each batch, never
     past a posting set aside, and a batch that stores nothing leaves it where
     it was. The servers are asked again before each batch, so one that comes
     back, or goes away, counts from the next batch on. `servers` and
@@ -684,49 +704,58 @@ def run(task_id: int) -> dict[str, Any]:
     skip: dict[str, int | None] = {}
     carried: list[dict[str, Any]] = []
     current: _Prepared | None = None
+    stop = threading.Event()
     with ThreadPoolExecutor(1) as preparing:
-        while not cancelled(task_id) and db.get_config("local_embedding_enabled"):
-            servers, unreachable = _servers(urls)
-            counts["servers"] = sorted(set(counts["servers"]) | set(servers))
-            counts["unreachable"] = sorted(set(counts["unreachable"]) | set(unreachable))
-            if not servers:
-                if not counts["batches"]:
-                    raise EmbeddingUnavailable(
-                        f"no embedding server answers: {', '.join(unreachable)}"
+        try:
+            while not cancelled(task_id) and db.get_config("local_embedding_enabled"):
+                servers, unreachable = _servers(urls)
+                counts["servers"] = sorted(set(counts["servers"]) | set(servers))
+                counts["unreachable"] = sorted(set(counts["unreachable"]) | set(unreachable))
+                if not servers:
+                    if not counts["batches"]:
+                        raise EmbeddingUnavailable(
+                            f"no embedding server answers: {', '.join(unreachable)}"
+                        )
+                    break
+                cap = int(db.get_config("local_embed_batch"))
+                if current is None:
+                    current = _prepare(cap, below, skip, frozenset(), stop, task_id)
+                    assert current is not None
+                upcoming = None
+                if not current.exhausted:
+                    in_flight = current.visible | {
+                        job["url"] for job in carried if job["job_id"] is None
+                    }
+                    upcoming = preparing.submit(
+                        _prepare, cap, current.walked_to, dict(skip), frozenset(in_flight), stop
                     )
-                break
-            cap = int(db.get_config("local_embed_batch"))
-            if current is None:
-                current = _prepare(cap, below, skip, frozenset())
-            upcoming = None
-            if not current.exhausted:
-                in_flight = current.visible | {
-                    job["url"] for job in carried if job["job_id"] is None
-                }
-                upcoming = preparing.submit(
-                    _prepare, cap, current.walked_to, dict(skip), frozenset(in_flight)
+                batch, carried = _embed_prepared(task_id, servers, current, carried, skip, counts)
+                counts["batches"] += 1
+                progressed = bool(batch["written"] or batch["restamped"])
+                if progressed:
+                    # Not past a set-aside posting, should the run end before
+                    # the next batch takes it.
+                    aside = [job["job_id"] for job in carried if job["job_id"] is not None]
+                    below = max(aside) + 1 if aside else current.walked_to
+                # An exhausted walk starts again from the top, unless postings
+                # are left over, or every posting the batch had failed (the
+                # servers, more likely than the pages): those are retried first.
+                restart = current.exhausted and not carried and (progressed or not current.jobs)
+                ours = checkpoint(
+                    task_id,
+                    counts["written"],
+                    counts["written"] + counts["failed"],
+                    f"batch {counts['batches']}: embedded {counts['written']} this run",
+                    counts,
+                    payload={"below": None if restart else below},
                 )
-            batch, carried = _embed_prepared(task_id, servers, current, carried, skip, counts)
-            counts["batches"] += 1
-            progressed = bool(batch["written"] or batch["restamped"])
-            if progressed:
-                # Not past a set-aside posting, should the run end before
-                # the next batch takes it.
-                aside = [job["job_id"] for job in carried if job["job_id"] is not None]
-                below = max(aside) + 1 if aside else current.walked_to
-            ours = checkpoint(
-                task_id,
-                counts["written"],
-                counts["written"] + counts["failed"],
-                f"batch {counts['batches']}: embedded {counts['written']} this run",
-                counts,
-                payload={
-                    "below": None if progressed and current.exhausted and not carried else below
-                },
-            )
-            if not ours or upcoming is None or not progressed:
-                break
-            current = upcoming.result()
+                if not ours or upcoming is None or not progressed:
+                    break
+                current = upcoming.result()
+                if current is None:
+                    break
+        finally:
+            stop.set()
     return counts
 
 
