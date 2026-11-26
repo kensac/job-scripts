@@ -496,9 +496,9 @@ def test_the_next_batch_is_prepared_while_the_servers_embed_this_one(f, monkeypa
     prepare = local_embeddings._prepare
     calls = []
 
-    def counting(*args):
+    def counting(*args, **kwargs):
         calls.append(args)
-        result = prepare(*args)
+        result = prepare(*args, **kwargs)
         if len(calls) == 2:
             prepared.set()
         return result
