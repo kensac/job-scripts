@@ -1014,29 +1014,33 @@ the postings someone can see that need a vector first (a new page, a rebuilt
 company profile), then never-embedded postings newest first, up to
 `local_embed_batch`. A posting outside the visible slice is embedded once;
 its row's `content_row_id` and `profiled_at` say what from. A run walks the
-corpus once, batch after batch, until the walk is exhausted or a batch
-stores and re-stamps nothing, so a backfill is a single run (requeued by the
-reaper if a deploy kills it), and postings that arrive meanwhile are the
-next run's.
+corpus batch after batch, checkpointing its cursor in the task payload, and
+the next run resumes where the last one stopped, so a run a deploy kills,
+whether requeued or replaced next cycle, loses nothing. Once the walk is
+exhausted the next run starts again from the newest job, picking up what
+arrived meanwhile and retrying what failed.
 An idle run still walks every job to find none: 23 s over 2.1M jobs
 (2026-11-26).
 
 **Servers come and go.** `JOBTRACKER_EMBEDDING_URLS` may name servers on
 other machines, such as a laptop that serves only while unused. Each run
 asks every server for its slots (`/props`) before each batch and runs that
-many requests on it; a server that does not answer, times out, or stops
-answering is left out of the batch and its posting handed to another. The
+many requests on it; a server that does not answer, does not connect, or
+stops answering is left out of the batch and its posting handed to another.
+A request that outlasts its read timeout is that posting's error, not the
+server's absence. The
 run's progress names the servers that did not answer.
 
-**A failure lasts one run.** A posting that errors on every server still
-answering, or was in flight on two servers that went down, is skipped for
-the rest of the run and tried again by the next; so is one whose stored
+**A failure lasts one pass of the walk.** A posting that errors on every
+server still answering, or was in flight on two servers that went down, is
+skipped, and tried again when the walk next comes round; so is one whose stored
 text cannot be read (object storage answered, and the page is missing or
 corrupt; storage that does not answer fails the run). Nothing records a
 posting as bad: whether a failure
 was the page's or a server's is a guess, and a wrong one would leave a
 good posting without a vector for good. A run stops at a batch that stores
-nothing, so failing servers end it rather than walk the corpus.
+nothing, without moving its cursor, so failing servers end it rather than
+walk past postings they could not embed.
 
 `local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
 is re-stamped (`tasks.rescrape`).

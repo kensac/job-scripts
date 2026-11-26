@@ -10,11 +10,12 @@ visible slice is embedded once: a later page or profile does not re-select
 it, and its row's content_row_id and profiled_at say what it was embedded
 from.
 
-A run takes them `local_embed_batch` at a time, walking the corpus once, embedding
-each batch on every server this host names that answers
-(core.derivations.local_embeddings), as many at once on each as the server
-has slots. So a backfill is one run that drains it, picking up servers that
-come and go between batches, and an idle cycle's run is one candidate query.
+A run takes them `local_embed_batch` at a time, resuming the walk of the
+corpus where the last run left it (_walk_start), and embeds each batch on
+every server this host names that answers (core.derivations.local_embeddings),
+as many at once on each as the server has slots. So a backfill is one run,
+or a few if deploys interrupt it, picking up servers that come and go
+between batches.
 
 What is embedded is the posting without the paragraphs its company repeats
 across roles, and with the company's name masked
@@ -36,6 +37,7 @@ import logging
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
 from typing import Any
 
 import requests
@@ -52,10 +54,10 @@ from core.derivations.local_embeddings import (
     server_urls,
     slots,
 )
-from core.payloads.objects import PayloadUnavailable
+from core.payloads.objects import PayloadUnavailable, shared_store
 from core.store import CONTENT_LATERAL
 from tasks.derivations.embeddings import candidate_sql
-from tasks.runtime import cancelled, set_progress
+from tasks.runtime import cancelled, checkpoint, set_progress
 
 logger = logging.getLogger(__name__)
 
@@ -149,18 +151,26 @@ def _restamp(rows: list[dict[str, Any]]) -> int:
 
 
 def _page_fault(exc: PayloadUnavailable) -> bool:
-    """Whether object storage answered and the page is what is wrong (a
-    missing bundle or member, a failed integrity check, a malformed
-    reference), as against storage not answering (a connection error or a
-    timeout under the error)."""
+    """Whether object storage answered and the page is what is wrong, as
+    against storage not answering. The page's: a failed integrity check or a
+    missing member (no cause), a malformed reference or body (ValueError,
+    TypeError), or the store refusing that one object (an HTTP 4xx other than
+    a timeout or throttling). Storage's: a connection error, a timeout, a
+    5xx, throttling. Configuration is checked before a run reads any page
+    (run), so a missing setting is never taken for a bad page."""
     cause = exc.__cause__
-    if cause is None or isinstance(cause, (ValueError, TypeError, KeyError)):
+    if cause is None or isinstance(cause, (ValueError, TypeError)):
         return True
     # botocore's ClientError, read by its shape: importing botocore here would
     # load the SDK into every worker at start (tests/test_lazy_imports.py).
     response = getattr(cause, "response", None)
     if isinstance(response, dict):
-        return response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        return (
+            isinstance(status, int)
+            and HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR
+            and status not in (HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS)
+        )
     return False
 
 
@@ -175,6 +185,8 @@ def _readable(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[di
     except PayloadUnavailable as exc:
         if not _page_fault(exc):
             raise
+        # A store that cannot be built (a missing setting) is not a bad page.
+        shared_store()
     readable, unread = [], []
     for row in rows:
         try:
@@ -211,10 +223,11 @@ def candidates(
             {
                 "cap": wanted,
                 "below": below,
-                # A failure can be walked again only from below the cursor,
-                # where a set-aside posting newer than it moved the cursor back.
+                # A visible failure can be walked to; a walked one only from
+                # below the cursor, where a set-aside posting newer than it
+                # moved the cursor back.
                 "taken": [row["url"] for row in visible]
-                + [url for url, job_id in skip.items() if job_id is not None and job_id < below],
+                + [url for url, job_id in skip.items() if job_id is None or job_id < below],
             },
         )
         exhausted = len(walked) < wanted
@@ -237,11 +250,11 @@ def candidates(
 def _profile(stale: list[str], current: dict[str, int]) -> None:
     """Rebuilds the profiles of `stale` companies from the newest posting of
     each of up to PROFILE_TITLES titles that has page text, leaving out a
-    sample whose page cannot be read (_readable)."""
-    samples, _ = _readable(
+    sample whose page cannot be read (_readable) and the title with it."""
+    samples, unread = _readable(
         db.query(
             """
-            SELECT s.k, s.company, s.title, q.input_content, q.content_ref FROM (
+            SELECT s.k, s.company, s.title, s.url, q.input_content, q.content_ref FROM (
                 SELECT k, company, title, url,
                        row_number() OVER (PARTITION BY k ORDER BY id DESC) AS n
                 FROM (
@@ -262,6 +275,9 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
             {"stale": stale, "titles": company_text.PROFILE_TITLES},
         )
     )
+    # A title whose sample could not be read is not counted, so the profile
+    # reads as short of the company's titles and is rebuilt next time.
+    lost = collections.Counter(sample["k"] for sample in unread)
     postings: dict[str, list[tuple[str, str]]] = {k: [] for k in stale}
     names: dict[str, str] = {}
     for sample in samples:
@@ -282,7 +298,7 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
             "SELECT k, t, %s FROM unnest(%s::text[], %s::int[]) AS s(k, t) "
             "ON CONFLICT (company_key) DO UPDATE SET titles = EXCLUDED.titles, "
             "rule = EXCLUDED.rule, profiled_at = now()",
-            (company_text.PROFILE_RULE, stale, [current[k] for k in stale]),
+            (company_text.PROFILE_RULE, stale, [current[k] - lost[k] for k in stale]),
         )
 
 
@@ -593,12 +609,28 @@ def _batch(
     return batch, below, exhausted
 
 
-def run(task_id: int, cap: int) -> dict[str, Any]:
-    """Batches of up to `cap` until the walk of the corpus is exhausted, a
-    batch stores and re-stamps nothing (every server is failing, or what is
-    left cannot be placed on one), no server answers, or the run is
-    cancelled. Postings that arrive after the walk passed them are the next
-    run's. The servers are asked again before each batch, so one that
+def _walk_start() -> int:
+    """Where the walk resumes: the cursor the latest run left in its payload
+    (a requeued run's own), or the top if none did or that run's walk was
+    exhausted. So failures are retried once a pass, not at the head of every
+    run, and a run killed by a deploy loses nothing."""
+    row = db.query_one(
+        "SELECT payload->'below' AS below FROM tasks "
+        "WHERE kind = %s AND payload ? 'below' ORDER BY id DESC LIMIT 1",
+        (KIND,),
+    )
+    below = row and row["below"]
+    return below if isinstance(below, int) else _NO_CURSOR
+
+
+def run(task_id: int) -> dict[str, Any]:
+    """Batches of `local_embed_batch` until the walk of the corpus is
+    exhausted, a batch stores and re-stamps nothing (every server is
+    failing, or what is left cannot be placed on one), no server answers,
+    the sweep is switched off, or the run is cancelled. Settings are read
+    before each batch, since a backfill run lasts days. The walk's cursor is
+    checkpointed after each batch, and a batch that stores nothing leaves it
+    where it was. The servers are asked again before each batch, so one that
     comes back, or goes away, counts from the next batch on. `servers` and
     `unreachable` name every server that answered, and that missed a batch
     or stopped answering, in the run."""
@@ -614,9 +646,9 @@ def run(task_id: int, cap: int) -> dict[str, Any]:
         "servers": [],
         "unreachable": [],
     }
-    below = _NO_CURSOR
+    below = _walk_start()
     skip: dict[str, int | None] = {}
-    while not cancelled(task_id):
+    while not cancelled(task_id) and db.get_config("local_embedding_enabled"):
         servers, unreachable = _servers(urls)
         counts["servers"] = sorted(set(counts["servers"]) | set(servers))
         counts["unreachable"] = sorted(set(counts["unreachable"]) | set(unreachable))
@@ -624,9 +656,21 @@ def run(task_id: int, cap: int) -> dict[str, Any]:
             if not counts["batches"]:
                 raise EmbeddingUnavailable(f"no embedding server answers: {', '.join(unreachable)}")
             break
-        batch, below, exhausted = _batch(task_id, servers, cap, below, skip, counts)
+        cap = int(db.get_config("local_embed_batch"))
+        batch, walked_to, exhausted = _batch(task_id, servers, cap, below, skip, counts)
         counts["batches"] += 1
-        if exhausted or not (batch["written"] or batch["restamped"]):
+        progressed = bool(batch["written"] or batch["restamped"])
+        if progressed:
+            below = walked_to
+        ours = checkpoint(
+            task_id,
+            counts["written"],
+            counts["written"] + counts["failed"],
+            f"batch {counts['batches']}: embedded {counts['written']} this run",
+            counts,
+            payload={"below": None if progressed and exhausted else below},
+        )
+        if not ours or exhausted or not progressed:
             break
     return counts
 
@@ -635,7 +679,7 @@ async def handle_embed_postings_local(task_id: int, payload: dict[str, Any]) -> 
     if not db.get_config("local_embedding_enabled"):
         set_progress(task_id, 0, 0, "switched off")
         return
-    counts = await asyncio.to_thread(run, task_id, int(db.get_config("local_embed_batch")))
+    counts = await asyncio.to_thread(run, task_id)
     set_progress(
         task_id,
         counts["written"],

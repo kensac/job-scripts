@@ -71,8 +71,8 @@ class EmbeddingUnavailable(RuntimeError):
 
 class ServerUnreachable(EmbeddingUnavailable):
     """The server is not there, or not ready: refused, reset, unresolvable,
-    silent past a timeout, cut off mid-response, or still loading its model
-    (503). Says nothing about the posting."""
+    not connecting, cut off mid-response, or still loading its model (503).
+    Says nothing about the posting."""
 
 
 def server_urls() -> list[str]:
@@ -101,11 +101,11 @@ def _call(
             raise ServerUnreachable(f"embedding server {url} is not ready")
         response.raise_for_status()
         return response.json()
-    except (
-        requests.ConnectionError,
-        requests.Timeout,
-        requests.exceptions.ChunkedEncodingError,
-    ) as exc:
+    except (requests.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+        # Refused, reset, unresolvable, not connected within _CONNECT_SECONDS
+        # (ConnectTimeout is a ConnectionError), or cut off mid-response. A
+        # read timeout is not here: one long page outlasting a request says
+        # nothing about the server, and is that page's error.
         raise ServerUnreachable(f"embedding server {url} cannot be reached") from exc
     except (requests.RequestException, ValueError) as exc:
         raise EmbeddingUnavailable(f"embedding server {url}{path} failed") from exc
