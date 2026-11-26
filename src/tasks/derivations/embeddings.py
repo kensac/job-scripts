@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Any
+from typing import Any, Literal
 
 from api import db
 from api.board import visibility
@@ -45,7 +45,22 @@ logger = logging.getLogger(__name__)
 # `stored_hash` rides along so the handler can tell a re-scrape that changed the
 # page from one that did not. An identical re-scrape refreshes the id and pays
 # for nothing.
-def _candidate_sql(scope: str) -> str:
+# posting_embeddings is embedded without its company's shared text
+# (core.derivations.company_text), so a row embedded before its company's
+# profile was last rebuilt is a candidate too.
+_PROFILE_CHANGED = """
+           OR EXISTS (
+               SELECT 1 FROM jobs pj
+               JOIN company_text_profiles p ON p.company_key = lower(btrim(pj.company))
+               WHERE pj.url = cr.url
+                 AND (e.profiled_at IS NULL OR p.profiled_at > e.profiled_at))"""
+
+
+def candidate_sql(
+    scope: str, table: Literal["job_embeddings", "posting_embeddings"] = "job_embeddings"
+) -> str:
+    """The candidates of an embeddings table: one literal per table, so no
+    name from elsewhere is formatted into SQL."""
     return f"""
     WITH current_row AS (
         SELECT c.url, q.content_row_id
@@ -55,9 +70,10 @@ def _candidate_sql(scope: str) -> str:
     todo AS (
         SELECT cr.url, cr.content_row_id, e.content_hash AS stored_hash
         FROM current_row cr
-        LEFT JOIN job_embeddings e ON e.url = cr.url
+        LEFT JOIN {table} e ON e.url = cr.url
         WHERE e.url IS NULL
            OR e.content_row_id IS DISTINCT FROM cr.content_row_id
+           {_PROFILE_CHANGED if table == "posting_embeddings" else ""}
         LIMIT %(cap)s
     )
     SELECT t.url, t.content_row_id, t.stored_hash, q.input_content, q.content_ref
@@ -66,7 +82,7 @@ def _candidate_sql(scope: str) -> str:
 """
 
 
-_CANDIDATES = _candidate_sql(visibility.across_users("j.url"))
+_CANDIDATES = candidate_sql(visibility.across_users("j.url"))
 
 
 def _store(rows: list[dict[str, Any]]) -> int:

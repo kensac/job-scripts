@@ -19,6 +19,7 @@ from tasks.content import handle_fetch_missing_content
 from tasks.derivations.compensation import PAY
 from tasks.derivations.embeddings import EMBEDDINGS
 from tasks.derivations.job_profiles import PROFILES
+from tasks.derivations.local_embeddings import handle_embed_postings_local
 from tasks.derivations.locations import LOCATIONS
 from tasks.derivations.requirements import REQUIREMENTS
 from tasks.derivations.sweep import Derivation
@@ -72,6 +73,7 @@ HANDLERS = {
     "retire_switched_off": handle_retire_switched_off,
     "fold_latest_posting_checks": handle_fold_latest_posting_checks,
     "tier_page_text": handle_tier_page_text,
+    "embed_postings_local": handle_embed_postings_local,
     "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,

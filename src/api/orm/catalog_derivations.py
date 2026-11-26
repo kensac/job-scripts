@@ -5,13 +5,15 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
     Identity,
     Index,
+    Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     text,
@@ -21,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
 from core.derivations.embeddings import EMBEDDING_DIMENSIONS
+from core.derivations.local_embeddings import LOCAL_EMBEDDING_DIMENSIONS
 
 
 class JobRequirements(Base):
@@ -110,6 +113,34 @@ class JobEmbedding(Base):
     content_hash: Mapped[str | None] = mapped_column(Text)
     # The page fetch the vector was read from, as on JobRequirements.
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class PostingEmbedding(Base):
+    """One vector per posting from the model the fleet serves itself
+    (core.derivations.local_embeddings), replacing job_embeddings once every
+    posting job_embeddings covers has one.
+
+    halfvec: two bytes a dimension instead of four. Cosine ranking of
+    normalised vectors does not move at that precision, and the table is a
+    quarter of job_embeddings' width per row (768 halves against 1,536
+    floats). No vector index, for job_embeddings' reason: the similarity
+    query is scoped to one user's visible slice, an exact scan.
+    """
+
+    __tablename__ = "posting_embeddings"
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    embedding: Mapped[Any] = mapped_column(HALFVEC(LOCAL_EMBEDDING_DIMENSIONS))
+    model: Mapped[str] = mapped_column(Text)
+    # sha256 of the text embedded (after its company's shared text was taken
+    # out), so a re-scrape or a rebuilt profile that leaves it unchanged is
+    # re-stamped, not embedded again (tasks.derivations.local_embeddings).
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    content_row_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The company profile the text was stripped under; a newer profile makes
+    # the row a candidate again. NULL when the company had none.
+    profiled_at: Mapped[datetime.datetime | None] = mapped_column()
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
@@ -208,3 +239,27 @@ class Location(Base):
     places: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
     classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class CompanyTextProfile(Base):
+    """When a company's shared paragraphs were last read, and from how many of
+    its distinct titles (core.derivations.company_text). Derived: rebuilt by
+    tasks.derivations.local_embeddings whenever the company has more titles
+    than its profile counted."""
+
+    __tablename__ = "company_text_profiles"
+
+    company_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    titles: Mapped[int] = mapped_column(Integer)
+    profiled_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class CompanySharedParagraph(Base):
+    """One paragraph a company repeats across roles, by the SHA-256 of its
+    words (core.derivations.company_text.paragraph_key). Derived with its
+    company's profile, replaced whole when the profile is rebuilt."""
+
+    __tablename__ = "company_shared_paragraphs"
+
+    company_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    paragraph_sha: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
