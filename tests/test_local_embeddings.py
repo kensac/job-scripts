@@ -405,6 +405,36 @@ def test_switching_the_sweep_off_stops_a_run_between_batches(f, monkeypatch, set
     assert counts["batches"] == 1 and counts["written"] == 1
 
 
+def test_the_next_batch_is_prepared_while_the_servers_embed_this_one(f, monkeypatch, set_config):
+    visible, _ = f.make_ready_job(content=CONTENT + " visible")
+    f.upload(visible, f.make_user())
+    for i in range(3):
+        f.make_ready_job(content=CONTENT + f" hidden {i}")
+    prepared = threading.Event()
+    prepare = local_embeddings._prepare
+    calls = []
+
+    def counting(*args):
+        calls.append(args)
+        if len(calls) == 2:
+            prepared.set()
+        return prepare(*args)
+
+    class WaitsForTheNextBatch(FakeServer):
+        def post(self, url, json, timeout):
+            if url.endswith("/v1/embeddings") and len(calls) == 1:
+                assert prepared.wait(timeout=10), "batch 2 was not prepared during batch 1"
+            return super().post(url, json, timeout)
+
+    server = WaitsForTheNextBatch()
+    monkeypatch.setattr(local_embeddings, "_prepare", counting)
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", lambda: server)
+    counts = _direct(set_config, 1)
+    assert counts["written"] == 4
+    assert len(server.embedded) == 4, "the visible posting in flight is not selected again"
+
+
 def test_a_server_that_times_out_hands_its_posting_back(f, monkeypatch, set_config):
     _, url = f.make_ready_job(content=CONTENT)
 

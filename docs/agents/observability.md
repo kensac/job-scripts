@@ -1019,6 +1019,15 @@ the next run resumes where the last one stopped, so a run a deploy kills,
 whether requeued or replaced next cycle, loses nothing. Once the walk is
 exhausted the next run starts again from the newest job, picking up what
 arrived meanwhile and retrying what failed.
+
+**The servers do not wait for the next batch.** Selecting a batch, building
+the profiles of companies the walk has not met, and stripping its text read
+pages out of object storage; for a backfill that reaches a new company in
+most batches, that took longer than embedding the batch (on hetzner at
+32 postings a second with both rented GPUs often idle, 2026-11-26). The
+next batch is prepared on a thread of its own while the current one is on
+the servers, leaving out the current batch's visible postings, which still
+need a vector until it lands.
 An idle run still walks every job to find none: 23 s over 2.1M jobs
 (2026-11-26).
 
