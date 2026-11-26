@@ -118,8 +118,9 @@ def _post(session: requests.Session, url: str, path: str, body: dict) -> dict:
 def slots(session: requests.Session, url: str) -> int:
     """How many requests the server at `url` serves at once (llama-server's
     `-np`), as it reports it, so each machine sets its own."""
-    total = _call(session, "GET", url, "/props", read_seconds=_CONNECT_SECONDS).get("total_slots")
-    if not isinstance(total, int) or total < 1:
+    props = _call(session, "GET", url, "/props", read_seconds=_CONNECT_SECONDS)
+    total = props.get("total_slots") if isinstance(props, dict) else None
+    if not isinstance(total, int) or isinstance(total, bool) or total < 1:
         raise EmbeddingUnavailable(f"embedding server {url} reports no slots")
     return total
 

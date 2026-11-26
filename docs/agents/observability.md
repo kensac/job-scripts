@@ -1014,9 +1014,10 @@ the postings someone can see that need a vector first (a new page, a rebuilt
 company profile), then never-embedded postings newest first, up to
 `local_embed_batch`. A posting outside the visible slice is embedded once;
 its row's `content_row_id` and `profiled_at` say what from. A run walks the
-corpus once, batch after batch, until a batch stores, re-stamps and refuses
-nothing, so a backfill is a single run (requeued by the reaper if a deploy
-kills it) and an idle cycle costs one candidate query.
+corpus once, batch after batch, until a batch stores and re-stamps nothing,
+so a backfill is a single run (requeued by the reaper if a deploy kills it).
+An idle run still walks every job to find none: 23 s over 2.1M jobs
+(2026-11-26).
 
 **Servers come and go.** `JOBTRACKER_EMBEDDING_URLS` may name servers on
 other machines, such as a laptop that serves only while unused. Each run
@@ -1025,15 +1026,14 @@ many requests on it; a server that does not answer, times out, or stops
 answering is left out of the batch and its posting handed to another. The
 run's progress names the servers that did not answer.
 
-**A failure is blamed on the page only when the page is what failed.** An
-error from a server that has stored a vector this run, or a page during
-which two servers stopped answering, is the page's: it is recorded in
-`posting_embedding_failures` against its `content_row_id` and not selected
-again until the posting has a newer page. So is a page whose stored text
-cannot be read. An error from a server that has stored nothing hands the
-posting to another server instead, so a misconfigured server never gets a
-good page recorded; a posting no server is left to try waits for a later
-batch.
+**A failure lasts one run.** A posting that errors on every server still
+answering, or was in flight on two servers that went down, is skipped for
+the rest of the run and tried again by the next; so is one whose stored
+text cannot be read. Nothing records a posting as bad: whether a failure
+was the page's or a server's is a guess, and a wrong one would leave a
+good posting without a vector for good. A run stops at a batch that stores
+nothing, so a storage outage or failing servers end it rather than walk
+the corpus.
 
 `local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
 is re-stamped (`tasks.rescrape`).

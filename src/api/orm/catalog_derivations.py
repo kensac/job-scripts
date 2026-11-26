@@ -144,21 +144,6 @@ class PostingEmbedding(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
-class PostingEmbeddingFailure(Base):
-    """A page the embedding servers refused (an error response, or a vector
-    of the wrong shape) while they embedded other postings, so it is the
-    page's fault and not the servers'. The sweep does not select that page
-    again; a newer page of the same posting is tried
-    (tasks.derivations.local_embeddings). A stored vector deletes the row.
-    """
-
-    __tablename__ = "posting_embedding_failures"
-
-    url: Mapped[str] = mapped_column(Text, primary_key=True)
-    content_row_id: Mapped[int] = mapped_column(BigInteger)
-    failed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
-
-
 class JobProfile(Base):
     """Versioned shadow classification of one exact content observation."""
 
