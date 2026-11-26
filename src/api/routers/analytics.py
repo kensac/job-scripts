@@ -73,18 +73,16 @@ def source_analytics(
     sort: Literal["source", "total", "still_open", "doa", "clearance", "cost", "apply"] = "total",
     dir: Literal["asc", "desc"] = "desc",
     # A page of the boards. Every board's row is about 2.6 KB, and 9,571
-    # boards made a 25 MB response (production copy, 2026-11-26). Without a
-    # limit every match is returned, for a page that has not moved to pages.
-    limit: int | None = Query(default=None, ge=1, le=500),
+    # boards made a 25 MB response (production copy, 2026-11-26).
+    limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsList:
     rows = collect_source_analytics(min_sample)
     found = search_source_analytics(rows, q, sort, descending=dir == "desc")
-    end = None if limit is None else offset + limit
     silent = [r.source for r in rows if r.inventory.total == 0]
     return BoardAnalyticsList(
-        rows=found[offset:end],
+        rows=found[offset : offset + limit],
         min_sample=min_sample,
         caveats=_CAVEATS,
         matched=len(found),
