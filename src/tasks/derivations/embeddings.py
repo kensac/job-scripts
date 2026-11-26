@@ -56,6 +56,14 @@ _PROFILE_CHANGED = """
                  AND (e.profiled_at IS NULL OR p.profiled_at > e.profiled_at))"""
 
 
+# A page the servers refused is not selected again; a newer page of the same
+# posting is (tasks.derivations.local_embeddings).
+_NOT_REFUSED = """
+           AND NOT EXISTS (
+               SELECT 1 FROM posting_embedding_failures pf
+               WHERE pf.url = cr.url AND pf.content_row_id = cr.content_row_id)"""
+
+
 def candidate_sql(
     scope: str, table: Literal["job_embeddings", "posting_embeddings"] = "job_embeddings"
 ) -> str:
@@ -71,9 +79,10 @@ def candidate_sql(
         SELECT cr.url, cr.content_row_id, e.content_hash AS stored_hash
         FROM current_row cr
         LEFT JOIN {table} e ON e.url = cr.url
-        WHERE e.url IS NULL
+        WHERE (e.url IS NULL
            OR e.content_row_id IS DISTINCT FROM cr.content_row_id
-           {_PROFILE_CHANGED if table == "posting_embeddings" else ""}
+           {_PROFILE_CHANGED if table == "posting_embeddings" else ""})
+           {_NOT_REFUSED if table == "posting_embeddings" else ""}
         LIMIT %(cap)s
     )
     SELECT t.url, t.content_row_id, t.stored_hash, q.input_content, q.content_ref

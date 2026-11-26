@@ -212,10 +212,10 @@ def test_one_run_drains_the_backlog_visible_postings_first(f, monkeypatch):
     batches: list[list[str]] = []
     select = local_embeddings.candidates
 
-    def recorded(cap):
-        rows = select(cap)
+    def recorded(cap, below):
+        rows, below = select(cap, below)
         batches.append([row["url"] for row in rows])
-        return rows
+        return rows, below
 
     monkeypatch.setattr(local_embeddings, "candidates", recorded)
 
@@ -237,6 +237,48 @@ def test_a_posting_nobody_can_see_is_embedded_once(f, monkeypatch):
     f.make_fetch(url, content=CONTENT + " rewritten")
     _run(monkeypatch, server)
     assert len(server.embedded) == calls, "a later page of an unseen posting is not re-selected"
+
+
+def test_a_page_refused_beside_stored_ones_is_not_tried_again_until_it_changes(f, monkeypatch):
+    _, good = f.make_ready_job(content=CONTENT)
+    _, bad = f.make_ready_job(content=CONTENT + " unembeddable")
+
+    class RefusesOne(FakeServer):
+        def post(self, url, json, timeout):
+            if url.endswith("/tokenize") and "unembeddable" in json["content"]:
+                return _Response({"error": "bad input"}, status_code=500)
+            return super().post(url, json, timeout)
+
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", RefusesOne)
+    counts = local_embeddings.run(make_task(local_embeddings.KIND, status="running"))
+    assert counts["written"] == 1 and counts["failed"] == 1
+    assert db.query_one("SELECT 1 FROM posting_embedding_failures WHERE url = %s", (bad,))
+
+    again = local_embeddings.run(make_task(local_embeddings.KIND, status="running"))
+    assert again["selected"] == 0, "the refused page is passed over"
+
+    f.make_fetch(bad, content=CONTENT + " rewritten")
+    third = local_embeddings.run(make_task(local_embeddings.KIND, status="running"))
+    assert third["written"] == 1
+    assert db.query_one("SELECT 1 FROM posting_embedding_failures WHERE url = %s", (bad,)) is None
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (good,))
+
+
+def test_a_server_that_times_out_hands_its_posting_back(f, monkeypatch):
+    _, url = f.make_ready_job(content=CONTENT)
+
+    class Stalls(FakeServer):
+        def post(self, url, json, timeout):
+            if url.startswith("http://emb-b"):
+                raise core.requests.ReadTimeout("no answer")
+            return super().post(url, json, timeout)
+
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-b,http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", Stalls)
+    counts = local_embeddings.run(make_task(local_embeddings.KIND, status="running"))
+    assert counts["failed"] == 0
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (url,))
 
 
 def test_a_run_ends_when_a_batch_stores_nothing(f, monkeypatch):

@@ -59,6 +59,11 @@ URLS_ENV = "JOBTRACKER_EMBEDDING_URLS"
 # this bounds one request, not the run.
 _TIMEOUT_SECONDS = 300
 
+# A server on the LAN or the tailnet connects, and answers /props, in
+# milliseconds; one that has not in this long is not there (a laptop asleep
+# drops packets rather than refusing them).
+_CONNECT_SECONDS = 5
+
 
 class EmbeddingUnavailable(RuntimeError):
     pass
@@ -66,7 +71,8 @@ class EmbeddingUnavailable(RuntimeError):
 
 class ServerUnreachable(EmbeddingUnavailable):
     """The server is not there, or not ready: refused, reset, unresolvable,
-    or still loading its model (503). Says nothing about the posting."""
+    silent past a timeout, cut off mid-response, or still loading its model
+    (503). Says nothing about the posting."""
 
 
 def server_urls() -> list[str]:
@@ -79,14 +85,27 @@ class Embedded:
     chunks: int
 
 
-def _call(session: requests.Session, method: str, url: str, path: str, **kwargs: Any) -> dict:
+def _call(
+    session: requests.Session,
+    method: str,
+    url: str,
+    path: str,
+    read_seconds: float = _TIMEOUT_SECONDS,
+    **kwargs: Any,
+) -> dict:
     try:
-        response = session.request(method, f"{url}{path}", timeout=_TIMEOUT_SECONDS, **kwargs)
+        response = session.request(
+            method, f"{url}{path}", timeout=(_CONNECT_SECONDS, read_seconds), **kwargs
+        )
         if response.status_code == HTTPStatus.SERVICE_UNAVAILABLE:
             raise ServerUnreachable(f"embedding server {url} is not ready")
         response.raise_for_status()
         return response.json()
-    except requests.ConnectionError as exc:
+    except (
+        requests.ConnectionError,
+        requests.Timeout,
+        requests.exceptions.ChunkedEncodingError,
+    ) as exc:
         raise ServerUnreachable(f"embedding server {url} cannot be reached") from exc
     except (requests.RequestException, ValueError) as exc:
         raise EmbeddingUnavailable(f"embedding server {url}{path} failed") from exc
@@ -99,7 +118,7 @@ def _post(session: requests.Session, url: str, path: str, body: dict) -> dict:
 def slots(session: requests.Session, url: str) -> int:
     """How many requests the server at `url` serves at once (llama-server's
     `-np`), as it reports it, so each machine sets its own."""
-    total = _call(session, "GET", url, "/props").get("total_slots")
+    total = _call(session, "GET", url, "/props", read_seconds=_CONNECT_SECONDS).get("total_slots")
     if not isinstance(total, int) or total < 1:
         raise EmbeddingUnavailable(f"embedding server {url} reports no slots")
     return total
