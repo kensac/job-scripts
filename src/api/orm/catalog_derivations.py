@@ -245,13 +245,16 @@ class CompanyTextProfile(Base):
     """When a company's shared paragraphs were last read, and from how many of
     its distinct titles (core.derivations.company_text). Derived: rebuilt by
     tasks.derivations.local_embeddings whenever the company has more titles
-    than its profile counted."""
+    than its profile counted, or when it was built under an older rule."""
 
     __tablename__ = "company_text_profiles"
 
     company_key: Mapped[str] = mapped_column(Text, primary_key=True)
     titles: Mapped[int] = mapped_column(Integer)
     profiled_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+    # core.derivations.company_text.PROFILE_RULE when it was built; an older
+    # rule's profile is rebuilt.
+    rule: Mapped[int] = mapped_column(Integer, server_default=text("1"))
 
 
 class CompanySharedParagraph(Base):

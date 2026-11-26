@@ -11,7 +11,8 @@ What is embedded is the posting without the paragraphs its company repeats
 across roles, and with the company's name masked
 (core.derivations.company_text). Each company's shared paragraphs are a
 derived profile, rebuilt here whenever the company has more distinct titles
-than its profile counted; a row records the profile it was embedded under,
+than its profile counted or was built under an older rule
+(company_text.PROFILE_RULE); a row records the profile it was embedded under,
 so a rebuilt profile re-selects its company's postings. The stored hash is of
 the text embedded, so a re-scrape or a rebuilt profile that leaves that text
 unchanged is re-stamped, not embedded again.
@@ -139,11 +140,12 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
     samples = page_fetches.resolve(
         db.query(
             """
-            SELECT s.k, s.title, q.input_content, q.content_ref FROM (
-                SELECT k, title, url, row_number() OVER (PARTITION BY k ORDER BY id DESC) AS n
+            SELECT s.k, s.company, s.title, q.input_content, q.content_ref FROM (
+                SELECT k, company, title, url,
+                       row_number() OVER (PARTITION BY k ORDER BY id DESC) AS n
                 FROM (
                     SELECT DISTINCT ON (lower(btrim(j.company)), lower(btrim(j.title)))
-                           lower(btrim(j.company)) AS k, j.title, j.url, j.id
+                           lower(btrim(j.company)) AS k, j.company, j.title, j.url, j.id
                     FROM jobs j
                     WHERE lower(btrim(j.company)) = ANY(%(stale)s)
                       AND EXISTS (SELECT 1 FROM page_texts q WHERE q.url = j.url AND q.chars > 200)
@@ -160,9 +162,11 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
         )
     )
     postings: dict[str, list[tuple[str, str]]] = {k: [] for k in stale}
+    names: dict[str, str] = {}
     for sample in samples:
         postings[sample["k"]].append((sample["title"], sample["input_content"]))
-    profiles = {k: company_text.shared_paragraphs(p) for k, p in postings.items()}
+        names[sample["k"]] = sample["company"]
+    profiles = {k: company_text.shared_paragraphs(names.get(k, k), p) for k, p in postings.items()}
     shared = [(k, sha) for k, (_, paragraphs) in profiles.items() for sha in paragraphs]
     with db.transaction():
         db.execute("DELETE FROM company_shared_paragraphs WHERE company_key = ANY(%s)", (stale,))
@@ -173,10 +177,11 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
                 ([k for k, _ in shared], [sha for _, sha in shared]),
             )
         db.execute(
-            "INSERT INTO company_text_profiles (company_key, titles) "
-            "SELECT * FROM unnest(%s::text[], %s::int[]) "
-            "ON CONFLICT (company_key) DO UPDATE SET titles = EXCLUDED.titles, profiled_at = now()",
-            (stale, [current[k] for k in stale]),
+            "INSERT INTO company_text_profiles (company_key, titles, rule) "
+            "SELECT k, t, %s FROM unnest(%s::text[], %s::int[]) AS s(k, t) "
+            "ON CONFLICT (company_key) DO UPDATE SET titles = EXCLUDED.titles, "
+            "rule = EXCLUDED.rule, profiled_at = now()",
+            (company_text.PROFILE_RULE, stale, [current[k] for k in stale]),
         )
 
 
@@ -196,13 +201,20 @@ def refresh_profiles(keys: set[str], task_id: int | None = None) -> int:
         )
     }
     known = {
-        row["company_key"]: row["titles"]
+        row["company_key"]: row
         for row in db.query(
-            "SELECT company_key, titles FROM company_text_profiles WHERE company_key = ANY(%s)",
+            "SELECT company_key, titles, rule FROM company_text_profiles "
+            "WHERE company_key = ANY(%s)",
             (list(keys),),
         )
     }
-    stale = sorted(k for k, titles in current.items() if known.get(k, 0) < titles)
+    stale = sorted(
+        k
+        for k, titles in current.items()
+        if k not in known
+        or known[k]["titles"] < titles
+        or known[k]["rule"] != company_text.PROFILE_RULE
+    )
     for start in range(0, len(stale), _PROFILE_BATCH):
         _profile(stale[start : start + _PROFILE_BATCH], current)
         if task_id is not None:
