@@ -33,6 +33,15 @@ three titles was company text (one of several versions of a company's
 about-us, EEO or agency notice) or a heading; none was a role's duty, so a
 named paragraph needs no share of the titles, and requiring one would keep
 those versions.
+
+Read on production, the half-the-titles test stripped duties at a company
+whose few roles are all of one kind (a five-title AI startup kept 24% of its
+text), as it would at a staffing agency posting one role a hundred ways. So
+it skips text under a role heading ("Responsibilities", "What you'll do",
+"Qualifications" and the like, until a company heading such as "Benefits"
+closes the section), decided by majority over the postings that carry the
+paragraph, since a posting that never closes its role section carries its
+benefits inside it. That startup then kept 73%, its duties with it.
 """
 
 from __future__ import annotations
@@ -43,8 +52,9 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 # The rule profiles are built under; a profile built under an older one is
-# rebuilt. 1: repeated under three titles. 2: the module docstring's rule.
-PROFILE_RULE = 2
+# rebuilt. 1: repeated under three titles. 2: named, or under half the
+# titles. 3: as 2, but the half-the-titles test skips a role section's text.
+PROFILE_RULE = 3
 
 # Titles a paragraph must repeat under to be the company's at all, and the
 # share of the company's titles that makes it the company's without naming it.
@@ -83,15 +93,142 @@ def paragraph_key(paragraph: str) -> bytes | None:
     return hashlib.sha256(words.encode()).digest()
 
 
+# Headings that open a section about the role, and ones that close it. A
+# heading is a short line (ROLE_HEADING_WORDS words or fewer, or ending in a
+# colon) containing one of these. Read from the headings of the 300 postings
+# the module docstring measures, and the Spanish, French and German postings
+# among them.
+_ROLE_HEADINGS = (
+    "responsibilit",
+    "qualification",
+    "requirement",
+    "what you will do",
+    "what you'll do",
+    "what you will be",
+    "what you'll be",
+    "what you'll bring",
+    "what you bring",
+    "what we're looking for",
+    "what we are looking for",
+    "who you are",
+    "about you",
+    "the role",
+    "this role",
+    "your role",
+    "role overview",
+    "job summary",
+    "position summary",
+    "job description",
+    "essential function",
+    "duties",
+    "knowledge, skills",
+    "skills",
+    "experience",
+    "education",
+    "licenses",
+    "certification",
+    "bonus points",
+    "nice to have",
+    "must have",
+    "your impact",
+    "in this role",
+    "key job",
+    "tasks",
+    "your profile",
+    "funciones",
+    "responsabilidades",
+    "requisitos",
+    "missions",
+    "profil",
+    "compétences",
+    "aufgaben",
+    "anforderungen",
+    "qualifikation",
+)
+_COMPANY_HEADINGS = (
+    "about us",
+    "who we are",
+    "what we do",
+    "benefits",
+    "what we offer",
+    "why join",
+    "equal opportunity",
+    "equal employment",
+    "compensation",
+    "salary",
+    "pay range",
+    "perks",
+    "culture",
+    "privacy",
+    "our mission",
+    "life at",
+    "join our team",
+    "careers",
+    "contact us",
+    "e-verify",
+    "terms of use",
+    "accommodation",
+    "diversity",
+    "about the company",
+    "avantages",
+    "à propos",
+    "über uns",
+    "beneficios",
+    "sobre nosotros",
+)
+ROLE_HEADING_WORDS = 5
+
+
+def _heading(line: str, company: str) -> str | None:
+    """ "role" or "company" for a heading line, None for any other line."""
+    text = line.strip().lower()
+    if not text or len(text) > 80:
+        return None
+    if len(text.split()) > ROLE_HEADING_WORDS and not text.endswith(":"):
+        return None
+    if text.endswith("."):
+        return None
+    if (
+        any(h in text for h in _COMPANY_HEADINGS)
+        or text.rstrip(":?") == f"about {company_key(company)}"
+    ):
+        return "company"
+    if any(h in text for h in _ROLE_HEADINGS):
+        return "role"
+    return None
+
+
+def sections(text: str, company: str) -> dict[bytes, bool]:
+    """Each paragraph of a posting, and whether it sits under a role heading
+    (until a company heading closes the section)."""
+    out: dict[bytes, bool] = {}
+    in_role = False
+    for paragraph in paragraphs(text):
+        kind = _heading(paragraph, company)
+        if kind is not None:
+            in_role = kind == "role"
+            continue
+        key = paragraph_key(paragraph)
+        if key is not None:
+            out[key] = out.get(key, False) or in_role
+    return out
+
+
 def shared_paragraphs(company: str, postings: Iterable[tuple[str, str]]) -> tuple[int, set[bytes]]:
     """From one company's (title, text) postings, how many distinct titles it
     has and the paragraphs that are its own text (see the module docstring)."""
     titles_of: dict[bytes, set[str]] = {}
     text_of: dict[bytes, str] = {}
     titles: set[str] = set()
+    # A paragraph is the role's when more of the postings carrying it put it
+    # under a role heading than not: a posting whose role section is never
+    # closed by a heading carries the benefits list inside it.
+    votes: dict[bytes, int] = {}
     for raw_title, text in postings:
         title = raw_title.strip().lower()
         titles.add(title)
+        for key, in_role in sections(text, company).items():
+            votes[key] = votes.get(key, 0) + (1 if in_role else -1)
         for paragraph in paragraphs(text):
             key = paragraph_key(paragraph)
             if key is not None:
@@ -102,7 +239,10 @@ def shared_paragraphs(company: str, postings: Iterable[tuple[str, str]]) -> tupl
         key
         for key, seen in titles_of.items()
         if len(seen) >= SHARED_MIN_TITLES
-        and (len(seen) >= unnamed_floor or names_company(text_of[key], company))
+        and (
+            (len(seen) >= unnamed_floor and votes.get(key, 0) <= 0)
+            or names_company(text_of[key], company)
+        )
     }
     return len(titles), own
 

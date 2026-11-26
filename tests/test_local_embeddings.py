@@ -319,3 +319,40 @@ def test_the_first_word_of_a_name_alone_does_not_name_the_company():
     assert company_text.names_company(
         "Advanced Micro Devices is an equal opportunity employer.", "Advanced Micro Devices, Inc."
     )
+
+
+def test_a_small_companys_shared_duties_under_a_role_heading_are_kept():
+    """A company whose few roles are all one kind shares its duties under
+    most titles; under a role heading they are the role's, and only the
+    benefits under a company heading go."""
+    from core.derivations import company_text
+
+    duty = "Build evaluation sets that are representative and reproducible from real workflows."
+    perk = "Free meals, coffee and snacks, and a generous learning budget every year."
+    titles = [
+        "Research Engineer",
+        "Member of Technical Staff",
+        "ML Engineer, Evals",
+        "Founding Engineer",
+    ]
+    postings = [
+        (t, f"{t} for our evals team.\nWhat you'll do:\n{duty}\nBenefits\n{perk}") for t in titles
+    ]
+    _, shared = company_text.shared_paragraphs("Ambral Labs", postings)
+
+    assert company_text.paragraph_key(duty) not in shared
+    assert company_text.paragraph_key(perk) in shared
+
+
+def test_a_benefits_list_left_inside_one_unclosed_role_section_is_still_the_companys():
+    from core.derivations import company_text
+
+    perk = "Competitive offer packages and a defined-benefit pension plan for every employee."
+    closed = [
+        (t, f"Responsibilities\nRun {t} reports for the clinical teams.\nWhy join us?\n{perk}")
+        for t in ["Analyst", "Nurse", "Technician", "Coordinator"]
+    ]
+    unclosed = [("Scheduler", f"Responsibilities\nRun schedules for the clinical teams.\n{perk}")]
+    _, shared = company_text.shared_paragraphs("General Hospital", closed + unclosed)
+
+    assert company_text.paragraph_key(perk) in shared
