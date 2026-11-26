@@ -564,6 +564,27 @@ def test_a_walk_exhausted_by_an_empty_batch_starts_again_from_the_top(f, monkeyp
     assert row is not None and row["payload"]["below"] is None
 
 
+def test_requests_to_the_embedding_servers_are_not_traced(f, monkeypatch, set_config):
+    from opentelemetry.instrumentation.utils import is_instrumentation_enabled
+
+    from api import telemetry
+
+    f.make_ready_job(content=CONTENT)
+    monkeypatch.setattr(telemetry, "_tracer", object())
+    traced: list[bool] = []
+
+    class Watching(FakeServer):
+        def post(self, url, json, timeout):
+            if url.endswith("/v1/embeddings"):
+                traced.append(is_instrumentation_enabled())
+            return super().post(url, json, timeout)
+
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", Watching)
+    _direct(set_config, 2000)
+    assert traced == [False]
+
+
 def test_a_server_that_times_out_hands_its_posting_back(f, monkeypatch, set_config):
     _, url = f.make_ready_job(content=CONTENT)
 

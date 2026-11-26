@@ -146,8 +146,13 @@ def test_untraced_turns_instrumentation_off_inside_and_back_on_after(monkeypatch
 
 
 def test_untraced_is_a_no_op_without_tracing(monkeypatch):
+    from opentelemetry.instrumentation.utils import is_instrumentation_enabled
+
     from api import telemetry
 
     monkeypatch.setattr(telemetry, "_tracer", None)
+    ran = False
     with telemetry.untraced():
-        pass
+        assert is_instrumentation_enabled()
+        ran = True
+    assert ran

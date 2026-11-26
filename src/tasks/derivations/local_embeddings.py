@@ -482,7 +482,7 @@ def _embed_all(
 
     def serve(url: str) -> None:
         # Two requests a posting to our own servers: the task's span stands
-        # for them (telemetry.untraced).
+        # for them (docs/agents/observability.md).
         try:
             with telemetry.untraced():
                 while (job := work.take(url)) is not None:

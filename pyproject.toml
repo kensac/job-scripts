@@ -25,6 +25,7 @@ dependencies = [
     "nh3==0.3.8",
     "openai==3.58.0",
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
+    "opentelemetry-instrumentation==0.66b2",
     "opentelemetry-instrumentation-fastapi==0.66b2",
     "opentelemetry-instrumentation-psycopg==0.66b2",
     "opentelemetry-instrumentation-requests==0.66b2",
