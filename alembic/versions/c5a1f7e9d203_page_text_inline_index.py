@@ -1,7 +1,7 @@
 """page_fetches: index of the rows whose text is still inline
 
 Revision ID: c5a1f7e9d203
-Revises: b4d81e2f6a07
+Revises: c7e2a4f19d50
 Create Date: 2026-11-26
 
 A fetch's text is uploaded to object storage before its row is written
@@ -33,7 +33,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c5a1f7e9d203"
-down_revision: str | None = "b4d81e2f6a07"
+down_revision: str | None = "c7e2a4f19d50"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
