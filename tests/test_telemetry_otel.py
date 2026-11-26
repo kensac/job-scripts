@@ -152,3 +152,58 @@ def test_uvicorns_request_log_is_shipped_too():
     rec = logging.LogRecord("uvicorn.access", 20, "x", 1, "GET /v1/healthz 200", (), None)
     shipped = telemetry.shipped_form(rec)
     assert shipped is not None and shipped.getMessage() == "GET /v1/healthz 200"
+
+
+def test_only_tasks_and_requests_start_traces():
+    """A database statement or outbound call made outside any task or request
+    (the worker's heartbeat, claim and scheduler polls) starts no trace; one
+    made inside a task is part of the task's trace."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.sdk.trace.sampling import ParentBased
+    from opentelemetry.trace import SpanKind
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(sampler=ParentBased(telemetry._root_sampler(1.0)))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    with tracer.start_as_current_span("SELECT heartbeat", kind=SpanKind.CLIENT):
+        pass
+    with (
+        tracer.start_as_current_span("task ingest_source"),
+        tracer.start_as_current_span("SELECT jobs", kind=SpanKind.CLIENT),
+    ):
+        pass
+    with tracer.start_as_current_span("GET /v1/jobs", kind=SpanKind.SERVER):
+        pass
+
+    assert sorted(span.name for span in exporter.get_finished_spans()) == [
+        "GET /v1/jobs",
+        "SELECT jobs",
+        "task ingest_source",
+    ]
+
+
+def test_probe_access_lines_are_not_shipped():
+    probe = logging.LogRecord(
+        "uvicorn.access",
+        20,
+        "x",
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:5000", "GET", "/healthz", "1.1", 200),
+        None,
+    )
+    request = logging.LogRecord(
+        "uvicorn.access",
+        20,
+        "x",
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4:5000", "GET", "/v1/jobs?page=2", "1.1", 200),
+        None,
+    )
+    assert telemetry.shipped_form(probe) is None
+    assert telemetry.shipped_form(request) is not None

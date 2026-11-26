@@ -75,6 +75,14 @@ _UNSHIPPED_LOGGERS = ("opentelemetry", "urllib3", "posthog")
 # Loggers configured with propagate=False by their owner, so a handler on the
 # root never sees them; they get the shipping handler directly.
 _NON_PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error")
+# Paths a prober requests every few seconds; their access lines say only that
+# the prober is alive, which Kener and Prometheus already record.
+_PROBE_PATHS = ("/healthz", "/metrics")
+# Libraries that log every request they send at INFO: the provider SDKs'
+# clients (httpx, and httpx2 under anthropic) polling batches. The calls that
+# matter are recorded where they are made (model_calls, ai_batches), so these
+# log from WARNING up.
+_REQUEST_LOGGERS = ("httpx", "httpx2")
 # Where psycopg puts parameter values in an exception's text. A log record is
 # not written with an egress policy in mind, and "unnamed portal parameter $5
 # = '...'" is a value from the failing query: an email, a token, a url, text
@@ -109,6 +117,8 @@ def shipped_form(record: logging.LogRecord) -> logging.LogRecord | None:
     """
     if record.name == __name__ or record.name.split(".")[0] in _UNSHIPPED_LOGGERS:
         return None
+    if record.name == "uvicorn.access" and _is_probe(record):
+        return None
     try:
         message = record.getMessage()
     except Exception:
@@ -122,6 +132,46 @@ def shipped_form(record: logging.LogRecord) -> logging.LogRecord | None:
     out.exc_info = None
     out.exc_text = None
     return out
+
+
+def _is_probe(record: logging.LogRecord) -> bool:
+    """A uvicorn access line for a probe path. Its args are (client, method,
+    path, http version, status)."""
+    args = record.args if isinstance(record.args, tuple) else ()
+    path = str(args[2]).split("?", 1)[0] if len(args) > 2 else ""
+    return path in _PROBE_PATHS
+
+
+def _root_sampler(ratio: float) -> Any:
+    """Which traces start. A root span of kind CLIENT is a database statement
+    or an outbound request made outside any task or request: the worker's
+    heartbeat, claim and scheduler polls, which run whether or not it has
+    work. The fleet shipped 16.0M spans against 0.59M log records in the week
+    to 2026-11-26, and an optiplex worker running little shipped 3.8 spans a
+    second. They are dropped; a task's or request's own statements and calls
+    are its children and follow its decision (ParentBased)."""
+    from opentelemetry.sdk.trace.sampling import (
+        Decision,
+        Sampler,
+        SamplingResult,
+        TraceIdRatioBased,
+    )
+    from opentelemetry.trace import SpanKind
+
+    ratio_sampler = TraceIdRatioBased(ratio)
+
+    class TaskOrRequestRoots(Sampler):
+        def should_sample(self, parent_context, trace_id, name, kind=None, *args, **kwargs):
+            if kind is SpanKind.CLIENT:
+                return SamplingResult(Decision.DROP)
+            return ratio_sampler.should_sample(
+                parent_context, trace_id, name, kind, *args, **kwargs
+            )
+
+        def get_description(self) -> str:
+            return f"TaskOrRequestRoots({ratio_sampler.get_description()})"
+
+    return TaskOrRequestRoots()
 
 
 def _shipping_handler(level: int, logger_provider: Any) -> logging.Handler:
@@ -209,15 +259,13 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # it first, read the daily volume in PostHog, then turn these two down if
     # the bill or the noise says so. Both are env because they are read once
     # at startup, before the database is open.
-    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+    from opentelemetry.sdk.trace.sampling import ParentBased
 
     ratio = float(os.environ.get("POSTHOG_TRACE_SAMPLE", "1.0"))
     log_level = logging.getLevelName(os.environ.get("POSTHOG_LOG_LEVEL", "INFO").upper())
     # PostHog is a generic OTLP receiver over HTTP; the full /i/v1/* paths are
     # required, the base-endpoint convention is not honoured.
-    _tracer_provider = TracerProvider(
-        resource=resource, sampler=ParentBased(TraceIdRatioBased(ratio))
-    )
+    _tracer_provider = TracerProvider(resource=resource, sampler=ParentBased(_root_sampler(ratio)))
     _tracer_provider.add_span_processor(
         BatchSpanProcessor(
             _counted(OTLPSpanExporter(endpoint=f"{host}/i/v1/traces", headers=headers), "traces")
@@ -249,6 +297,8 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # the service's own.
     for name in _NON_PROPAGATING_LOGGERS:
         logging.getLogger(name).addHandler(handler)
+    for name in _REQUEST_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
     logger.info(
         f"telemetry: enabled service={service} host={host} release={RELEASE} "
         f"process_host={HOST} traces_sampled={ratio} logs_from={logging.getLevelName(log_level)}"

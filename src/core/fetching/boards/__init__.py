@@ -81,5 +81,7 @@ def fetch_listings(url: str, company: str | None = None) -> list[JobPosting]:
     if board_format.needs_company and not company:
         raise ValueError(f"a {board_format.name} board names no company; set the source's company")
     postings = board_format.fetcher(url, company)
-    logger.info(f"Fetched {len(postings)} postings from {url}")
+    # Debug: the pull's own summary (tasks.ingest) and its task progress carry
+    # the count.
+    logger.debug(f"Fetched {len(postings)} postings from {url}")
     return postings

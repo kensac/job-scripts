@@ -813,11 +813,14 @@ inside which request or task". Four things ship:
   `fetch_deferred`, `ai_call_failed`, `alert_opened`, `alert_resolved`,
   `worker_started`).
 - Every log record at INFO and above, through OpenTelemetry, uvicorn's request
-  log included. Its loggers do not propagate, so the handler is attached to
-  them by name.
-- One span per HTTP request, per worker task and per outbound `requests` call
-  (the board pulls and ATS resolvers), so a trace of the queue reads as tasks
-  with their fetches underneath.
+  log included except probe paths (`/healthz`, `/metrics`). Its loggers do not
+  propagate, so the handler is attached to them by name.
+- One span per HTTP request and per worker task, with the database
+  statements and outbound `requests` calls made inside it as children, so a
+  trace of the queue reads as tasks with their fetches underneath. A
+  statement or call made outside any task or request (the worker's
+  heartbeat, claim and scheduler polls) starts no trace
+  (`telemetry._root_sampler`).
 
 Every record carries `service.name` (`jobtracker-api` or `jobtracker-worker`),
 `service.instance.id` (the worker's fleet name), `host`, and `release` (the
@@ -847,7 +850,17 @@ is refused.
 How much goes is a measurement, not a guess. Everything ships first
 (`POSTHOG_TRACE_SAMPLE=1.0`, `POSTHOG_LOG_LEVEL=INFO`), the daily volume is
 read in PostHog, and the two knobs come down if the bill or the noise says so.
-Errors and events are never sampled.
+Errors and events are never sampled. The volume by kind and worker is
+`sum by (instance, kind) (increase(jobtracker_telemetry_exports_total{result="ok"}[7d]))`
+in Prometheus; the week to 2026-11-26 shipped 16.0M spans and 0.59M log
+records.
+
+**What a log line is for.** INFO is for a fact a person reads that no row,
+span or event already holds: a pull's summary, a decision the code made, a
+fallback it took. A line per item that restates a row it writes (a page
+fetched, a posting gone) or a task's span (started, done) is DEBUG, kept for
+reading one process's stdout. Libraries that log every request they send
+(`httpx`, `httpx2`) log from WARNING up.
 
 `telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
 need no destination, and it says so once at startup. It never raises. It

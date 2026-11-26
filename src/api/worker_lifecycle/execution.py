@@ -95,7 +95,10 @@ async def run_held(
     report_status()
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
-    logger.info(f"Task {task['id']} ({task['kind']}) starting")
+    # Debug: the task's span and its row already record that it started and
+    # how it ended, so these lines are for reading one worker's stdout, not
+    # for shipping (observability.md, "What a log line is for").
+    logger.debug(f"Task {task['id']} ({task['kind']}) starting")
     if not handler:
         finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
         return False
@@ -159,7 +162,7 @@ async def run_held(
         else:
             finish(task["id"], "done")
             metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
-            logger.info(f"Task {task['id']} done")
+            logger.debug(f"Task {task['id']} done")
     except ai_pause.AIPaused as exc:
         # The switch, not a fault: the task ends without its model work and
         # the scheduler enqueues a fresh one once AI is back on.
