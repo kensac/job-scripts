@@ -26016,8 +26016,36 @@
     "/v1/analytics/sources": {
       "get": {
         "summary": "Source Analytics",
+        "description": "The boards as a connection (api.connections): the `first` that come\nafter the cursor `after`, searched and sorted over every board.",
         "operationId": "source_analytics_v1_analytics_sources_get",
         "parameters": [
+          {
+            "name": "first",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "First"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
           {
             "name": "min_sample",
             "in": "query",
@@ -26078,29 +26106,6 @@
               "type": "string",
               "default": "desc",
               "title": "Dir"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
             }
           },
           {
@@ -36085,12 +36090,19 @@
       },
       "BoardAnalyticsList": {
         "properties": {
-          "rows": {
+          "nodes": {
             "items": {
               "$ref": "#/components/schemas/BoardAnalytics"
             },
             "type": "array",
-            "title": "Rows"
+            "title": "Nodes"
+          },
+          "page_info": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
           },
           "min_sample": {
             "type": "integer",
@@ -36102,14 +36114,6 @@
             },
             "type": "array",
             "title": "Caveats"
-          },
-          "matched": {
-            "type": "integer",
-            "title": "Matched"
-          },
-          "offset": {
-            "type": "integer",
-            "title": "Offset"
           },
           "no_postings": {
             "items": {
@@ -36125,11 +36129,11 @@
         },
         "type": "object",
         "required": [
-          "rows",
+          "nodes",
+          "page_info",
+          "total_count",
           "min_sample",
           "caveats",
-          "matched",
-          "offset",
           "no_postings",
           "no_postings_total"
         ],
@@ -47344,6 +47348,31 @@
           "email"
         ],
         "title": "OwnerUser"
+      },
+      "PageInfo": {
+        "properties": {
+          "end_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Cursor"
+          },
+          "has_next_page": {
+            "type": "boolean",
+            "title": "Has Next Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_cursor",
+          "has_next_page"
+        ],
+        "title": "PageInfo"
       },
       "PageReport": {
         "properties": {

@@ -383,19 +383,42 @@ SORT_KEYS: dict[str, Callable[[BoardAnalytics], float | int | None]] = {
 }
 
 
-def search_source_analytics(
-    rows: list[BoardAnalytics], q: str | None, sort: str, descending: bool
-) -> list[BoardAnalytics]:
-    """The boards whose name contains `q`, in the page's order: by the
-    column, unknown values last, ties by source."""
+def _order(sort: str, descending: bool) -> tuple[Callable[[BoardAnalytics], tuple], bool]:
+    """The page's order as a key and a direction: by the column, unknown
+    values last either way, ties by source. The key is also each node's
+    position, which a cursor carries."""
+    if sort == "source":
+        return (lambda r: (r.source.lower(), r.source)), descending
+    value = SORT_KEYS[sort]
+
+    def key(r: BoardAnalytics) -> tuple:
+        v = value(r)
+        if v is None:
+            return (1, 0, r.source)
+        return (0, -v if descending else v, r.source)
+
+    return key, False
+
+
+def source_connection(
+    rows: list[BoardAnalytics],
+    *,
+    q: str | None,
+    sort: str,
+    descending: bool,
+    first: int,
+    after: tuple | None,
+) -> tuple[list[BoardAnalytics], tuple | None, bool, int]:
+    """The `first` boards whose name contains `q` that come after the
+    position `after` in the order: the nodes, the last node's position,
+    whether more follow, and how many boards match in all."""
     needle = (q or "").strip().lower()
     found = [r for r in rows if needle in r.source.lower()] if needle else list(rows)
-    if sort == "source":
-        found.sort(key=lambda r: r.source.lower(), reverse=descending)
-        return found
-    key = SORT_KEYS[sort]
-    known = [r for r in found if key(r) is not None]
-    unknown = [r for r in found if key(r) is None]
-    # Stable: rows arrive by source, so equal values stay in source order.
-    known.sort(key=lambda r: key(r) or 0, reverse=descending)
-    return known + unknown
+    key, reverse = _order(sort, descending)
+    found.sort(key=key, reverse=reverse)
+    following = found
+    if after is not None:
+        following = [r for r in found if (key(r) < after if reverse else key(r) > after)]
+    nodes = following[:first]
+    end = key(nodes[-1]) if nodes else after
+    return nodes, end, len(following) > first, len(found)

@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, Query
 
 from api.analytics.assembly import (
     collect_source_analytics,
-    search_source_analytics,
+    source_connection,
 )
 from api.analytics.assembly import (
     source_detail as board_detail,
@@ -40,6 +40,7 @@ from api.analytics.models import (
     BoardAnalyticsList,
 )
 from api.auth import AuthedUser
+from api.connections import MAX_FIRST, PageInfo, cursor_for, decode_cursor
 from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE
 from api.routers.admin import require_admin
@@ -66,27 +67,56 @@ _CAVEATS = [
 ]
 
 
+def _is_position(position: object, sort: str) -> bool:
+    """A position source_connection could have written for this sort."""
+    if not isinstance(position, list):
+        return False
+    if sort == "source":
+        return len(position) == 2 and all(isinstance(p, str) for p in position)
+    return (
+        len(position) == 3
+        and position[0] in (0, 1)
+        and isinstance(position[1], int | float)
+        and not isinstance(position[1], bool)
+        and isinstance(position[2], str)
+    )
+
+
 @router.get("/sources")
 def source_analytics(
+    first: int = Query(ge=1, le=MAX_FIRST),
+    after: str | None = None,
     min_sample: int = Query(DEFAULT_MIN_SAMPLE, ge=1, le=10_000),
     q: str | None = Query(default=None, max_length=200),
     sort: Literal["source", "total", "still_open", "doa", "clearance", "cost", "apply"] = "total",
     dir: Literal["asc", "desc"] = "desc",
-    # A page of the boards. Every board's row is about 2.6 KB, and 9,571
-    # boards made a 25 MB response (production copy, 2026-11-26).
-    limit: int = Query(default=50, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsList:
+    """The boards as a connection (api.connections): the `first` that come
+    after the cursor `after`, searched and sorted over every board."""
+    query = {"q": (q or "").strip().lower(), "sort": sort, "dir": dir, "min_sample": min_sample}
+    position = decode_cursor(after, query) if after else None
+    if position is not None and not _is_position(position, sort):
+        raise refuse(400, "INVALID_CURSOR", "the cursor is not from this query")
     rows = collect_source_analytics(min_sample)
-    found = search_source_analytics(rows, q, sort, descending=dir == "desc")
+    nodes, end, more, total = source_connection(
+        rows,
+        q=q,
+        sort=sort,
+        descending=dir == "desc",
+        first=first,
+        after=tuple(position) if position is not None else None,
+    )
     silent = [r.source for r in rows if r.inventory.total == 0]
     return BoardAnalyticsList(
-        rows=found[offset : offset + limit],
+        nodes=nodes,
+        page_info=PageInfo(
+            end_cursor=cursor_for(query, list(end)) if end is not None else None,
+            has_next_page=more,
+        ),
+        total_count=total,
         min_sample=min_sample,
         caveats=_CAVEATS,
-        matched=len(found),
-        offset=offset,
         no_postings=silent[:NO_POSTINGS_NAMED],
         no_postings_total=len(silent),
     )

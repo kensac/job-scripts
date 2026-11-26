@@ -4,15 +4,16 @@ import datetime
 
 import pytest
 
-from api import db
+from api import db, stale_cache
 from api.mail import applications
 
-ENDPOINT = "/v1/analytics/sources"
+# Every board in one request: the test catalogs are a handful of boards.
+ENDPOINT = "/v1/analytics/sources?first=500"
 
 
 def _row(payload: dict, source: str) -> dict:
-    row = next((r for r in payload["rows"] if r["source"] == source), None)
-    assert row is not None, f"{source} missing from {[r['source'] for r in payload['rows']]}"
+    row = next((r for r in payload["nodes"] if r["source"] == source), None)
+    assert row is not None, f"{source} missing from {[r['source'] for r in payload['nodes']]}"
     return row
 
 
@@ -64,7 +65,7 @@ def test_rate_resolves_once_the_denominator_clears_the_floor(client, admin_heade
     for i in range(40):
         f.make_ready_job(source="big", closed="rejected" if i < 10 else "passed")
 
-    row = _row(client.get(f"{ENDPOINT}?min_sample=40", headers=admin_headers).json(), "big")
+    row = _row(client.get(f"{ENDPOINT}&min_sample=40", headers=admin_headers).json(), "big")
     rate = row["funnel"]["closed"]["pass_rate"]
     assert rate["below_floor"] is False
     assert rate["numerator"] == 30
@@ -93,7 +94,7 @@ def test_dead_on_arrival_reads_the_first_verdict_not_the_latest(client, admin_he
     f.make_verdict(alive_then_closed, "closed", "rejected")
     f.make_ready_job(source="doa", closed="rejected")
 
-    row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "doa")
+    row = _row(client.get(f"{ENDPOINT}&min_sample=1", headers=admin_headers).json(), "doa")
     assert row["decay"]["dead_on_arrival"]["denominator"] == 2
     assert row["decay"]["dead_on_arrival"]["numerator"] == 1
     assert row["funnel"]["closed"]["rejected"] == 2
@@ -117,7 +118,7 @@ def test_custom_filters_report_job_level_and_evaluation_level_denominators(
     f.make_verdict(one_fails, "custom", "passed", prompt_hash=first["prompt_hash"])
     f.make_verdict(one_fails, "custom", "rejected", prompt_hash=second["prompt_hash"])
 
-    row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "filtered")
+    row = _row(client.get(f"{ENDPOINT}&min_sample=1", headers=admin_headers).json(), "filtered")
     custom = row["funnel"]["custom"]
     assert custom["checked"] == 2
     assert custom["passed"] == 1
@@ -132,7 +133,7 @@ def test_coverage_reports_the_share_of_the_board_a_check_has_seen(client, admin_
         f.make_job(source="partly-checked")
 
     row = _row(
-        client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "partly-checked"
+        client.get(f"{ENDPOINT}&min_sample=1", headers=admin_headers).json(), "partly-checked"
     )
     coverage = row["funnel"]["closed"]["coverage"]
     assert coverage["numerator"] == 1
@@ -183,7 +184,7 @@ def test_overlap_counts_postings_another_board_also_carries(client, admin_header
     f.make_job(source="left", company="Acme", title="Designer")
     f.make_job(source="right", company="Acme", title="Engineer")
 
-    payload = client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json()
+    payload = client.get(f"{ENDPOINT}&min_sample=1", headers=admin_headers).json()
     left = _row(payload, "left")
     assert left["overlap"]["keyed_jobs"] == 2
     assert left["overlap"]["shared_with_other_source"] == 1
@@ -201,7 +202,7 @@ def test_board_yield_counts_applications_per_source(client, admin_headers, f):
     f.make_board_row(user_id, tracked, status=None)
     applications.from_board(user_id, applied, datetime.date(2026, 9, 1), set_date=True)
 
-    row = _row(client.get(f"{ENDPOINT}?min_sample=1", headers=admin_headers).json(), "yielding")
+    row = _row(client.get(f"{ENDPOINT}&min_sample=1", headers=admin_headers).json(), "yielding")
     assert "board_rows" not in row["board_yield"]
     assert row["board_yield"]["with_status"] == 1
     assert row["board_yield"]["applied"] == 1
@@ -335,33 +336,86 @@ def test_detail_endpoint_404s_on_an_unknown_source(client, admin_headers):
     assert resp.status_code == 404
 
 
-def test_a_page_of_boards_searched_and_sorted_on_the_server(client, admin_headers, f):
+def _connection(client, headers, **params) -> dict:
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    return client.get(f"/v1/analytics/sources?{query}", headers=headers).json()
+
+
+def test_boards_are_a_connection_searched_and_sorted_on_the_server(client, admin_headers, f):
     for name, postings in (("pg-big", 3), ("pg-mid", 2), ("pg-small", 1), ("other", 5)):
         f.make_source(name)
         for _ in range(postings):
             f.make_job(source=name)
     f.make_source("pg-silent")
 
-    page = client.get(
-        f"{ENDPOINT}?q=PG-&sort=total&dir=desc&limit=2&offset=0", headers=admin_headers
-    ).json()
-    assert [r["source"] for r in page["rows"]] == ["pg-big", "pg-mid"]
-    assert page["matched"] == 4 and page["offset"] == 0
+    first = _connection(client, admin_headers, first=2, q="PG-", sort="total", dir="desc")
+    assert [r["source"] for r in first["nodes"]] == ["pg-big", "pg-mid"]
+    assert first["total_count"] == 4
+    assert first["page_info"]["has_next_page"] is True
     silent = db.query(
         "SELECT name FROM sources s WHERE NOT EXISTS "
         "(SELECT 1 FROM jobs j WHERE j.source = s.name) ORDER BY name"
     )
-    assert page["no_postings_total"] == len(silent)
-    assert page["no_postings"] == sorted(r["name"] for r in silent)[:10]
+    assert first["no_postings_total"] == len(silent)
+    assert first["no_postings"] == sorted(r["name"] for r in silent)[:10]
     assert "pg-silent" in [r["name"] for r in silent]
 
-    rest = client.get(
-        f"{ENDPOINT}?q=pg-&sort=total&dir=desc&limit=2&offset=2", headers=admin_headers
-    ).json()
-    assert [r["source"] for r in rest["rows"]] == ["pg-small", "pg-silent"]
+    rest = _connection(
+        client,
+        admin_headers,
+        first=2,
+        q="PG-",
+        sort="total",
+        dir="desc",
+        after=first["page_info"]["end_cursor"],
+    )
+    assert [r["source"] for r in rest["nodes"]] == ["pg-small", "pg-silent"]
+    assert rest["page_info"]["has_next_page"] is False
 
-    by_name = client.get(f"{ENDPOINT}?q=pg-&sort=source&dir=asc", headers=admin_headers).json()
-    assert [r["source"] for r in by_name["rows"]] == ["pg-big", "pg-mid", "pg-silent", "pg-small"]
+    by_name = _connection(client, admin_headers, first=10, q="pg-", sort="source", dir="asc")
+    assert [r["source"] for r in by_name["nodes"]] == ["pg-big", "pg-mid", "pg-silent", "pg-small"]
+
+
+def test_a_cursor_holds_its_place_when_boards_arrive_before_it(client, admin_headers, f):
+    """A cursor names a position, not a count: a board that sorts before it,
+    added between two requests, neither repeats a board nor skips one."""
+    for name in ("cx-a", "cx-c", "cx-e"):
+        f.make_source(name)
+    first = _connection(client, admin_headers, first=2, q="cx-", sort="source", dir="asc")
+    assert [r["source"] for r in first["nodes"]] == ["cx-a", "cx-c"]
+    f.make_source("cx-b")
+    stale_cache.clear_all()  # as the next computation would see it
+    rest = _connection(
+        client,
+        admin_headers,
+        first=2,
+        q="cx-",
+        sort="source",
+        dir="asc",
+        after=first["page_info"]["end_cursor"],
+    )
+    assert [r["source"] for r in rest["nodes"]] == ["cx-e"]
+
+
+def test_a_cursor_from_another_query_is_refused(client, admin_headers, f):
+    for name in ("cq-a", "cq-b"):
+        f.make_source(name)
+    first = _connection(client, admin_headers, first=1, q="cq-", sort="source", dir="asc")
+    cursor = first["page_info"]["end_cursor"]
+    other = client.get(
+        f"/v1/analytics/sources?first=1&q=cq-&sort=total&dir=asc&after={cursor}",
+        headers=admin_headers,
+    )
+    assert other.status_code == 400
+    forged = client.get(
+        "/v1/analytics/sources?first=1&after=bm90LWEtY3Vyc29y", headers=admin_headers
+    )
+    assert forged.status_code == 400
+
+
+def test_first_is_required(client, admin_headers):
+    """No default page size: the client says how many it shows."""
+    assert client.get("/v1/analytics/sources", headers=admin_headers).status_code == 422
 
 
 def test_boards_with_no_measured_rate_sort_last_both_ways(client, admin_headers, f):
@@ -373,9 +427,9 @@ def test_boards_with_no_measured_rate_sort_last_both_ways(client, admin_headers,
     f.make_job(source="nr-unchecked")
     for direction in ("asc", "desc"):
         rows = client.get(
-            f"{ENDPOINT}?q=nr-&sort=still_open&dir={direction}&min_sample=1",
+            f"{ENDPOINT}&q=nr-&sort=still_open&dir={direction}&min_sample=1",
             headers=admin_headers,
-        ).json()["rows"]
+        ).json()["nodes"]
         assert [r["source"] for r in rows] == ["nr-checked", "nr-unchecked"]
 
 

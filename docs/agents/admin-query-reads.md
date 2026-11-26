@@ -75,9 +75,9 @@ served stale too, keyed on the set of active presets, and warmed at startup.
 Source analytics (/analytics/sources) computes every source's aggregates in
 one cached set (`api.analytics.assembly.TABLES`), from which the list and each
 source's detail are assembled, and keeps the assembled rows per sample floor.
-The list is searched, sorted and paged on the server: every board's row is
-about 2.6 KB, and all 9,571 made a 25 MB response (production copy,
-2026-11-26).
+The list is a connection (visibility.md), searched and sorted on the server:
+every board's row is about 2.6 KB, and all 9,571 in one response made 25 MB
+(production copy, 2026-11-26).
 
 The catalog (/jobs/catalog) searches `company`, `title` and `url` with
 `ILIKE` joined by OR, and each column has a trigram GIN index. An OR is
