@@ -30,8 +30,10 @@ from fastapi import APIRouter, Depends, Query
 
 from api.analytics.assembly import (
     collect_source_analytics,
-    overlap_partners,
     search_source_analytics,
+)
+from api.analytics.assembly import (
+    source_detail as board_detail,
 )
 from api.analytics.models import (
     BoardAnalyticsDetail,
@@ -98,12 +100,13 @@ def source_detail(
     min_sample: int = Query(DEFAULT_MIN_SAMPLE, ge=1, le=10_000),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsDetail:
-    row = next((r for r in collect_source_analytics(min_sample) if r.source == source), None)
-    if row is None:
+    found = board_detail(source, min_sample)
+    if found is None:
         raise refuse(404, "NOT_FOUND", "unknown source")
+    row, partners = found
     return BoardAnalyticsDetail(
         row=row,
-        overlap_partners=overlap_partners(source),
+        overlap_partners=partners,
         min_sample=min_sample,
         caveats=_CAVEATS,
     )

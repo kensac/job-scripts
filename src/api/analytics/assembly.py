@@ -1,8 +1,9 @@
 """Assemble source analytics from independent aggregate query results."""
 
 import decimal
+import itertools
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from urllib.parse import urlencode
 
 from api import db
@@ -44,6 +45,7 @@ from api.analytics.queries import (
     _VERDICT_CHECKS,
     _YIELD_SQL,
 )
+from api.rates import DEFAULT_MIN_SAMPLE
 from api.rates import rate as _rate
 from api.stale_cache import Stale, StaleByKey
 
@@ -228,7 +230,7 @@ def summarize_source_spend(rows: list[_SpendRow], min_sample: int) -> BoardSpend
                 total_tokens=r.total_tokens,
                 cost_usd=float(r.cost_usd) if r.cost_usd is not None else None,
             )
-            for r in sorted(rows, key=lambda r: (-r.calls, r.model))
+            for r in sorted(rows, key=lambda r: (-r.calls, r.model or ""))
         ],
     )
 
@@ -249,6 +251,11 @@ class _SourceTables:
     partners: dict[str, list[OverlapPartner]]
     funnel: dict[str, dict[str, _FunnelRow]]
     spend: dict[str, list[_SpendRow]]
+    # Which computation this is, so rows assembled at another sample floor
+    # are keyed to the tables they came from and never outlive them.
+    generation: int
+    # Every board's row at the default floor, assembled with the tables.
+    rows: list[BoardAnalytics] = field(default_factory=list)
 
 
 def _collect_tables() -> _SourceTables:
@@ -276,7 +283,8 @@ def _collect_tables() -> _SourceTables:
     for rows in partners.values():
         rows.sort(key=lambda p: (-p.shared_postings, p.source))
 
-    return _SourceTables(
+    tables = _SourceTables(
+        generation=next(_GENERATIONS),
         configs=index_rows_by_source(
             db.query_as(_ConfigRow, "SELECT name AS source, listings_url, active FROM sources")
         ),
@@ -291,6 +299,10 @@ def _collect_tables() -> _SourceTables:
         funnel=funnel,
         spend=spend,
     )
+    return replace(tables, rows=_assemble(tables, DEFAULT_MIN_SAMPLE))
+
+
+_GENERATIONS = itertools.count(1)
 
 
 # Aggregates over the whole catalog and every model call, so the page is
@@ -328,15 +340,31 @@ def _assemble(t: _SourceTables, min_sample: int) -> list[BoardAnalytics]:
 
 
 # Assembling every board's row took 2.8 s for 9,571 boards on a production
-# copy (2026-11-26), so the rows are kept per sample floor as well.
-_ROWS: StaleByKey[int, list[BoardAnalytics]] = StaleByKey(
+# copy (2026-11-26): the default floor's rows are assembled with the tables,
+# and another floor's once per computation of them.
+_ROWS: StaleByKey[tuple[int, int], list[BoardAnalytics]] = StaleByKey(
     lambda: int(db.get_config("admin_stats_cache_seconds"))
 )
 
 
+def _rows(t: _SourceTables, min_sample: int) -> list[BoardAnalytics]:
+    if min_sample == DEFAULT_MIN_SAMPLE:
+        return t.rows
+    return _ROWS.get((min_sample, t.generation), lambda: _assemble(t, min_sample))
+
+
 def collect_source_analytics(min_sample: int) -> list[BoardAnalytics]:
     """Every board's row, ordered by source."""
-    return _ROWS.get(min_sample, lambda: _assemble(TABLES.get(), min_sample))
+    return _rows(TABLES.get(), min_sample)
+
+
+def source_detail(
+    source: str, min_sample: int
+) -> tuple[BoardAnalytics, list[OverlapPartner]] | None:
+    """One board's row and the boards it overlaps, from one computation."""
+    t = TABLES.get()
+    row = next((r for r in _rows(t, min_sample) if r.source == source), None)
+    return None if row is None else (row, t.partners.get(source, []))
 
 
 def _rate_value(stage: CheckStage | CustomCheckStage | None) -> float | None:
@@ -371,8 +399,3 @@ def search_source_analytics(
     # Stable: rows arrive by source, so equal values stay in source order.
     known.sort(key=lambda r: key(r) or 0, reverse=descending)
     return known + unknown
-
-
-def overlap_partners(source: str) -> list[OverlapPartner]:
-    """The other sources carrying the same (company, title), most first."""
-    return TABLES.get().partners.get(source, [])

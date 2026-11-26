@@ -74,7 +74,6 @@ def _warm_admin_pages() -> None:
     jobs list's verdict tabs, start computing now, in the background, so the first visit after a roll does not
     wait for them (api.stale_cache)."""
     from api.analytics import assembly as source_analytics
-    from api.rates import DEFAULT_MIN_SAMPLE
     from api.routers.admin import (
         health,
         ledger_stats,
@@ -92,10 +91,6 @@ def _warm_admin_pages() -> None:
         )
     health._content_mix.warm()
     source_analytics.TABLES.warm()
-    source_analytics._ROWS.warm(
-        DEFAULT_MIN_SAMPLE,
-        lambda: source_analytics._assemble(source_analytics.TABLES.get(), DEFAULT_MIN_SAMPLE),
-    )
     # Both panels sit on the spend page and read its default window. A report
     # warmed for any other window leaves the page's own request to wait the
     # full computation after every roll.

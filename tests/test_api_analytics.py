@@ -394,3 +394,18 @@ def test_overlap_partners_count_each_pair_of_matching_postings(client, admin_hea
     assert detail["overlap_partners"] == [{"source": "dup-b", "shared_postings": 6}]
     assert detail["row"]["overlap"]["keyed_jobs"] == 3
     assert detail["row"]["overlap"]["shared_with_other_source"] == 2
+
+
+def test_spend_models_tied_on_calls_order_by_name_with_an_unnamed_model():
+    """model_calls.model is nullable: a tie between a named and an unnamed
+    model must order, not raise."""
+    from api.analytics.assembly import summarize_source_spend
+    from api.analytics.models import _SpendRow
+
+    def row(model: str | None) -> _SpendRow:
+        return _SpendRow(
+            source="s", model=model, calls=2, priced_calls=2, total_tokens=1, cost_usd=None
+        )
+
+    spend = summarize_source_spend([row("b"), row(None), row("a")], 1)
+    assert [m.model for m in spend.by_model] == [None, "a", "b"]
