@@ -176,7 +176,7 @@ def demote_closed() -> int:
                 -- forever, because ingest marks them inactive and the sweep
                 -- never looks at them again.
                 NOT {catalog.IS_AVAILABLE.format(job="j")}
-                OR {verdict_reads.latest_status("j.url", "closed")} = 'rejected'
+                OR {verdict_reads.posting_status("j", "closed")} = 'rejected'
                 )
                 ORDER BY membership.user_id, membership.job_id
             ),

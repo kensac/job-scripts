@@ -72,8 +72,8 @@ STAGES: dict[str, tuple[str, str]] = {
     "listed": ("pass", "On the board"),
 }
 
-_CLOSED = verdict_reads.latest_status("j.url", "closed")
-_CLEARANCE = verdict_reads.latest_status("j.url", "clearance")
+_CLOSED = verdict_reads.posting_status("j", "closed")
+_CLEARANCE = verdict_reads.posting_status("j", "clearance")
 _VERDICT = verdict_reads.latest_status("j.url", "custom", prompt_hash="%(prompt_hash)s")
 _CRITERIA = "".join(
     f"\n  WHEN NOT {condition} THEN 'criteria_{name}'"

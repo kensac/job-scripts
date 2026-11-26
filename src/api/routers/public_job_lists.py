@@ -350,7 +350,7 @@ def _viewer_filters(
         # A board may admit postings the clearance gate rejected (citizenship,
         # clearance, ITAR); a viewer can drop them. No verdict yet is not a rejection.
         filters.append(
-            f"AND {verdict_reads.latest_status('j.url', 'clearance')} IS DISTINCT FROM 'rejected'"
+            f"AND {verdict_reads.posting_status('j', 'clearance')} IS DISTINCT FROM 'rejected'"
         )
     return filters, params
 

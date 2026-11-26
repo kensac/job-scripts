@@ -56,7 +56,7 @@ async def handle_fetch_missing_content(task_id: int, payload: dict[str, Any]) ->
           -- and re-verdicted every hour, 743 rows in a day (2026-09-06).
           -- The latest closed answer decides, as on the board: a posting
           -- rejected once and open since still has a page.
-          AND {verdict_reads.latest_status("j.url", "closed")} IS DISTINCT FROM 'rejected'
+          AND {verdict_reads.posting_status("j", "closed")} IS DISTINCT FROM 'rejected'
         -- Freshest first by the age the boards' criteria read. A board's
         -- first pull of a Workday tenant lists its older postings with no
         -- date; ordered NULLS LAST they waited behind every dated posting,

@@ -324,7 +324,7 @@ async def handle_reverify_open(task_id: int, payload: dict[str, Any]) -> None:
         rows = db.query(
             f"""
             SELECT j.url, j.company, j.title FROM jobs j
-            WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'
+            WHERE {catalog.IS_AVAILABLE.format(job="j")} AND {AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.posting_status("j", "closed")} = 'passed'
             ORDER BY j.id
             """
         )

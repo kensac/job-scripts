@@ -62,6 +62,40 @@ def latest_status(url: str, check: str, *, prompt_hash: str | None = None) -> st
     return f"({latest(url, check, prompt_hash=prompt_hash)})"
 
 
+def posting_status(job: str, check: str) -> str:
+    """`latest_status` for the posting whose jobs row is aliased `job`, for
+    a scan over the catalog: read from latest_posting_checks, a probe into a
+    narrow table keyed on the job id, instead of into ai_queries.
+
+    A url with a dirty row has an answer or posting the fold has not taken in
+    yet, so it is read live from `verdicts`; every other url's projection row
+    is current (core.latest_posting_checks). An answer commits with its dirty
+    row and a fold clears a dirty row with the projection write, so in any
+    snapshot this is exactly `latest_status` for every write the triggers
+    see, which is every write the application makes. A write they cannot see
+    (a load with session_replication_role = replica, a TRUNCATE, rows loaded
+    before migration d81c5e2b7a43) is read stale until a fold over every job:
+    the daily one, or `fold(everything=True)` run after the load. The dirty test is a correlated
+    probe, not a set: the planner sizes the table from its current pages when
+    it plans, so a backlog the fold has not cleared turns it into an index
+    probe rather than a rescan per posting.
+
+    Measured on a production copy (2026-11-26), a person's board with no
+    filter (315,390 candidates): 16.7 s probing ai_queries, 5.0 s here, the
+    same 109,911 postings."""
+    if check == "custom":
+        raise ValueError("custom answers are keyed by prompt; use latest_status")
+    stored = (
+        f"(SELECT lpc.status FROM latest_posting_checks lpc "
+        f"WHERE lpc.job_id = {job}.id AND lpc.check_type = {_check(check)})"
+    )
+    return (
+        f"(CASE WHEN EXISTS (SELECT 1 FROM latest_posting_checks_dirty lpcd "
+        f"WHERE lpcd.url = {job}.url) "
+        f"THEN {latest_status(f'{job}.url', check)} ELSE {stored} END)"
+    )
+
+
 def closed_verdict(url: str) -> str:
     """What a posting's latest closed answer shows a person: 'open', 'closed',
     or NULL when nothing has looked. The board row, a public list card and
@@ -109,12 +143,14 @@ def has_verdict(url: str, check: str) -> str:
 # decision and not an oversight.
 #
 # ai_queries is never pruned (docs/agents/engineering-standards.md, "Always
-# retain all data"); this reads the latest verdict per (url, check_type) and
-# relies on it being there.
-def verified_open(url: str) -> str:
+# retain all data"); this reads the latest verdict per (url, check_type),
+# from latest_posting_checks or, for a url not yet folded in, from verdicts
+# (posting_status), and relies on it being there.
+def verified_open(job: str) -> str:
+    """For the posting whose jobs row is aliased `job` (posting_status)."""
     return (
-        f"{latest_status(url, 'closed')} = 'passed' "
-        f"AND {latest_status(url, 'clearance')} = 'passed'"
+        f"{posting_status(job, 'closed')} = 'passed' "
+        f"AND {posting_status(job, 'clearance')} = 'passed'"
     )
 
 

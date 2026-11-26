@@ -57,7 +57,7 @@ _CANDIDATES = f"""
             SELECT DISTINCT a.url FROM ledger_rows a
             LEFT JOIN jobs j ON j.url = a.url
             WHERE j.url IS NULL
-               OR ({AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.verified_open("j.url")})
+               OR ({AI_ELIGIBLE_JOB.format(job="j")} AND {verdict_reads.verified_open("j")})
         ) c
         {CONTENT_LATERAL.format(url="c.url", columns="id AS content_row_id")}
     ),
