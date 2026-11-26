@@ -13,7 +13,7 @@ its primary role family (job_profiles):
     text-embedding-3-small, as written                  0.89           0.24
     nomic-embed-text-v1.5, as written                   0.78           0.30
     name masked only                                    0.56           0.38
-    company text removed and name masked (this rule)    0.42           0.44
+    company text removed and name masked (this rule)    0.42           0.43
 
 What counts as the company's text was settled by reading what each rule
 removed, not by the score alone. Repetition across titles is not enough: a
@@ -41,7 +41,10 @@ it skips text under a role heading ("Responsibilities", "What you'll do",
 "Qualifications" and the like, until a company heading such as "Benefits"
 closes the section), decided by majority over the postings that carry the
 paragraph, since a posting that never closes its role section carries its
-benefits inside it. That startup then kept 73%, its duties with it.
+benefits inside it. That startup then kept 73%, its duties with it. Headings are matched whole (see
+_ROLE_HEADINGS), so a bullet such as "Experience with cell culture" or
+"Uncapped commissions" neither opens nor closes a section, and an
+equal-opportunity, accommodation or agency paragraph closes one.
 """
 
 from __future__ import annotations
@@ -93,124 +96,201 @@ def paragraph_key(paragraph: str) -> bytes | None:
     return hashlib.sha256(words.encode()).digest()
 
 
-# Headings that open a section about the role, and ones that close it. A
-# heading is a short line (ROLE_HEADING_WORDS words or fewer, or ending in a
-# colon) containing one of these. Read from the headings of the 300 postings
-# the module docstring measures, and the Spanish, French and German postings
-# among them.
-_ROLE_HEADINGS = (
-    "responsibilit",
-    "qualification",
-    "requirement",
-    "what you will do",
-    "what you'll do",
-    "what you will be",
-    "what you'll be",
-    "what you'll bring",
-    "what you bring",
-    "what we're looking for",
-    "what we are looking for",
+# Section headings, matched whole: a heading is a line that, lowercased and
+# without its bullet and trailing colon, IS one of these, or a line ending in a
+# colon, of at most COLON_HEADING_WORDS words, that contains one as whole
+# words. Read from the headings of the 300 postings the module docstring
+# measures; a heading not listed is no heading, and its text falls to the
+# general rule. A bullet ("Strong written communication skills", "Experience
+# with cell culture", "Uncapped commissions") is never a heading.
+_ROLE_HEADINGS = frozenset(
+    {
+        "responsibilities",
+        "key responsibilities",
+        "your responsibilities",
+        "job responsibilities",
+        "key job responsibilities",
+        "principal duties & responsibilities",
+        "essential functions",
+        "essential functions/major responsibilities",
+        "duties",
+        "qualifications",
+        "minimum qualifications",
+        "preferred qualifications",
+        "basic qualifications",
+        "required qualifications",
+        "requirements",
+        "minimum requirements",
+        "what you will do",
+        "what you'll do",
+        "what you'll be working on",
+        "what you'll bring to the team",
+        "what you bring",
+        "what we're looking for",
+        "who you are",
+        "about you",
+        "the role",
+        "about the role",
+        "about this role",
+        "your role",
+        "role overview",
+        "job summary",
+        "position summary",
+        "job description",
+        "summary of duties and responsibilities",
+        "knowledge, skills and abilities",
+        "skills",
+        "experience",
+        "education",
+        "education and experience",
+        "education & experience required",
+        "licenses and certifications",
+        "bonus points",
+        "nice to have",
+        "nice to haves",
+        "must have",
+        "must haves",
+        "in this role",
+        "how you'll make impact",
+        "the difference you will make",
+        "on day one we will expect you to have",
+        "funciones",
+        "responsabilidades",
+        "requisitos",
+        "vos missions",
+        "votre profil",
+        "profil",
+        "aufgaben",
+        "ihre aufgaben",
+        "anforderungen",
+        "ihr profil",
+    }
+)
+_COMPANY_HEADINGS = frozenset(
+    {
+        "about us",
+        "who we are",
+        "what we do",
+        "benefits",
+        "our benefits",
+        "benefits page",
+        "what we offer",
+        "why join us",
+        "equal opportunity",
+        "equal employment opportunity",
+        "compensation",
+        "compensation range",
+        "salary",
+        "salary range",
+        "pay range",
+        "perks",
+        "culture",
+        "our culture",
+        "privacy policy",
+        "applicant privacy policy",
+        "our mission",
+        "join our team",
+        "careers",
+        "contact us",
+        "e-verify",
+        "terms of use",
+        "about the company",
+        "the community you will join",
+        "our commitment to inclusion & belonging",
+        "avantages",
+        "à propos",
+        "über uns",
+        "beneficios",
+        "sobre nosotros",
+    }
+)
+# Company headings that end with the company's own name ("Why join UHN?",
+# "Life at Airbnb"), matched by how they start; at most COLON_HEADING_WORDS
+# words, so a sentence starting so is not one.
+_COMPANY_HEADING_STARTS = (
+    "why join",
+    "why work",
+    "why you'll love",
+    "life at",
+    "working at",
+    "about working at",
+)
+# Phrases (whole words) that make a colon heading a role or a company one.
+_ROLE_WORDS = (
+    "responsibilities",
+    "qualifications",
+    "requirements",
+    "duties",
+    "what you",
     "who you are",
-    "about you",
     "the role",
     "this role",
     "your role",
-    "role overview",
     "job summary",
     "position summary",
-    "job description",
-    "essential function",
-    "duties",
-    "knowledge, skills",
     "skills",
-    "experience",
-    "education",
-    "licenses",
-    "certification",
-    "bonus points",
-    "nice to have",
-    "must have",
-    "your impact",
-    "in this role",
-    "key job",
-    "tasks",
-    "your profile",
-    "funciones",
-    "responsabilidades",
-    "requisitos",
-    "missions",
-    "profil",
-    "compétences",
-    "aufgaben",
-    "anforderungen",
-    "qualifikation",
 )
-_COMPANY_HEADINGS = (
-    "about us",
-    "who we are",
-    "what we do",
-    "benefits",
-    "what we offer",
-    "why join",
+_COMPANY_WORDS = ("about us", "benefits", "what we offer", "why join", "perks", "compensation")
+# Colon headings in the 300 postings: 97% of those up to ten words had eight
+# or fewer; longer colon lines are sentences introducing a list.
+COLON_HEADING_WORDS = 8
+# Paragraphs that are company boilerplate whatever section they sit in: they
+# close a role section, and a template that never closes one with a heading
+# still loses its equal-opportunity statement.
+_BOILERPLATE = (
     "equal opportunity",
     "equal employment",
-    "compensation",
-    "salary",
-    "pay range",
-    "perks",
-    "culture",
-    "privacy",
-    "our mission",
-    "life at",
-    "join our team",
-    "careers",
-    "contact us",
+    "affirmative action",
+    "reasonable accommodation",
     "e-verify",
-    "terms of use",
-    "accommodation",
-    "diversity",
-    "about the company",
-    "avantages",
-    "à propos",
-    "über uns",
-    "beneficios",
-    "sobre nosotros",
+    "third-party recruiter",
+    "recruitment agenc",
+    "unsolicited resume",
+    "privacy policy",
+    "protected veteran",
 )
-ROLE_HEADING_WORDS = 5
+
+
+def _words(phrase: str) -> str:
+    return rf"(?<!\w){re.escape(phrase)}(?!\w)"
 
 
 def _heading(line: str, company: str) -> str | None:
     """ "role" or "company" for a heading line, None for any other line."""
-    text = line.strip().lower()
-    if not text or len(text) > 80:
+    raw = line.strip()
+    text = re.sub(r"^[\W\d_]+", "", raw.lower()).rstrip(" :?").strip()
+    if not text:
         return None
-    if len(text.split()) > ROLE_HEADING_WORDS and not text.endswith(":"):
-        return None
-    if text.endswith("."):
-        return None
-    if (
-        any(h in text for h in _COMPANY_HEADINGS)
-        or text.rstrip(":?") == f"about {company_key(company)}"
-    ):
+    if text in _COMPANY_HEADINGS or any(text == f"about {p}" for p in _name_phrases(company)):
         return "company"
-    if any(h in text for h in _ROLE_HEADINGS):
+    if len(text.split()) <= COLON_HEADING_WORDS and text.startswith(_COMPANY_HEADING_STARTS):
+        return "company"
+    if text in _ROLE_HEADINGS:
         return "role"
+    if raw.endswith(":") and len(text.split()) <= COLON_HEADING_WORDS:
+        if any(re.search(_words(w), text) for w in _COMPANY_WORDS):
+            return "company"
+        if any(re.search(_words(w), text) for w in _ROLE_WORDS):
+            return "role"
     return None
 
 
-def sections(text: str, company: str) -> dict[bytes, bool]:
-    """Each paragraph of a posting, and whether it sits under a role heading
-    (until a company heading closes the section)."""
-    out: dict[bytes, bool] = {}
+def sections(text: str, company: str) -> list[tuple[bytes, str, bool]]:
+    """Each keyed paragraph of a posting, and whether it sits under a role
+    heading: until a company heading, or a boilerplate paragraph, closes the
+    section. Boilerplate is never the role's."""
+    out: list[tuple[bytes, str, bool]] = []
     in_role = False
     for paragraph in paragraphs(text):
         kind = _heading(paragraph, company)
         if kind is not None:
             in_role = kind == "role"
             continue
+        if any(b in paragraph.lower() for b in _BOILERPLATE):
+            in_role = False
         key = paragraph_key(paragraph)
         if key is not None:
-            out[key] = out.get(key, False) or in_role
+            out.append((key, paragraph, in_role))
     return out
 
 
@@ -227,13 +307,10 @@ def shared_paragraphs(company: str, postings: Iterable[tuple[str, str]]) -> tupl
     for raw_title, text in postings:
         title = raw_title.strip().lower()
         titles.add(title)
-        for key, in_role in sections(text, company).items():
+        for key, paragraph, in_role in sections(text, company):
+            titles_of.setdefault(key, set()).add(title)
+            text_of[key] = paragraph
             votes[key] = votes.get(key, 0) + (1 if in_role else -1)
-        for paragraph in paragraphs(text):
-            key = paragraph_key(paragraph)
-            if key is not None:
-                titles_of.setdefault(key, set()).add(title)
-                text_of[key] = paragraph
     unnamed_floor = max(SHARED_MIN_TITLES + 1, UNNAMED_MIN_SHARE * len(titles))
     own = {
         key
