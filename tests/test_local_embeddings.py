@@ -25,12 +25,15 @@ OPEN, CLOSE = -1, -2
 
 class FakeServer:
     """llama-server's /props, /tokenize and /v1/embeddings: one token per
-    word (framed by OPEN and CLOSE when asked for special tokens), and a
+    word, a word's id the same in every request (framed by OPEN and CLOSE
+    when asked for special tokens), and a
     vector whose first component is the count of a chunk's own tokens. `down`
     names servers that refuse connections."""
 
     def __init__(self, down: frozenset[str] = frozenset(), slots: int = 2):
         self.embedded: list[list[int]] = []
+        # One id per distinct word, as a real vocabulary has.
+        self.vocab: dict[str, int] = {}
         self.down = down
         self.slots = slots
 
@@ -45,8 +48,8 @@ class FakeServer:
     def post(self, url, json, timeout):
         path = url.split("/", 3)[-1]
         if path == "tokenize":
-            tokens = list(range(len(json["content"].split())))
-            if json.get("add_special"):
+            tokens = [self.vocab.setdefault(w, len(self.vocab)) for w in json["content"].split()]
+            if json.get("add_special", True):
                 tokens = [OPEN, *tokens, CLOSE]
             body = {"tokens": tokens}
         else:
@@ -76,6 +79,39 @@ class _Response:
         return self.body
 
 
+@pytest.fixture(autouse=True)
+def _fresh_frames(monkeypatch):
+    """Each test reads its own servers' frames."""
+    monkeypatch.setattr(core, "_frames", {})
+
+
+def test_a_server_whose_tokenizer_joins_the_prefix_to_the_text_is_refused():
+    class Joins(FakeServer):
+        def post(self, url, json, timeout):
+            response = super().post(url, json, timeout)
+            if url.endswith("/tokenize") and json["content"] == core.DOCUMENT_PREFIX + "posting":
+                response.body["tokens"] = [OPEN, 99, CLOSE]
+            return response
+
+    with pytest.raises(core.EmbeddingUnavailable):
+        core.read_frame(Joins(), "http://emb")
+
+
+def test_special_token_strings_in_a_page_stay_text():
+    server = FakeServer()
+    sent = []
+    post = server.post
+
+    def recording(url, json, timeout):
+        if url.endswith("/tokenize"):
+            sent.append(json)
+        return post(url, json, timeout)
+
+    server.post = recording
+    core.embed_document(server, "http://emb", "a page with [SEP] in it")
+    assert sent and all(body["parse_special"] is False for body in sent)
+
+
 def test_a_long_posting_is_embedded_whole_in_weighted_chunks(monkeypatch):
     monkeypatch.setattr(core, "CHUNK_TOKENS", 10)
     server = FakeServer()
@@ -84,7 +120,8 @@ def test_a_long_posting_is_embedded_whole_in_weighted_chunks(monkeypatch):
     assert embedded.chunks == 3
     # Each chunk is its own tokens, framed as the server frames the prefixed
     # text: OPEN, the prefix's one token, the chunk, CLOSE.
-    assert all(ids[:2] == [OPEN, 0] and ids[-1] == CLOSE for ids in server.embedded)
+    prefix = server.vocab[core.DOCUMENT_PREFIX.strip()]
+    assert all(ids[:2] == [OPEN, prefix] and ids[-1] == CLOSE for ids in server.embedded)
     assert [len(ids) - 3 for ids in server.embedded] == [10, 10, 5]
     # Chunks of 10, 10 and 5 tokens, each embedded with the one-word prefix,
     # so the fake's first component reads 11, 11 and 6: weighted by the
@@ -94,8 +131,7 @@ def test_a_long_posting_is_embedded_whole_in_weighted_chunks(monkeypatch):
     assert embedded.vector[:2] == pytest.approx([first / norm, 1.0 / norm])
 
 
-def test_a_posting_costs_two_requests_and_the_frame_is_read_once_per_server():
-    core._frames.clear()
+def test_a_posting_costs_two_requests_once_the_frame_is_known():
     paths: list[str] = []
 
     class Counting(FakeServer):
@@ -106,7 +142,7 @@ def test_a_posting_costs_two_requests_and_the_frame_is_read_once_per_server():
     server = Counting()
     for words in (5, 12, 30):
         core.embed_document(server, "http://emb", "word " * words)
-    frame = 2  # the prefix tokenized with and without special tokens, once
+    frame = 4  # read_frame: the prefix and a sample, framed and not, once
     assert paths.count("tokenize") == 3 + frame
     assert paths.count("v1/embeddings") == 3
     assert len(paths) == 3 * 2 + frame

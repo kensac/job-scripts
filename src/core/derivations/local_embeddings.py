@@ -129,26 +129,51 @@ def slots(session: requests.Session, url: str) -> int:
 _frames: dict[str, tuple[list[int], list[int]]] = {}
 _frames_lock = threading.Lock()
 
+# A word to check the frame against: any word the vocabulary holds.
+_FRAME_SAMPLE = "posting"
+
+
+def _tokenize(session: requests.Session, url: str, text: str, special: bool) -> list[int]:
+    """`text`'s token ids, with the model's special tokens around them when
+    `special`. Special-token strings inside the text ("[SEP]" in a scraped
+    page) stay text."""
+    body = {"content": text, "add_special": special, "parse_special": False}
+    return _post(session, url, "/tokenize", body)["tokens"]
+
+
+def read_frame(session: requests.Session, url: str) -> tuple[list[int], list[int]]:
+    """Reads, checks and keeps the token ids the server at `url` puts before
+    and after a document's own when given text: its opening special token
+    and DOCUMENT_PREFIX, and its closing special token. Read from the
+    server, so nothing about the model's vocabulary is written here; asked
+    again each time the server is (the sweep's probe before each batch), so
+    a server restarted with another model is not framed with the old one's
+    ids. Raises EmbeddingUnavailable when framing token ids this way would
+    not equal the server's own tokenization of the prefixed text (a
+    tokenizer that does not split on whitespace), so such a server is left
+    out rather than fed ids it would not produce."""
+    framed = _tokenize(session, url, DOCUMENT_PREFIX, special=True)
+    prefix = _tokenize(session, url, DOCUMENT_PREFIX, special=False)
+    starts = [i for i in range(len(framed)) if framed[i : i + len(prefix)] == prefix]
+    if not starts:
+        raise EmbeddingUnavailable(f"embedding server {url} frames the prefix unexpectedly")
+    end = starts[0] + len(prefix)
+    opening, closing = framed[:end], framed[end:]
+    sample = _tokenize(session, url, _FRAME_SAMPLE, special=False)
+    whole = _tokenize(session, url, DOCUMENT_PREFIX + _FRAME_SAMPLE, special=True)
+    if whole != [*opening, *sample, *closing]:
+        raise EmbeddingUnavailable(
+            f"embedding server {url} does not tokenize the prefix apart from the text"
+        )
+    with _frames_lock:
+        _frames[url] = (opening, closing)
+    return opening, closing
+
 
 def _frame(session: requests.Session, url: str) -> tuple[list[int], list[int]]:
-    """The token ids the server at `url` puts before and after a document's
-    own when given text: its opening special token and DOCUMENT_PREFIX, and
-    its closing special token. Read from the server, once per server, so
-    nothing about the model's vocabulary is written here."""
     with _frames_lock:
         frame = _frames.get(url)
-    if frame is None:
-        framed = _post(session, url, "/tokenize", {"content": DOCUMENT_PREFIX, "add_special": True})
-        prefix = _post(session, url, "/tokenize", {"content": DOCUMENT_PREFIX})["tokens"]
-        tokens = framed["tokens"]
-        starts = [i for i in range(len(tokens)) if tokens[i : i + len(prefix)] == prefix]
-        if not starts:
-            raise EmbeddingUnavailable(f"embedding server {url} frames the prefix unexpectedly")
-        end = starts[0] + len(prefix)
-        frame = (tokens[:end], tokens[end:])
-        with _frames_lock:
-            _frames[url] = frame
-    return frame
+    return frame if frame is not None else read_frame(session, url)
 
 
 def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
@@ -156,12 +181,13 @@ def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
     once, cut into chunks the model's window holds, each chunk embedded as
     exactly those tokens (framed as the server frames text: the prefix and
     special tokens around them), and the chunk vectors averaged by token
-    count, then normalised. Two requests a posting; embedding the tokens
+    count, then normalised. Two requests a posting once the server's frame
+    is known (read_frame, four more each time it is read); embedding the tokens
     rather than text made from them again means what is embedded is the
     posting's own tokenization (turning a chunk back into text and that text
     back into tokens changed 2 of 200 postings' tokens, 2026-11-26)."""
     text = text[:EMBEDDING_INPUT_CHARS]
-    tokens: Sequence[int] = _post(session, url, "/tokenize", {"content": text})["tokens"]
+    tokens: Sequence[int] = _tokenize(session, url, text, special=False)
     spans = [tokens[s : s + CHUNK_TOKENS] for s in range(0, len(tokens), CHUNK_TOKENS)] or [[]]
     opening, closing = _frame(session, url)
     data = _post(

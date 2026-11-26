@@ -52,6 +52,7 @@ from core.derivations.local_embeddings import (
     EmbeddingUnavailable,
     ServerUnreachable,
     embed_document,
+    read_frame,
     server_urls,
     slots,
 )
@@ -378,8 +379,12 @@ def _vector_row(job: dict[str, Any], vector: list[float]) -> dict[str, Any]:
 
 
 def _probe(url: str) -> int | None:
+    """The server's slots, having read its frame afresh (read_frame), or None
+    when it does not answer or cannot be framed."""
     try:
-        return slots(_session(), url)
+        count = slots(_session(), url)
+        read_frame(_session(), url)
+        return count
     except EmbeddingUnavailable:
         logger.warning("embedding server %s is not available", url, exc_info=True)
         return None
