@@ -173,7 +173,9 @@ def reconcile_available() -> int:
     flipped, lands here within the hour, in the hourly retire_switched_off
     task. Safe to stop and rerun. Returns the rows written.
 
-    One read finds the rows whose stored value differs; it takes no lock.
+    One read finds the rows whose stored value differs; it takes no lock,
+    and it is taken once per run, so a row that goes stale while the run
+    writes waits for the next run, inside the hour.
     Only those rows are then written, in batches of their own transaction
     that lock in url order and skip rows a concurrent writer holds for the
     next run, so it cannot deadlock against an ingest, and each re-evaluates
@@ -184,7 +186,9 @@ def reconcile_available() -> int:
     on a production copy, and 34 s with JIT, which compiles the whole plan
     (engineering-standards.md, "Measure a large statement with JIT on and
     off")."""
-    with transaction(), connection() as conn:
+    # Its own connection and transaction, so the setting ends with the read
+    # and never reaches a caller's open transaction.
+    with pool.connection() as conn, conn.transaction():
         conn.execute("SET LOCAL jit = off")
         stale = [
             r["id"]
