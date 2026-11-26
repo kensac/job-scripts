@@ -26085,16 +26085,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 500,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
               "title": "Limit"
             }
           },
