@@ -24,8 +24,10 @@ The tables start empty and nothing reads them yet: the task fills the
 projection, and readers move to it in a later release once it is verified
 complete. A data copy here would run behind the schema lock at every
 container start. Creating the foreign key and the triggers takes SHARE ROW
-EXCLUSIVE on jobs and ai_queries for a moment, so the whole migration runs
-under the lock_timeout bd1e66f153c3 states. Additive.
+EXCLUSIVE on jobs and ai_queries for a moment, and a write to either waits
+behind the request, so the whole migration runs under the 10 s lock_timeout
+d4428913f75e set for its triggers on ai_queries: a start that cannot have
+the lock fails and retries rather than holding writers. Additive.
 
 Revision ID: d81c5e2b7a43
 Revises: d8e2b4c6a915
@@ -96,10 +98,9 @@ _TRIGGER_TABLES = (
 
 
 def upgrade() -> None:
-    # bd1e66f153c3's bound: a start can afford a minute for the transactions
-    # in flight, and past that the wait is not ending. Set before the foreign
-    # key, which locks jobs too.
-    op.execute("SET LOCAL lock_timeout = '60s'")
+    # d4428913f75e's bound for the same locks on the same tables. Set before
+    # the foreign key, which locks jobs too.
+    op.execute("SET LOCAL lock_timeout = '10s'")
     op.create_table(
         "latest_posting_checks",
         sa.Column("job_id", sa.BigInteger(), nullable=False),
@@ -121,7 +122,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("SET LOCAL lock_timeout = '60s'")
+    op.execute("SET LOCAL lock_timeout = '10s'")
     for name, table in _TRIGGER_TABLES:
         op.execute(f"DROP TRIGGER IF EXISTS {name} ON {table}")
     op.execute("DROP FUNCTION IF EXISTS latest_posting_checks_dirty_answers()")

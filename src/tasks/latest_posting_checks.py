@@ -30,15 +30,12 @@ logger = logging.getLogger(__name__)
 async def handle_fold_latest_posting_checks(task_id: int, payload: dict[str, Any]) -> None:
     everything = bool(payload.get("everything"))
     counts = await asyncio.to_thread(latest_posting_checks.fold, everything=everything)
-    if counts is None:
-        set_progress(task_id, 0, 0, "another fold is running; its next cycle takes these")
-        return
     logger.info("latest_posting_checks fold (everything=%s): %s", everything, counts)
     set_progress(
         task_id,
         counts["cleared"],
         counts["cleared"],
         f"wrote {counts['written']}, removed {counts['removed']}, "
-        f"cleared {counts['cleared']} dirty urls",
+        f"cleared {counts['cleared']} dirty rows",
         extra={**counts, "everything": everything},
     )

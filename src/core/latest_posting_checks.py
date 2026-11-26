@@ -11,7 +11,7 @@ module is the projection's only writer:
   TRUNCATE). Writing only the rows that differ, a run with nothing to fix
   locks nothing.
 
-One fold at a time, under an advisory lock, and each fold one statement, so
+One fold at a time, waiting on an advisory lock, and each fold one statement, so
 one snapshot: the dirty rows it deletes are exactly the ones whose answers
 it read. A dirty row committed after the snapshot is not visible to the
 delete and stays for the next fold; until then a reader reads that url from
@@ -78,10 +78,12 @@ _FOLD: LiteralString = """
 _LOCK_KEY = "hashtextextended('latest_posting_checks', 0)"
 
 
-def fold(*, everything: bool = False) -> dict[str, int] | None:
+def fold(*, everything: bool = False) -> dict[str, int]:
     """Bring the projection to `verdicts` for the dirty urls, or for every
-    job. The rows written and removed and the dirty rows cleared; None when
-    another fold holds the lock."""
+    job. The rows written and removed and the dirty rows cleared. Waits for
+    a fold already running: one takes 0.7 s for the busiest hour's urls and
+    27.5 s for every job (production copy, 2026-11-26). A fold that skipped
+    instead would drop the day's full fold whenever the cycle's fold won."""
     # Composed only of the fixed fragments above, never a value.
     statement = cast(
         "LiteralString",
@@ -93,9 +95,7 @@ def fold(*, everything: bool = False) -> dict[str, int] | None:
     with pool.connection() as conn:
         conn.autocommit = True
         try:
-            row = conn.execute(f"SELECT pg_try_advisory_lock({_LOCK_KEY}) AS held").fetchone()
-            if not row or not row["held"]:
-                return None
+            conn.execute(f"SELECT pg_advisory_lock({_LOCK_KEY})")
             try:
                 counts = conn.execute(statement).fetchone()
             finally:

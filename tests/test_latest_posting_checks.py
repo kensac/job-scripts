@@ -155,15 +155,25 @@ def test_the_fold_over_everything_repairs_what_the_triggers_did_not_see():
     }
 
 
-def test_one_fold_at_a_time():
+def test_a_fold_waits_for_the_one_running_and_then_runs():
+    """A skipped fold would drop the day's full fold whenever the cycle's
+    fold held the lock."""
+    import threading
+
     _job()
     _answer("closed", "passed")
+    results: list[dict[str, int]] = []
     with pool.connection() as other:
         other.autocommit = True
         other.execute(f"SELECT pg_advisory_lock({latest_posting_checks._LOCK_KEY})")
+        waiter = threading.Thread(target=lambda: results.append(latest_posting_checks.fold()))
         try:
-            assert latest_posting_checks.fold() is None
+            waiter.start()
+            waiter.join(timeout=2)
+            assert waiter.is_alive() and results == []
         finally:
             other.execute(f"SELECT pg_advisory_unlock({latest_posting_checks._LOCK_KEY})")
             other.autocommit = False
-    assert _dirty() == [URL, URL]
+        waiter.join(timeout=30)
+    assert results == [{"written": 1, "removed": 0, "cleared": 2}]
+    assert _dirty() == []
