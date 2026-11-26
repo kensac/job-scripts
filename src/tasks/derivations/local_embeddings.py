@@ -1,11 +1,20 @@
-"""Embeds postings with the model the fleet serves itself.
+"""Embeds every posting with the model the fleet serves itself.
 
-The same postings as the OpenAI sweep (tasks.derivations.embeddings): every
-posting some person can see whose current page has no vector, or a vector
-from an older page, or from before its company's text profile last changed.
-Each run takes up to `local_embed_per_cycle` of them and embeds them on the
-servers this host names (core.derivations.local_embeddings); only a host with
-servers claims the kind.
+Two kinds of posting are selected, in this order. First, the ones some person
+can see now (api.board.visibility.across_users) whose current page has no
+vector, or a vector from an older page, or from before its company's text
+profile last changed: what the similarity panel reads stays current. Then
+every other posting with page text that has never been embedded, newest
+first, so the whole corpus is there for analysis. A posting outside the
+visible slice is embedded once: a later page or profile does not re-select
+it, and its row's content_row_id and profiled_at say what it was embedded
+from.
+
+A run takes them BATCH_POSTINGS at a time until nothing is left, embedding
+each batch on every server this host names that answers
+(core.derivations.local_embeddings), as many at once on each as the server
+has slots. So a backfill is one run that drains it, picking up servers that
+come and go between batches, and an idle cycle's run is one candidate query.
 
 What is embedded is the posting without the paragraphs its company repeats
 across roles, and with the company's name masked
@@ -13,9 +22,9 @@ across roles, and with the company's name masked
 derived profile, rebuilt here whenever the company has more distinct titles
 than its profile counted or was built under an older rule
 (company_text.PROFILE_RULE); a row records the profile it was embedded under,
-so a rebuilt profile re-selects its company's postings. The stored hash is of
-the text embedded, so a re-scrape or a rebuilt profile that leaves that text
-unchanged is re-stamped, not embedded again.
+so a rebuilt profile re-selects its company's visible postings. The stored
+hash is of the text embedded, so a re-scrape or a rebuilt profile that leaves
+that text unchanged is re-stamped, not embedded again.
 """
 
 from __future__ import annotations
@@ -25,7 +34,7 @@ import hashlib
 import logging
 import queue
 import threading
-from typing import Any
+from typing import Any, Literal
 
 import requests
 
@@ -36,9 +45,12 @@ from core.derivations import company_text
 from core.derivations.local_embeddings import (
     LOCAL_EMBEDDING_MODEL,
     EmbeddingUnavailable,
+    ServerUnreachable,
     embed_document,
     server_urls,
+    slots,
 )
+from core.store import CONTENT_LATERAL
 from tasks.derivations.embeddings import candidate_sql
 from tasks.runtime import cancelled, set_progress
 
@@ -48,10 +60,27 @@ KIND = "embed_postings_local"
 
 CANDIDATES = candidate_sql(visibility.across_users("j.url"), "posting_embeddings")
 
-# Requests in flight per server: the slots llama-server is started with
-# (`-np`, optiplex-config's embeddings services). Each server has its own
-# threads pulling from one queue, so a fast server never waits on a slow one.
-SLOTS_PER_SERVER = 4
+# Every posting with page text that has no row, newest first. Rows already
+# embedded are walked past each run rather than remembered: with all 2.1M
+# jobs embedded but one, walking them took 23 s (2026-11-26, probing an
+# embeddings table's primary key per job), and the 230k jobs without page
+# text cost one page_texts probe each on top.
+BACKFILL = f"""
+    SELECT j.url, q.content_row_id, NULL::text AS stored_hash, q.input_content, q.content_ref
+    FROM jobs j
+    {CONTENT_LATERAL.format(url="j.url", columns="id AS content_row_id, input_content, content_ref")}
+    WHERE NOT EXISTS (SELECT 1 FROM posting_embeddings e WHERE e.url = j.url)
+      AND j.url <> ALL(%(taken)s)
+    ORDER BY j.id DESC
+    LIMIT %(cap)s
+"""
+
+# Postings a batch takes. At the 5.5 KB a page averaged (2026-11-26) that is
+# about 11 MB of text held at once. Visible postings lead every batch, so a
+# posting that has just become visible waits at most one batch during a
+# backfill: about 45 minutes on optiplex's two servers alone (0.75 postings a
+# second), half a minute with the rented GPUs (68 a second).
+BATCH_POSTINGS = 2000
 
 # Postings written per statement, so a run that stops part way keeps what it
 # embedded and progress moves as it goes.
@@ -118,7 +147,13 @@ def _restamp(rows: list[dict[str, Any]]) -> int:
 
 
 def candidates(cap: int) -> list[dict[str, Any]]:
-    rows = page_fetches.resolve(db.query(CANDIDATES, {"cap": cap}))
+    """Up to `cap` postings: the visible ones that need a vector, then never
+    embedded ones to fill the run."""
+    rows = db.query(CANDIDATES, {"cap": cap})
+    if len(rows) < cap:
+        taken = [row["url"] for row in rows]
+        rows += db.query(BACKFILL, {"cap": cap - len(rows), "taken": taken})
+    rows = page_fetches.resolve(rows)
     companies = {
         row["url"]: row
         for row in db.query(
@@ -246,6 +281,8 @@ def profiles(keys: set[str]) -> tuple[dict[str, set[bytes]], dict[str, Any]]:
 def _embed(url: str, job: dict[str, Any]) -> dict[str, Any] | None:
     try:
         embedded = embed_document(_session(), url, job["text"])
+    except ServerUnreachable:
+        raise
     except Exception:
         # A posting that cannot be embedded, for whatever reason, is left
         # without a row and selected again next run; it never ends the run.
@@ -261,58 +298,108 @@ def _embed(url: str, job: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _embed_all(task_id: int, urls: list[str], jobs: list[dict[str, Any]], counts: dict) -> None:
-    """Every job through one queue, SLOTS_PER_SERVER threads per server each
-    taking the next job as it finishes one, results written as they land."""
-    todo: queue.Queue[dict[str, Any] | None] = queue.Queue()
+def _servers(urls: list[str]) -> tuple[dict[str, int], list[str]]:
+    """The servers that answer, with their slots, and the ones that do not."""
+    ready, unreachable = {}, []
+    for url in urls:
+        try:
+            ready[url] = slots(_session(), url)
+        except EmbeddingUnavailable:
+            logger.warning("embedding server %s is not available this run", url, exc_info=True)
+            unreachable.append(url)
+    return ready, unreachable
+
+
+# What a worker thread puts on the results queue as it exits, with the server
+# it worked for and whether that server stopped answering.
+_Retired = tuple[Literal["retired"], str, bool]
+
+
+def _embed_all(
+    task_id: int,
+    servers: dict[str, int],
+    jobs: list[dict[str, Any]],
+    counts: dict[str, int],
+    run_counts: dict[str, Any],
+) -> None:
+    """Every job through one queue, one thread per server slot, each taking
+    the next job as it finishes one, results written as they land. A server
+    that stops answering hands its job back and leaves the run, so a laptop
+    that goes to sleep costs nothing; the run ends when the queue is empty
+    or no server is left."""
+    todo: queue.Queue[dict[str, Any]] = queue.Queue()
     for job in jobs:
         todo.put(job)
-    results: queue.Queue[dict[str, Any] | None] = queue.Queue()
+    results: queue.Queue[dict[str, Any] | _Retired | None] = queue.Queue()
     stop = threading.Event()
 
     def work(url: str) -> None:
-        while not stop.is_set():
-            try:
-                job = todo.get_nowait()
-            except queue.Empty:
-                return
-            results.put(_embed(url, job) if job is not None else None)
+        gone = False
+        try:
+            while not stop.is_set():
+                try:
+                    job = todo.get_nowait()
+                except queue.Empty:
+                    return
+                try:
+                    results.put(_embed(url, job))
+                except ServerUnreachable:
+                    todo.put(job)
+                    gone = True
+                    logger.warning("embedding server %s stopped answering", url, exc_info=True)
+                    return
+        finally:
+            results.put(("retired", url, gone))
 
     threads = [
         threading.Thread(target=work, args=(url,), daemon=True)
-        for url in urls
-        for _ in range(SLOTS_PER_SERVER)
+        for url, slot_count in servers.items()
+        for _ in range(slot_count)
     ]
     for thread in threads:
         thread.start()
-    pending: list[dict[str, Any]] = []
+    live, done, pending = len(threads), 0, []
     try:
-        for done in range(1, len(jobs) + 1):
-            embedded = results.get()
-            if embedded is None:
+        while live:
+            item = results.get()
+            if isinstance(item, tuple):
+                live -= 1
+                if item[2] and item[1] not in run_counts["unreachable"]:
+                    run_counts["unreachable"] = sorted([*run_counts["unreachable"], item[1]])
+                continue
+            done += 1
+            if item is None:
                 counts["failed"] += 1
             else:
-                pending.append(embedded)
+                pending.append(item)
             if len(pending) >= _WRITE_EVERY:
                 counts["written"] += _store(pending)
                 pending = []
-                set_progress(task_id, done, len(jobs), f"embedded {counts['written']}")
+                written = run_counts["written"] + counts["written"]
+                set_progress(
+                    task_id,
+                    done,
+                    len(jobs),
+                    f"batch {run_counts['batches'] + 1}: {done} of {len(jobs)}; "
+                    f"embedded {written} this run",
+                )
             if cancelled(task_id):
-                break
+                stop.set()
     finally:
         stop.set()
         if pending:
             counts["written"] += _store(pending)
 
 
-def run(task_id: int, cap: int) -> dict[str, int]:
-    urls = server_urls()
-    if not urls:
-        raise EmbeddingUnavailable("no embedding server configured on this host")
+def _batch(
+    task_id: int, servers: dict[str, int], cap: int, counts: dict[str, Any]
+) -> dict[str, int]:
+    """One batch of up to `cap` candidates through `servers`, adding to
+    `counts`; returns what this batch did."""
     rows = candidates(cap)
     # Profiles built under an older rule, whether or not their postings are
     # candidates: rebuilding one moves its profiled_at, which makes its
-    # postings candidates for the next run (embeddings._PROFILE_CHANGED).
+    # postings candidates for the next batch (embeddings._PROFILE_CHANGED).
     older = {
         row["company_key"]
         for row in db.query(
@@ -321,7 +408,7 @@ def run(task_id: int, cap: int) -> dict[str, int]:
         )
     }
     keys = {row["company_key"] for row in rows} | older
-    counts = {
+    batch = {
         "selected": len(rows),
         "written": 0,
         "failed": 0,
@@ -343,8 +430,44 @@ def run(task_id: int, cap: int) -> dict[str, int]:
         }
         (unchanged if row["stored_hash"] == job["hash"] else jobs).append(job)
     if unchanged:
-        counts["restamped"] = _restamp(unchanged)
-    _embed_all(task_id, urls, jobs, counts)
+        batch["restamped"] = _restamp(unchanged)
+    _embed_all(task_id, servers, jobs, batch, counts)
+    for key, value in batch.items():
+        counts[key] += value
+    return batch
+
+
+def run(task_id: int, cap: int = BATCH_POSTINGS) -> dict[str, Any]:
+    """Batches until one leaves nothing new stored (the backlog is drained,
+    or what is left fails), no server answers, or the run is cancelled. The
+    servers are asked again before each batch, so one that comes back, or
+    goes away, counts from the next batch on. `servers` and `unreachable`
+    name every server that answered, and that missed a batch, in the run."""
+    urls = server_urls()
+    if not urls:
+        raise EmbeddingUnavailable("no embedding server configured on this host")
+    counts: dict[str, Any] = {
+        "batches": 0,
+        "selected": 0,
+        "written": 0,
+        "failed": 0,
+        "restamped": 0,
+        "profiled": 0,
+        "servers": [],
+        "unreachable": [],
+    }
+    while not cancelled(task_id):
+        servers, unreachable = _servers(urls)
+        counts["servers"] = sorted(set(counts["servers"]) | set(servers))
+        counts["unreachable"] = sorted(set(counts["unreachable"]) | set(unreachable))
+        if not servers:
+            if not counts["batches"]:
+                raise EmbeddingUnavailable(f"no embedding server answers: {', '.join(unreachable)}")
+            break
+        batch = _batch(task_id, servers, cap, counts)
+        counts["batches"] += 1
+        if not batch["written"] and not batch["restamped"]:
+            break
     return counts
 
 
@@ -352,15 +475,15 @@ async def handle_embed_postings_local(task_id: int, payload: dict[str, Any]) -> 
     if not db.get_config("local_embedding_enabled"):
         set_progress(task_id, 0, 0, "switched off")
         return
-    cap = int(db.get_config("local_embed_per_cycle"))
-    counts = await asyncio.to_thread(run, task_id, cap)
+    counts = await asyncio.to_thread(run, task_id)
     embeddable = counts["selected"] - counts["restamped"]
     set_progress(
         task_id,
         counts["written"],
         embeddable,
         f"embedded {counts['written']} of {embeddable}, {counts['failed']} failed, "
-        f"{counts['restamped']} unchanged",
+        f"{counts['restamped']} unchanged"
+        + (f"; not answering: {', '.join(counts['unreachable'])}" if counts["unreachable"] else ""),
         extra=counts,
     )
     logger.info("%s: %s", KIND, counts)

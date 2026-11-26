@@ -1,9 +1,13 @@
 """Posting embeddings from a model served on the fleet's own hardware.
 
-A host that runs an embedding server (llama.cpp's `llama-server --embedding`,
-OpenAI-compatible) names it in JOBTRACKER_EMBEDDING_URLS, a comma list so one
-host can lend both its GPU and its CPU. Only such a host claims
-`embed_postings_local` (api.worker_lifecycle.claims.NEEDS_ENV).
+A host that runs the embedding sweep names the servers it uses
+(llama.cpp's `llama-server --embedding`, OpenAI-compatible) in
+JOBTRACKER_EMBEDDING_URLS, a comma list: its own GPU and CPU, and servers on
+other machines on the tailnet, such as a laptop that serves only while its
+owner is not using it. Only such a host claims `embed_postings_local`
+(api.worker_lifecycle.claims.NEEDS_ENV). A server that cannot be reached is
+ServerUnreachable, which the sweep treats as absent rather than as a failed
+posting.
 
 A posting is embedded whole: its text, up to EMBEDDING_INPUT_CHARS, is split
 into chunks the model's window holds, each chunk is embedded, and the vectors
@@ -30,6 +34,8 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from http import HTTPStatus
+from typing import Any
 
 import requests
 
@@ -58,6 +64,11 @@ class EmbeddingUnavailable(RuntimeError):
     pass
 
 
+class ServerUnreachable(EmbeddingUnavailable):
+    """The server is not there, or not ready: refused, reset, unresolvable,
+    or still loading its model (503). Says nothing about the posting."""
+
+
 def server_urls() -> list[str]:
     return [url.rstrip("/") for url in env_list(URLS_ENV)]
 
@@ -68,13 +79,30 @@ class Embedded:
     chunks: int
 
 
-def _post(session: requests.Session, url: str, path: str, body: dict) -> dict:
+def _call(session: requests.Session, method: str, url: str, path: str, **kwargs: Any) -> dict:
     try:
-        response = session.post(f"{url}{path}", json=body, timeout=_TIMEOUT_SECONDS)
+        response = session.request(method, f"{url}{path}", timeout=_TIMEOUT_SECONDS, **kwargs)
+        if response.status_code == HTTPStatus.SERVICE_UNAVAILABLE:
+            raise ServerUnreachable(f"embedding server {url} is not ready")
         response.raise_for_status()
         return response.json()
+    except requests.ConnectionError as exc:
+        raise ServerUnreachable(f"embedding server {url} cannot be reached") from exc
     except (requests.RequestException, ValueError) as exc:
-        raise EmbeddingUnavailable(f"embedding server {path} failed") from exc
+        raise EmbeddingUnavailable(f"embedding server {url}{path} failed") from exc
+
+
+def _post(session: requests.Session, url: str, path: str, body: dict) -> dict:
+    return _call(session, "POST", url, path, json=body)
+
+
+def slots(session: requests.Session, url: str) -> int:
+    """How many requests the server at `url` serves at once (llama-server's
+    `-np`), as it reports it, so each machine sets its own."""
+    total = _call(session, "GET", url, "/props").get("total_slots")
+    if not isinstance(total, int) or total < 1:
+        raise EmbeddingUnavailable(f"embedding server {url} reports no slots")
+    return total
 
 
 def embed_document(session: requests.Session, url: str, text: str) -> Embedded:

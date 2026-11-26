@@ -1010,9 +1010,24 @@ token count, then normalised. Nothing is truncated to fit the window: over
 top-10 neighbours unchanged, but the whole posting is what the vector claims
 to stand for.
 
-`local_embed_per_cycle` bounds a run, `local_embedding_enabled` switches it
-off, and an unchanged re-scrape is re-stamped (`tasks.rescrape`). A posting
-whose embedding fails is left without a row and selected again next run.
+**Every posting is embedded, the visible ones kept current.** A batch takes
+the postings someone can see that need a vector first (a new page, a rebuilt
+company profile), then never-embedded postings newest first, up to
+`BATCH_POSTINGS`. A posting outside the visible slice is embedded once; its
+row's `content_row_id` and `profiled_at` say what from. A run takes batches
+until one stores nothing new, so a backfill is a single run (requeued by the
+reaper if a deploy kills it) and an idle cycle costs one candidate query.
+
+**Servers come and go.** `JOBTRACKER_EMBEDDING_URLS` may name servers on
+other machines, such as a laptop that serves only while unused. Each run
+asks every server for its slots (`/props`) before each batch and runs that
+many requests on it; a server that does not answer, or stops answering, is
+left out of the batch and its posting handed to another, so it is never a failed posting. The
+run's progress names the servers that did not answer.
+
+`local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
+is re-stamped (`tasks.rescrape`). A posting whose embedding fails is left
+without a row and selected again next run.
 
 ## Scheduled filter transport
 
