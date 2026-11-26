@@ -1026,6 +1026,11 @@ arrived meanwhile and retrying what failed.
 An idle run still walks every job to find none: 23 s over 2.1M jobs
 (2026-11-26).
 
+**A posting's requests are not traced.** The request threads run inside
+`telemetry.untraced()`: the task's span stands for the run, and a span per
+request was 130 a second from hetzner during the backfill, built under the
+same interpreter lock as the requests.
+
 **The servers do not wait for the next batch.** Selecting a batch, building
 the profiles of companies the walk has not met, and stripping its text read
 pages out of object storage; for a backfill that reaches a new company in
