@@ -128,10 +128,13 @@ class PostingUpload(Base):
 class PageFetch(Base):
     """One fetch of a posting's page: what came back and how it was read.
 
-    A fact, appended and written only by core.page_fetches. The one update
-    is where its text is held: inline in content, or by reference
-    (content_sha256, content_object, content_object_size, with content_chars
-    its length and content NULL), all set together (ck_page_fetches_reference_whole).
+    A fact, appended and written only by core.page_fetches. Its text is held
+    by reference (content_sha256, content_object, content_object_size, with
+    content_chars its length and content NULL), all set together
+    (ck_page_fetches_reference_whole), uploaded before the row is written.
+    It is inline in content only on a row written before that or while
+    storage was unavailable, and the one update moves it
+    (tasks.page_text_tiering).
     page_texts is the view of the fetches that brought text back, either way.
 
     Ids come from ai_queries' sequence: the fetches stored there before
@@ -164,6 +167,9 @@ class PageFetch(Base):
             " AND content_object_size IS NOT NULL AND content_chars IS NOT NULL)",
             name="ck_page_fetches_reference_whole",
         ),
+        # The rows whose text is still inline, which tasks.page_text_tiering
+        # moves; its predicate is that module's INLINE.
+        Index("idx_page_fetches_inline_text", "id", postgresql_where=text("content <> ''")),
         Index("idx_page_fetches_created_at", "created_at"),
         # The admin ledger's filter options skip-scan distinct values through
         # ledger_rows, as they do on ai_queries (routers/admin/queries.py).

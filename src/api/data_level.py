@@ -10,13 +10,17 @@ agree: a host rolled back is below the level again on its next beat.
 
 1: batch_requests rows hold only the member's own fields once the bundle's
    fields are on batch_objects (tasks.batch_objects).
+2: page text written before references moves to object storage
+   (tasks.page_text_tiering). An older image resolves every candidate's page
+   of a managed-board run one bundle at a time, and its own tier_page_text
+   run brings recent held text back inline.
 """
 
 from __future__ import annotations
 
 from api import db
 
-LEVEL = 1
+LEVEL = 2
 
 # A worker beats every 60 seconds (api.worker.HEARTBEAT_SECONDS) and the
 # fleet screen calls it dead after two minutes (health.WORKER_FRESH); five
