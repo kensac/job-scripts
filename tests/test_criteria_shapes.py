@@ -116,10 +116,9 @@ def _passing(ids: dict[int, str], where: str, params: dict) -> set[str]:
 def test_both_shapes_are_one_rule(catalog, criterion, which):
     key = "excluded_locations" if which == "excl" else "included_locations"
     params = criteria.params({"criteria": {key: list(criterion)}})
-    per_posting = "".join(f"\n AND {c}" for c in criteria.CONDITIONS.values())
 
     scanned = _passing(catalog, criteria.SQL, params)
-    one_by_one = _passing(catalog, per_posting, params)
+    one_by_one = _passing(catalog, criteria.PER_POSTING_SQL, params)
 
     assert scanned == one_by_one == EXPECTED[(criterion, which)]
 

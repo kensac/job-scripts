@@ -43,7 +43,6 @@ FULL = f"""
 WITH enabled_filters AS MATERIALIZED (
     {board_eligibility.ENABLED_FILTERS}
 ),
-{board_eligibility.LATEST_CHECK},
 -- The postings every enabled filter passed. The hashes go in as an array,
 -- not a join. Joined, the planner sorted 26,000 (url, hash) rows under the
 -- locale collation before the DISTINCT ON, 320 ms of a 365 ms table; as an
@@ -70,20 +69,16 @@ members AS (
     UNION
     SELECT uj.job_id FROM user_jobs uj WHERE uj.user_id = %(uid)s AND {_ACTED_ON}
     -- With filters, a posting must pass every one, so the few postings they
-    -- passed are where to start: their closed and clearance answers are
-    -- looked up per posting. Started from the catalog instead, every
-    -- subscribed posting was checked against the latest answer of every url
+    -- passed are where to start. Started from the catalog instead, every
+    -- subscribed posting went through the criteria and verdict checks
     -- first: on a production copy (2026-11-26) a person with one filter had
     -- 330,000 candidates and 2,005 filter passes.
     UNION
     SELECT j.id FROM filter_pass fp JOIN jobs j ON j.url = fp.url
     WHERE (SELECT COUNT(*) FROM enabled_filters) > 0
-      AND {board_eligibility.STRUCTURAL_PER_POSTING}
+      AND {board_eligibility.STRUCTURAL}
       AND {board_eligibility.SUBSCRIBED}
-    -- Without filters every subscribed posting is a candidate, and the
-    -- latest answers of every url, read once, are the cheaper shape (see
-    -- board_eligibility.STRUCTURAL_PER_POSTING). latest_check is only built
-    -- when this branch runs.
+    -- Without filters every subscribed posting is a candidate.
     UNION
     SELECT j.id FROM jobs j
     WHERE (SELECT COUNT(*) FROM enabled_filters) = 0

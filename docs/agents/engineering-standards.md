@@ -214,12 +214,17 @@ per posting instead, the board read re-matched the criteria about 460,000
 times twice over: 20 of its 26 seconds on a production copy (2026-11-26). The
 planner keeps an uncorrelated subquery as a hashed subplan only where it
 cannot pull it up into a join, so the membership test is written
-`(x IN (subquery)) IS TRUE`; a bare `IN` or `EXISTS` at the top of a `WHERE`
-became a join driven from the set, one lookup per member (788,476 for the
-closed check, 22 of 24 seconds). Where the constant differs per row (criteria
-stored per board, `json_sql`) or one posting is checked (`api.posting_path`),
-the per-posting shape stays; both shapes are composed from one spelling of
-the rule, and `tests/test_criteria_shapes.py` holds them equal.
+`(x IN (subquery)) IS TRUE`. It also hashes only a set it expects to fit in
+`work_mem x hash_mem_multiplier`, and otherwise rescans the set for every
+row, so the shape is for a set that stays small: the location strings a
+criterion matches (at most 134,397 of 28 bytes, 2026-11-26). The latest
+closed answer of every url is not one: it was hashed only because the
+planner estimated 9 passing urls against 788,476, so a posting's verdicts are
+looked up per posting instead (`api.board.eligibility.STRUCTURAL`). Where the
+constant differs per row (criteria stored per board, `json_sql`) or a few
+postings are checked (`api.posting_path`, a verification batch), the
+per-posting shape stays; both shapes are composed from one spelling of the
+rule, and `tests/test_criteria_shapes.py` holds them equal.
 
 **Join a table only when the statement reads it.** The planner removes an
 unused LEFT JOIN to a unique key, but the join column stays needed, so an

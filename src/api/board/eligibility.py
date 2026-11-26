@@ -20,42 +20,18 @@ ENABLED_FILTERS = """
 SELECT DISTINCT prompt_hash FROM user_filters WHERE user_id = %(uid)s AND enabled
 """
 
-_LATEST_CHECKS = verdict_reads.latest_per(
-    "url, check_type", "url, check_type, status", "check_type IN ('closed', 'clearance')"
-)
-
-LATEST_CHECK = f"""
-latest_check AS (
-    {_LATEST_CHECKS}
-)
-"""
-
-# Membership in latest_check's passing urls, as a set built once per
-# statement and probed per posting. `IS TRUE` keeps it a hashed subplan; as an
-# EXISTS (or a bare IN) at the top of a WHERE the planner turns it into a
-# join driven from latest_check, one jobs lookup per passing url: 788,476 of
-# them, 22 of a person's 24-second board read on a production copy
-# (2026-11-26).
-_PASSED = """(j.url IN (SELECT lc.url FROM latest_check lc
-                    WHERE lc.check_type = '{check}' AND lc.status = 'passed')) IS TRUE"""
-
+# Available, inside the criteria, and its latest closed and clearance answers
+# passed, each looked up per posting on idx_ai_queries_latest_verdict. Read
+# per posting, the cost follows the candidates that reach the lookup, after
+# the cheap conditions. The other shape built the latest answer of every url
+# first and probed it as a set. It was faster only while the planner hashed
+# that set, which it did only because it estimated 9 passing urls against
+# 788,476 (production copy, 2026-11-26); estimated right, the set outgrows
+# hash memory (work_mem x hash_mem_multiplier) and every posting rescans it.
+# Measured on that copy: board 2's candidates 13.9 s against 38.1 s
+# (production 2026-10-18), and a person's board with no filter 15.4 s against
+# 35.7 s on main.
 STRUCTURAL = f"""
-        {catalog.IS_AVAILABLE.format(job="j")}
-        {{criteria}}
-        AND {_PASSED.format(check="closed")}
-        AND (%(bypass_sponsorship)s OR {_PASSED.format(check="clearance")})
-"""
-
-
-# STRUCTURAL with each posting's latest closed and clearance answers looked up
-# on idx_ai_queries_latest_verdict instead of from latest_check, which reads
-# the latest answer of every url first. For a board's sources that is the
-# faster shape: on production 2026-10-18, board 2's candidates (25,546 rows)
-# took 13.9 s against 38.1 s, and from oci the old shape held the worker's
-# main thread past its heartbeat. A person's FULL read spans every source
-# they follow and is slower this way (31-38 s against 53-57 s), so it keeps
-# STRUCTURAL.
-STRUCTURAL_PER_POSTING = f"""
         {catalog.IS_AVAILABLE.format(job="j")}
         {{criteria}}
         AND {verdict_reads.latest_status("j.url", "closed")} = 'passed'

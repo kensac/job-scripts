@@ -91,6 +91,11 @@ def _conditions(locations: dict[str, str]) -> dict[str, str]:
 # to stored criteria. SQL below is the same conjunction for a scan.
 CONDITIONS: dict[str, str] = _conditions(_PER_POSTING)
 
+# The conjunction checked posting by posting, for a statement that reads a
+# few postings (a verification batch's urls): building the per-statement set
+# there costs more than the postings it checks.
+PER_POSTING_SQL = "".join(f"\n        AND {c}" for c in CONDITIONS.values()) + "\n"
+
 # The conjunction for a scan of many postings under one person's or board's
 # criteria. The same conditions, the locations in their per-statement shape.
 SQL = "".join(f"\n        AND {c}" for c in _conditions(_PER_STATEMENT).values()) + "\n"
