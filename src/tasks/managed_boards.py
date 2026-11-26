@@ -40,7 +40,10 @@ async def handle_run_managed_board(task_id: int, payload: dict[str, Any]) -> Non
     payload = _checked_snapshot(payload)
     cfg = _server_config(payload, _provider(payload))
     snapshot, jobs, hooks = _prepare_run(task_id, payload)
-    await execute_live(task_id, cfg, snapshot, jobs, hooks)
+    decided = decided_custom_urls(
+        [job["url"] for job in jobs], snapshot.prompt_hash, answering_models("custom", cfg.model)
+    )
+    await execute_live(task_id, cfg, snapshot, _with_pages(jobs, decided), hooks, decided)
 
 
 async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) -> None:
@@ -74,7 +77,7 @@ async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) 
             model=answering_models("custom", payload["requested_model"]),
         )
     )
-    inference_jobs = [job for job in jobs if job["url"] not in decided]
+    inference_jobs = _with_pages([job for job in jobs if job["url"] not in decided], set())
     await execute_batch(
         task_id,
         cfg,
@@ -91,6 +94,32 @@ async def handle_run_managed_board_batch(task_id: int, payload: dict[str, Any]) 
         # needed more than 1,050.
         complete_without_submission=True,
     )
+
+
+def _with_pages(jobs: list[dict[str, Any]], decided: set[str]) -> list[dict[str, Any]]:
+    """The jobs with the page text their run froze (content_query_id), read
+    only for jobs not in `decided`: text is in object storage, a read per
+    bundle, and a decided job is never checked. A decided job, or one that
+    froze no page, carries an empty page, which execution reads as none."""
+    wanted = [
+        job["content_query_id"]
+        for job in jobs
+        if job["url"] not in decided and job.get("content_query_id") is not None
+    ]
+    contents: dict[int | None, str] = (
+        {
+            row["id"]: row["input_content"]
+            for row in page_fetches.resolve(
+                db.query(
+                    "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
+                    (wanted,),
+                )
+            )
+        }
+        if wanted
+        else {}
+    )
+    return [{**job, "content": contents.get(job.get("content_query_id"), "")} for job in jobs]
 
 
 def _checked_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
@@ -128,8 +157,9 @@ def _server_config(payload: dict[str, Any], provider: str) -> ai.AIConfig:
 def _prepare_run(
     task_id: int, payload: dict[str, Any]
 ) -> tuple[FilterSnapshot, list[dict[str, Any]], ExecutionHooks]:
-    """The run's filter, its jobs with their frozen page text, and the hooks
-    that charge the board and project the run once no batch is pending."""
+    """The run's filter, its jobs, and the hooks that charge the board and
+    project the run once no batch is pending. Page text is read separately
+    (_with_pages), for the jobs that still need a verdict."""
     board_id = int(payload["managed_board_id"])
     # Read once per run or resume: the reference costs one object GET.
     all_jobs = runs.run_jobs(payload)
@@ -139,23 +169,6 @@ def _prepare_run(
         on_ambiguous=payload["on_ambiguous"],
         prompt_hash=payload["prompt_hash"],
     )
-    content_ids = [
-        job["content_query_id"] for job in all_jobs if job.get("content_query_id") is not None
-    ]
-    # Keyed by the job's content_query_id, which is None for a job with no
-    # content: that lookup misses and the job is checked on an empty page.
-    frozen_contents: dict[int | None, str] = {
-        row["id"]: row["input_content"]
-        for row in page_fetches.resolve(
-            db.query(
-                "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
-                (content_ids,),
-            )
-        )
-    }
-    jobs = [
-        {**job, "content": frozen_contents.get(job.get("content_query_id"), "")} for job in all_jobs
-    ]
 
     def complete() -> None:
         if not pending_batch_ids(task_id):
@@ -174,4 +187,4 @@ def _prepare_run(
         progress=lambda done, total, label: set_progress(task_id, done, total, label),
         complete=complete,
     )
-    return snapshot, jobs, hooks
+    return snapshot, all_jobs, hooks

@@ -616,25 +616,44 @@ one per value. The TOAST a move frees is reused after vacuum; the files shrink
 only with a rewrite.
 
 
-## A page's text can be held by reference
+## A page's text is held by reference
 
 `core.page_fetches` owns both shapes of a fetch's text, as
-`core.payloads.listings` does for listings. Page text is most of the database
-(4.1 GB of 21 GB on 2026-10-31), and most of it is read by nothing: older
-copies of a page fetched again, and the pages of postings closed long ago.
-Such a row can hold its text as a member of a verified bundle object:
-`content_sha256` names the member, `content_object` and `content_object_size`
-the bundle, and `content_chars` keeps the text's length. `content` is then
-NULL. The four are set together or not at all
-(`ck_page_fetches_reference_whole`).
+`core.payloads.listings` does for listings. Page text was most of the
+database (5.2 GB of 22 GB on 2026-11-26), so it lives in object storage: a
+fetch's text is a member of a verified bundle object, `content_sha256` names
+the member, `content_object` and `content_object_size` the bundle, and
+`content_chars` keeps the text's length. `content` is then NULL. The four
+are set together or not at all (`ck_page_fetches_reference_whole`).
+
+**The writer uploads before the row exists.** `page_fetches.record` and
+`record_many` upload the text with `PayloadStore.put_bundle`, which reads it
+back, then insert the row holding the reference, outside any transaction.
+Ingest stores listing text a page bundle at a time. Storage that cannot take
+the text leaves it inline rather than losing the fetch, as a pull does for
+listings; nothing else writes text inline.
+
+**Page bundles are `PAGE_BUNDLE_MAX_BYTES` (256 KB) wide.** A bundle is read
+whole to resolve one member, so its width is what one page read costs. With
+the 8 MB bundles first used for page text, 2,000 random held pages took 16 s
+on hetzner and 153 s from optiplex; a 10 KB GET took 4 ms and 220 ms
+(2026-11-26). The constant's comment carries the measurement.
 
 **Every reader of page text selects `content_ref` beside `input_content` from
 `page_texts` and passes its rows through `core.page_fetches.resolve`.** A held
 row reads NULL in `input_content`, so a reader that skipped it fails on None
-rather than judging an empty page. An inline row costs nothing to resolve. A
-link that cannot be read, or reads something else, raises
+rather than judging an empty page. `resolve` reads the bundles its rows name
+concurrently, once each, before filling any row; an inline row costs
+nothing. A link that cannot be read, or reads something else, raises
 `PayloadUnavailable`; it is never a page without text. Resolve outside a
 transaction. `core.page_fetches.text_of` reads one fetch by id.
+
+**Read only the text that will be used.** Every read is an object GET, so a
+reader resolves the pages it will send to a model, not every candidate's. A
+managed-board run reads text only for jobs without a decided verdict
+(`tasks.managed_boards._with_pages`), as the personal filter run does
+(`execute_live`): a board's candidate list reaches 40,029 jobs, almost all
+decided on any run after the first.
 
 **Length is `page_texts.chars`, never `length(input_content)`.** It is the
 stored length on a held row and `length(content)` on an inline one, so "longer
@@ -645,36 +664,21 @@ than MIN_CONTENT_CHARS" is answered the same in both shapes.
 **SQL that computes on the text cannot see a held row.** A hash or a cut of
 the text is computed in Python from resolved text (the comp sweep's
 `content_hash`). `ledger_rows` rebuilds an answer's input in SQL and reads
-NULL for a held fetch, so the admin detail rebuilds it from `text_of`
-through the same `core.answer_inputs.sql`. The admin ledger's deep search
-does not match held text.
+NULL for a held fetch, so the admin ledger rebuilds it from the resolved
+text through the same `core.answer_inputs.sql`, every row of a page in one
+resolve. The admin ledger's search does not match page text.
 
-**Which rows are held is one rule, `tasks.page_text_tiering.COLD`.** A fetch
-older than `page_text_cold_after_days` (14) is held when a newer fetch of its
-page holds text `CONTENT_LATERAL` prefers, or when its posting has been
-unavailable with no source observing it for the whole window. On 2026-10-31,
-98.8% of postings that reappeared did so within 14 days. The hourly
-`tier_page_text` task brings back inline every held row the rule no longer
-selects, then holds the inline rows it does, at most
-`page_text_tiering_per_cycle` of each, oldest first. So the stored shape
-follows the settings: a reopened posting, a longer window, or
-`page_text_tiering_enabled` switched off all bring pages back. Nothing is
-deleted and ids never change, so every `content_row_id` and `page_fetch_id`
-stays true.
-
-**A move is upload, read back, then clear.** `PayloadStore.put_bundle` reads
-every member back before any row is cleared, and the clear only touches rows
-still inline. Each move or pull-back is a row update, which marks its hours
-dirty for the ledger rollup (`ledger_dirty_fetches`); oldest-first keeps each
-run inside a few hours. The TOAST space a move frees is reused by new fetches,
-and comes back to disk only with `VACUUM FULL page_fetches`.
-
-**Rollout order.** The release that added the columns, the view and the
-resolving readers (#1230) runs on every API and worker before
-`page_text_tiering_enabled` is switched on. An older image reads a held row
-as no text. Rolling back past #1230 needs the setting off and the task to
-have brought every row back first; its migration's downgrade refuses while
-any row is held.
+**Inline text is moved, oldest first.** The `tier_page_text` task
+(`tasks.page_text_tiering`) moves every inline row to object storage until
+none is left, found through `idx_page_fetches_inline_text`, whose predicate
+is the module's `INLINE`. The schedule starts a run only when none is pending
+or running. A move is upload, read back, then clear, and the clear only
+touches rows still inline. Nothing is deleted and ids never change, so every
+`content_row_id` and `page_fetch_id` stays true. Each move is a row update,
+which marks its hours dirty for the ledger rollup (`ledger_dirty_fetches`);
+oldest-first keeps each step inside a few hours. The TOAST space a move frees
+is reused by new rows, and comes back to disk only when the table is
+rewritten (`VACUUM FULL page_fetches`).
 
 ## A pull rewrites a catalog row only when the row would change
 

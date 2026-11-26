@@ -262,7 +262,7 @@ class TestCustomVerdictCostCliff:
         from tasks.filtering import execution as filter_execution
 
         source = inspect.getsource(filter_execution)
-        assert 'snapshot.prompt_hash, answering_models("custom", cfg.model)' in source
+        assert 'snapshot.prompt_hash,\n            answering_models("custom", cfg.model)' in source
 
 
 def test_no_call_site_still_hardcodes_a_batched_model():

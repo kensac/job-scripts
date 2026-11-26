@@ -4,6 +4,7 @@ import psycopg
 import pytest
 
 from api import db
+from core import page_fetches
 from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.pricing import estimate_cost_usd
 from tasks.derivations.embeddings import _CANDIDATES, _store
@@ -218,9 +219,9 @@ class TestUnchangedRescrapes:
             (url,),
         )
         assert row is not None
-        digest = hashlib.sha256(
-            row["input_content"][:EMBEDDING_INPUT_CHARS].encode("utf-8")
-        ).hexdigest()
+        text = page_fetches.text_of(row["id"])
+        assert text is not None
+        digest = hashlib.sha256(text[:EMBEDDING_INPUT_CHARS].encode("utf-8")).hexdigest()
         db.execute(
             "UPDATE job_embeddings SET content_hash = %s, content_row_id = %s WHERE url = %s",
             (digest, row["id"] - 1, url),
@@ -228,7 +229,7 @@ class TestUnchangedRescrapes:
 
         candidate = {
             "url": url,
-            "input_content": row["input_content"],
+            "input_content": text,
             "stored_hash": digest,
             "content_row_id": row["id"],
         }

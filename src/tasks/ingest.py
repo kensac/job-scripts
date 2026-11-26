@@ -18,6 +18,7 @@ from api.ai import verdicts
 from api.health.evidence import WORKER_FRESH
 from core import page_fetches
 from core.fetching.hosts import pace_key
+from core.payloads.objects import encode_payload
 from tasks.board import content_ready_urls
 from tasks.runtime import Deferred, cancelled, checkpoint, set_progress
 
@@ -383,20 +384,37 @@ async def _cache_pages(task_id: int, source: str, candidates: list[Any]) -> dict
         [p.url for p in candidates if p.url not in have_content]
     )
     cached = fetch_failed = gone = 0
+    # The listing call already carried these postings' text, in the same
+    # shape the ATS resolver would have fetched it. Storing it is an upload
+    # and an insert per page bundle; fetching it again is the request that gets a
+    # worker blocked.
+    listed: list[page_fetches.Fetch] = []
+    listed_bytes = 0
+
+    async def store_listed() -> None:
+        nonlocal cached, listed_bytes
+        listed_bytes = 0
+        if listed:
+            await asyncio.to_thread(page_fetches.record_many, list(listed))
+            cached += len(listed)
+            metrics.INGEST_JOBS.labels(source, "cached").inc(len(listed))
+            listed.clear()
+
     for i, p in enumerate(candidates):
         if i % 10 == 0 and cancelled(task_id):
+            await store_listed()
             logger.info(f"Task {task_id} cancelled mid-ingest")
             return None
         if p.url in have_content or p.url in tried_recently:
             continue
         if p.description:
-            # The listing call already carried the posting's text, in the
-            # same shape the ATS resolver would have fetched it. Storing it
-            # is one insert; fetching it again is the request that gets a
-            # worker blocked.
-            page_fetches.record(p.url, "passed", "listing text", p.description)
-            cached += 1
-            metrics.INGEST_JOBS.labels(source, "cached").inc()
+            # Stored a page bundle at a time: the batch is uploaded before the
+            # posting that would carry it past one bundle joins it.
+            size = len(encode_payload(p.description))
+            if listed and listed_bytes + size > page_fetches.PAGE_BUNDLE_MAX_BYTES:
+                await store_listed()
+            listed.append(page_fetches.Fetch(p.url, "passed", "listing text", p.description))
+            listed_bytes += size
             continue
         try:
             content, closure = await verdicts.refresh_content(
@@ -421,6 +439,7 @@ async def _cache_pages(task_id: int, source: str, candidates: list[Any]) -> dict
         metrics.INGEST_JOBS.labels(source, "cached").inc()
         if cached % 5 == 0:
             set_progress(task_id, i + 1, len(candidates), source)
+    await store_listed()
     return {
         "already_cached": len(have_content),
         "skipped_recent_failure": len(tried_recently),

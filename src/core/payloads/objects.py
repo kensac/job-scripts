@@ -6,12 +6,16 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Callable, Iterable
+import threading
+from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from typing import Any
 
 lazy import boto3
 lazy from botocore.config import Config
+
+from core.pool import in_transaction
 
 # botocore's default connection pool size, named so callers can bound their
 # concurrency by it: a thread beyond the pool waits for a connection, and the
@@ -113,14 +117,17 @@ class BundleMemberRef:
             raise PayloadUnavailable("Invalid bundle member reference") from exc
 
 
-def bundle_groups[T](items: Iterable[T], size: Callable[[T], int]) -> list[list[T]]:
-    """Consecutive runs of items, each a bundle of at most BUNDLE_MAX_BYTES
-    unless one item alone is larger."""
+def bundle_groups[T](
+    items: Iterable[T], size: Callable[[T], int], max_bytes: int | None = None
+) -> list[list[T]]:
+    """Consecutive runs of items, each a bundle of at most `max_bytes`
+    (BUNDLE_MAX_BYTES unless given) unless one item alone is larger."""
+    max_bytes = BUNDLE_MAX_BYTES if max_bytes is None else max_bytes
     groups: list[list[T]] = []
     total = 0
     for item in items:
         member = size(item)
-        if not groups or total + member > BUNDLE_MAX_BYTES:
+        if not groups or total + member > max_bytes:
             groups.append([])
             total = 0
         groups[-1].append(item)
@@ -258,6 +265,29 @@ class PayloadStore:
                 cache[key, size] = members
         return members
 
+    def prefetch(self, bundles: Iterable[tuple[str, int]], cache: BundleCache) -> None:
+        """Read the bundles named by (SHA-256, size) into `cache`, concurrently
+        up to the connection pool, so resolving many members costs one round
+        trip per wave of bundles rather than one per bundle."""
+        wanted = {
+            (sha256, size)
+            for sha256, size in bundles
+            if (f"payloads/v3/sha256/{sha256}.json", size) not in cache
+        }
+        if not wanted:
+            return
+        if any(_DIGEST.fullmatch(sha256) is None or size < 0 for sha256, size in wanted):
+            raise PayloadUnavailable("Invalid bundle reference")
+        with ThreadPoolExecutor(max_workers=min(len(wanted), MAX_CONNECTIONS)) as executor:
+            read = list(
+                executor.map(
+                    lambda bundle: (bundle, self._bundle(self.bucket, bundle[0], bundle[1], None)),
+                    wanted,
+                )
+            )
+        for (sha256, size), members in read:
+            cache[f"payloads/v3/sha256/{sha256}.json", size] = members
+
     def get_digest_member(
         self, bundle_sha256: str, bundle_size: int, member_sha256: str, cache: BundleCache
     ) -> Any:
@@ -290,3 +320,49 @@ class PayloadStore:
         if len(raw) != ref.member_size or hashlib.sha256(raw).hexdigest() != ref.member_sha256:
             raise PayloadUnavailable("Payload bundle member integrity check failed")
         return value
+
+
+type Link = tuple[bytes, int]
+
+
+def put_values(
+    values: Mapping[str, Any], store: PayloadStore, max_bytes: int | None = None
+) -> dict[str, Link]:
+    """Upload values keyed by their own digest as verified bundles, split at
+    `max_bytes` (bundle_groups' default unless given) and uploaded concurrently up to the store's connection pool.
+    Returns each digest's bundle digest and size. Outside transactions."""
+    if in_transaction():
+        raise RuntimeError("Payloads cannot be uploaded inside a database transaction")
+    groups = bundle_groups(values.items(), lambda item: len(encode_payload(item[1])), max_bytes)
+    if not groups:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(len(groups), MAX_CONNECTIONS)) as executor:
+        uploaded = list(executor.map(lambda group: store.put_bundle(dict(group)), groups))
+    return {
+        name: (bytes.fromhex(ref.sha256), ref.size)
+        for refs in uploaded
+        for name, ref in refs.items()
+    }
+
+
+_shared: dict[float | None, PayloadStore] = {}
+_shared_lock = threading.Lock()
+
+
+def shared_store(timeout: float | None = None) -> PayloadStore:
+    """One store per process for each timeout, built once under a lock: a
+    boto3 client is safe to share across threads, but building one from the
+    default session is not, and building one per call costs a client's
+    setup on every read or write."""
+    with _shared_lock:
+        store = _shared.get(timeout)
+        if store is None:
+            store = _shared[timeout] = PayloadStore.from_env(timeout=timeout)
+        return store
+
+
+def forget_shared_stores() -> None:
+    """Drop the shared stores, so the next shared_store reads the
+    configuration again (tests that swap the configuration)."""
+    with _shared_lock:
+        _shared.clear()

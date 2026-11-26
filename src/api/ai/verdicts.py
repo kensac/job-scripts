@@ -401,7 +401,9 @@ async def refresh_page(
         )
         return None, "ats_gone"
     if ats_res.ok and ats_res.text and not fetching.looks_blocked(ats_res.text):
-        fetch_id = page_fetches.record(url, "passed", "ats text", ats_res.text)
+        fetch_id = await asyncio.to_thread(
+            page_fetches.record, url, "passed", "ats text", ats_res.text
+        )
         if ats_res.posted:
             catalog.fill_date_posted(url, ats_res.posted)
         return Page(fetch_id, ats_res.text), None
@@ -424,7 +426,8 @@ async def refresh_page(
     if db.get_config("fetch_engine") == "static_first" and listings_url is None:
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:
-            return Page(page_fetches.record(url, "passed", "static", static), static), None
+            fetch_id = await asyncio.to_thread(page_fetches.record, url, "passed", "static", static)
+            return Page(fetch_id, static), None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)
@@ -440,7 +443,8 @@ async def refresh_page(
         # posting from a careers index, and a URL cannot.
         if redirected:
             logger.info(f"{url} landed elsewhere; letting the check judge the page")
-        return Page(page_fetches.record(url, "passed", "scraped", content), content), None
+        fetch_id = await asyncio.to_thread(page_fetches.record, url, "passed", "scraped", content)
+        return Page(fetch_id, content), None
     else:
         # A fetch that came back with nothing (blocked, timed out, empty) left
         # no record, so every hourly ingest and every backfill tried it again:

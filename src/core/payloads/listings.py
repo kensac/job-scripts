@@ -23,10 +23,11 @@ from psycopg.types.json import Jsonb
 from core.payloads.objects import (
     MAX_CONNECTIONS,
     BundleCache,
+    Link,
     PayloadStore,
     PayloadUnavailable,
-    bundle_groups,
     encode_payload,
+    put_values,
 )
 from core.pool import connection, in_transaction, transaction
 
@@ -75,27 +76,6 @@ def resolve(
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(encode_payload(value)).hexdigest()
-
-
-type Link = tuple[bytes, int]
-
-
-def put_values(values: Mapping[str, Any], store: PayloadStore) -> dict[str, Link]:
-    """Upload values keyed by their own digest as verified bundles, split at
-    BUNDLE_MAX_BYTES and uploaded concurrently up to the store's connection
-    pool. Returns each digest's bundle digest and size. Outside transactions."""
-    if in_transaction():
-        raise RuntimeError("Listing payloads cannot be uploaded inside a database transaction")
-    groups = bundle_groups(values.items(), lambda item: len(encode_payload(item[1])))
-    if not groups:
-        return {}
-    with ThreadPoolExecutor(max_workers=min(len(groups), MAX_CONNECTIONS)) as executor:
-        uploaded = list(executor.map(lambda group: store.put_bundle(dict(group)), groups))
-    return {
-        name: (bytes.fromhex(ref.sha256), ref.size)
-        for refs in uploaded
-        for name, ref in refs.items()
-    }
 
 
 def reference_columns(

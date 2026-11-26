@@ -124,11 +124,10 @@ def _store(result: BatchResult, context: dict[str, Any], parsed: CompExtract) ->
         "basis": comp_basis,
         "model": result.model,
         "row": context["content_row_id"],
-        # A batch submitted before the hash rode in its context is hashed
-        # from the stored row, which is inline: nothing was held by reference
-        # until every image carried this.
+        # Of the text the model read, carried in the request's context. A
+        # batch submitted before the hash rode there stores none, which the
+        # selection reads as unknown, so a later rescrape extracts it again.
         "hash": context.get("content_hash"),
-        "chars": COMP_INPUT_CHARS,
     }
     # The guard is in the statement: it reads the current page row again, so
     # a page fetched after the currency check leaves the answer unwritten. The
@@ -147,13 +146,10 @@ _STORE = (
     INSERT INTO job_comp (url, comp_min, comp_max, comp_text, comp_period, comp_currency,
                           comp_basis, model, content_hash, content_row_id)
     SELECT page.url, %(min)s, %(max)s, %(text)s, %(period)s, %(currency)s, %(basis)s,
-           %(model)s,
-           COALESCE(%(hash)s::text,
-                    encode(sha256(convert_to(left(q.input_content, %(chars)s), 'UTF8')), 'hex')),
-           q.id
+           %(model)s, %(hash)s, q.id
     FROM (VALUES (%(url)s::text)) AS page(url)
     """
-    + CONTENT_LATERAL.format(url="page.url", columns="id, input_content")
+    + CONTENT_LATERAL.format(url="page.url", columns="id")
     + """
     WHERE q.id = %(row)s
     ON CONFLICT (url) DO UPDATE SET

@@ -106,8 +106,8 @@ def schedule_ingest_cycle() -> None:
     # reconcile stores what catalog.AVAILABLE says of them, and writes
     # nothing once the catalog agrees (catalog.reconcile_available).
     enqueue("retire_switched_off", {"cycle": cycle}, dedupe_key=f"retire-off:{cycle}")
-    # Where page text lives follows one rule (tasks.page_text_tiering). One at
-    # a time: two runs would upload the same rows twice.
+    # Page text still inline moves to object storage (tasks.page_text_tiering).
+    # One at a time: two runs would upload the same rows twice.
     if not db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'tier_page_text' "
         "AND status IN ('pending', 'running') LIMIT 1"

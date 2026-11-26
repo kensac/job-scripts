@@ -171,22 +171,33 @@ def paid_answer(
 
 def answer_pointers(url: str) -> list[dict[str, Any]]:
     """Every answer for `url` in id order, with what it points at: `rebuilt`
-    is its input as core.answer_inputs rebuilds it from its fetch, and
-    `call_tokens` its call's."""
-    from core import answer_inputs
+    is its input as core.answer_inputs rebuilds it from its fetch's resolved
+    text, and `call_tokens` its call's."""
+    from core import answer_inputs, page_fetches
 
-    return db.query(
-        f"""
-        SELECT q.check_type, q.page_fetch_id, q.model_call_id,
-               {answer_inputs.sql("q", "f.content")} AS rebuilt,
+    answers = db.query(
+        """
+        SELECT q.id, q.check_type, q.page_fetch_id, q.model_call_id,
                m.total_tokens AS call_tokens, m.duration_ms AS call_duration_ms
         FROM ai_queries q
-        LEFT JOIN page_fetches f ON f.id = q.page_fetch_id
         LEFT JOIN model_calls m ON m.id = q.model_call_id
         WHERE q.url = %s ORDER BY q.id
         """,
         (url,),
     )
+    for answer in answers:
+        text = (
+            page_fetches.text_of(answer["page_fetch_id"])
+            if answer["page_fetch_id"] is not None
+            else None
+        )
+        rebuilt = db.query_one(
+            f"SELECT {answer_inputs.sql('q', '%(text)s::text')} AS rebuilt "
+            "FROM ai_queries q WHERE q.id = %(id)s",
+            {"text": text, "id": answer.pop("id")},
+        )
+        answer["rebuilt"] = rebuilt["rebuilt"] if rebuilt else None
+    return answers
 
 
 def make_fetch(
@@ -332,8 +343,7 @@ def make_requirements(
     # it the row reads as "extracted from we-do-not-know-which page", which the
     # sweep correctly treats as needing a re-read.
     current = db.query_one(
-        "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
-        "ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM page_texts WHERE url = %s AND chars > 200 ORDER BY id DESC LIMIT 1",
         (url,),
     )
     db.execute(
@@ -368,8 +378,7 @@ def make_embedding(url: str, vector: list[float] | None = None, *, seed: float =
         vector[1] = seed
     assert len(vector) == EMBEDDING_DIMENSIONS
     current = db.query_one(
-        "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
-        "ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM page_texts WHERE url = %s AND chars > 200 ORDER BY id DESC LIMIT 1",
         (url,),
     )
     db.execute(
@@ -452,3 +461,13 @@ class ObjectClient:
         if self.fail_get:
             raise OSError("read failed")
         return {"Body": io.BytesIO(self.objects[Bucket, Key])}
+
+
+def ledger_input(row_id: int) -> str | None:
+    """A ledger row's input as the admin ledger shows it: ledger_rows rebuilds
+    it in SQL, which reads NULL for page text held in object storage, so the
+    ledger fills those from the resolved text (query_ledger.query_records)."""
+    from api.routers.admin.query_ledger import query_records
+
+    [record] = query_records("id = %s", (row_id,))
+    return record.input_content

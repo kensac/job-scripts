@@ -169,7 +169,7 @@ async def test_handler_attributes_usage_and_atomically_replaces_projection(f, mo
     payload = board_config(payload)
     task_id = f.make_task("run_managed_board", payload, status="running")
 
-    async def fake_execute(task_id, cfg, snapshot, jobs, hooks):
+    async def fake_execute(task_id, cfg, snapshot, jobs, hooks, decided=None):
         add_ai_result(
             url,
             "passed",

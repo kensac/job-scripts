@@ -146,16 +146,23 @@ async def execute_live(
     snapshot: FilterSnapshot,
     jobs: list[dict[str, Any]],
     hooks: ExecutionHooks,
+    decided: set[str] | None = None,
 ) -> None:
+    """`decided`, when the caller already read it for these jobs and this
+    model, is used as read: a caller that froze pages only for the jobs it
+    found undecided must skip exactly those it did not freeze."""
     # One read of each for the whole run, before the first paid call. Per job,
     # each cost its own BEGIN, read and COMMIT for every candidate, which a
     # worker far from the database pays at full latency (observability.md).
     # Model scope is load-bearing: changing models invalidates the cache rather
     # than treating another model's verdict as this model's work, unless the
     # two were measured and grouped (api.verdict_equivalence).
-    decided = decided_custom_urls(
-        [job["url"] for job in jobs], snapshot.prompt_hash, answering_models("custom", cfg.model)
-    )
+    if decided is None:
+        decided = decided_custom_urls(
+            [job["url"] for job in jobs],
+            snapshot.prompt_hash,
+            answering_models("custom", cfg.model),
+        )
     stored = get_contents(
         [job["url"] for job in jobs if "content" not in job and job["url"] not in decided]
     )

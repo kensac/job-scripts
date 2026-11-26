@@ -7,7 +7,7 @@ import pytest
 
 from api import db, worker
 from api.ai import batch_results, request_snapshots
-from core import batch
+from core import batch, page_fetches
 from core.derivations.embeddings import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL
 from core.payloads.objects import BundleMemberRef, PayloadRef, PayloadStore
 from tasks import runtime
@@ -81,12 +81,13 @@ def _receipt(f):
     for i in range(2):
         url = f"https://embedding.test/{i}"
         f.make_fetch(url, content="a sufficiently detailed posting " * 30)
-        row = db.query_one("SELECT id,input_content FROM page_texts WHERE url=%s", (url,))
+        row = db.query_one("SELECT id FROM page_texts WHERE url=%s", (url,))
+        text = page_fetches.text_of(row["id"])
         originals.append(
             {
                 "url": url,
                 "content_row_id": row["id"],
-                "content_hash": hashlib.sha256(row["input_content"].encode()).hexdigest(),
+                "content_hash": hashlib.sha256(text.encode()).hexdigest(),
             }
         )
     task_id = f.make_task("embed_postings_batch", {}, status="running")

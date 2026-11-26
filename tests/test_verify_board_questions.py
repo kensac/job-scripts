@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from api import db
+from core import store
 from core.answers import joint_question_key
 from core.filters import compute_filter_hash
 from core.store import decided_custom_urls
@@ -95,9 +96,7 @@ async def test_a_posting_no_board_admits_keeps_the_plain_request(f, submitted):
     await _sweep(f)
 
     [spec] = submitted
-    content = db.query_one("SELECT input_content FROM page_texts WHERE url = %s", (url,))[
-        "input_content"
-    ]
+    content = store.get_content(url)
     plain = verify._verification_spec(url, content)
     assert (spec.instructions, spec.input, spec.schema) == (
         plain.instructions,

@@ -7,7 +7,7 @@ from core import pricing
 from core.query_instructions import hydrate
 from tasks import application
 from tasks.filtering import personal_runs as filters
-from tests.factories import filter_config
+from tests.factories import filter_config, ledger_input
 from tests.resume_support import seed_text_resume
 
 MODEL = "gpt-5-mini"
@@ -113,7 +113,7 @@ async def test_every_consumed_filter_result_records_transport_and_cached_usage(
     assert verdict["cost_usd"] == row["cost_usd"]
     assert verdict["filter_name"] == f"user{uid}:{flt['name']}"
     assert hydrate([verdict])[0]["instructions"]
-    assert verdict["input_content"] == (
+    assert ledger_input(verdict["id"]) == (
         "Company: Acme\nJob Title: Engineer\n\nJob Content:\nBuild useful software."
     )
 
