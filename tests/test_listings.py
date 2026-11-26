@@ -11,6 +11,7 @@ import hashlib
 
 from api import db
 from api.ai import verdicts
+from core import page_fetches
 from core.fetching import boards
 from core.fetching.posting import JobPosting
 from core.payloads.listings import resolve
@@ -223,12 +224,9 @@ def test_every_listing_is_stored_with_its_text_and_the_text_becomes_the_content(
     assert rows[dropped.url]["description"] == "Senior text"
     # The kept posting's content came from the listing, not a page fetch.
     assert fetched == []
-    content = db.query_one(
-        "SELECT content AS input_content, method AS reason FROM page_fetches WHERE url = %s",
-        (kept.url,),
-    )
-    assert content is not None and content["input_content"] == kept.description
-    assert content["reason"] == "listing text"
+    content = db.query_one("SELECT id, method FROM page_fetches WHERE url = %s", (kept.url,))
+    assert content is not None and content["method"] == "listing text"
+    assert page_fetches.text_of(content["id"]) == kept.description
 
 
 # Digests do not compress, so these are stored out of line in TOAST: the case

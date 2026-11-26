@@ -117,6 +117,19 @@ def _pull(monkeypatch, f, listed) -> dict:
     return task["progress"]
 
 
+def _listing_objects(objects) -> dict:
+    """The stored objects other than page text bundles: a pull also stores
+    each new posting's listing text as its page (core.page_fetches)."""
+    pages = {
+        f"payloads/v3/sha256/{row['h']}.json"
+        for row in db.query(
+            "SELECT DISTINCT encode(content_object, 'hex') AS h FROM page_fetches "
+            "WHERE content_object IS NOT NULL"
+        )
+    }
+    return {key: raw for key, raw in objects.client.objects.items() if key[1] not in pages}
+
+
 def _referenced(url: str) -> tuple[bool, bool]:
     row = _row(url)
     return row["description_object"] is not None, row["raw_object"] is not None
@@ -130,7 +143,7 @@ def test_a_pull_stores_text_and_raw_as_one_verified_object_and_nothing_inline(
     progress = _pull(monkeypatch, f, [POSTING, untexted])
 
     # One object for the whole pull, not one per value.
-    assert len(objects.client.objects) == 1
+    assert len(_listing_objects(objects)) == 1
     assert progress["listings_inline"] == 0
     row = _row(POSTING.url)
     assert (row["description"], row["raw"]) == ("", {})
@@ -152,7 +165,7 @@ def test_a_repull_of_identical_content_uploads_and_writes_nothing(monkeypatch, f
     _pull(monkeypatch, f, [POSTING, LISTED[1]])
     before = _versions()
     stored = dict(objects.client.objects)
-    assert len(stored) == 1
+    assert len(_listing_objects(objects)) == 1
 
     _pull(monkeypatch, f, [POSTING, LISTED[1]])
     _pull(monkeypatch, f, [dataclasses.replace(POSTING, description=""), LISTED[1]])
@@ -168,8 +181,8 @@ def test_a_changed_raw_record_uploads_only_itself(monkeypatch, f, objects):
 
     _pull(monkeypatch, f, [dataclasses.replace(POSTING, raw={"id": 9})])
 
-    assert len(objects.client.objects) == 2
-    [new] = [raw for raw in objects.client.objects.values() if LONG_TEXT.encode() not in raw]
+    assert len(_listing_objects(objects)) == 2
+    [new] = [raw for raw in _listing_objects(objects).values() if LONG_TEXT.encode() not in raw]
     assert b'{"id":9}' in new
     row = _row(POSTING.url)
     assert row["description_object"] == description_object

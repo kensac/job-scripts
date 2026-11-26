@@ -117,10 +117,11 @@ class BundleMemberRef:
 
 
 def bundle_groups[T](
-    items: Iterable[T], size: Callable[[T], int], max_bytes: int = BUNDLE_MAX_BYTES
+    items: Iterable[T], size: Callable[[T], int], max_bytes: int | None = None
 ) -> list[list[T]]:
-    """Consecutive runs of items, each a bundle of at most `max_bytes` unless
-    one item alone is larger."""
+    """Consecutive runs of items, each a bundle of at most `max_bytes`
+    (BUNDLE_MAX_BYTES unless given) unless one item alone is larger."""
+    max_bytes = BUNDLE_MAX_BYTES if max_bytes is None else max_bytes
     groups: list[list[T]] = []
     total = 0
     for item in items:
@@ -324,10 +325,10 @@ type Link = tuple[bytes, int]
 
 
 def put_values(
-    values: Mapping[str, Any], store: PayloadStore, max_bytes: int = BUNDLE_MAX_BYTES
+    values: Mapping[str, Any], store: PayloadStore, max_bytes: int | None = None
 ) -> dict[str, Link]:
     """Upload values keyed by their own digest as verified bundles, split at
-    `max_bytes` and uploaded concurrently up to the store's connection pool.
+    `max_bytes` (bundle_groups' default unless given) and uploaded concurrently up to the store's connection pool.
     Returns each digest's bundle digest and size. Outside transactions."""
     if in_transaction():
         raise RuntimeError("Payloads cannot be uploaded inside a database transaction")

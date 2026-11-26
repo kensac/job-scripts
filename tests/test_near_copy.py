@@ -45,10 +45,11 @@ async def _sweep(f) -> None:
 
 
 def _content(url: str, text: str) -> None:
-    db.execute(
-        "UPDATE page_fetches SET content = %s WHERE url = %s",
-        (text, url),
-    )
+    """The posting's page now reads `text`: a newer fetch, the page every
+    reader sees."""
+    from tests.factories import make_fetch
+
+    make_fetch(url, content=text)
 
 
 @pytest.mark.asyncio

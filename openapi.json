@@ -21731,16 +21731,6 @@
             }
           },
           {
-            "name": "deep",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Deep"
-            }
-          },
-          {
             "name": "sources",
             "in": "query",
             "required": false,

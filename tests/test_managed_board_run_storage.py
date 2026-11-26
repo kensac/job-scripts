@@ -63,6 +63,7 @@ def test_a_title_the_review_gate_screens_never_enters_the_run(
 def test_storage_outage_at_admission_queues_nothing(client, admin_headers, f, monkeypatch, objects):
     _admissible(monkeypatch)
     board, _job_id, _url = _board_and_job(client, admin_headers, f)
+    pages = dict(objects.client.objects)
     objects.client.fail_put = True
 
     response = client.post(f"/v1/admin/managed-boards/{board['id']}/run", headers=admin_headers)
@@ -70,7 +71,8 @@ def test_storage_outage_at_admission_queues_nothing(client, admin_headers, f, mo
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "STORAGE_UNAVAILABLE"
     assert db.query_one("SELECT count(*) AS n FROM tasks")["n"] == 0
-    assert objects.client.objects == {}
+    # Only the board's postings' page text, written before the outage.
+    assert objects.client.objects == pages
 
 
 @pytest.mark.asyncio

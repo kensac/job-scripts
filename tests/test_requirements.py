@@ -5,6 +5,7 @@ import hashlib
 import pytest
 
 from api import db
+from core import page_fetches
 from core.derivations import skills
 from core.derivations.requirements import CLEARANCE_LEVELS, DEGREE_LEVELS, MAX_PLAUSIBLE_YOE
 from tasks.derivations.requirements import (
@@ -222,11 +223,13 @@ class TestContentLateralParity:
 
         job_id, url = f.make_ready_job(content="RAW PAGE " * 40)
         for source, expr in (("jobs j", "j.url"), ("(SELECT %(u)s::text AS url) c", "c.url")):
-            rows = db.query(
-                f"SELECT q.input_content FROM {source} "
-                f"{CONTENT_LATERAL.format(url=expr, columns='input_content')} "
-                f"WHERE {expr} = %(u)s",
-                {"u": url},
+            rows = page_fetches.resolve(
+                db.query(
+                    f"SELECT q.input_content, q.content_ref FROM {source} "
+                    f"{CONTENT_LATERAL.format(url=expr, columns='input_content, content_ref')} "
+                    f"WHERE {expr} = %(u)s",
+                    {"u": url},
+                )
             )
             assert len(rows) == 1
             assert rows[0]["input_content"].startswith("RAW PAGE")
@@ -325,8 +328,7 @@ class TestRescrapedPages:
 
     def _current_row(self, url: str) -> int:
         row = db.query_one(
-            "SELECT id FROM page_texts WHERE url = %s AND length(input_content) > 200 "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT id FROM page_texts WHERE url = %s AND chars > 200 ORDER BY id DESC LIMIT 1",
             (url,),
         )
         assert row is not None
@@ -347,7 +349,7 @@ class TestRescrapedPages:
         from tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
-        rows = db.query(_CANDIDATES, {"cap": 10})
+        rows = page_fetches.resolve(db.query(_CANDIDATES, {"cap": 10}))
         row = next(r for r in rows if r["url"] == url)
         _store(
             url,
@@ -357,7 +359,7 @@ class TestRescrapedPages:
         )
         # Same text arrives again under a new row id.
         f.make_fetch(url, content=CONTENT)
-        candidates = db.query(_CANDIDATES, {"cap": 10})
+        candidates = page_fetches.resolve(db.query(_CANDIDATES, {"cap": 10}))
         assert url in [r["url"] for r in candidates], "the newer row makes it a candidate"
         assert url not in [
             r["url"]
@@ -372,7 +374,7 @@ class TestRescrapedPages:
         from tasks import rescrape
 
         _, url = f.make_ready_job(content=CONTENT)
-        rows = db.query(_CANDIDATES, {"cap": 10})
+        rows = page_fetches.resolve(db.query(_CANDIDATES, {"cap": 10}))
         row = next(r for r in rows if r["url"] == url)
         _store(
             url,
@@ -382,7 +384,7 @@ class TestRescrapedPages:
         )
         f.make_fetch(url, content=CONTENT)
         rescrape.drop_unchanged(
-            db.query(_CANDIDATES, {"cap": 10}),
+            page_fetches.resolve(db.query(_CANDIDATES, {"cap": 10})),
             table="job_requirements",
             limit=REQUIREMENTS_INPUT_CHARS,
         )

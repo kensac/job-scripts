@@ -1,4 +1,4 @@
-"""ledger_rows reads an answer's input through its fetch and its usage
+"""The ledger reads an answer's input through its fetch and its usage
 through its call, and shows what the stored copies showed."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from api import db
 from core.answers import VERIFY_INPUT_CHARS
 from core.filters import build_custom_input
 from core.store import add_ai_result
-from tests.factories import paid_answer
+from tests.factories import ledger_input, paid_answer
 
 PAGE = "a posting body that is long enough to be a page " * 10
 NANO = "gpt-5-nano"
@@ -17,13 +17,13 @@ NANO = "gpt-5-nano"
 
 def _row(answer_id: int) -> dict:
     row = db.query_one(
-        "SELECT input_content, prompt_tokens, completion_tokens, total_tokens, cached_tokens, "
+        "SELECT prompt_tokens, completion_tokens, total_tokens, cached_tokens, "
         "cache_write_tokens, reasoning_tokens, duration_ms, cost_usd FROM ledger_rows "
         "WHERE id = %s",
         (answer_id,),
     )
     assert row is not None
-    return row
+    return {"input_content": ledger_input(answer_id), **row}
 
 
 def test_an_answer_shows_the_input_rebuilt_from_the_fetch_it_names(f):

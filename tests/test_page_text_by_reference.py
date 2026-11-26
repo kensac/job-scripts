@@ -1,16 +1,16 @@
-"""A page fetch's text held by reference to a verified bundle object, and the
-readers that must see it as if it were inline (core.page_fetches.resolve)."""
+"""A page fetch's text held by reference to a verified bundle object, the
+shape every fetch is written in, and the readers that must see it as its
+text (core.page_fetches.resolve)."""
 
 from __future__ import annotations
-
-import hashlib
 
 import psycopg
 import pytest
 
 from api import db
 from core import page_fetches, store
-from core.payloads.objects import PayloadStore, PayloadUnavailable, encode_payload
+from core.filters import build_custom_input
+from core.payloads.objects import PayloadStore, PayloadUnavailable
 from tasks.derivations import compensation
 from tests.factories import ObjectClient
 
@@ -25,23 +25,8 @@ def objects(monkeypatch):
     return held
 
 
-def _hold(objects: PayloadStore, fetch_id: int) -> None:
-    """Move one fetch's text into a bundle, the shape the mover leaves."""
-    row = db.query_one("SELECT content FROM page_fetches WHERE id = %s", (fetch_id,))
-    assert row is not None
-    text = row["content"]
-    member = hashlib.sha256(encode_payload(text)).hexdigest()
-    ref = objects.put_bundle({member: text})[member]
-    db.execute(
-        "UPDATE page_fetches SET content = NULL, content_sha256 = %s, content_object = %s, "
-        "content_object_size = %s, content_chars = %s WHERE id = %s",
-        (bytes.fromhex(member), bytes.fromhex(ref.sha256), ref.size, len(text), fetch_id),
-    )
-
-
 def test_a_held_fetch_reads_as_its_text_through_every_helper(f, objects):
     fetch_id = f.make_fetch(URL, content=TEXT)
-    _hold(objects, fetch_id)
 
     assert db.query_one("SELECT input_content FROM page_texts WHERE id = %s", (fetch_id,)) == {
         "input_content": None
@@ -61,17 +46,16 @@ def test_a_held_fetch_reads_as_its_text_through_every_helper(f, objects):
 
 
 def test_a_link_that_cannot_be_read_fails_instead_of_reading_empty(f, objects):
-    fetch_id = f.make_fetch(URL, content=TEXT)
-    _hold(objects, fetch_id)
+    f.make_fetch(URL, content=TEXT)
     objects.client.objects.clear()
     with pytest.raises(PayloadUnavailable):
         store.get_content(URL)
 
 
-def test_a_half_moved_row_is_refused(f):
+def test_a_half_moved_row_is_refused(f, objects):
     fetch_id = f.make_fetch(URL, content=TEXT)
     with pytest.raises(psycopg.errors.CheckViolation):
-        db.execute("UPDATE page_fetches SET content_chars = 5 WHERE id = %s", (fetch_id,))
+        db.execute("UPDATE page_fetches SET content = %s WHERE id = %s", (TEXT, fetch_id))
 
 
 def test_the_admin_detail_rebuilds_an_answer_from_held_text(client, admin_headers, f, objects):
@@ -85,12 +69,10 @@ def test_the_admin_detail_rebuilds_an_answer_from_held_text(client, admin_header
         job_title="Engineer",
         page_fetch_id=fetch_id,
     )
-    before = client.get(f"/v1/admin/queries/{answer_id}", headers=admin_headers).json()
-    _hold(objects, fetch_id)
+    expected = build_custom_input("Acme", "Engineer", TEXT)
 
     after = client.get(f"/v1/admin/queries/{answer_id}", headers=admin_headers).json()
-    assert after["input_content"] == before["input_content"]
-    assert TEXT in after["input_content"]
+    assert after["input_content"] == expected
     fetch = client.get(f"/v1/admin/queries/{fetch_id}", headers=admin_headers).json()
     assert fetch["input_content"] == TEXT
 
@@ -100,7 +82,7 @@ def test_the_admin_detail_rebuilds_an_answer_from_held_text(client, admin_header
     ).json()["rows"]
     assert {r["id"]: r["input_content"] for r in drawer} == {
         fetch_id: TEXT,
-        answer_id: before["input_content"],
+        answer_id: expected,
     }
 
 

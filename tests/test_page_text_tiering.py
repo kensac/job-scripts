@@ -69,7 +69,7 @@ def test_many_fetches_keep_their_order_and_share_bundles(f, objects):
     ids = page_fetches.record_many(fetches)
 
     assert ids == sorted(ids) and len(ids) == len(fetches)
-    for fetch, fetch_id in zip(fetches[:5], ids, strict=True):
+    for fetch, fetch_id in zip(fetches[:5], ids[:5], strict=True):
         assert page_fetches.text_of(fetch_id) == fetch.content
     assert len({_stored(i)["content_object"] for i in ids[:5]}) == 1
     failed = _stored(ids[5])

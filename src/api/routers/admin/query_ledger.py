@@ -53,7 +53,6 @@ def _query_filter_clause(
     config: str | None,
     url: str | None,
     q: str | None,
-    deep: bool = False,
     sources: str | None = None,
     reason_group: str | None = None,
     evidence_missing: bool = False,
@@ -96,15 +95,11 @@ def _query_filter_clause(
     if q:
         # A sequential scan of ai_queries: company and job_title have no
         # trigram index (7c0b33a7fd95 dropped them unscanned), and an OR is
-        # index-backed only when every arm is. deep=true adds input_content,
-        # the page dumps, which multiplies what that scan reads. A page held
-        # by reference (core.page_fetches) is not in the database to match.
-        cols = (
-            "(reason ILIKE %(q)s OR url ILIKE %(q)s OR company ILIKE %(q)s OR job_title ILIKE %(q)s"
+        # index-backed only when every arm is. Page text is not searched: it
+        # is held in object storage (core.page_fetches), not in the database.
+        clauses.append(
+            "(reason ILIKE %(q)s OR url ILIKE %(q)s OR company ILIKE %(q)s OR job_title ILIKE %(q)s)"
         )
-        if deep:
-            cols += " OR input_content ILIKE %(q)s"
-        clauses.append(cols + ")")
         params["q"] = f"%{q}%"
     # The filter-insights aggregate classifies reasons in Python; this
     # drill-through has to reproduce that selection in SQL. If the two ever
@@ -296,7 +291,6 @@ def list_queries(
     config: str | None = None,
     url: str | None = None,
     q: str | None = None,
-    deep: bool = False,
     sources: str | None = None,
     reason_group: str | None = None,
     evidence_missing: bool = False,
@@ -316,7 +310,6 @@ def list_queries(
             config,
             url,
             q,
-            deep,
             sources,
             reason_group,
             evidence_missing,
@@ -433,11 +426,10 @@ def query_records(where: str, params: tuple) -> list[QueryRecord]:
     rows = db.query(
         f"SELECT {_QUERY_DETAIL_COLUMNS}, instructions_id FROM ledger_rows WHERE {where}", params
     )
-    # ponytail: one lookup per held row; batch it if a posting's history grows
-    # past a drawer's worth of calls.
+    held = _held_inputs([row for row in rows if row["input_content"] is None])
     for row in rows:
         if row["input_content"] is None:
-            row["input_content"] = _held_input(row)
+            row["input_content"] = held.get(row["id"])
     return [QueryRecord.model_validate(row) for row in query_instructions.hydrate(rows)]
 
 
@@ -449,23 +441,53 @@ def get_query(query_id: int, user: AuthedUser = Depends(require_admin)) -> Query
     return records[0]
 
 
-def _held_input(row: dict) -> str | None:
-    """The input of a row whose page text is held by reference, which
-    ledger_rows cannot rebuild in SQL: a fetch row is its own text, and an
-    answer's is core.answer_inputs over its fetch's text, as the view does."""
-    if row["config_name"] == "content-cache":
-        return page_fetches.text_of(row["id"])
-    answer = db.query_one("SELECT page_fetch_id FROM ai_queries WHERE id = %s", (row["id"],))
-    fetch_id = answer["page_fetch_id"] if answer else None
-    text = page_fetches.text_of(fetch_id) if fetch_id is not None else None
-    if text is None:
-        return None
-    rebuilt = db.query_one(
-        f"SELECT {answer_inputs.sql('q', '%(text)s::text')} AS input "
-        "FROM ai_queries q WHERE q.id = %(id)s",
-        {"text": text, "id": row["id"]},
-    )
-    return rebuilt["input"] if rebuilt else None
+def _held_inputs(rows: list[dict]) -> dict[int, str]:
+    """The inputs of rows whose page text is held by reference, by row id,
+    which ledger_rows cannot rebuild in SQL: a fetch row is its own text, and
+    an answer's is core.answer_inputs over its fetch's text, as the view does.
+    One read of the answers, one resolve of every page, one rebuild."""
+    if not rows:
+        return {}
+    fetch_of = {row["id"]: row["id"] for row in rows if row["config_name"] == "content-cache"}
+    answers = [row["id"] for row in rows if row["config_name"] != "content-cache"]
+    if answers:
+        for answer in db.query(
+            "SELECT id, page_fetch_id FROM ai_queries "
+            "WHERE id = ANY(%s) AND page_fetch_id IS NOT NULL",
+            (answers,),
+        ):
+            fetch_of[answer["id"]] = answer["page_fetch_id"]
+    if not fetch_of:
+        return {}
+    texts = {
+        page["id"]: page["input_content"]
+        for page in page_fetches.resolve(
+            db.query(
+                "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
+                (list(set(fetch_of.values())),),
+            )
+        )
+    }
+    answered = set(answers)
+    inputs = {
+        row_id: texts[fetch_id]
+        for row_id, fetch_id in fetch_of.items()
+        if row_id not in answered and fetch_id in texts
+    }
+    rebuild = [
+        (row_id, texts[fetch_id])
+        for row_id, fetch_id in fetch_of.items()
+        if row_id in answered and fetch_id in texts
+    ]
+    if rebuild:
+        for rebuilt in db.query(
+            f"SELECT q.id, {answer_inputs.sql('q', 't.text')} AS input "
+            "FROM ai_queries q JOIN unnest(%s::bigint[], %s::text[]) AS t(id, text) "
+            "ON q.id = t.id",
+            ([row_id for row_id, _ in rebuild], [text for _, text in rebuild]),
+        ):
+            inputs[rebuilt["id"]] = rebuilt["input"]
+    return inputs
 
 
 class DeleteQueries(BaseModel):

@@ -664,9 +664,9 @@ than MIN_CONTENT_CHARS" is answered the same in both shapes.
 **SQL that computes on the text cannot see a held row.** A hash or a cut of
 the text is computed in Python from resolved text (the comp sweep's
 `content_hash`). `ledger_rows` rebuilds an answer's input in SQL and reads
-NULL for a held fetch, so the admin detail rebuilds it from `text_of`
-through the same `core.answer_inputs.sql`. The admin ledger's deep search
-does not match held text.
+NULL for a held fetch, so the admin ledger rebuilds it from the resolved
+text through the same `core.answer_inputs.sql`, every row of a page in one
+resolve. The admin ledger's search does not match page text.
 
 **Inline text is moved, oldest first.** The `tier_page_text` task
 (`tasks.page_text_tiering`) moves every inline row to object storage until
