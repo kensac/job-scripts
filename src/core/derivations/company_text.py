@@ -14,6 +14,8 @@ its primary role family (job_profiles):
     nomic-embed-text-v1.5, as written               0.78           0.30
     shared paragraphs removed                       0.61           0.38
     shared paragraphs removed, name masked          0.41           0.44
+      (masked as phrases, mask_company)             0.41           0.44
+      (full name only)                              0.44           0.43
     looser threshold (2 titles, 10%), masked        0.38           0.43
 
 A paragraph is shared when it appears under at least SHARED_MIN_TITLES of the
@@ -44,11 +46,6 @@ MIN_KEPT_CHARS = 200
 # company the comparison above measured, and at the throughput Garage served
 # held pages (2026-11-26) a fraction of a second of reads per company.
 PROFILE_TITLES = 40
-
-# Words of a company name that name nothing: legal forms and connectives.
-_NAME_NOISE = frozenset(
-    {"inc", "llc", "ltd", "corp", "co", "the", "and", "of", "group", "services", "company"}
-)
 
 
 def company_key(company: str) -> str:
@@ -86,15 +83,49 @@ def shared_paragraphs(postings: Iterable[tuple[str, str]]) -> tuple[int, set[byt
     return len(titles), {key for key, seen in titles_of.items() if len(seen) >= floor}
 
 
-def _name_words(company: str) -> list[str]:
-    words = {w for w in re.split(r"[^\w&]+", company.lower()) if len(w) > 2}
-    return sorted(words - _NAME_NOISE, key=len, reverse=True)
+# Words of a company name that name nothing: legal forms and connectives.
+_NAME_NOISE = frozenset(
+    {
+        "inc",
+        "llc",
+        "ltd",
+        "corp",
+        "corporation",
+        "co",
+        "limited",
+        "plc",
+        "gmbh",
+        "the",
+        "and",
+        "of",
+        "group",
+        "services",
+        "company",
+    }
+)
+
+
+def _name_phrases(company: str) -> list[str]:
+    """What a posting calls its company: the full name, the name without its
+    legal form, and the name's first word, which is how a posting shortens
+    "Acme Robotics" to "Acme". Field words later in the name ("Robotics")
+    are left alone; a one-word name is masked as that word wherever it
+    appears, the cost of masking it at all."""
+    words = [w for w in re.split(r"[^\w&]+", company.lower()) if w]
+    meaningful = [w for w in words if w not in _NAME_NOISE]
+    phrases = {" ".join(words), " ".join(meaningful)}
+    if meaningful:
+        phrases.add(meaningful[0])
+    return sorted((p for p in phrases if len(p) > 2), key=len, reverse=True)
 
 
 def mask_company(text: str, company: str) -> str:
-    """The company's name, word by word, replaced by "the company"."""
-    for word in _name_words(company):
-        text = re.sub(rf"\b{re.escape(word)}\b", "the company", text, flags=re.IGNORECASE)
+    """The company's name replaced by "the company", longest phrase first.
+    On the set above this scored 0.41 and 0.44, as masking every word of the
+    name did, against 0.44 and 0.43 for the full name alone."""
+    for phrase in _name_phrases(company):
+        pattern = r"[\s,.]+".join(map(re.escape, phrase.split()))
+        text = re.sub(rf"\b{pattern}\b", "the company", text, flags=re.IGNORECASE)
     return text
 
 

@@ -171,6 +171,18 @@ def test_paragraphs_a_company_repeats_across_roles_are_shared_and_one_roles_are_
     text = company_text.embedding_text(_posting("Data Analyst") * 3, "Acme Robotics, Inc.", shared)
     assert ABOUT not in text and EEO not in text
     assert "acme" not in text.lower() and "the company" in text
+    assert "warehouse" not in text, "the shared about-us paragraph is gone"
+
+
+def test_masking_the_name_keeps_the_field_words_in_it():
+    from core.derivations import company_text
+
+    text = company_text.mask_company(
+        "Acme Robotics builds robotics. At Acme we love it. ACME ROBOTICS, INC. hires.",
+        "Acme Robotics, Inc.",
+    )
+    assert "acme" not in text.lower()
+    assert "builds robotics" in text
 
 
 def test_a_posting_left_too_short_by_stripping_is_embedded_as_written():
