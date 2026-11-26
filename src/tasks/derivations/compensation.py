@@ -65,7 +65,7 @@ def _select(cap: int, payload: dict[str, Any]) -> list[Row]:
                OR {_UNREADABLE})
           AND {catalog.IS_AVAILABLE.format(job="j")}
           AND {eligible}
-          AND {verdict_reads.verified_open("j.url")}
+          AND {verdict_reads.verified_open("j")}
         ORDER BY j.id DESC
         LIMIT %(cap)s
         """,

@@ -4,8 +4,10 @@ triggers could not see."""
 
 from __future__ import annotations
 
+import pytest
+
 from api import db
-from core import latest_posting_checks
+from core import latest_posting_checks, verdict_reads
 from core.pool import pool, transaction
 
 URL = "https://jobs.test/posting"
@@ -177,3 +179,42 @@ def test_a_fold_waits_for_the_one_running_and_then_runs():
         waiter.join(timeout=30)
     assert results == [{"written": 1, "removed": 0, "cleared": 2}]
     assert _dirty() == []
+
+
+def _read(job: int, check: str) -> tuple[str | None, str | None]:
+    row = db.query_one(
+        f"SELECT {verdict_reads.posting_status('j', check)} AS stored, "
+        f"{verdict_reads.latest_status('j.url', check)} AS live FROM jobs j WHERE j.id = %s",
+        (job,),
+    )
+    assert row is not None
+    return row["stored"], row["live"]
+
+
+def test_a_reader_sees_the_latest_answer_before_and_after_the_fold():
+    """A dirty url is read live, so a reader is never behind the fold; a
+    folded one is read from the projection."""
+    job = _job()
+    assert _read(job, "closed") == (None, None)
+    _answer("closed", "passed")
+    assert _read(job, "closed") == ("passed", "passed")  # dirty: live
+    latest_posting_checks.fold()
+    assert _read(job, "closed") == ("passed", "passed")  # folded: projection
+    _answer("closed", "rejected")
+    assert _read(job, "closed") == ("rejected", "rejected")
+    assert _read(job, "clearance") == (None, None)
+
+
+def test_a_clean_url_is_read_from_the_projection():
+    job = _job()
+    _answer("closed", "passed")
+    latest_posting_checks.fold()
+    # Projection and verdicts made to differ with no dirty row: the reader
+    # must be reading the projection, not probing verdicts.
+    db.execute("UPDATE latest_posting_checks SET status = 'rejected' WHERE job_id = %s", (job,))
+    assert _read(job, "closed") == ("rejected", "passed")
+
+
+def test_custom_answers_are_not_read_from_the_projection():
+    with pytest.raises(ValueError):
+        verdict_reads.posting_status("j", "custom")

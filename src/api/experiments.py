@@ -190,7 +190,7 @@ def sample(n: int, seed: str) -> list[dict[str, Any]]:
                 SELECT j.url, j.company, j.title, q.input_content, q.content_ref
                 FROM jobs j
                 {CONTENT_LATERAL.format(url="j.url", columns="input_content, content_ref")}
-                WHERE j.url = ANY(%(urls)s) AND {verdict_reads.verified_open("j.url")}
+                WHERE j.url = ANY(%(urls)s) AND {verdict_reads.verified_open("j")}
                 """,
                     {"urls": chunk},
                 )

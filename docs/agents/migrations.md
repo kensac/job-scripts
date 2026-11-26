@@ -207,8 +207,10 @@ triggers on `ai_queries` and `jobs` only append the touched urls to
 `latest_posting_checks_dirty`, a table with no unique key, so a writer takes
 no lock it did not take before; `tasks.latest_posting_checks` is the only
 writer of the projection, folding the dirty urls in one statement under an
-advisory lock each cycle and every job once a day; and a reader takes a url
-with a dirty row from `verdicts` (migration `d81c5e2b7a43`). Read per
+advisory lock each cycle and every job once a day; and a reader
+(`verdict_reads.posting_status`) takes a url with a dirty row from
+`verdicts` and every other url from the projection (migration
+`d81c5e2b7a43`). Read per
 posting, that answer was an index probe into `ai_queries` for every
 candidate of a catalog scan: 461,746 probes and 11.6 s for one month of
 available postings, against 0.8 s hashing a table of latest answers
