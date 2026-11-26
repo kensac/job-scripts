@@ -32,6 +32,7 @@ shared text, is core.derivations.company_text.
 from __future__ import annotations
 
 import math
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -125,21 +126,78 @@ def slots(session: requests.Session, url: str) -> int:
     return total
 
 
+_frames: dict[str, tuple[list[int], list[int]]] = {}
+_frames_lock = threading.Lock()
+
+# A word to check the frame against: any word the vocabulary holds.
+_FRAME_SAMPLE = "posting"
+
+
+def _tokenize(session: requests.Session, url: str, text: str, special: bool) -> list[int]:
+    """`text`'s token ids, with the model's special tokens around them when
+    `special`. Special-token strings inside the text ("[SEP]" in a scraped
+    page) stay text."""
+    body = {"content": text, "add_special": special, "parse_special": False}
+    return _post(session, url, "/tokenize", body)["tokens"]
+
+
+def read_frame(session: requests.Session, url: str) -> tuple[list[int], list[int]]:
+    """Reads, checks and keeps the token ids the server at `url` puts before
+    and after a document's own when given text: its opening special token
+    and DOCUMENT_PREFIX, and its closing special token. Read from the
+    server, so nothing about the model's vocabulary is written here; asked
+    again each time the server is (the sweep's probe before each batch), so
+    a server restarted with another model is not framed with the old one's
+    ids. Raises EmbeddingUnavailable when framing token ids this way would
+    not equal the server's own tokenization of the prefixed text (a
+    tokenizer that does not split on whitespace), so such a server is left
+    out rather than fed ids it would not produce."""
+    framed = _tokenize(session, url, DOCUMENT_PREFIX, special=True)
+    prefix = _tokenize(session, url, DOCUMENT_PREFIX, special=False)
+    starts = [i for i in range(len(framed)) if framed[i : i + len(prefix)] == prefix]
+    if not starts:
+        raise EmbeddingUnavailable(f"embedding server {url} frames the prefix unexpectedly")
+    end = starts[0] + len(prefix)
+    opening, closing = framed[:end], framed[end:]
+    sample = _tokenize(session, url, _FRAME_SAMPLE, special=False)
+    whole = _tokenize(session, url, DOCUMENT_PREFIX + _FRAME_SAMPLE, special=True)
+    if whole != [*opening, *sample, *closing]:
+        raise EmbeddingUnavailable(
+            f"embedding server {url} does not tokenize the prefix apart from the text"
+        )
+    with _frames_lock:
+        _frames[url] = (opening, closing)
+    return opening, closing
+
+
+def _frame(session: requests.Session, url: str) -> tuple[list[int], list[int]]:
+    with _frames_lock:
+        frame = _frames.get(url)
+    return frame if frame is not None else read_frame(session, url)
+
+
 def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
-    """One posting's vector from the server at `url`: chunked to the model's
-    window, chunk vectors averaged by token count, normalised."""
+    """One posting's vector from the server at `url`: its text tokenized
+    once, cut into chunks the model's window holds, each chunk embedded as
+    exactly those tokens (framed as the server frames text: the prefix and
+    special tokens around them), and the chunk vectors averaged by token
+    count, then normalised. Two requests a posting once the server's frame
+    is known (read_frame, four more each time it is read); embedding the tokens
+    rather than text made from them again means what is embedded is the
+    posting's own tokenization (turning a chunk back into text and that text
+    back into tokens changed 2 of 200 postings' tokens, 2026-11-26)."""
     text = text[:EMBEDDING_INPUT_CHARS]
-    tokens: Sequence[int] = _post(session, url, "/tokenize", {"content": text})["tokens"]
+    tokens: Sequence[int] = _tokenize(session, url, text, special=False)
     spans = [tokens[s : s + CHUNK_TOKENS] for s in range(0, len(tokens), CHUNK_TOKENS)] or [[]]
-    chunks = [
-        _post(session, url, "/detokenize", {"tokens": list(span)})["content"] if span else ""
-        for span in spans
-    ]
-    data = _post(session, url, "/v1/embeddings", {"input": [DOCUMENT_PREFIX + c for c in chunks]})[
-        "data"
-    ]
+    opening, closing = _frame(session, url)
+    data = _post(
+        session,
+        url,
+        "/v1/embeddings",
+        {"input": [[*opening, *span, *closing] for span in spans]},
+    )["data"]
     vectors = [item["embedding"] for item in sorted(data, key=lambda item: item["index"])]
-    if len(vectors) != len(chunks) or any(len(v) != LOCAL_EMBEDDING_DIMENSIONS for v in vectors):
+    if len(vectors) != len(spans) or any(len(v) != LOCAL_EMBEDDING_DIMENSIONS for v in vectors):
         raise EmbeddingUnavailable("embedding server returned vectors of another shape")
     weights = [max(1, len(span)) for span in spans]
     mean = [
@@ -149,4 +207,4 @@ def embed_document(session: requests.Session, url: str, text: str) -> Embedded:
     norm = math.sqrt(sum(x * x for x in mean))
     if not norm or not math.isfinite(norm):
         raise EmbeddingUnavailable("embedding server returned a zero or non-finite vector")
-    return Embedded([x / norm for x in mean], len(chunks))
+    return Embedded([x / norm for x in mean], len(spans))
