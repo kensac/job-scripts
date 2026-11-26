@@ -570,8 +570,18 @@ control from the former. An endpoint with no user dimension (fleet workers,
 the shared checks, source analytics) leaves `user` out of `filterable` rather
 than pretending.
 
-**Lists page in one of four shapes, and a new list uses the first.** They
-are not unified because each is a published contract the frontend reads.
+**Lists are connections (`api.connections`).** A client asks for the
+`first` nodes `after` a cursor and is given `nodes`, `page_info`
+(`end_cursor`, `has_next_page`) and `total_count`. There are no page numbers
+and no offsets, and no default page size: the client names how many it shows
+(the frontend's one ledger step), bounded by `MAX_FIRST`. A cursor is opaque,
+names the query it was read under (a cursor from another query is refused
+with 400) and the last node's position in the order (its sort value, then a
+unique tie-break), so rows added or recomputed between requests neither
+repeat nor go missing. This is the owner's rule (2026-11-26): no pagination
+anywhere. Source analytics is a connection.
+
+Older lists still page in other shapes and are to be converted, not copied:
 
 | Shape | In | Out | Where |
 |---|---|---|---|
@@ -580,12 +590,7 @@ are not unified because each is a published contract the frontend reads.
 | Offset cursor | `limit`, `cursor` (an offset as a string) | `has_more`, `next_cursor` | `/admin/companies` only |
 | Limit and offset | `limit`, `offset` | `has_more`, sometimes `total` | `GET /user/jobs`, and older admin lists: users, sources, screened postings, batch rows, spend rows, filter insights, the catalog |
 
-Use a page number unless rows arrive while someone is paging and a skipped
-or repeated row would matter; then use an id or keyset cursor. Do not add
-the last two shapes.
-
-Page-number lists use `api.pagination.Page` for bounds, offsets and metadata.
-Rows, totals and summaries share the same selection; pagination never narrows
+Rows, totals and summaries share the same selection: a cursor never narrows
 a total or summary.
 
 ## The ATS on the board

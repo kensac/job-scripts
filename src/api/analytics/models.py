@@ -5,6 +5,7 @@ import decimal
 
 from pydantic import BaseModel
 
+from api.connections import PageInfo
 from api.rates import Rate
 
 
@@ -267,12 +268,13 @@ class BoardAnalyticsList(BaseModel):
     """`caveats` ships with the numbers rather than beside them on a wiki,
     because a caveat a reader has to go and find is one that will be missed."""
 
-    rows: list[BoardAnalytics]
+    # The boards matching the search after the cursor, in the requested
+    # order (api.connections).
+    nodes: list[BoardAnalytics]
+    page_info: PageInfo
+    total_count: int
     min_sample: int
     caveats: list[str]
-    # The boards matching the search, of which `rows` is the page at `offset`.
-    matched: int
-    offset: int
     # The boards with no postings, whatever the search: the page names them
     # above the table, where a board that is ingested and returns nothing is
     # the loudest thing this endpoint says. The first NO_POSTINGS_NAMED by
