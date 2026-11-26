@@ -24,22 +24,31 @@ date_posted, and `with_date_posted` reports how much of the board that covers.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 
-from api import db
-from api.analytics.assembly import collect_source_analytics
+from api.analytics.assembly import (
+    collect_source_analytics,
+    search_source_analytics,
+)
+from api.analytics.assembly import (
+    source_detail as board_detail,
+)
 from api.analytics.models import (
     BoardAnalyticsDetail,
     BoardAnalyticsList,
-    OverlapPartner,
 )
-from api.analytics.queries import _OVERLAP_PARTNERS_SQL
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.rates import DEFAULT_MIN_SAMPLE
 from api.routers.admin import require_admin
 
 router = APIRouter(prefix="/analytics")
+
+# Boards with no postings named above the table; the rest are counted, as the
+# page did when a bundle of a few hundred boards switched on at once.
+NO_POSTINGS_NAMED = 10
 
 _CAVEATS = [
     "active counts postings some switched-on source lists. An aggregator's "
@@ -60,12 +69,28 @@ _CAVEATS = [
 @router.get("/sources")
 def source_analytics(
     min_sample: int = Query(DEFAULT_MIN_SAMPLE, ge=1, le=10_000),
+    q: str | None = Query(default=None, max_length=200),
+    sort: Literal["source", "total", "still_open", "doa", "clearance", "cost", "apply"] = "total",
+    dir: Literal["asc", "desc"] = "desc",
+    # A page of the boards. Every board's row is about 2.6 KB, and 9,571
+    # boards made a 25 MB response (production copy, 2026-11-26). Without a
+    # limit every match is returned, for a page that has not moved to pages.
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsList:
+    rows = collect_source_analytics(min_sample)
+    found = search_source_analytics(rows, q, sort, descending=dir == "desc")
+    end = None if limit is None else offset + limit
+    silent = [r.source for r in rows if r.inventory.total == 0]
     return BoardAnalyticsList(
-        rows=collect_source_analytics(min_sample),
+        rows=found[offset:end],
         min_sample=min_sample,
         caveats=_CAVEATS,
+        matched=len(found),
+        offset=offset,
+        no_postings=silent[:NO_POSTINGS_NAMED],
+        no_postings_total=len(silent),
     )
 
 
@@ -75,12 +100,13 @@ def source_detail(
     min_sample: int = Query(DEFAULT_MIN_SAMPLE, ge=1, le=10_000),
     user: AuthedUser = Depends(require_admin),
 ) -> BoardAnalyticsDetail:
-    row = next((r for r in collect_source_analytics(min_sample) if r.source == source), None)
-    if row is None:
+    found = board_detail(source, min_sample)
+    if found is None:
         raise refuse(404, "NOT_FOUND", "unknown source")
+    row, partners = found
     return BoardAnalyticsDetail(
         row=row,
-        overlap_partners=db.query_as(OverlapPartner, _OVERLAP_PARTNERS_SQL, {"source": source}),
+        overlap_partners=partners,
         min_sample=min_sample,
         caveats=_CAVEATS,
     )

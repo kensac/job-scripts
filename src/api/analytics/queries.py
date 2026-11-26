@@ -3,7 +3,7 @@
 from api import signals
 from api.board.person_state import PERSON_STATE
 from api.mail import applications
-from core import verdict_reads
+from core import latest_posting_checks, verdict_reads
 from core.checks import POSTING_CHECK_NAMES
 
 # 'content' and 'extraction' are not in it, deliberately, because they record
@@ -32,27 +32,19 @@ FROM jobs
 GROUP BY source
 """
 
-# Joining jobs before deduping is load-bearing for speed, not just tidiness:
-# DISTINCT ON over (url, check_type, id) sorts a 46k-row set keyed by a long
-# text url and spills to disk (~1.15s measured on prod). Carrying jobs.id
-# through and sorting on (job_id, check_type, id) keeps the same sort in
-# memory and costs ~245ms for identical output.
-_LATEST_CHECK_PER_JOB = verdict_reads.latest_per(
-    "j.id, v.check_type",
-    "j.source AS source, v.check_type, v.status",
-    "v.check_type = ANY(%(checks)s)",
-    join="JOIN jobs j ON j.url = v.url",
-)
-
+# Each posting's latest answer to each check, read as a set from the
+# projection (core.latest_posting_checks.CURRENT) and hash-joined to its
+# source. Built here from `verdicts` it took 7.2 s on a production copy
+# (2026-11-26).
 _FUNNEL_SQL = f"""
-WITH latest AS (
-    {_LATEST_CHECK_PER_JOB}
-)
-SELECT source, check_type,
+SELECT j.source, c.check_type,
        count(*) AS checked,
-       count(*) FILTER (WHERE status = 'passed') AS passed,
-       count(*) FILTER (WHERE status = 'rejected') AS rejected
-FROM latest GROUP BY source, check_type
+       count(*) FILTER (WHERE c.status = 'passed') AS passed,
+       count(*) FILTER (WHERE c.status = 'rejected') AS rejected
+FROM ({latest_posting_checks.CURRENT}) c
+JOIN jobs j ON j.id = c.job_id
+WHERE c.check_type = ANY(%(checks)s)
+GROUP BY j.source, c.check_type
 """
 
 _LATEST_FILTER_PER_JOB = verdict_reads.latest_per(
@@ -97,32 +89,38 @@ _FIRST_CLOSED_SQL = signals.first_closed_sql()
 #
 # Batch custom_id identifies the posting URL. A live call backfilled from a
 # verdict gets its URL through that verdict's primary key. Separate query
-# arms avoid hashing all ai_queries: 6.2 s on production 2026-10-10, against
-# 11.0 s for the combined join and 5.4 s for the former full-row read.
-# Recent live calls with no URL are excluded (about ten weekly on that date).
+# arms avoid hashing all ai_queries. Each arm names its call's source before
+# anything is summed, so the sums group on (source, model), a few thousand
+# groups. Summed per (model, url) first, as this did, the planner grouped a
+# million urls, spilled them to disk and probed jobs_url_key once per url:
+# 24.6 s on a production copy (2026-11-26), against 3.8 s with the same
+# totals.
+# Recent live calls with no URL are excluded (about ten weekly on 2026-10-10).
 # `priced` distinguishes a free call from one missing a price record.
 #
 # This response covers all time. /admin/spend defaults to 30 days; a board's
 # lifetime cost needs an explicit all-time window for a valid comparison.
 _SPEND_SQL = """
 WITH calls AS (
-    SELECT m.model, m.requests, m.cost_usd, m.total_tokens, m.custom_id AS url
-    FROM model_calls m
+    SELECT j.source, m.model, m.requests, m.cost_usd, m.total_tokens
+    FROM model_calls m JOIN jobs j ON j.url = m.custom_id
     WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
       AND m.custom_id IS NOT NULL
     UNION ALL
-    SELECT m.model, m.requests, m.cost_usd, m.total_tokens, q.url
-    FROM model_calls m JOIN ai_queries q ON q.id = m.source_id
+    SELECT j.source, m.model, m.requests, m.cost_usd, m.total_tokens
+    FROM model_calls m
+    JOIN ai_queries q ON q.id = m.source_id
+    JOIN jobs j ON j.url = q.url
     WHERE m.purpose IN ('verify', 'reverify', 'filter', 'managed_board', 'manual')
       AND m.source = 'verdict' AND m.provider_batch_id IS NULL
 )
-SELECT j.source AS source, c.model,
-       sum(c.requests) AS calls,
-       coalesce(sum(c.requests) FILTER (WHERE c.cost_usd IS NOT NULL), 0) AS priced_calls,
-       sum(c.total_tokens) AS total_tokens,
-       sum(c.cost_usd) AS cost_usd
-FROM calls c JOIN jobs j ON j.url = c.url
-GROUP BY j.source, c.model
+SELECT source, model,
+       sum(requests) AS calls,
+       coalesce(sum(requests) FILTER (WHERE cost_usd IS NOT NULL), 0) AS priced_calls,
+       sum(total_tokens) AS total_tokens,
+       sum(cost_usd) AS cost_usd
+FROM calls
+GROUP BY source, model
 """
 
 # last_success_at is when the ingest last ran cleanly; jobs.last_loaded_at (from
@@ -175,35 +173,34 @@ GROUP BY j.source
 # unique table-wide, so a posting belongs to exactly one source by
 # construction and cross-source duplication is invisible at the url level.
 #
-# min(source) <> max(source) over the partition is "more than one distinct
-# source carries this posting" - count(DISTINCT) is not a window function, and
-# computing the distinct count as a separate aggregate means hashing the pairs
-# and then joining them back, which measured 477ms against prod versus 358ms
-# for the single windowed pass.
+# One pass gives both readings: per source, its keyed postings and how many
+# of them another source also carries (partner NULL), and per pair of
+# sources, how many postings they share (the detail page's partners: each of
+# one source's postings counted against each matching posting of the other).
+# The pairs are built only from keys more than one source carries. Asked per
+# source, as the detail page did, the partner join took 13.6 s a request; for
+# every pair at once it takes 9.2 s, read from the cached page
+# (production copy, 2026-11-26).
 _OVERLAP_SQL = """
-SELECT source,
-       count(*) AS keyed_jobs,
-       count(*) FILTER (WHERE lo <> hi) AS shared_with_other_source
-FROM (
-    SELECT source, min(source) OVER w AS lo, max(source) OVER w AS hi
-    FROM (
-        SELECT source, lower(btrim(company)) AS company, lower(btrim(title)) AS title
-        FROM jobs WHERE company <> '' AND title <> ''
-    ) keyed
-    WINDOW w AS (PARTITION BY company, title)
-) spread
-GROUP BY source
-"""
-
-_OVERLAP_PARTNERS_SQL = """
-WITH keyed AS (
-    SELECT source, lower(btrim(company)) AS company, lower(btrim(title)) AS title
+WITH per AS MATERIALIZED (
+    SELECT source, lower(btrim(company)) COLLATE "C" AS company,
+           lower(btrim(title)) COLLATE "C" AS title, count(*) AS n
     FROM jobs WHERE company <> '' AND title <> ''
-), mine AS (
-    SELECT company, title FROM keyed WHERE source = %(source)s
+    GROUP BY 1, 2, 3
+), shared AS MATERIALIZED (
+    SELECT company, title FROM per GROUP BY company, title HAVING count(*) > 1
+), shared_per AS MATERIALIZED (
+    SELECT p.source, p.company, p.title, p.n
+    FROM per p JOIN shared s USING (company, title)
 )
-SELECT k.source AS source, count(*) AS shared_postings
-FROM keyed k JOIN mine m ON m.company = k.company AND m.title = k.title
-WHERE k.source <> %(source)s
-GROUP BY k.source ORDER BY shared_postings DESC
+SELECT p.source, NULL::text AS partner,
+       sum(p.n)::bigint AS keyed_jobs,
+       coalesce(sum(p.n) FILTER (WHERE s.company IS NOT NULL), 0)::bigint AS shared
+FROM per p LEFT JOIN shared s ON s.company = p.company AND s.title = p.title
+GROUP BY p.source
+UNION ALL
+SELECT a.source, b.source, NULL, sum(a.n * b.n)::bigint
+FROM shared_per a JOIN shared_per b
+  ON b.company = a.company AND b.title = a.title AND b.source <> a.source
+GROUP BY a.source, b.source
 """
