@@ -89,3 +89,22 @@ def test_a_row_an_ingest_holds_is_skipped_and_stored_next_cycle(f):
     assert _available(held) and not _available(free)
     assert catalog.reconcile_available() == 1
     assert not _available(held)
+
+
+def test_every_stale_row_is_written_across_batches_and_sparse_ids(f, monkeypatch):
+    """The rows are found by one read and written in batches; a short batch
+    and ids far apart make every slice and the last partial one count."""
+    from core.catalog import observations
+
+    monkeypatch.setattr(observations, "_BATCH", 2)
+    f.make_source("off", active=False)
+    jobs = [f.make_job(source="off") for _ in range(5)]
+    # Ingest upserts spend ids; leave a gap far wider than any old range.
+    db.execute("SELECT setval(pg_get_serial_sequence('jobs', 'id'), 5000000)")
+    jobs.append(f.make_job(source="off"))
+    for job in jobs:
+        _observe(job, "off")
+
+    assert catalog.reconcile_available() == len(jobs)
+    assert not any(_available(job) for job in jobs)
+    assert catalog.reconcile_available() == 0

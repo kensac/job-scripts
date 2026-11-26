@@ -127,8 +127,6 @@ IS_AVAILABLE: LiteralString = "COALESCE({job}.available, false)"
 # cannot see (docs/agents/sources-and-boards.md).
 _STORED: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
 
-_RECONCILE_CHUNK = 20_000
-
 
 def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
     """Writes _STORED into jobs.available for these rows where it differs.
@@ -170,30 +168,39 @@ def refresh_available(ids: list[int]) -> int:
 
 
 def reconcile_available() -> int:
-    """jobs.available over the whole catalog, in id chunks of their own
-    transaction: what observations do not announce, a source switched on or
-    off and the title pattern setting flipped, lands here within the hour,
-    in the hourly retire_switched_off task. Only rows that differ are locked,
-    and rows a concurrent writer holds are skipped for the next run, so it
-    cannot deadlock against an ingest. Safe to stop and rerun. Returns the
-    rows written."""
-    available = _STORED.format(job="j")
-    with pool.connection() as conn:
-        bounds = conn.execute("SELECT min(id) AS lo, max(id) AS hi FROM jobs").fetchone()
-    if not bounds or bounds["lo"] is None:
-        return 0
+    """jobs.available over the whole catalog: what observations do not
+    announce, a source switched on or off and the title pattern setting
+    flipped, lands here within the hour, in the hourly retire_switched_off
+    task. Safe to stop and rerun. Returns the rows written.
+
+    One read finds the rows whose stored value differs; it takes no lock,
+    and it is taken once per run, so a row that goes stale while the run
+    writes waits for the next run, inside the hour.
+    Only those rows are then written, in batches of their own transaction
+    that lock in url order and skip rows a concurrent writer holds for the
+    next run, so it cannot deadlock against an ingest, and each re-evaluates
+    under its lock (_refresh_available). It walked the id space in ranges
+    instead, and ingest upserts spend an id even when they only update: on
+    2026-11-26 the 2,145,156 jobs spread over ids 1 to 41,820,483, 2,092
+    range statements a run, 11 minutes on average. The single read took 21 s
+    on a production copy, and 34 s with JIT, which compiles the whole plan
+    (engineering-standards.md, "Measure a large statement with JIT on and
+    off")."""
+    # Its own connection and transaction, so the setting ends with the read
+    # and never reaches a caller's open transaction.
+    with pool.connection() as conn, conn.transaction():
+        conn.execute("SET LOCAL jit = off")
+        stale = [
+            r["id"]
+            for r in conn.execute(
+                f"SELECT j.id FROM jobs j "
+                f"WHERE j.available IS DISTINCT FROM {_STORED.format(job='j')} ORDER BY j.id"
+            ).fetchall()
+        ]
     written = 0
-    for lo in range(bounds["lo"], bounds["hi"] + 1, _RECONCILE_CHUNK):
+    for start in range(0, len(stale), _BATCH):
         with transaction(), connection() as conn:
-            stale = [
-                r["id"]
-                for r in conn.execute(
-                    f"SELECT j.id FROM jobs j WHERE j.id >= %s AND j.id < %s "
-                    f"AND j.available IS DISTINCT FROM {available}",
-                    (lo, lo + _RECONCILE_CHUNK),
-                ).fetchall()
-            ]
-            written += _refresh_available(conn, stale, skip_locked=True)
+            written += _refresh_available(conn, stale[start : start + _BATCH], skip_locked=True)
     return written
 
 
