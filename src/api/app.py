@@ -82,7 +82,7 @@ def _warm_admin_pages() -> None:
         query_ledger,
         review_gates,
     )
-    from api.routers.filtering import admin_insights
+    from api.routers.filtering import admin_insights, presets
     from api.routers.mail import debug_analytics
 
     ledger_stats._stats.warm()
@@ -96,6 +96,7 @@ def _warm_admin_pages() -> None:
     source_analytics.TABLES.warm()
     debug_analytics._consistency.warm()
     job_profiles._population.warm()
+    presets.warm_coverage()
     admin_insights._reports.warm(
         admin_insights.DEFAULT_REPORT,
         lambda: admin_insights._rejection_report(*admin_insights.DEFAULT_REPORT),

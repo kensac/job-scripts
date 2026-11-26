@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -126,7 +128,7 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         "FROM filter_presets WHERE active ORDER BY name",
     )
     hashes = {p.id: compute_filter_hash(p.prompt, p.on_ambiguous) for p in presets}
-    key = tuple(sorted(set(hashes.values())))
+    key = _coverage_key(hashes.values())
     eligible, coverage = _coverage.get(key, lambda: _preset_coverage_rows(list(key)))
     return PresetList(
         presets=[
@@ -138,6 +140,17 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         ],
         eligible_postings=eligible,
     )
+
+
+def _coverage_key(hashes: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted(set(hashes)))
+
+
+def warm_coverage() -> None:
+    """Start computing the active presets' coverage (api.app, at startup)."""
+    rows = db.query("SELECT prompt, on_ambiguous FROM filter_presets WHERE active")
+    key = _coverage_key(compute_filter_hash(r["prompt"], r["on_ambiguous"]) for r in rows)
+    _coverage.warm(key, lambda: _preset_coverage_rows(list(key)))
 
 
 def _preset_coverage_rows(hashes: list[str]) -> tuple[int, dict[str, dict]]:
