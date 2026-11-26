@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -15,6 +17,7 @@ from api.routers.filtering.saved_filters import (
     after_filter_change,
     refuse_second_enabled,
 )
+from api.stale_cache import StaleByKey
 from core import catalog, verdict_reads
 from core.filters import compute_filter_hash
 
@@ -125,9 +128,8 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         "FROM filter_presets WHERE active ORDER BY name",
     )
     hashes = {p.id: compute_filter_hash(p.prompt, p.on_ambiguous) for p in presets}
-    rows = db.query(_PRESET_COVERAGE_SQL, {"hashes": list(hashes.values())})
-    eligible = int(rows[0]["eligible"])
-    coverage = {row["prompt_hash"]: row for row in rows if row["prompt_hash"] is not None}
+    key = _coverage_key(hashes.values())
+    eligible, coverage = _coverage.get(key, lambda: _preset_coverage_rows(list(key)))
     return PresetList(
         presets=[
             PresetOffer(
@@ -138,6 +140,32 @@ def list_presets(user: AuthedUser = Depends(require_user)) -> PresetList:
         ],
         eligible_postings=eligible,
     )
+
+
+def _coverage_key(hashes: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted(set(hashes)))
+
+
+def warm_coverage() -> None:
+    """Start computing the active presets' coverage (api.app, at startup)."""
+    rows = db.query("SELECT prompt, on_ambiguous FROM filter_presets WHERE active")
+    key = _coverage_key(compute_filter_hash(r["prompt"], r["on_ambiguous"]) for r in rows)
+    _coverage.warm(key, lambda: _preset_coverage_rows(list(key)))
+
+
+def _preset_coverage_rows(hashes: list[str]) -> tuple[int, dict[str, dict]]:
+    rows = db.query(_PRESET_COVERAGE_SQL, {"hashes": hashes})
+    coverage = {row["prompt_hash"]: row for row in rows if row["prompt_hash"] is not None}
+    return int(rows[0]["eligible"]), coverage
+
+
+# The same for everyone and a count over every available posting (2.4 s on a
+# production copy, 2026-11-26, nearly all of it the eligible count), so it is
+# served stale per set of presets, as the admin pages are
+# (docs/agents/admin-query-reads.md).
+_coverage: StaleByKey[tuple[str, ...], tuple[int, dict[str, dict]]] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
 
 
 def _preset_coverage(row: dict | None, eligible: int) -> PresetCoverage:

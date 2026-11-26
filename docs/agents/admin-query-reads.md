@@ -66,6 +66,12 @@ than rebuilding the answer-to-call join per cut. The review-gate report runs
 the title screen once per distinct (recipe, title, source), materialized
 before the screen so the planner cannot push the regex back into the join.
 
+Mail consistency, rejection reasons and the job-profile report read the same
+way (6 to 9 s each on a production copy, 2026-11-26), the job-profile report
+with its latest task read live. The filter presets' coverage is no admin page
+but is the same for everyone and counts every available posting, so it is
+served stale too, keyed on the set of active presets, and warmed at startup.
+
 Source analytics (/analytics/sources) computes every source's aggregates in
 one cached set (`api.analytics.assembly.TABLES`), from which the list and each
 source's detail are assembled, and keeps the assembled rows per sample floor.

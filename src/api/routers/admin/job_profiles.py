@@ -12,6 +12,7 @@ from api import db, events
 from api.auth import AuthedUser
 from api.problem import refuse
 from api.routers.admin.shared import require_admin
+from api.stale_cache import Stale
 from core.derivations.job_profile import CLASSIFIER_VERSION, JOB_PROFILE_MODEL
 
 router = APIRouter()
@@ -117,6 +118,14 @@ def run_job_profiles(user: AuthedUser = Depends(require_admin)) -> JobProfileAdm
 
 @router.get("/job-profiles/report")
 def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileReport:
+    """The population served stale (docs/agents/admin-query-reads.md): it
+    checks every profile against its posting's latest page, 84,052 probes and
+    2.7 s on a production copy (2026-11-26). The latest task is read live, so
+    a run's progress shows as it moves."""
+    return _population.get().model_copy(update={"latest_task": _latest()})
+
+
+def _report() -> JobProfileReport:
     # Report the stored population, not the model the next pass pins. The pin
     # can move while collection is paused, and keying on it would show zero
     # classifications beside a full table.
@@ -186,5 +195,10 @@ def job_profile_report(user: AuthedUser = Depends(require_admin)) -> JobProfileR
         ),
         role_families=population("primary_role_family"),
         career_stages=population("career_stage"),
-        latest_task=_latest(),
+        latest_task=None,
     )
+
+
+_population: Stale[JobProfileReport] = Stale(
+    _report, lambda: int(db.get_config("admin_stats_cache_seconds"))
+)

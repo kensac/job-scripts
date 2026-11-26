@@ -32,6 +32,7 @@ from api.routers.filtering.insight_breakdowns import (
     named_group_breakdowns,
     prompt_totals,
 )
+from api.stale_cache import StaleByKey
 from core import reason_taxonomy
 from core.reason_taxonomy import GROUP_LABELS, GROUPS
 
@@ -157,12 +158,34 @@ def rejection_reasons(
     users: str | None = Query(default=None, alias="user"),
     user: AuthedUser = Depends(require_admin),
 ) -> RejectionReasons:
+    """Served stale per query (docs/agents/admin-query-reads.md): a 30-day
+    window is 740,000 verdicts and their rejection reasons, 6.0 s to read
+    and group on a production copy (2026-11-26)."""
+    key = (days, prompt_hash or None, min_decisions, examples, tuple(scoping.user_ids(users)))
+    return _reports.get(key, lambda: _rejection_report(*key))
+
+
+_reports: StaleByKey[tuple, RejectionReasons] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+# The page's first view, warmed at startup (api.app).
+DEFAULT_REPORT: tuple = (30, None, DEFAULT_MIN_DECISIONS, 3, ())
+
+
+def _rejection_report(
+    days: int,
+    prompt_hash: str | None,
+    min_decisions: int,
+    examples: int,
+    user_ids: tuple[int, ...],
+) -> RejectionReasons:
     params: dict[str, Any] = {"days": days}
     hash_clause = ""
     if prompt_hash:
         hash_clause = " AND prompt_hash = %(prompt_hash)s"
         params["prompt_hash"] = prompt_hash
-    ids = scoping.user_ids(users)
+    ids = list(user_ids)
     if ids:
         hash_clause += " AND " + scoping.filters_of()
         params["user_ids"] = ids
