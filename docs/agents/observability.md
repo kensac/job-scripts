@@ -858,9 +858,10 @@ records.
 **What a log line is for.** INFO is for a fact a person reads that no row,
 span or event already holds: a pull's summary, a decision the code made, a
 fallback it took. A line per item that restates a row it writes (a page
-fetched, a posting gone) or a task's span (started, done) is DEBUG, kept for
-reading one process's stdout. Libraries that log every request they send
-(`httpx`, `httpx2`) log from WARNING up.
+fetched, a posting gone) or a task's row and span (started, done, parked,
+deferred) is DEBUG, which a process prints only when it runs with
+`JOBTRACKER_LOG_LEVEL=DEBUG`. Libraries that log every request they send
+(`httpx`, `httpx2`) log from WARNING up, telemetry or not.
 
 `telemetry` is a no-op without `POSTHOG_API_KEY`, so tests and a bare checkout
 need no destination, and it says so once at startup. It never raises. It

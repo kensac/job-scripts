@@ -75,9 +75,10 @@ _UNSHIPPED_LOGGERS = ("opentelemetry", "urllib3", "posthog")
 # Loggers configured with propagate=False by their owner, so a handler on the
 # root never sees them; they get the shipping handler directly.
 _NON_PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error")
-# Paths a prober requests every few seconds; their access lines say only that
-# the prober is alive, which Kener and Prometheus already record.
-_PROBE_PATHS = ("/healthz", "/metrics")
+# The path a prober requests every few seconds; its access lines say only
+# that the prober is alive, which Kener already records. Prometheus scrapes
+# its own listener (api.metrics), which writes no access line.
+_PROBE_PATHS = ("/healthz",)
 # Libraries that log every request they send at INFO: the provider SDKs'
 # clients (httpx, and httpx2 under anthropic) polling batches. The calls that
 # matter are recorded where they are made (model_calls, ai_batches), so these
@@ -134,11 +135,23 @@ def shipped_form(record: logging.LogRecord) -> logging.LogRecord | None:
     return out
 
 
+def log_level() -> int:
+    """The level a process logs at on stdout: JOBTRACKER_LOG_LEVEL, INFO
+    unless set. DEBUG prints the per-item lines nothing else needs, for
+    reading one process (observability.md, "What a log line is for")."""
+    return logging.getLevelName(os.environ.get("JOBTRACKER_LOG_LEVEL", "INFO").upper())
+
+
+def quiet_request_loggers() -> None:
+    """Libraries that log every request they send at INFO log from WARNING
+    up, whether or not telemetry ships."""
+
+
 def _is_probe(record: logging.LogRecord) -> bool:
     """A uvicorn access line for a probe path. Its args are (client, method,
     path, http version, status)."""
     args = record.args if isinstance(record.args, tuple) else ()
-    path = str(args[2]).split("?", 1)[0] if len(args) > 2 else ""
+    path = str(args[2]).split("?", 1)[0].rstrip("/") if len(args) > 2 else ""
     return path in _PROBE_PATHS
 
 
@@ -255,10 +268,11 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
         }
     )
     # How much goes. Errors and events always go; traces and logs are the
-    # volume, and the right amount is a measurement, not a guess: ship all of
-    # it first, read the daily volume in PostHog, then turn these two down if
-    # the bill or the noise says so. Both are env because they are read once
-    # at startup, before the database is open.
+    # volume, and the right amount is a measurement, not a guess
+    # (observability.md). Traces start only at a task or a request
+    # (_root_sampler), sampled at POSTHOG_TRACE_SAMPLE; logs ship from
+    # POSTHOG_LOG_LEVEL. Both are env because they are read once at startup,
+    # before the database is open.
     from opentelemetry.sdk.trace.sampling import ParentBased
 
     ratio = float(os.environ.get("POSTHOG_TRACE_SAMPLE", "1.0"))
@@ -276,6 +290,12 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     # Outbound HTTP: the board pulls and ATS resolvers go through `requests`,
     # so every board fetch is a span with its status, under the task's span.
     RequestsInstrumentor().instrument()
+    # Work a task hands to a thread pool (payload uploads, listing bundles)
+    # carries the task's context, so its statements and calls stay the task's
+    # children instead of becoming roots the sampler drops.
+    from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+
+    ThreadingInstrumentor().instrument()
     # Database time inside the same spans: psycopg is instrumented in api.db
     # before its pool opens, because a connection made before instrumentation
     # never produces a span.
@@ -293,15 +313,14 @@ def init(service: str = "jobtracker", instance: str | None = None) -> None:
     logging.getLogger().addHandler(handler)
     # uvicorn's loggers do not propagate to the root, so its request log
     # (every method, path and status) and its own lifecycle lines never
-    # reached the handler; Kanishk wants every log line shipped, not only
-    # the service's own.
+    # reached the handler; they are shipped like the service's own, except
+    # the probe's access lines (_is_probe).
     for name in _NON_PROPAGATING_LOGGERS:
         logging.getLogger(name).addHandler(handler)
-    for name in _REQUEST_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
     logger.info(
         f"telemetry: enabled service={service} host={host} release={RELEASE} "
-        f"process_host={HOST} traces_sampled={ratio} logs_from={logging.getLevelName(log_level)}"
+        f"process_host={HOST} traces={_tracer_provider.sampler.get_description()} "
+        f"logs_from={logging.getLevelName(log_level)}"
     )
 
 
