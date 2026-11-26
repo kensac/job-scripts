@@ -310,7 +310,17 @@ def run(task_id: int, cap: int) -> dict[str, int]:
     if not urls:
         raise EmbeddingUnavailable("no embedding server configured on this host")
     rows = candidates(cap)
-    keys = {row["company_key"] for row in rows}
+    # Profiles built under an older rule, whether or not their postings are
+    # candidates: rebuilding one moves its profiled_at, which makes its
+    # postings candidates for the next run (embeddings._PROFILE_CHANGED).
+    older = {
+        row["company_key"]
+        for row in db.query(
+            "SELECT company_key FROM company_text_profiles WHERE rule <> %s",
+            (company_text.PROFILE_RULE,),
+        )
+    }
+    keys = {row["company_key"] for row in rows} | older
     counts = {
         "selected": len(rows),
         "written": 0,

@@ -13,7 +13,7 @@ its primary role family (job_profiles):
     text-embedding-3-small, as written                  0.89           0.24
     nomic-embed-text-v1.5, as written                   0.78           0.30
     name masked only                                    0.56           0.38
-    company text removed and name masked (this rule)    0.42           0.43
+    company text removed and name masked (this rule)    0.42           0.44
 
 What counts as the company's text was settled by reading what each rule
 removed, not by the score alone. Repetition across titles is not enough: a
@@ -24,10 +24,15 @@ removed those while scoring 0.41 and 0.44. Exact phrasing spread across
 companies does not separate them either: that hospital's licensure line is
 worded as no other employer words it. What does: a paragraph is the
 company's when it repeats under at least two of its titles and names the
-company, or repeats under at least half of its titles. A role's text repeats
-under a subset of the titles, never the company's name; the about-us blurb,
-the EEO statement, the agency notice and the benefits list do one or the
-other.
+company (its full name, or the name without its legal form), or repeats
+under at least half of its titles and at least three. A role's text repeats
+under a subset of the titles and rarely names the company; the about-us
+blurb, the EEO statement, the agency notice and the benefits list do one or
+the other. Read on the same set, every named paragraph under only two or
+three titles was company text (one of several versions of a company's
+about-us, EEO or agency notice) or a heading; none was a role's duty, so a
+named paragraph needs no share of the titles, and requiring one would keep
+those versions.
 """
 
 from __future__ import annotations
@@ -143,8 +148,14 @@ def _name_pattern(phrase: str) -> str:
 
 
 def names_company(text: str, company: str) -> bool:
+    """Whether `text` says the company's full name, or that name without its
+    legal form. Not its first word alone: for Advanced Micro Devices that is
+    "advanced", which a requirement says without naming anyone."""
+    words = [w for w in re.split(r"[^\w&]+", company.lower()) if w]
+    meaningful = [w for w in words if w not in _NAME_NOISE]
+    phrases = {" ".join(words), " ".join(meaningful)}
     return any(
-        re.search(_name_pattern(p), text, flags=re.IGNORECASE) for p in _name_phrases(company)
+        re.search(_name_pattern(p), text, flags=re.IGNORECASE) for p in phrases if len(p) > 2
     )
 
 

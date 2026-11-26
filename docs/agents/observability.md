@@ -988,7 +988,8 @@ the slots the servers start with (`SLOTS_PER_SERVER`).
 
 **A posting is embedded without the text its company says about itself.**
 A paragraph is the company's when it repeats under at least two of its
-titles and names the company, or repeats under at least half of its titles;
+titles and names the company (its full name, or without its legal form),
+or repeats under at least half of its titles and at least three;
 those are taken out and the name is masked. The rule was chosen by reading
 what each candidate removed: repetition across titles alone also stripped
 role requirements (a hospital's nurse titles share their licensure line),

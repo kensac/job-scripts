@@ -279,3 +279,43 @@ def test_a_profile_built_under_an_older_rule_is_rebuilt(f):
     assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
     row = db.query_one("SELECT rule FROM company_text_profiles WHERE company_key = 'acme robotics'")
     assert row == {"rule": company_text.PROFILE_RULE}
+
+
+def test_an_older_rules_profile_is_rebuilt_without_any_new_posting(f, monkeypatch):
+    """A rule bump reaches companies whose postings are all embedded: the
+    run rebuilds their profiles, and the next run re-selects the postings."""
+    from core.derivations import company_text
+
+    job_id, url = f.make_ready_job(content=_posting("Backend Engineer") * 2)
+    f.upload(job_id, f.make_user())
+    db.execute(
+        "UPDATE jobs SET company = 'Acme Robotics', title = 'Backend Engineer' WHERE id = %s",
+        (job_id,),
+    )
+    server = FakeServer()
+    _run(monkeypatch, server)
+    db.execute("UPDATE company_text_profiles SET rule = %s", (company_text.PROFILE_RULE - 1,))
+    calls = len(server.embedded)
+
+    _run(monkeypatch, server)
+    rule = db.query_one("SELECT rule FROM company_text_profiles")
+    assert rule == {"rule": company_text.PROFILE_RULE}
+    _run(monkeypatch, server)
+    stamped = db.query_one(
+        "SELECT e.profiled_at = p.profiled_at AS current FROM posting_embeddings e "
+        "JOIN company_text_profiles p ON p.company_key = 'acme robotics' WHERE e.url = %s",
+        (url,),
+    )
+    assert stamped == {"current": True}, "re-selected and re-stamped under the rebuilt profile"
+    assert len(server.embedded) == calls, "its embedded text did not change, so nothing is paid"
+
+
+def test_the_first_word_of_a_name_alone_does_not_name_the_company():
+    from core.derivations import company_text
+
+    assert not company_text.names_company(
+        "Advanced degree in Electrical Engineering preferred.", "Advanced Micro Devices, Inc."
+    )
+    assert company_text.names_company(
+        "Advanced Micro Devices is an equal opportunity employer.", "Advanced Micro Devices, Inc."
+    )
