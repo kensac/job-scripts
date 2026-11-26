@@ -38,7 +38,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-import botocore.exceptions
 import requests
 
 from api import db
@@ -157,8 +156,11 @@ def _page_fault(exc: PayloadUnavailable) -> bool:
     cause = exc.__cause__
     if cause is None or isinstance(cause, (ValueError, TypeError, KeyError)):
         return True
-    if isinstance(cause, botocore.exceptions.ClientError):
-        return cause.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}
+    # botocore's ClientError, read by its shape: importing botocore here would
+    # load the SDK into every worker at start (tests/test_lazy_imports.py).
+    response = getattr(cause, "response", None)
+    if isinstance(response, dict):
+        return response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}
     return False
 
 
