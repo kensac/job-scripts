@@ -76,11 +76,14 @@ def _warm_admin_pages() -> None:
     from api.analytics import assembly as source_analytics
     from api.routers.admin import (
         health,
+        job_profiles,
         ledger_stats,
         posting_inspection,
         query_ledger,
         review_gates,
     )
+    from api.routers.filtering import admin_insights
+    from api.routers.mail import debug_analytics
 
     ledger_stats._stats.warm()
     query_ledger._options.warm()
@@ -91,6 +94,12 @@ def _warm_admin_pages() -> None:
         )
     health._content_mix.warm()
     source_analytics.TABLES.warm()
+    debug_analytics._consistency.warm()
+    job_profiles._population.warm()
+    admin_insights._reports.warm(
+        admin_insights.DEFAULT_REPORT,
+        lambda: admin_insights._rejection_report(*admin_insights.DEFAULT_REPORT),
+    )
     # Both panels sit on the spend page and read its default window. A report
     # warmed for any other window leaves the page's own request to wait the
     # full computation after every roll.

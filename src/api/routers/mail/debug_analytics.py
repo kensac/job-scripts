@@ -26,6 +26,7 @@ from api.routers.mail.debug_models import (
     SenderDomainRow,
     SourceRow,
 )
+from api.stale_cache import Stale
 
 router = APIRouter()
 
@@ -71,6 +72,21 @@ FROM groups ORDER BY kinds DESC, copies DESC
 _CONSISTENCY_MIN_BODY = 200
 
 
+def _consistency_groups() -> tuple[list[dict[str, Any]], int]:
+    rows = db.query(_CONSISTENCY_SQL, {"min_len": _CONSISTENCY_MIN_BODY})
+    total = db.query_one(f"WITH latest AS ({current_event()}) SELECT count(*) AS c FROM latest")
+    return rows, int((total or {}).get("c", 0))
+
+
+# Hashing every classified body takes 8.4 s on a production copy
+# (2026-11-26), nearly all of it the digit normalisation over 61,613 bodies,
+# so the groups are served stale (docs/agents/admin-query-reads.md) and
+# warmed at startup.
+_consistency: Stale[tuple[list[dict[str, Any]], int]] = Stale(
+    _consistency_groups, lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
 @router.get("/admin/mail/consistency")
 def classification_consistency(
     limit: int = Query(default=25, ge=1, le=200),
@@ -87,17 +103,9 @@ def classification_consistency(
     `messages_classified` is the denominator; a rate quoted without it would
     be describing a canary as if it were a census.
     """
-    rows = db.query(_CONSISTENCY_SQL, {"min_len": _CONSISTENCY_MIN_BODY})
+    rows, classified = _consistency.get()
     inconsistent = [r for r in rows if r["kinds"] > 1]
     covered = sum(r["copies"] for r in rows)
-    total_row = db.query_one(
-        f"""
-        WITH latest AS (
-            {current_event()}
-        )
-        SELECT count(*) AS c FROM latest
-        """
-    )
     return ClassificationConsistency(
         groups=rates.rate(len(inconsistent), len(rows), rates.DEFAULT_MIN_SAMPLE),
         messages=rates.rate(
@@ -105,7 +113,7 @@ def classification_consistency(
         ),
         coverage=ConsistencyCoverage(
             messages_covered=covered,
-            messages_classified=int((total_row or {}).get("c", 0)),
+            messages_classified=classified,
             min_copies=2,
             min_body_chars=_CONSISTENCY_MIN_BODY,
         ),

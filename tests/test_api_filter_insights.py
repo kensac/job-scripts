@@ -1,6 +1,6 @@
 """Admin filter insight endpoint behavior."""
 
-from api import db
+from api import db, stale_cache
 from core.reason_taxonomy import GROUP_KEYS
 from tests.filter_insights_support import _get, _phrasings, _reject
 
@@ -335,6 +335,7 @@ def test_examples_are_a_deterministic_sample_not_a_frequency_ranking(client, adm
     for i in range(4):
         _reject(f"https://p.test/{i}", f"No pay disclosed, variant {i}.", "hash_aaaa", "f")
     first = _get(client, admin_headers)["prompt_versions"][0]["groups"][0]["examples"]
+    stale_cache.clear_all()  # recomputed, not the cached answer
     second = _get(client, admin_headers)["prompt_versions"][0]["groups"][0]["examples"]
     assert first == second
     assert first == sorted(first)
