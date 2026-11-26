@@ -333,3 +333,64 @@ def test_detail_endpoint_names_the_boards_a_source_overlaps(client, admin_header
 def test_detail_endpoint_404s_on_an_unknown_source(client, admin_headers):
     resp = client.get("/v1/analytics/sources/no-such-board", headers=admin_headers)
     assert resp.status_code == 404
+
+
+def test_a_page_of_boards_searched_and_sorted_on_the_server(client, admin_headers, f):
+    for name, postings in (("pg-big", 3), ("pg-mid", 2), ("pg-small", 1), ("other", 5)):
+        f.make_source(name)
+        for _ in range(postings):
+            f.make_job(source=name)
+    f.make_source("pg-silent")
+
+    page = client.get(
+        f"{ENDPOINT}?q=PG-&sort=total&dir=desc&limit=2&offset=0", headers=admin_headers
+    ).json()
+    assert [r["source"] for r in page["rows"]] == ["pg-big", "pg-mid"]
+    assert page["matched"] == 4 and page["offset"] == 0
+    silent = db.query(
+        "SELECT name FROM sources s WHERE NOT EXISTS "
+        "(SELECT 1 FROM jobs j WHERE j.source = s.name) ORDER BY name"
+    )
+    assert page["no_postings_total"] == len(silent)
+    assert page["no_postings"] == sorted(r["name"] for r in silent)[:10]
+    assert "pg-silent" in [r["name"] for r in silent]
+
+    rest = client.get(
+        f"{ENDPOINT}?q=pg-&sort=total&dir=desc&limit=2&offset=2", headers=admin_headers
+    ).json()
+    assert [r["source"] for r in rest["rows"]] == ["pg-small", "pg-silent"]
+
+    by_name = client.get(f"{ENDPOINT}?q=pg-&sort=source&dir=asc", headers=admin_headers).json()
+    assert [r["source"] for r in by_name["rows"]] == ["pg-big", "pg-mid", "pg-silent", "pg-small"]
+
+
+def test_boards_with_no_measured_rate_sort_last_both_ways(client, admin_headers, f):
+    """As the table did in the browser: a rate below nothing measured is not
+    the bottom of a ranking, so it sits after every measured board."""
+    f.make_source("nr-checked")
+    f.make_ready_job(source="nr-checked", closed="passed")
+    f.make_source("nr-unchecked")
+    f.make_job(source="nr-unchecked")
+    for direction in ("asc", "desc"):
+        rows = client.get(
+            f"{ENDPOINT}?q=nr-&sort=still_open&dir={direction}&min_sample=1",
+            headers=admin_headers,
+        ).json()["rows"]
+        assert [r["source"] for r in rows] == ["nr-checked", "nr-unchecked"]
+
+
+def test_overlap_partners_count_each_pair_of_matching_postings(client, admin_headers, f):
+    """Two of one board's postings against three of another's with the same
+    (company, title) are six shared pairs, as the per-source join counted."""
+    f.make_source("dup-a")
+    f.make_source("dup-b")
+    for _ in range(2):
+        f.make_job(source="dup-a", company=" Acme ", title="Engineer")
+    for _ in range(3):
+        f.make_job(source="dup-b", company="acme", title="ENGINEER")
+    f.make_job(source="dup-a", company="Solo", title="Only here")
+
+    detail = client.get("/v1/analytics/sources/dup-a", headers=admin_headers).json()
+    assert detail["overlap_partners"] == [{"source": "dup-b", "shared_postings": 6}]
+    assert detail["row"]["overlap"]["keyed_jobs"] == 3
+    assert detail["row"]["overlap"]["shared_with_other_source"] == 2

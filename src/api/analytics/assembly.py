@@ -1,6 +1,8 @@
 """Assemble source analytics from independent aggregate query results."""
 
 import decimal
+from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import urlencode
 
 from api import db
@@ -17,6 +19,7 @@ from api.analytics.models import (
     CheckStage,
     CustomCheckStage,
     ModelSpend,
+    OverlapPartner,
     _ConfigRow,
     _CustomRow,
     _FirstClosedRow,
@@ -42,6 +45,7 @@ from api.analytics.queries import (
     _YIELD_SQL,
 )
 from api.rates import rate as _rate
+from api.stale_cache import Stale, StaleByKey
 
 
 def index_rows_by_source[R: _SourceKeyed](rows: list[R]) -> dict[str, R]:
@@ -224,23 +228,30 @@ def summarize_source_spend(rows: list[_SpendRow], min_sample: int) -> BoardSpend
                 total_tokens=r.total_tokens,
                 cost_usd=float(r.cost_usd) if r.cost_usd is not None else None,
             )
-            for r in sorted(rows, key=lambda r: -r.calls)
+            for r in sorted(rows, key=lambda r: (-r.calls, r.model))
         ],
     )
 
 
-def collect_source_analytics(min_sample: int) -> list[BoardAnalytics]:
-    configs = index_rows_by_source(
-        db.query_as(_ConfigRow, "SELECT name AS source, listings_url, active FROM sources")
-    )
-    inventory = index_rows_by_source(db.query_as(_InventoryRow, _INVENTORY_SQL))
-    custom = index_rows_by_source(db.query_as(_CustomRow, _CUSTOM_SQL))
-    first_closed = index_rows_by_source(db.query_as(_FirstClosedRow, _FIRST_CLOSED_SQL))
-    ingest = index_rows_by_source(db.query_as(_IngestRow, _INGEST_SQL))
-    board = index_rows_by_source(db.query_as(_YieldRow, _YIELD_SQL))
-    populations = index_rows_by_source(db.query_as(_PopulationsRow, _POPULATIONS_SQL))
-    overlap = index_rows_by_source(db.query_as(_OverlapRow, _OVERLAP_SQL))
+@dataclass(frozen=True)
+class _SourceTables:
+    """Every source's aggregates, keyed by source: what the page and the
+    detail page assemble their rows from."""
 
+    configs: dict[str, _ConfigRow]
+    inventory: dict[str, _InventoryRow]
+    custom: dict[str, _CustomRow]
+    first_closed: dict[str, _FirstClosedRow]
+    ingest: dict[str, _IngestRow]
+    board: dict[str, _YieldRow]
+    populations: dict[str, _PopulationsRow]
+    overlap: dict[str, _OverlapRow]
+    partners: dict[str, list[OverlapPartner]]
+    funnel: dict[str, dict[str, _FunnelRow]]
+    spend: dict[str, list[_SpendRow]]
+
+
+def _collect_tables() -> _SourceTables:
     funnel: dict[str, dict[str, _FunnelRow]] = {}
     for row in db.query_as(_FunnelRow, _FUNNEL_SQL, {"checks": list(_VERDICT_CHECKS)}):
         funnel.setdefault(row.source, {})[row.check_type] = row
@@ -249,24 +260,119 @@ def collect_source_analytics(min_sample: int) -> list[BoardAnalytics]:
     for row in db.query_as(_SpendRow, _SPEND_SQL):
         spend.setdefault(row.source, []).append(row)
 
+    overlap: dict[str, _OverlapRow] = {}
+    partners: dict[str, list[OverlapPartner]] = {}
+    for r in db.query(_OVERLAP_SQL):
+        if r["partner"] is None:
+            overlap[r["source"]] = _OverlapRow(
+                source=r["source"],
+                keyed_jobs=r["keyed_jobs"],
+                shared_with_other_source=r["shared"],
+            )
+        else:
+            partners.setdefault(r["source"], []).append(
+                OverlapPartner(source=r["partner"], shared_postings=r["shared"])
+            )
+    for rows in partners.values():
+        rows.sort(key=lambda p: (-p.shared_postings, p.source))
+
+    return _SourceTables(
+        configs=index_rows_by_source(
+            db.query_as(_ConfigRow, "SELECT name AS source, listings_url, active FROM sources")
+        ),
+        inventory=index_rows_by_source(db.query_as(_InventoryRow, _INVENTORY_SQL)),
+        custom=index_rows_by_source(db.query_as(_CustomRow, _CUSTOM_SQL)),
+        first_closed=index_rows_by_source(db.query_as(_FirstClosedRow, _FIRST_CLOSED_SQL)),
+        ingest=index_rows_by_source(db.query_as(_IngestRow, _INGEST_SQL)),
+        board=index_rows_by_source(db.query_as(_YieldRow, _YIELD_SQL)),
+        populations=index_rows_by_source(db.query_as(_PopulationsRow, _POPULATIONS_SQL)),
+        overlap=overlap,
+        partners=partners,
+        funnel=funnel,
+        spend=spend,
+    )
+
+
+# Aggregates over the whole catalog and every model call, so the page is
+# served stale (docs/agents/admin-query-reads.md) and warmed at startup
+# (api.app). Computed once for every source: the list and each source's
+# detail page assemble from the same tables, and min_sample only changes the
+# assembly, so neither recomputes a scan.
+TABLES: Stale[_SourceTables] = Stale(
+    _collect_tables, lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+def _assemble(t: _SourceTables, min_sample: int) -> list[BoardAnalytics]:
     # A configured source with no postings is not an empty row to skip - it is
     # a board that is being ingested and returning nothing, which is the
     # loudest thing this endpoint can say about it.
-    names = set(configs) | set(inventory) | set(ingest)
+    names = set(t.configs) | set(t.inventory) | set(t.ingest)
     return [
         assemble_source_analytics(
             name,
             min_sample=min_sample,
-            config=configs.get(name),
-            inventory=inventory.get(name),
-            funnel=funnel.get(name, {}),
-            custom=custom.get(name),
-            first_closed=first_closed.get(name),
-            spend=spend.get(name, []),
-            ingest=ingest.get(name),
-            board=board.get(name),
-            populations=populations.get(name),
-            overlap=overlap.get(name),
+            config=t.configs.get(name),
+            inventory=t.inventory.get(name),
+            funnel=t.funnel.get(name, {}),
+            custom=t.custom.get(name),
+            first_closed=t.first_closed.get(name),
+            spend=t.spend.get(name, []),
+            ingest=t.ingest.get(name),
+            board=t.board.get(name),
+            populations=t.populations.get(name),
+            overlap=t.overlap.get(name),
         )
         for name in sorted(names)
     ]
+
+
+# Assembling every board's row took 2.8 s for 9,571 boards on a production
+# copy (2026-11-26), so the rows are kept per sample floor as well.
+_ROWS: StaleByKey[int, list[BoardAnalytics]] = StaleByKey(
+    lambda: int(db.get_config("admin_stats_cache_seconds"))
+)
+
+
+def collect_source_analytics(min_sample: int) -> list[BoardAnalytics]:
+    """Every board's row, ordered by source."""
+    return _ROWS.get(min_sample, lambda: _assemble(TABLES.get(), min_sample))
+
+
+def _rate_value(stage: CheckStage | CustomCheckStage | None) -> float | None:
+    return stage.pass_rate.value if stage else None
+
+
+# The table's columns, as the page sorts them: each reads a number, or None
+# where the board has too little to say, and those sort last either way.
+SORT_KEYS: dict[str, Callable[[BoardAnalytics], float | int | None]] = {
+    "total": lambda r: r.inventory.total,
+    "still_open": lambda r: _rate_value(r.funnel.get("closed")),
+    "doa": lambda r: r.decay.dead_on_arrival.value,
+    "clearance": lambda r: _rate_value(r.funnel.get("clearance")),
+    "cost": lambda r: r.spend.cost_usd,
+    "apply": lambda r: r.board_yield.apply_rate.value,
+}
+
+
+def search_source_analytics(
+    rows: list[BoardAnalytics], q: str | None, sort: str, descending: bool
+) -> list[BoardAnalytics]:
+    """The boards whose name contains `q`, in the page's order: by the
+    column, unknown values last, ties by source."""
+    needle = (q or "").strip().lower()
+    found = [r for r in rows if needle in r.source.lower()] if needle else list(rows)
+    if sort == "source":
+        found.sort(key=lambda r: r.source.lower(), reverse=descending)
+        return found
+    key = SORT_KEYS[sort]
+    known = [r for r in found if key(r) is not None]
+    unknown = [r for r in found if key(r) is None]
+    # Stable: rows arrive by source, so equal values stay in source order.
+    known.sort(key=lambda r: key(r) or 0, reverse=descending)
+    return known + unknown
+
+
+def overlap_partners(source: str) -> list[OverlapPartner]:
+    """The other sources carrying the same (company, title), most first."""
+    return TABLES.get().partners.get(source, [])

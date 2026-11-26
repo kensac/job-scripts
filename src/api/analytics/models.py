@@ -270,6 +270,15 @@ class BoardAnalyticsList(BaseModel):
     rows: list[BoardAnalytics]
     min_sample: int
     caveats: list[str]
+    # The boards matching the search, of which `rows` is the page at `offset`.
+    matched: int
+    offset: int
+    # The boards with no postings, whatever the search: the page names them
+    # above the table, where a board that is ingested and returns nothing is
+    # the loudest thing this endpoint says. The first NO_POSTINGS_NAMED by
+    # name, and how many there are: about 4,000 names would be half the page.
+    no_postings: list[str]
+    no_postings_total: int
 
 
 class OverlapPartner(_SourceKeyed):

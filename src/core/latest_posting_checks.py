@@ -78,6 +78,20 @@ _FOLD: LiteralString = """
            (SELECT count(*) FROM cleared) AS cleared
 """
 
+# Every posting's latest answer to every posting check, exactly as `verdicts`
+# gives it, as a statement of (job_id, check_type, status): for a read over
+# the whole catalog, where a set is cheaper than a probe per posting. A job
+# whose url has a dirty row is read live from `verdicts`; every other job's
+# rows come from the projection, which the fold keeps current for it.
+CURRENT: LiteralString = f"""
+    SELECT l.job_id, l.check_type, l.status FROM latest_posting_checks l
+    WHERE NOT EXISTS (
+        SELECT 1 FROM latest_posting_checks_dirty d JOIN jobs jd ON jd.url = d.url
+        WHERE jd.id = l.job_id)
+    UNION ALL
+    SELECT t.job_id, t.check_type, t.status FROM ({_LATEST.format(jobs=_DIRTY_JOBS)}) t
+"""
+
 # One fold at a time across the fleet.
 _LOCK_KEY = "hashtextextended('latest_posting_checks', 0)"
 

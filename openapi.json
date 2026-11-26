@@ -26030,6 +26030,85 @@
             }
           },
           {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "source",
+                "total",
+                "still_open",
+                "doa",
+                "clearance",
+                "cost",
+                "apply"
+              ],
+              "type": "string",
+              "default": "total",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "desc",
+              "title": "Dir"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 500,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
             "name": "x-service-token",
             "in": "header",
             "required": false,
@@ -36027,13 +36106,36 @@
             },
             "type": "array",
             "title": "Caveats"
+          },
+          "matched": {
+            "type": "integer",
+            "title": "Matched"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "no_postings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "No Postings"
+          },
+          "no_postings_total": {
+            "type": "integer",
+            "title": "No Postings Total"
           }
         },
         "type": "object",
         "required": [
           "rows",
           "min_sample",
-          "caveats"
+          "caveats",
+          "matched",
+          "offset",
+          "no_postings",
+          "no_postings_total"
         ],
         "title": "BoardAnalyticsList",
         "description": "`caveats` ships with the numbers rather than beside them on a wiki,\nbecause a caveat a reader has to go and find is one that will be missed."

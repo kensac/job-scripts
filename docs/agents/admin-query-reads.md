@@ -66,6 +66,13 @@ than rebuilding the answer-to-call join per cut. The review-gate report runs
 the title screen once per distinct (recipe, title, source), materialized
 before the screen so the planner cannot push the regex back into the join.
 
+Source analytics (/analytics/sources) computes every source's aggregates in
+one cached set (`api.analytics.assembly.TABLES`), from which the list and each
+source's detail are assembled, and keeps the assembled rows per sample floor.
+The list is searched, sorted and paged on the server: every board's row is
+about 2.6 KB, and all 9,571 made a 25 MB response (production copy,
+2026-11-26).
+
 The catalog (/jobs/catalog) searches `company`, `title` and `url` with
 `ILIKE` joined by OR, and each column has a trigram GIN index. An OR is
 index-backed only when every arm is, so a column added to the search needs
