@@ -388,10 +388,25 @@ def mask_company(text: str, company: str) -> str:
 
 def embedding_text(text: str, company: str, shared: set[bytes]) -> str:
     """What is embedded for a posting: its paragraphs other than the
-    company's own text, with the company's name masked."""
-    kept = [p for p in paragraphs(text) if paragraph_key(p) not in shared]
+    company's own text, with the company's name masked. A company with no
+    shared text keys no paragraphs: nothing could match."""
+    kept = [p for p in paragraphs(text) if not shared or paragraph_key(p) not in shared]
     stripped = "\n".join(kept)
     return mask_company(stripped if len(stripped) >= MIN_KEPT_CHARS else text, company)
+
+
+def embedding_texts(postings: list[tuple[str, str, set[bytes]]]) -> list[str]:
+    """embedding_text of each (text, company, shared), in one call, for a
+    caller that runs it in another process."""
+    return [embedding_text(text, company, shared) for text, company, shared in postings]
+
+
+def shared_paragraphs_of(
+    companies: list[tuple[str, list[tuple[str, str]]]],
+) -> list[tuple[int, set[bytes]]]:
+    """shared_paragraphs of each (company, postings), in one call, for a
+    caller that runs it in another process."""
+    return [shared_paragraphs(company, postings) for company, postings in companies]
 
 
 def shared_by_company(rows: Iterable[Mapping[str, Any]]) -> dict[str, set[bytes]]:

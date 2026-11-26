@@ -35,9 +35,11 @@ import collections
 import dataclasses
 import hashlib
 import logging
+import multiprocessing
 import queue
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from http import HTTPStatus
 from typing import Any
 
@@ -249,7 +251,12 @@ def candidates(
     return rows, unread, exhausted
 
 
-def _profile(stale: list[str], current: dict[str, int]) -> None:
+def _cpu(executor: Executor | None, fn: Callable[[Any], Any], arg: Any) -> Any:
+    """`fn(arg)`, in `executor`'s process when there is one."""
+    return fn(arg) if executor is None else executor.submit(fn, arg).result()
+
+
+def _profile(stale: list[str], current: dict[str, int], cpu: Executor | None = None) -> None:
     """Rebuilds the profiles of `stale` companies from the newest posting of
     each of up to PROFILE_TITLES titles that has page text, leaving out a
     sample whose page cannot be read (_readable) and the title with it."""
@@ -285,7 +292,11 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
     for sample in samples:
         postings[sample["k"]].append((sample["title"], sample["input_content"]))
         names[sample["k"]] = sample["company"]
-    profiles = {k: company_text.shared_paragraphs(names.get(k, k), p) for k, p in postings.items()}
+    keys = list(postings)
+    built = _cpu(
+        cpu, company_text.shared_paragraphs_of, [(names.get(k, k), postings[k]) for k in keys]
+    )
+    profiles = dict(zip(keys, built, strict=True))
     shared = [(k, sha) for k, (_, paragraphs) in profiles.items() for sha in paragraphs]
     with db.transaction():
         db.execute("DELETE FROM company_shared_paragraphs WHERE company_key = ANY(%s)", (stale,))
@@ -305,7 +316,10 @@ def _profile(stale: list[str], current: dict[str, int]) -> None:
 
 
 def refresh_profiles(
-    keys: set[str], task_id: int | None = None, stop: threading.Event | None = None
+    keys: set[str],
+    task_id: int | None = None,
+    stop: threading.Event | None = None,
+    cpu: Executor | None = None,
 ) -> int:
     """Rebuilds the shared paragraphs of every company in `keys` whose
     distinct titles outnumber its profile's, a batch of companies at a time,
@@ -340,7 +354,7 @@ def refresh_profiles(
     for start in range(0, len(stale), _PROFILE_BATCH):
         if stop is not None and stop.is_set():
             return start
-        _profile(stale[start : start + _PROFILE_BATCH], current)
+        _profile(stale[start : start + _PROFILE_BATCH], current, cpu)
         if task_id is not None:
             done = min(start + _PROFILE_BATCH, len(stale))
             set_progress(task_id, done, len(stale), f"profiled {done} companies")
@@ -581,6 +595,7 @@ def _prepare(
     in_flight: frozenset[str],
     stop: threading.Event,
     task_id: int | None = None,
+    cpu: Executor | None = None,
 ) -> _Prepared | None:
     """Selects up to `cap` candidates below `below`, leaving out `skip` (the
     run's failures) and `in_flight` (the visible postings of the batch the
@@ -607,15 +622,20 @@ def _prepare(
     keys = {row["company_key"] for row in rows} | older
     if stop.is_set():
         return None
-    profiled = refresh_profiles(keys, task_id, stop)
+    profiled = refresh_profiles(keys, task_id, stop, cpu)
     if stop.is_set():
         return None
     shared, built = profiles(keys)
+    texts = _cpu(
+        cpu,
+        company_text.embedding_texts,
+        [
+            (row["input_content"], row["company"], shared.get(row["company_key"], set()))
+            for row in rows
+        ],
+    )
     jobs, unchanged = [], []
-    for row in rows:
-        text = company_text.embedding_text(
-            row["input_content"], row["company"], shared.get(row["company_key"], set())
-        )
+    for row, text in zip(rows, texts, strict=True):
         job = {
             "url": row["url"],
             "job_id": row.get("job_id"),
@@ -710,7 +730,16 @@ def run(task_id: int) -> dict[str, Any]:
     carried: list[dict[str, Any]] = []
     current: _Prepared | None = None
     stop = threading.Event()
-    with ThreadPoolExecutor(1) as preparing:
+    # Stripping text and building profiles are pure Python over text, and in
+    # the worker's interpreter they held the lock the request threads need:
+    # profiled on hetzner (2026-11-26), preparing took 44% of the worker's
+    # samples, request threads waited on it, and four GPUs ran under a third
+    # busy. One process takes that work: stripping a batch takes seconds,
+    # embedding it tens. Spawned, not forked, from a threaded worker.
+    with (
+        ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as cpu,
+        ThreadPoolExecutor(1) as preparing,
+    ):
         try:
             while not cancelled(task_id) and db.get_config("local_embedding_enabled"):
                 servers, unreachable = _servers(urls)
@@ -724,7 +753,7 @@ def run(task_id: int) -> dict[str, Any]:
                     break
                 cap = int(db.get_config("local_embed_batch"))
                 if current is None:
-                    current = _prepare(cap, below, skip, frozenset(), stop, task_id)
+                    current = _prepare(cap, below, skip, frozenset(), stop, task_id, cpu)
                     assert current is not None
                 upcoming = None
                 if not current.exhausted:
@@ -732,7 +761,14 @@ def run(task_id: int) -> dict[str, Any]:
                         job["url"] for job in carried if job["job_id"] is None
                     }
                     upcoming = preparing.submit(
-                        _prepare, cap, current.walked_to, dict(skip), frozenset(in_flight), stop
+                        _prepare,
+                        cap,
+                        current.walked_to,
+                        dict(skip),
+                        frozenset(in_flight),
+                        stop,
+                        None,
+                        cpu,
                     )
                 batch, carried = _embed_prepared(task_id, servers, current, carried, skip, counts)
                 counts["batches"] += 1
