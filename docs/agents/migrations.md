@@ -199,6 +199,17 @@ views, and the test corpus and sync tools read base tables only.
 Do not add a column for something derivable from rows you already have
 ([data-and-truth.md](data-and-truth.md) states the principle).
 
-The answer ledger's hourly sums (`answer_usage_hourly`) are the one stored
-derivation. They are allowed because a read never returns a stale hour;
-admin-query-reads.md says how.
+Two stored derivations exist, each allowed because a read never returns it
+stale. The answer ledger's hourly sums (`answer_usage_hourly`):
+admin-query-reads.md says how. Each posting's latest answer to each posting
+check (`latest_posting_checks`): statement-level triggers on `ai_queries` and
+`jobs` keep it exact in the writing transaction, a newer answer always wins
+whatever order inserts commit in, and an update or delete recomputes the keys
+it touched (migration `d81c5e2b7a43`). `tasks.latest_posting_checks` filled it
+and checks it daily for a write the triggers could not see (replica mode, a
+TRUNCATE). Read per posting, that answer was an index probe into
+`ai_queries` for every candidate of a catalog scan: 461,746 probes and 11.6 s
+for one month of available postings, against 0.8 s hashing this table
+(production copy, 2026-11-26). The jobs trigger costs an ingest upsert about
+0.04 to 0.17 ms. Any new stored derivation meets the same bar: exact in the
+writing transaction, with a reconcile that is a no-op while it holds.

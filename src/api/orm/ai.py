@@ -150,6 +150,31 @@ class AiQuery(Base):
     model_call_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
+class LatestPostingCheck(Base):
+    """Each posting's latest answer to each check that is not a custom
+    filter, as `verdicts` would give it: the answer with the highest id for
+    the posting's url and the check. A projection of `verdicts`, kept exact
+    in the same transaction by triggers on ai_queries and jobs and rebuilt
+    by tasks.latest_posting_checks, so a reader never sees it behind.
+
+    Read per posting, the latest answer was an index probe into ai_queries
+    for every candidate, the largest single cost of a scan over the
+    catalog: 461,746 probes, 11.6 s, for one month of available postings,
+    against 0.8 s hashing this table's passing rows (production copy,
+    2026-11-26). Keyed by job id rather than url, which is 90 bytes on
+    average: a url key made the table and its indexes 606 MB.
+    """
+
+    __tablename__ = "latest_posting_checks"
+
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    check_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    verdict_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(Text)
+
+
 class AiInstructionText(Base):
     __tablename__ = "ai_instruction_texts"
 

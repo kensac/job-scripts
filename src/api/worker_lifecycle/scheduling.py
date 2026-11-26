@@ -218,6 +218,12 @@ def schedule_ingest_cycle() -> None:
     day = now.strftime("%Y-%m-%d")
     if ai_on:
         enqueue("reverify_open", {"cycle": day}, dedupe_key=f"reverify:{day}")
+    # The latest-answer projection's daily check (tasks.latest_posting_checks).
+    enqueue(
+        "reconcile_latest_posting_checks",
+        {"cycle": day},
+        dedupe_key=f"latest-posting-checks:{day}",
+    )
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync
     # above runs hourly, so without these two the pipeline would fill
