@@ -1,4 +1,4 @@
-"""posting_embeddings: vectors from the model the fleet serves itself
+"""posting_embeddings, and the per-company text profiles they are embedded with
 
 Revision ID: e3f1a7c95b20
 Revises: d81c5e2b7a43
@@ -9,6 +9,10 @@ A new table, not a change to job_embeddings: the width differs (768 against
 posting it covers has a vector here. The width is a frozen literal, as the
 job_embeddings migration's is: a migration means the same thing forever, and
 tests pin the live column to core.derivations.local_embeddings.
+
+company_text_profiles and company_shared_paragraphs are the paragraphs each
+company repeats across roles (core.derivations.company_text), derived and
+rebuilt by the embedding run; a posting is embedded without them.
 """
 
 from collections.abc import Sequence
@@ -40,5 +44,25 @@ def upgrade() -> None:
     )
 
 
+    op.create_table(
+        "company_text_profiles",
+        sa.Column("company_key", sa.Text(), primary_key=True),
+        sa.Column("titles", sa.Integer(), nullable=False),
+        sa.Column(
+            "profiled_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+    )
+    op.create_table(
+        "company_shared_paragraphs",
+        sa.Column("company_key", sa.Text(), primary_key=True),
+        sa.Column("paragraph_sha", sa.LargeBinary(), primary_key=True),
+    )
+
+
 def downgrade() -> None:
+    op.drop_table("company_shared_paragraphs")
+    op.drop_table("company_text_profiles")
     op.drop_table("posting_embeddings")

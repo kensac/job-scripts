@@ -12,6 +12,8 @@ from sqlalchemy import (
     CheckConstraint,
     Identity,
     Index,
+    Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     text,
@@ -233,3 +235,27 @@ class Location(Base):
     places: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     model: Mapped[str | None] = mapped_column(Text)
     classified_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class CompanyTextProfile(Base):
+    """When a company's shared paragraphs were last read, and from how many of
+    its distinct titles (core.derivations.company_text). Derived: rebuilt by
+    tasks.derivations.local_embeddings whenever the company has more titles
+    than its profile counted."""
+
+    __tablename__ = "company_text_profiles"
+
+    company_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    titles: Mapped[int] = mapped_column(Integer)
+    profiled_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class CompanySharedParagraph(Base):
+    """One paragraph a company repeats across roles, by the SHA-256 of its
+    words (core.derivations.company_text.paragraph_key). Derived with its
+    company's profile, replaced whole when the profile is rebuilt."""
+
+    __tablename__ = "company_shared_paragraphs"
+
+    company_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    paragraph_sha: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)

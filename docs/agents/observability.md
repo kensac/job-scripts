@@ -986,6 +986,15 @@ variable is a comma list of `llama-server --embedding` addresses; a host may
 lend its GPU and its CPU as two servers. Requests in flight per server are
 the slots the servers start with (`SLOTS_PER_SERVER`).
 
+**A posting is embedded without what its company says in every posting.**
+Paragraphs the company repeats across at least three distinct titles (and
+15% of them) are taken out and its name is masked, from a derived per-company
+profile (`company_text_profiles`, `company_shared_paragraphs`) the run
+rebuilds whenever a company has more titles than its profile counted
+(`core.derivations.company_text`, whose docstring carries the measurement:
+as written, 89% of a posting's ten nearest OpenAI neighbours were its own
+employer's).
+
 **A posting is embedded whole.** Its text up to `EMBEDDING_INPUT_CHARS` is
 cut into chunks of the model's window, and the chunk vectors are averaged by
 token count, then normalised. Nothing is truncated to fit the window: over

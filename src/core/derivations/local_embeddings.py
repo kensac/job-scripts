@@ -21,7 +21,8 @@ ten nearest share its verdict.
     nomic-embed-text-v1.5             0.92               0.72
 
 On optiplex's Radeon R7 350 (Vulkan) and four CPU threads together it embedded
-0.9 postings a second.
+0.9 postings a second. What a posting is embedded as, without its company's
+shared text, is core.derivations.company_text.
 """
 
 from __future__ import annotations

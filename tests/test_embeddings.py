@@ -246,10 +246,10 @@ class TestUnchangedRescrapes:
         from tasks import rescrape
 
         assert {
-        "job_comp",
-        "job_embeddings",
-        "job_requirements",
-        "posting_embeddings",
-    } == rescrape.STAMPABLE
+            "job_comp",
+            "job_embeddings",
+            "job_requirements",
+            "posting_embeddings",
+        } == rescrape.STAMPABLE
         with pytest.raises(ValueError, match="not a re-stampable table"):
             rescrape.drop_unchanged([], table="jobs", limit=10)

@@ -6,6 +6,12 @@ from an older page. An unchanged re-scrape is re-stamped (tasks.rescrape).
 Each run takes up to `local_embed_per_cycle` of them and embeds them on the
 servers this host names (core.derivations.local_embeddings), concurrently
 up to the slots each server runs; only a host with servers claims the kind.
+
+What is embedded is the posting without the paragraphs its company repeats
+across roles, and with the company's name masked
+(core.derivations.company_text). Each company's shared paragraphs are a
+derived profile, rebuilt here whenever the company has more distinct titles
+than its profile counted.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ import requests
 from api import db
 from api.board import visibility
 from core import page_fetches
+from core.derivations import company_text
 from core.derivations.embeddings import EMBEDDING_INPUT_CHARS
 from core.derivations.local_embeddings import (
     LOCAL_EMBEDDING_MODEL,
@@ -83,13 +90,101 @@ def _store(rows: list[dict[str, Any]]) -> int:
 
 def candidates(cap: int) -> list[dict[str, Any]]:
     rows = page_fetches.resolve(db.query(CANDIDATES, {"cap": cap}))
-    return rescrape.drop_unchanged(rows, table="posting_embeddings", limit=EMBEDDING_INPUT_CHARS)
+    rows = rescrape.drop_unchanged(rows, table="posting_embeddings", limit=EMBEDDING_INPUT_CHARS)
+    companies = {
+        row["url"]: row["company"]
+        for row in db.query(
+            "SELECT url, company FROM jobs WHERE url = ANY(%s)", ([r["url"] for r in rows],)
+        )
+    }
+    for row in rows:
+        row["company"] = companies.get(row["url"], "")
+    return rows
 
 
-def _embed(job: tuple[str, dict[str, Any]]) -> dict[str, Any] | None:
-    url, row = job
+def refresh_profiles(keys: set[str]) -> int:
+    """Rebuilds the shared paragraphs of every company in `keys` whose
+    distinct titles outnumber its profile's, returning how many were rebuilt.
+    A profile reads one posting for each of up to PROFILE_TITLES titles."""
+    keys.discard("")
+    if not keys:
+        return 0
+    current = {
+        row["k"]: row["titles"]
+        for row in db.query(
+            "SELECT lower(btrim(company)) AS k, count(DISTINCT lower(btrim(title))) AS titles "
+            "FROM jobs WHERE lower(btrim(company)) = ANY(%s) GROUP BY 1",
+            (list(keys),),
+        )
+    }
+    known = {
+        row["company_key"]: row["titles"]
+        for row in db.query(
+            "SELECT company_key, titles FROM company_text_profiles WHERE company_key = ANY(%s)",
+            (list(keys),),
+        )
+    }
+    stale = [k for k, titles in current.items() if known.get(k, 0) < titles]
+    if not stale:
+        return 0
+    samples = page_fetches.resolve(
+        db.query(
+            """
+            SELECT s.k, s.title, q.input_content, q.content_ref FROM (
+                SELECT k, title, url, row_number() OVER (PARTITION BY k ORDER BY id DESC) AS n
+                FROM (
+                    SELECT DISTINCT ON (lower(btrim(company)), lower(btrim(title)))
+                           lower(btrim(company)) AS k, title, url, id
+                    FROM jobs WHERE lower(btrim(company)) = ANY(%(stale)s)
+                    ORDER BY lower(btrim(company)), lower(btrim(title)), id DESC
+                ) newest_per_title
+            ) s
+            CROSS JOIN LATERAL (
+                SELECT q.input_content, q.content_ref FROM page_texts q
+                WHERE q.url = s.url AND q.chars > 200 ORDER BY q.id DESC LIMIT 1
+            ) q
+            WHERE s.n <= %(titles)s
+            """,
+            {"stale": stale, "titles": company_text.PROFILE_TITLES},
+        )
+    )
+    postings: dict[str, list[tuple[str, str]]] = {k: [] for k in stale}
+    for sample in samples:
+        postings[sample["k"]].append((sample["title"], sample["input_content"]))
+    profiles = {k: company_text.shared_paragraphs(p) for k, p in postings.items()}
+    with db.transaction():
+        db.execute("DELETE FROM company_shared_paragraphs WHERE company_key = ANY(%s)", (stale,))
+        shared = [(k, sha) for k, (_, paragraphs) in profiles.items() for sha in paragraphs]
+        if shared:
+            db.execute(
+                "INSERT INTO company_shared_paragraphs (company_key, paragraph_sha) "
+                "SELECT * FROM unnest(%s::text[], %s::bytea[])",
+                ([k for k, _ in shared], [sha for _, sha in shared]),
+            )
+        db.execute(
+            "INSERT INTO company_text_profiles (company_key, titles) "
+            "SELECT * FROM unnest(%s::text[], %s::int[]) "
+            "ON CONFLICT (company_key) DO UPDATE SET titles = EXCLUDED.titles, profiled_at = now()",
+            (stale, [current[k] for k in stale]),
+        )
+    return len(stale)
+
+
+def shared_paragraphs(keys: set[str]) -> dict[str, set[bytes]]:
+    return company_text.shared_by_company(
+        db.query(
+            "SELECT company_key, paragraph_sha FROM company_shared_paragraphs "
+            "WHERE company_key = ANY(%s)",
+            (list(keys),),
+        )
+    )
+
+
+def _embed(job: tuple[str, dict[str, Any], set[bytes]]) -> dict[str, Any] | None:
+    url, row, shared = job
+    text = company_text.embedding_text(row["input_content"], row["company"], shared)
     try:
-        embedded = embed_document(_session(), url, row["input_content"])
+        embedded = embed_document(_session(), url, text)
     except EmbeddingUnavailable:
         logger.warning("embedding failed for %s on %s", row["url"], url, exc_info=True)
         return None
@@ -107,9 +202,14 @@ def run(task_id: int, cap: int) -> dict[str, int]:
     if not urls:
         raise EmbeddingUnavailable("no embedding server configured on this host")
     rows = candidates(cap)
-    counts = {"selected": len(rows), "written": 0, "failed": 0}
+    keys = {company_text.company_key(row["company"]) for row in rows}
+    counts = {"selected": len(rows), "written": 0, "failed": 0, "profiled": refresh_profiles(keys)}
+    shared = shared_paragraphs(keys)
     pending: list[dict[str, Any]] = []
-    jobs = [(urls[i % len(urls)], row) for i, row in enumerate(rows)]
+    jobs = [
+        (urls[i % len(urls)], row, shared.get(company_text.company_key(row["company"]), set()))
+        for i, row in enumerate(rows)
+    ]
     with ThreadPoolExecutor(max_workers=SLOTS_PER_SERVER * len(urls)) as executor:
         for done, embedded in enumerate(executor.map(_embed, jobs), start=1):
             if embedded is None:

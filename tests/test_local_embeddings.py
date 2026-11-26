@@ -141,3 +141,62 @@ def test_switched_off_embeds_nothing(f, monkeypatch, set_config):
     set_config("local_embedding_enabled", False)
     _run(monkeypatch, FakeServer())
     assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (url,)) is None
+
+
+ABOUT = "Acme Robotics builds warehouse robots used by the largest retailers in the world."
+EEO = "Acme Robotics is an equal opportunity employer and values a diverse workforce."
+
+
+def _posting(role: str) -> str:
+    return f"{role} at Acme Robotics\nYou will {role.lower()} every day, owning the {role} roadmap and its delivery.\n{ABOUT}\n{EEO}"
+
+
+def test_paragraphs_a_company_repeats_across_roles_are_shared_and_one_roles_are_not():
+    from core.derivations import company_text
+
+    roles = ["Backend Engineer", "Account Executive", "Data Analyst", "Recruiter"]
+    postings = [(r, _posting(r)) for r in roles] + [
+        ("Backend Engineer", _posting("Backend Engineer"))
+    ]
+    titles, shared = company_text.shared_paragraphs(postings)
+
+    assert titles == 4
+    assert {company_text.paragraph_key(ABOUT), company_text.paragraph_key(EEO)} <= shared
+    own = company_text.paragraph_key(
+        "You will backend engineer every day, owning the Backend Engineer roadmap and its delivery."
+    )
+    assert own not in shared, "a repost repeats its own role's text; that is not the company's"
+
+    text = company_text.embedding_text(_posting("Data Analyst") * 3, "Acme Robotics, Inc.", shared)
+    assert ABOUT not in text and EEO not in text
+    assert "acme" not in text.lower() and "the company" in text
+
+
+def test_a_posting_left_too_short_by_stripping_is_embedded_as_written():
+    from core.derivations import company_text
+
+    shared = {company_text.paragraph_key(ABOUT), company_text.paragraph_key(EEO)}
+    text = company_text.embedding_text(f"Intern\n{ABOUT}\n{EEO}", "Acme Robotics", shared)
+    assert "warehouse robots" in text
+
+
+def test_a_company_profile_is_rebuilt_when_it_gains_titles(f):
+    for role in ["Backend Engineer", "Account Executive", "Data Analyst"]:
+        job_id, _ = f.make_ready_job(content=_posting(role) * 2)
+        db.execute(
+            "UPDATE jobs SET company = 'Acme Robotics', title = %s WHERE id = %s", (role, job_id)
+        )
+    assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
+    first = db.query_one(
+        "SELECT titles FROM company_text_profiles WHERE company_key = 'acme robotics'"
+    )
+    assert first == {"titles": 3}
+    shared = local_embeddings.shared_paragraphs({"acme robotics"})["acme robotics"]
+    assert len(shared) == 2
+    assert local_embeddings.refresh_profiles({"acme robotics"}) == 0, "nothing new, nothing reread"
+
+    job_id, _ = f.make_ready_job(content=_posting("Recruiter") * 2)
+    db.execute(
+        "UPDATE jobs SET company = 'Acme Robotics', title = 'Recruiter' WHERE id = %s", (job_id,)
+    )
+    assert local_embeddings.refresh_profiles({"acme robotics"}) == 1
