@@ -182,4 +182,21 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         help="Postings the hourly similarity embedding sweep embeds per cycle, in one "
         "provider batch. A cycle waits for the previous batch to return.",
     ),
+    # tasks.derivations.local_embeddings, on hosts that serve the model.
+    "local_embedding_enabled": ConfigKey(
+        section="Boards",
+        default=True,
+        value_type=bool,
+        help="Embed postings with the model the fleet serves itself, on the hosts that run "
+        "an embedding server. Switched off, the hourly run does nothing.",
+    ),
+    # About an hour of optiplex's GPU and CPU together, which embedded 0.9
+    # postings a second (2026-11-26), so a run ends inside its cycle.
+    "local_embed_per_cycle": ConfigKey(
+        section="Boards",
+        default=3200,
+        value_type=PositiveInt,
+        help="Postings one hourly run embeds with the fleet's own model. A run on a faster "
+        "host finishes sooner; raise it to fill the hour there.",
+    ),
 }

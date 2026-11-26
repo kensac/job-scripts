@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # into SQL. A new sweep adds its line here deliberately.
 _RESTAMP: dict[str, LiteralString] = {
     "job_embeddings": "UPDATE job_embeddings SET content_row_id = %s WHERE url = %s",
+    "posting_embeddings": "UPDATE posting_embeddings SET content_row_id = %s WHERE url = %s",
     "job_requirements": "UPDATE job_requirements SET content_row_id = %s WHERE url = %s",
     "job_comp": "UPDATE job_comp SET content_row_id = %s WHERE url = %s",
 }

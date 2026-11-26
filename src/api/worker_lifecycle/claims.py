@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from api import db, hosts, metrics, telemetry
@@ -38,8 +39,19 @@ def _kinds_clause(kinds: list[str], exclude: list[str]) -> str:
     return clause
 
 
+# Kinds that need something only some hosts have, named by the environment
+# variable that says a host has it. A worker without the variable never claims
+# the kind, so neither knob above has to list it on every other host, and a
+# new host that lacks it cannot claim and fail it.
+NEEDS_ENV: dict[str, str] = {
+    # An embedding server (core.derivations.local_embeddings.URLS_ENV).
+    "embed_postings_local": "JOBTRACKER_EMBEDDING_URLS",
+}
+
 WORKER_KINDS = env_list("JOBTRACKER_WORKER_KINDS")
-EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS")
+EXCLUDE_KINDS = env_list("JOBTRACKER_WORKER_EXCLUDE_KINDS") + [
+    kind for kind, name in NEEDS_ENV.items() if not os.environ.get(name, "").strip()
+]
 
 
 # The order eligible tasks are claimed in: by age, except that a scheduled

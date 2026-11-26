@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from api.orm.base import Base, _now
 from core.derivations.embeddings import EMBEDDING_DIMENSIONS
+from core.derivations.local_embeddings import LOCAL_EMBEDDING_DIMENSIONS
 
 
 class JobRequirements(Base):
@@ -109,6 +110,30 @@ class JobEmbedding(Base):
     model: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(Text)
     # The page fetch the vector was read from, as on JobRequirements.
+    content_row_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class PostingEmbedding(Base):
+    """One vector per posting from the model the fleet serves itself
+    (core.derivations.local_embeddings), replacing job_embeddings once every
+    posting job_embeddings covers has one.
+
+    halfvec: two bytes a dimension instead of four. Cosine ranking of
+    normalised vectors does not move at that precision, and the table is a
+    quarter of job_embeddings' width per row (768 halves against 1,536
+    floats). No vector index, for job_embeddings' reason: the similarity
+    query is scoped to one user's visible slice, an exact scan.
+    """
+
+    __tablename__ = "posting_embeddings"
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    embedding: Mapped[Any] = mapped_column(HALFVEC(LOCAL_EMBEDDING_DIMENSIONS))
+    model: Mapped[str] = mapped_column(Text)
+    # sha256 of the text embedded, as on job_embeddings: an unchanged
+    # re-scrape is re-stamped, not embedded again (tasks.rescrape).
+    content_hash: Mapped[str | None] = mapped_column(Text)
     content_row_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 

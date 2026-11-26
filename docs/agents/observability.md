@@ -968,6 +968,35 @@ becomes visible, so similarity can remain unavailable until that batch
 completes. Collection never rechecks the current visibility scope. Public lists
 have no similarity consumer and their membership is unaffected.
 
+## Embeddings from the fleet's own model
+
+`embed_postings_local` (`tasks.derivations.local_embeddings`) embeds the same
+postings as `embed_postings_batch` into `posting_embeddings`, with a model
+served on fleet hardware (`core.derivations.local_embeddings`, whose
+docstring carries the judged comparison that chose it). It replaces the
+OpenAI sweep: once `posting_embeddings` covers every posting
+`job_embeddings` does, the similarity reader moves to it and the OpenAI
+sweep and table go.
+
+**A kind that needs something only some hosts have is gated by the variable
+that says a host has it** (`api.worker_lifecycle.claims.NEEDS_ENV`). A
+worker without `JOBTRACKER_EMBEDDING_URLS` excludes the kind, so no other
+host's denylist names it and a new host cannot claim and fail it. The
+variable is a comma list of `llama-server --embedding` addresses; a host may
+lend its GPU and its CPU as two servers. Requests in flight per server are
+the slots the servers start with (`SLOTS_PER_SERVER`).
+
+**A posting is embedded whole.** Its text up to `EMBEDDING_INPUT_CHARS` is
+cut into chunks of the model's window, and the chunk vectors are averaged by
+token count, then normalised. Nothing is truncated to fit the window: over
+150 postings, truncating to the window dropped 7% of the text and left 95% of
+top-10 neighbours unchanged, but the whole posting is what the vector claims
+to stand for.
+
+`local_embed_per_cycle` bounds a run, `local_embedding_enabled` switches it
+off, and an unchanged re-scrape is re-stamped (`tasks.rescrape`). A posting
+whose embedding fails is left without a row and selected again next run.
+
 ## Scheduled filter transport
 
 **Only the instructions are written to the prompt cache.** On a model with

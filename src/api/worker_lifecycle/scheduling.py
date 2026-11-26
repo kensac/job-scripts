@@ -113,6 +113,16 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("tier_page_text", {"cycle": cycle}, dedupe_key=f"tier-page-text:{cycle}")
+    # Postings embedded with the fleet's own model, by a host that serves it
+    # (tasks.derivations.local_embeddings; api.worker_lifecycle.claims.NEEDS_ENV).
+    # One at a time: two runs would select the same postings.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'embed_postings_local' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue(
+            "embed_postings_local", {"cycle": cycle}, dedupe_key=f"embed-postings-local:{cycle}"
+        )
     # Receipt responses still inline move to object storage
     # (tasks.receipt_responses). One at a time, for the same reason.
     if not db.query_one(
