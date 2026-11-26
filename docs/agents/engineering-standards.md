@@ -206,6 +206,21 @@ Keep the old SQL as the reference in the equality test, built from the same
 fragments, and give the fixture a row for every branch
 (`tests/test_verification_candidates.py`).
 
+**A check whose answer depends on a constant, not on the row, is a set built
+once per statement.** A person's location criteria are the same for every
+posting a board read considers, so which location strings they match is one
+set, hashed once and probed per posting (`api.board.criteria.SQL`). Joined
+per posting instead, the board read re-matched the criteria about 460,000
+times twice over: 20 of its 26 seconds on a production copy (2026-11-26). The
+planner keeps an uncorrelated subquery as a hashed subplan only where it
+cannot pull it up into a join, so the membership test is written
+`(x IN (subquery)) IS TRUE`; a bare `IN` or `EXISTS` at the top of a `WHERE`
+became a join driven from the set, one lookup per member (788,476 for the
+closed check, 22 of 24 seconds). Where the constant differs per row (criteria
+stored per board, `json_sql`) or one posting is checked (`api.posting_path`),
+the per-posting shape stays; both shapes are composed from one spelling of
+the rule, and `tests/test_criteria_shapes.py` holds them equal.
+
 **Join a table only when the statement reads it.** The planner removes an
 unused LEFT JOIN to a unique key, but the join column stays needed, so an
 index-only scan must still return it. The admin catalog count joined

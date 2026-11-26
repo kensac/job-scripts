@@ -19,36 +19,81 @@ from typing import Any
 # A string may name several places and so may a criterion ("United States
 # and Canada"); the match is any of the string's against any of the
 # criterion's, at every level the criterion's entry names.
-_PLACE_MATCH = """
-              (x.country IS NULL AND x.remote AND l.remote)
-              OR EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements(x.places) xp, jsonb_array_elements(l.places) lp
-                  WHERE xp->>'country' = lp->>'country'
-                    AND (xp->>'region' IS NULL OR xp->>'region' = lp->>'region')
-                    AND (xp->>'city' IS NULL OR xp->>'city' = lp->>'city'))"""
+# The place rule, spelled once in two parts and composed below into both
+# shapes a caller can evaluate. A criterion entry x matches a location l when
+# x is a bare remote criterion and l is remote, or when one of x's places, its
+# null levels dropped, is contained in l's places: every level the entry names
+# is equal. Every stored place carries a string country with region and city
+# beside it (2026-11-26); a place with no country never matches, as an equal
+# comparison with nothing never did.
+_REMOTE_MATCH = "(x.country IS NULL AND x.remote AND l.remote)"
+_PLACE_NAMED = "xp->>'country' IS NOT NULL"
+_PLACE_CONTAINS = "l.places @> jsonb_build_array(jsonb_strip_nulls(xp))"
+_PLACE_MATCH = f"""({_REMOTE_MATCH} OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(x.places) xp
+                  WHERE {_PLACE_NAMED} AND {_PLACE_CONTAINS}))"""
 
-# Each criterion on its own, named, so a posting's path can say which one it
-# failed (api.posting_path); SQL is their conjunction and the only spelling.
-CONDITIONS: dict[str, str] = {
-    "posted_after": "(%(crit_date)s::date IS NULL OR j.date_posted >= %(crit_date)s::date)",
-    "max_age": """(%(crit_max_age)s::int IS NULL
-             OR COALESCE(j.date_posted, j.created_at)
-                >= now() - make_interval(days => %(crit_max_age)s::int))""",
-    "excluded_locations": f"""(NOT %(crit_has_excl)s OR NOT EXISTS (
+# Per posting: the posting's location strings joined to `locations`, each
+# checked against the criterion. The shape for a criterion that differs per
+# row (json_sql) and for one posting at a time (api.posting_path).
+_PER_POSTING = {
+    "excl": f"""NOT EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_excl)s::text[])
-              WHERE {_PLACE_MATCH}))""",
-    "included_locations": f"""(NOT %(crit_has_incl)s OR cardinality(j.locations) = 0 OR EXISTS (
+              WHERE {_PLACE_MATCH})""",
+    "incl": f"""EXISTS (
               SELECT 1 FROM unnest(j.locations) loc
               JOIN locations l ON l.text = btrim(loc)
               JOIN locations x ON x.text = ANY(%(crit_incl)s::text[])
-              WHERE {_PLACE_MATCH}))""",
-    "terms": "(NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])",
+              WHERE {_PLACE_MATCH})""",
 }
 
-SQL = "".join(f"\n        AND {condition}" for condition in CONDITIONS.values()) + "\n"
+# Per statement: every location string the criterion matches, found once and
+# hashed, then probed per posting location. The shape for a scan of many
+# postings under one criterion (SQL). Per posting, a person's board read
+# re-matched the criterion about 460,000 times twice over: 20 of its 26
+# seconds on a production copy (2026-11-26). The containment half reads
+# idx_locations_places rather than every location. `IS TRUE` keeps the set a
+# hashed subplan; as a bare IN the planner pulls it into a per-posting join.
+_MATCHING = f"""
+              SELECT l.text FROM locations x
+              CROSS JOIN LATERAL jsonb_array_elements(x.places) xp
+              JOIN locations l ON {_PLACE_CONTAINS}
+              WHERE x.text = ANY(%(crit_{{key}})s::text[]) AND {_PLACE_NAMED}
+              UNION
+              SELECT l.text FROM locations x JOIN locations l ON {_REMOTE_MATCH}
+              WHERE x.text = ANY(%(crit_{{key}})s::text[])"""
+_PER_STATEMENT = {
+    key: f"""{"NOT " if key == "excl" else ""}EXISTS (
+              SELECT 1 FROM unnest(j.locations) loc
+              WHERE (btrim(loc) IN ({_MATCHING.format(key=key)})) IS TRUE)"""
+    for key in ("excl", "incl")
+}
+
+
+def _conditions(locations: dict[str, str]) -> dict[str, str]:
+    return {
+        "posted_after": "(%(crit_date)s::date IS NULL OR j.date_posted >= %(crit_date)s::date)",
+        "max_age": """(%(crit_max_age)s::int IS NULL
+             OR COALESCE(j.date_posted, j.created_at)
+                >= now() - make_interval(days => %(crit_max_age)s::int))""",
+        "excluded_locations": f"(NOT %(crit_has_excl)s OR {locations['excl']})",
+        "included_locations": (
+            f"(NOT %(crit_has_incl)s OR cardinality(j.locations) = 0 OR {locations['incl']})"
+        ),
+        "terms": "(NOT %(crit_has_terms)s OR j.terms && %(crit_terms)s::text[])",
+    }
+
+
+# Each criterion on its own, named, so a posting's path can say which one it
+# failed (api.posting_path), in the per-posting shape that json_sql also binds
+# to stored criteria. SQL below is the same conjunction for a scan.
+CONDITIONS: dict[str, str] = _conditions(_PER_POSTING)
+
+# The conjunction for a scan of many postings under one person's or board's
+# criteria. The same conditions, the locations in their per-statement shape.
+SQL = "".join(f"\n        AND {c}" for c in _conditions(_PER_STATEMENT).values()) + "\n"
 
 
 def json_sql(criteria: str, names: tuple[str, ...] = tuple(CONDITIONS)) -> str:

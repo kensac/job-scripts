@@ -40,28 +40,24 @@ _LATEST_FILTER = verdict_reads.latest_per(
 )
 
 FULL = f"""
-WITH enabled_filters AS (
+WITH enabled_filters AS MATERIALIZED (
     {board_eligibility.ENABLED_FILTERS}
 ),
 {board_eligibility.LATEST_CHECK},
-filter_pass AS (
-    -- The hashes go in as an array, not a join. Joined, the planner sorted
-    -- 26,000 (url, hash) rows under the locale collation before the DISTINCT
-    -- ON, 320 ms of a 365 ms table; as an array the index-only scan on
-    -- idx_ai_queries_latest_custom already yields index order and there is
-    -- no sort at all: 28 ms, measured on production 2026-09-05.
-    SELECT url, COUNT(*) AS passed_count FROM (
+-- The postings every enabled filter passed. The hashes go in as an array,
+-- not a join. Joined, the planner sorted 26,000 (url, hash) rows under the
+-- locale collation before the DISTINCT ON, 320 ms of a 365 ms table; as an
+-- array the index-only scan on idx_ai_queries_latest_custom already yields
+-- index order and there is no sort at all: 28 ms, measured on production
+-- 2026-09-05.
+filter_pass AS MATERIALIZED (
+    SELECT url FROM (
         {_LATEST_FILTER}
-    ) t WHERE t.status = 'passed' GROUP BY url
-)
-SELECT {{columns}}
-FROM jobs j
-LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
--- Joined once, not looked up per row: as a correlated subquery this ran
--- 13,566 times per board read.
-LEFT JOIN filter_pass fp ON fp.url = j.url
-WHERE (
-    j.id IN (SELECT job_id FROM posting_uploads WHERE uploaded_by = %(uid)s)
+    ) t WHERE t.status = 'passed'
+    GROUP BY url HAVING COUNT(*) = (SELECT COUNT(*) FROM enabled_filters)
+),
+members AS (
+    SELECT job_id AS id FROM posting_uploads WHERE uploaded_by = %(uid)s
     -- A board row the person ACTED on (a status, a note, a date applied) is
     -- theirs whatever the criteria or the verdicts say. A row the worker
     -- materialised for a passing posting and nobody touched is not a
@@ -71,15 +67,34 @@ WHERE (
     -- kept postings the filter had since rejected on 2026-09-07, when the
     -- untouched branch re-checked the criteria and nothing else, so a
     -- re-judgement on a new model could not remove what the old one let in).
-    OR (uj.user_id IS NOT NULL AND {_ACTED_ON})
-    OR (
-        {board_eligibility.STRUCTURAL}
-        AND {board_eligibility.SUBSCRIBED}
-        AND ((SELECT COUNT(*) FROM enabled_filters) = 0
-             OR COALESCE(fp.passed_count, 0)
-                = (SELECT COUNT(*) FROM enabled_filters))
-    )
+    UNION
+    SELECT uj.job_id FROM user_jobs uj WHERE uj.user_id = %(uid)s AND {_ACTED_ON}
+    -- With filters, a posting must pass every one, so the few postings they
+    -- passed are where to start: their closed and clearance answers are
+    -- looked up per posting. Started from the catalog instead, every
+    -- subscribed posting was checked against the latest answer of every url
+    -- first: on a production copy (2026-11-26) a person with one filter had
+    -- 330,000 candidates and 2,005 filter passes.
+    UNION
+    SELECT j.id FROM filter_pass fp JOIN jobs j ON j.url = fp.url
+    WHERE (SELECT COUNT(*) FROM enabled_filters) > 0
+      AND {board_eligibility.STRUCTURAL_PER_POSTING}
+      AND {board_eligibility.SUBSCRIBED}
+    -- Without filters every subscribed posting is a candidate, and the
+    -- latest answers of every url, read once, are the cheaper shape (see
+    -- board_eligibility.STRUCTURAL_PER_POSTING). latest_check is only built
+    -- when this branch runs.
+    UNION
+    SELECT j.id FROM jobs j
+    WHERE (SELECT COUNT(*) FROM enabled_filters) = 0
+      AND {board_eligibility.STRUCTURAL}
+      AND {board_eligibility.SUBSCRIBED}
 )
+SELECT {{columns}}
+FROM members m
+JOIN jobs j ON j.id = m.id
+LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
+WHERE TRUE
 {{extra}}
 """
 

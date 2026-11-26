@@ -30,14 +30,20 @@ latest_check AS (
 )
 """
 
+# Membership in latest_check's passing urls, as a set built once per
+# statement and probed per posting. `IS TRUE` keeps it a hashed subplan; as an
+# EXISTS (or a bare IN) at the top of a WHERE the planner turns it into a
+# join driven from latest_check, one jobs lookup per passing url: 788,476 of
+# them, 22 of a person's 24-second board read on a production copy
+# (2026-11-26).
+_PASSED = """(j.url IN (SELECT lc.url FROM latest_check lc
+                    WHERE lc.check_type = '{check}' AND lc.status = 'passed')) IS TRUE"""
+
 STRUCTURAL = f"""
         {catalog.IS_AVAILABLE.format(job="j")}
         {{criteria}}
-        AND EXISTS (SELECT 1 FROM latest_check lc
-                    WHERE lc.url = j.url AND lc.check_type = 'closed' AND lc.status = 'passed')
-        AND (%(bypass_sponsorship)s
-             OR EXISTS (SELECT 1 FROM latest_check lc
-                        WHERE lc.url = j.url AND lc.check_type = 'clearance' AND lc.status = 'passed'))
+        AND {_PASSED.format(check="closed")}
+        AND (%(bypass_sponsorship)s OR {_PASSED.format(check="clearance")})
 """
 
 
