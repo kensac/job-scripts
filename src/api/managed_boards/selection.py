@@ -116,7 +116,7 @@ def _candidates(board: _Board) -> list[_Candidate]:
           ORDER BY q.id DESC LIMIT 1
         ) content ON true
         WHERE j.source = ANY(%(sources)s)
-          AND {eligibility.STRUCTURAL_PER_POSTING.format(criteria=board_criteria.SQL)}
+          AND {eligibility.STRUCTURAL.format(criteria=board_criteria.SQL)}
         ORDER BY j.id
         """,
         params,
@@ -155,7 +155,6 @@ def _reuse_candidates(sponsor_id: int, resolved_model: str) -> list[_Candidate]:
         _Candidate,
         f"""
         WITH enabled AS ({eligibility.ENABLED_FILTERS}),
-        {eligibility.LATEST_CHECK},
         latest_custom AS (
           {_LATEST_CUSTOM}
         )
@@ -237,7 +236,8 @@ def verification_questions(
             continue
         rows = db.query(
             "SELECT j.url, j.title, j.source FROM jobs j "
-            "WHERE j.url = ANY(%(urls)s) AND j.source = ANY(%(sources)s) " + board_criteria.SQL,
+            "WHERE j.url = ANY(%(urls)s) AND j.source = ANY(%(sources)s) "
+            + board_criteria.PER_POSTING_SQL,
             {
                 "urls": urls,
                 "sources": board.sources,

@@ -181,6 +181,19 @@ class Location(Base):
     """
 
     __tablename__ = "locations"
+    __table_args__ = (
+        # A criterion's place against every location's places, by JSON
+        # containment (api.board.criteria). Read through this, the match set
+        # for "United States" took 254 ms; comparing every location's places
+        # element by element, 664 ms, and the UK and Canada exclusion 2 ms
+        # against 1,285 ms (production copy, 2026-11-26).
+        Index(
+            "idx_locations_places",
+            "places",
+            postgresql_using="gin",
+            postgresql_ops={"places": "jsonb_path_ops"},
+        ),
+    )
 
     # The column is named text; the attribute is not, because a class attribute
     # called text would shadow sqlalchemy.text for the columns after it.

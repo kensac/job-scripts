@@ -34,7 +34,6 @@ def materialize_passing(user_id: int) -> int:
             WITH enabled AS (
                 {board_eligibility.ENABLED_FILTERS}
             ),
-            {board_eligibility.LATEST_CHECK},
             pass_all AS MATERIALIZED (
                 SELECT j.id FROM jobs j
                 WHERE ({board_eligibility.SUBSCRIBED}
@@ -66,7 +65,6 @@ def materialize_passing(user_id: int) -> int:
 def candidates_for(user_id: int) -> list[dict[str, Any]]:
     return db.query(
         f"""
-        WITH {board_eligibility.LATEST_CHECK}
         SELECT j.url, j.company, j.title, j.source FROM jobs j
         WHERE {board_eligibility.STRUCTURAL.format(criteria=criteria.SQL)}
           AND ({board_eligibility.SUBSCRIBED}

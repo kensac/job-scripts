@@ -11,7 +11,7 @@ import pytest
 from api import ai, db
 from api.ai import access as ai_access
 from api.ai import verdicts
-from api.board.eligibility import LATEST_CHECK
+from core import verdict_reads
 from core.store import Page
 from tests.factories import user_id_for_subject
 
@@ -21,11 +21,7 @@ SECRET_TEXT = "the secret posting text"
 
 def _shared_closed(url: str) -> str | None:
     """The closed verdict as every board reads it."""
-    row = db.query_one(
-        f"WITH {LATEST_CHECK} SELECT status FROM latest_check "
-        "WHERE url = %s AND check_type = 'closed'",
-        (url,),
-    )
+    row = db.query_one(f"SELECT {verdict_reads.latest_status('%s', 'closed')} AS status", (url,))
     return row["status"] if row else None
 
 
