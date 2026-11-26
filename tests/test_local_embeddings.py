@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import threading
 from typing import Any
 
 import pytest
@@ -19,11 +20,22 @@ DIMS = core.LOCAL_EMBEDDING_DIMENSIONS
 
 
 class FakeServer:
-    """llama-server's /tokenize, /detokenize and /v1/embeddings: one token per
-    word, and a vector whose first component is the chunk's token count."""
+    """llama-server's /props, /tokenize, /detokenize and /v1/embeddings: one
+    token per word, and a vector whose first component is the chunk's token
+    count. `down` names servers that refuse connections."""
 
-    def __init__(self):
+    def __init__(self, down: frozenset[str] = frozenset(), slots: int = 2):
         self.embedded: list[str] = []
+        self.down = down
+        self.slots = slots
+
+    def request(self, method, url, timeout, json=None):
+        server, path = url.rsplit("/", 1)[0], url.split("/", 3)[-1]
+        if any(url.startswith(d) for d in self.down):
+            raise core.requests.ConnectionError(f"{server} refused")
+        if path == "props":
+            return _Response({"total_slots": self.slots})
+        return self.post(url, json, timeout)
 
     def post(self, url, json, timeout):
         path = url.split("/", 3)[-1]
@@ -43,11 +55,13 @@ class FakeServer:
 
 
 class _Response:
-    def __init__(self, body: Any):
+    def __init__(self, body: Any, status_code: int = 200):
         self.body: Any = body
+        self.status_code = status_code
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise core.requests.HTTPError(f"{self.status_code}")
 
     def json(self):
         return self.body
@@ -95,6 +109,12 @@ def test_a_host_without_a_server_never_claims_the_kind():
     assert "embed_postings_local" not in claims.unmet_needs({core.URLS_ENV: "http://emb:8080"})
 
 
+def _direct(set_config, batch: int) -> dict[str, Any]:
+    """One run of the sweep, outside the handler, with batches of `batch`."""
+    set_config("local_embed_batch", batch)
+    return local_embeddings.run(make_task(local_embeddings.KIND, status="running"))
+
+
 def _run(monkeypatch, server) -> int:
     monkeypatch.setenv(core.URLS_ENV, "http://emb-a,http://emb-b")
     monkeypatch.setattr(local_embeddings, "_session", lambda: server)
@@ -122,18 +142,283 @@ def test_a_visible_posting_is_embedded_once_and_an_unchanged_rescrape_is_restamp
     assert restamped is not None and restamped["content_row_id"] > row["content_row_id"]
 
 
-def test_a_failed_posting_is_left_for_the_next_run(f, monkeypatch):
-    job_id, url = f.make_ready_job(content=CONTENT)
-    f.upload(job_id, f.make_user())
+def test_a_posting_every_server_errors_on_fails_for_the_run_only(f, monkeypatch, set_config):
+    _, good = f.make_ready_job(content=CONTENT)
+    _, bad = f.make_ready_job(content=CONTENT + " unembeddable")
+    broken = {"on": True}
 
-    class Down(FakeServer):
+    class RefusesOne(FakeServer):
         def post(self, url, json, timeout):
-            raise core.requests.ConnectionError("down")
+            if broken["on"] and url.endswith("/tokenize") and "unembeddable" in json["content"]:
+                return _Response({"error": "bad input"}, status_code=500)
+            return super().post(url, json, timeout)
 
-    task_id = _run(monkeypatch, Down())
-    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (url,)) is None
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a,http://emb-b")
+    monkeypatch.setattr(local_embeddings, "_session", RefusesOne)
+    counts = _direct(set_config, 2000)
+    assert counts["written"] == 1 and counts["failed"] == 1
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (good,))
+
+    broken["on"] = False
+    again = _direct(set_config, 2000)
+    assert again["written"] == 1, "the next run tries it again"
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (bad,))
+
+
+def test_a_misconfigured_server_hands_its_postings_to_the_others(f, monkeypatch):
+    urls = []
+    for _ in range(6):
+        job_id, url = f.make_ready_job(content=CONTENT)
+        f.upload(job_id, f.make_user())
+        urls.append(url)
+
+    class OneBroken(FakeServer):
+        def post(self, url, json, timeout):
+            if url.startswith("http://emb-b"):
+                return _Response({"error": "context too small"}, status_code=500)
+            return super().post(url, json, timeout)
+
+    task_id = _run(monkeypatch, OneBroken())
+    stored = db.query("SELECT url FROM posting_embeddings WHERE url = ANY(%s)", (urls,))
+    assert len(stored) == 6
     progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
-    assert progress["failed"] == 1
+    assert progress["failed"] == 0
+
+
+def test_a_posting_two_servers_go_down_on_fails_without_stopping_the_run(
+    f, monkeypatch, set_config
+):
+    _, good = f.make_ready_job(content=CONTENT)
+    _, killer = f.make_ready_job(content=CONTENT + " crashes the server")
+
+    class Crashes(FakeServer):
+        def post(self, url, json, timeout):
+            if url.endswith("/tokenize") and "crashes" in json["content"]:
+                raise core.requests.ConnectionError("server died")
+            return super().post(url, json, timeout)
+
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a,http://emb-b,http://emb-c")
+    monkeypatch.setattr(local_embeddings, "_session", Crashes)
+    counts = _direct(set_config, 2000)
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (good,))
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (killer,)) is None
+    assert counts["failed"] == 1
+
+
+def test_a_page_whose_text_cannot_be_read_fails_alone(f, monkeypatch, set_config):
+    _, good = f.make_ready_job(content=CONTENT)
+    _, unreadable = f.make_ready_job(content=CONTENT + " lost")
+    resolve = local_embeddings.page_fetches.resolve
+
+    def flaky(rows, **kwargs):
+        if any(row.get("url") == unreadable for row in rows):
+            raise local_embeddings.PayloadUnavailable("bundle missing")
+        return resolve(rows, **kwargs)
+
+    monkeypatch.setattr(local_embeddings.page_fetches, "resolve", flaky)
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+    counts = _direct(set_config, 2000)
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (good,))
+    assert counts["failed"] == 1
+
+
+def test_object_storage_not_answering_fails_the_run_rather_than_the_pages(monkeypatch):
+    def down(rows, **kwargs):
+        try:
+            raise ConnectionError("storage unreachable")
+        except ConnectionError as exc:
+            raise local_embeddings.PayloadUnavailable("unavailable") from exc
+
+    monkeypatch.setattr(local_embeddings.page_fetches, "resolve", down)
+    with pytest.raises(local_embeddings.PayloadUnavailable):
+        local_embeddings._readable([{"url": "u1"}, {"url": "u2"}])
+
+
+def test_a_missing_bundle_member_is_the_pages_fault():
+    missing = local_embeddings.PayloadUnavailable("Payload bundle has no such member")
+    assert local_embeddings._page_fault(missing)
+    try:
+        raise TimeoutError("read timed out")
+    except TimeoutError as exc:
+        try:
+            raise local_embeddings.PayloadUnavailable("unavailable") from exc
+        except local_embeddings.PayloadUnavailable as outage:
+            assert not local_embeddings._page_fault(outage)
+
+
+def test_an_unreadable_profile_sample_is_left_out_of_the_profile(f, monkeypatch):
+    urls = []
+    for role in ["Backend Engineer", "Account Executive", "Data Analyst"]:
+        job_id, url = f.make_ready_job(content=_posting(role) * 2)
+        db.execute(
+            "UPDATE jobs SET company = 'Acme Robotics', title = %s WHERE id = %s", (role, job_id)
+        )
+        urls.append(url)
+    resolve = local_embeddings.page_fetches.resolve
+
+    def one_lost(rows, **kwargs):
+        if any(row.get("title") == "Data Analyst" for row in rows):
+            raise local_embeddings.PayloadUnavailable("bundle member missing")
+        return resolve(rows, **kwargs)
+
+    monkeypatch.setattr(local_embeddings.page_fetches, "resolve", one_lost)
+    local_embeddings.refresh_profiles({"acme robotics"})
+    profile = db.query_one(
+        "SELECT titles FROM company_text_profiles WHERE company_key = 'acme robotics'"
+    )
+    assert profile is not None
+
+
+def test_a_props_answer_that_is_not_llama_servers_leaves_the_server_out(f, monkeypatch):
+    _, url = f.make_ready_job(content=CONTENT)
+
+    class Impostor(FakeServer):
+        def request(self, method, url, timeout, json=None):
+            if url.startswith("http://emb-b") and url.endswith("/props"):
+                return _Response([])
+            return super().request(method, url, timeout, json=json)
+
+    task_id = _run(monkeypatch, Impostor())
+    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
+    assert progress["unreachable"] == ["http://emb-b"]
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (url,))
+
+
+def test_a_server_that_does_not_answer_is_left_out_and_its_postings_go_to_the_others(
+    f, monkeypatch
+):
+    urls = []
+    for _ in range(3):
+        job_id, url = f.make_ready_job(content=CONTENT)
+        f.upload(job_id, f.make_user())
+        urls.append(url)
+    task_id = _run(monkeypatch, FakeServer(down=frozenset({"http://emb-b"})))
+    stored = db.query("SELECT url FROM posting_embeddings WHERE url = ANY(%s)", (urls,))
+    assert len(stored) == 3
+    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
+    assert progress["servers"] == ["http://emb-a"]
+    assert progress["unreachable"] == ["http://emb-b"]
+    assert progress["failed"] == 0
+
+
+def test_a_server_that_stops_answering_hands_back_its_posting(f, monkeypatch):
+    urls = []
+    for _ in range(4):
+        job_id, url = f.make_ready_job(content=CONTENT)
+        f.upload(job_id, f.make_user())
+        urls.append(url)
+
+    slept = threading.Event()
+
+    class Sleeps(FakeServer):
+        """emb-b reports its slots, then goes to sleep holding a posting;
+        emb-a waits for that, so emb-b has taken one before the queue drains."""
+
+        def post(self, url, json, timeout):
+            if url.startswith("http://emb-b"):
+                slept.set()
+                raise core.requests.ConnectionError("asleep")
+            assert slept.wait(timeout=10)
+            return super().post(url, json, timeout)
+
+    task_id = _run(monkeypatch, Sleeps())
+    stored = db.query("SELECT url FROM posting_embeddings WHERE url = ANY(%s)", (urls,))
+    assert len(stored) == 4, "every posting emb-b took was embedded on emb-a"
+    progress = db.query_one("SELECT progress FROM tasks WHERE id = %s", (task_id,))["progress"]
+    assert progress["failed"] == 0
+    assert progress["unreachable"] == ["http://emb-b"]
+
+
+def test_no_server_answering_fails_the_run(f, monkeypatch):
+    job_id, _ = f.make_ready_job(content=CONTENT)
+    f.upload(job_id, f.make_user())
+    with pytest.raises(core.EmbeddingUnavailable):
+        _run(monkeypatch, FakeServer(down=frozenset({"http://emb-a", "http://emb-b"})))
+
+
+def test_one_run_drains_the_backlog_visible_postings_first(f, monkeypatch, set_config):
+    visible, visible_url = f.make_ready_job(content=CONTENT + " visible")
+    f.upload(visible, f.make_user())
+    hidden = [f.make_ready_job(content=CONTENT + f" hidden {i}")[1] for i in range(3)]
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+    batches: list[list[str]] = []
+    select = local_embeddings.candidates
+
+    def recorded(cap, below, skip=None):
+        rows, unreadable, exhausted = select(cap, below, skip)
+        batches.append([row["url"] for row in rows])
+        return rows, unreadable, exhausted
+
+    monkeypatch.setattr(local_embeddings, "candidates", recorded)
+
+    counts = _direct(set_config, 1)
+    stored = {r["url"] for r in db.query("SELECT url FROM posting_embeddings")}
+    assert stored == {visible_url, *hidden}
+    assert batches[0] == [visible_url], "the visible posting leads, though it is the oldest"
+    assert batches[1:4] == [[u] for u in reversed(hidden)], "then the rest, newest first"
+    # One batch a posting, and a last one that finds nothing.
+    assert counts["batches"] == 5 and counts["written"] == 4
+
+
+def test_a_posting_nobody_can_see_is_embedded_once(f, monkeypatch):
+    _, url = f.make_ready_job(content=CONTENT)
+    server = FakeServer()
+    _run(monkeypatch, server)
+    calls = len(server.embedded)
+    assert calls
+    f.make_fetch(url, content=CONTENT + " rewritten")
+    _run(monkeypatch, server)
+    assert len(server.embedded) == calls, "a later page of an unseen posting is not re-selected"
+
+
+def test_a_run_resumes_the_walk_where_the_last_one_left_it(f, monkeypatch, set_config):
+    ids, urls = zip(*(f.make_ready_job(content=CONTENT + f" {i}") for i in range(3)), strict=True)
+    make_task(local_embeddings.KIND, {"below": ids[1]}, status="done")
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+
+    _direct(set_config, 2000)
+    stored = {r["url"] for r in db.query("SELECT url FROM posting_embeddings")}
+    assert stored == {urls[0]}, "only the postings below the last run's cursor"
+
+    _direct(set_config, 2000)
+    stored = {r["url"] for r in db.query("SELECT url FROM posting_embeddings")}
+    assert stored == set(urls), "an exhausted walk starts again from the newest"
+
+
+def test_switching_the_sweep_off_stops_a_run_between_batches(f, monkeypatch, set_config):
+    for i in range(3):
+        f.make_ready_job(content=CONTENT + f" {i}")
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", FakeServer)
+    store = local_embeddings._store
+
+    def then_off(rows):
+        stored = store(rows)
+        set_config("local_embedding_enabled", False)
+        return stored
+
+    monkeypatch.setattr(local_embeddings, "_store", then_off)
+    counts = _direct(set_config, 1)
+    assert counts["batches"] == 1 and counts["written"] == 1
+
+
+def test_a_server_that_times_out_hands_its_posting_back(f, monkeypatch, set_config):
+    _, url = f.make_ready_job(content=CONTENT)
+
+    class Stalls(FakeServer):
+        def post(self, url, json, timeout):
+            if url.startswith("http://emb-b"):
+                raise core.requests.ReadTimeout("no answer")
+            return super().post(url, json, timeout)
+
+    monkeypatch.setenv(core.URLS_ENV, "http://emb-b,http://emb-a")
+    monkeypatch.setattr(local_embeddings, "_session", Stalls)
+    counts = _direct(set_config, 2000)
+    assert counts["failed"] == 0
+    assert db.query_one("SELECT 1 FROM posting_embeddings WHERE url = %s", (url,))
 
 
 def test_switched_off_embeds_nothing(f, monkeypatch, set_config):

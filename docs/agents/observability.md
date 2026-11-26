@@ -970,13 +970,12 @@ have no similarity consumer and their membership is unaffected.
 
 ## Embeddings from the fleet's own model
 
-`embed_postings_local` (`tasks.derivations.local_embeddings`) embeds the same
-postings as `embed_postings_batch` into `posting_embeddings`, with a model
-served on fleet hardware (`core.derivations.local_embeddings`, whose
-docstring carries the judged comparison that chose it). It replaces the
-OpenAI sweep: once `posting_embeddings` covers every posting
-`job_embeddings` does, the similarity reader moves to it and the OpenAI
-sweep and table go.
+`embed_postings_local` (`tasks.derivations.local_embeddings`) embeds every
+posting with page text into `posting_embeddings`, with a model served on
+fleet hardware (`core.derivations.local_embeddings`, whose docstring carries
+the judged comparison that chose it). It replaces the OpenAI sweep
+(`embed_postings_batch`, `job_embeddings`): the similarity reader moves to
+it, and the OpenAI sweep and table go.
 
 **A kind that needs something only some hosts have is gated by the variable
 that says a host has it** (`api.worker_lifecycle.claims.NEEDS_ENV`). A
@@ -984,7 +983,7 @@ worker without `JOBTRACKER_EMBEDDING_URLS` excludes the kind, so no other
 host's denylist names it and a new host cannot claim and fail it. The
 variable is a comma list of `llama-server --embedding` addresses; a host may
 lend its GPU and its CPU as two servers. Requests in flight per server are
-the slots the servers start with (`SLOTS_PER_SERVER`).
+the slots the server reports (`/props`, llama-server's `-np`).
 
 **A posting is embedded without the text its company says about itself.**
 A paragraph is the company's when it repeats under at least two of its
@@ -1010,9 +1009,41 @@ token count, then normalised. Nothing is truncated to fit the window: over
 top-10 neighbours unchanged, but the whole posting is what the vector claims
 to stand for.
 
-`local_embed_per_cycle` bounds a run, `local_embedding_enabled` switches it
-off, and an unchanged re-scrape is re-stamped (`tasks.rescrape`). A posting
-whose embedding fails is left without a row and selected again next run.
+**Every posting is embedded, the visible ones kept current.** A batch takes
+the postings someone can see that need a vector first (a new page, a rebuilt
+company profile), then never-embedded postings newest first, up to
+`local_embed_batch`. A posting outside the visible slice is embedded once;
+its row's `content_row_id` and `profiled_at` say what from. A run walks the
+corpus batch after batch, checkpointing its cursor in the task payload, and
+the next run resumes where the last one stopped, so a run a deploy kills,
+whether requeued or replaced next cycle, loses nothing. Once the walk is
+exhausted the next run starts again from the newest job, picking up what
+arrived meanwhile and retrying what failed.
+An idle run still walks every job to find none: 23 s over 2.1M jobs
+(2026-11-26).
+
+**Servers come and go.** `JOBTRACKER_EMBEDDING_URLS` may name servers on
+other machines, such as a laptop that serves only while unused. Each run
+asks every server for its slots (`/props`) before each batch and runs that
+many requests on it; a server that does not answer, does not connect, or
+stops answering is left out of the batch and its posting handed to another.
+A request that outlasts its read timeout is that posting's error, not the
+server's absence. The
+run's progress names the servers that did not answer.
+
+**A failure lasts one pass of the walk.** A posting that errors on every
+server still answering, or was in flight on two servers that went down, is
+skipped, and tried again when the walk next comes round; so is one whose stored
+text cannot be read (object storage answered, and the page is missing or
+corrupt; storage that does not answer fails the run). Nothing records a
+posting as bad: whether a failure
+was the page's or a server's is a guess, and a wrong one would leave a
+good posting without a vector for good. A run stops at a batch that stores
+nothing, without moving its cursor, so failing servers end it rather than
+walk past postings they could not embed.
+
+`local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
+is re-stamped (`tasks.rescrape`).
 
 ## Scheduled filter transport
 
