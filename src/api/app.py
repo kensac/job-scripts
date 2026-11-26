@@ -49,7 +49,8 @@ from api.routers import (
 # service's INFO records, the telemetry startup line among them, were dropped
 # before any handler saw them; the api looked uninstrumented in its own logs
 # while shipping. Same call the worker makes at startup.
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=telemetry.log_level())
+telemetry.quiet_request_loggers()
 
 
 @asynccontextmanager

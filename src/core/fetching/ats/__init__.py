@@ -259,10 +259,13 @@ def _logged(resolver: AtsResolver, url: str, fetch: Callable[[], AtsResult]) -> 
     except Exception as exc:
         logger.debug(f"[{resolver.name}] resolver error {url}: {exc}")
         return AtsResult(Status.ERROR, source=resolver.name)
+    # Debug: a hit is the page_fetches row it writes, and gone is the closed
+    # verdict it records, one per posting (observability.md, "What a log line
+    # is for").
     if result.ok:
-        logger.info(f"ATS hit [{resolver.name}]: {len(result.text or '')} chars from {url}")
+        logger.debug(f"ATS hit [{resolver.name}]: {len(result.text or '')} chars from {url}")
     elif result.status is Status.GONE:
-        logger.info(f"ATS reports posting gone [{resolver.name}]: {url}")
+        logger.debug(f"ATS reports posting gone [{resolver.name}]: {url}")
     return result
 
 

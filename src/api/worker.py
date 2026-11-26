@@ -408,7 +408,8 @@ def _seed_gauges() -> None:
 
 def main() -> None:
     global _task_limit
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=telemetry.log_level())
+    telemetry.quiet_request_loggers()
     signal.signal(signal.SIGTERM, _graceful_exit)
     signal.signal(signal.SIGINT, _graceful_exit)
     db.init_schema()

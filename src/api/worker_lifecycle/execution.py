@@ -95,7 +95,11 @@ async def run_held(
     report_status()
     handler = HANDLERS.get(task["kind"])
     events.publish_task(task["id"])
-    logger.info(f"Task {task['id']} ({task['kind']}) starting")
+    # Debug, as is every outcome line below: the task's span, its row and
+    # TASKS_PROCESSED already record that it started and how it ended
+    # (observability.md, "What a log line is for"). JOBTRACKER_LOG_LEVEL=DEBUG
+    # prints them on one process's stdout.
+    logger.debug(f"Task {task['id']} ({task['kind']}) starting")
     if not handler:
         finish(task["id"], "failed", f"unknown task kind: {task['kind']}")
         return False
@@ -155,22 +159,22 @@ async def run_held(
             # The handler collected the batches that had finished and left
             # the rest on its payload: it waits on those, it is not done.
             metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
-            logger.info(f"Task {task['id']} parked again on unfinished batches")
+            logger.debug(f"Task {task['id']} parked again on unfinished batches")
         else:
             finish(task["id"], "done")
             metrics.TASKS_PROCESSED.labels(task["kind"], "done").inc()
-            logger.info(f"Task {task['id']} done")
+            logger.debug(f"Task {task['id']} done")
     except ai_pause.AIPaused as exc:
         # The switch, not a fault: the task ends without its model work and
         # the scheduler enqueues a fresh one once AI is back on.
         finish(task["id"], "done", str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "ai_paused").inc()
-        logger.info(f"Task {task['id']} ended: {exc}")
+        logger.debug(f"Task {task['id']} ended: {exc}")
     except AwaitingBatch:
         # Parked, not finished and not failed: the slot is free and the task
         # resumes when its batches land.
         metrics.TASKS_PROCESSED.labels(task["kind"], "awaiting_batch").inc()
-        logger.info(f"Task {task['id']} parked awaiting batches")
+        logger.debug(f"Task {task['id']} parked awaiting batches")
     except Deferred as d:
         # Back to pending until the host's slot opens, the attempt given
         # back: waiting on a limit is not a failure and must not count as one.
@@ -181,7 +185,7 @@ async def run_held(
             (d.not_before, claim.task_id, claim.worker, claim.attempts),
         )
         metrics.TASKS_PROCESSED.labels(task["kind"], "deferred").inc()
-        logger.info(f"Task {task['id']} {d}")
+        logger.debug(f"Task {task['id']} {d}")
     except PayloadUnavailable as exc:
         fail_unavailable_payload(task["id"], str(exc))
         metrics.TASKS_PROCESSED.labels(task["kind"], "failed").inc()
