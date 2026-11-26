@@ -471,3 +471,33 @@ def ledger_input(row_id: int) -> str | None:
 
     [record] = query_records("id = %s", (row_id,))
     return record.input_content
+
+
+def change_receipt_responses(task_id: int, change, store=None) -> None:
+    """Rewrite each receipt of `task_id` so its response is `change(response)`,
+    stored the way checkpoints store one: a member of a verified bundle in
+    `store` (the shared store unless given)."""
+    from api.ai import batch_results
+    from core.payloads.objects import put_values, shared_store
+
+    rows = db.query("SELECT * FROM batch_result_receipts WHERE task_id = %s", (task_id,))
+    for row in batch_results.resolve_responses(rows):
+        response = change(row["response"])
+        digest = batch_results.response_digest(response)
+        [(bundle, size)] = put_values({digest: response}, store or shared_store()).values()
+        db.execute(
+            "UPDATE batch_result_receipts SET response = NULL, response_sha256 = %s, "
+            "response_object = %s, response_object_size = %s "
+            "WHERE provider_batch_id = %s AND custom_id = %s",
+            (bytes.fromhex(digest), bundle, size, row["provider_batch_id"], row["custom_id"]),
+        )
+
+
+def receipt_response(task_id: int) -> dict:
+    """The one receipt of `task_id`, its response resolved."""
+    from api.ai import batch_results
+
+    [row] = batch_results.resolve_responses(
+        db.query("SELECT * FROM batch_result_receipts WHERE task_id = %s", (task_id,))
+    )
+    return row["response"]

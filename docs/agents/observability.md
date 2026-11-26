@@ -1038,13 +1038,40 @@ Handlers read the settings through `api.run_configs.filter_of` and
 `with_board_settings`; `tasks.board.submission_exclusions` is the one SQL
 reader.
 
-## Embedding receipt vectors
+## Receipt responses are held by reference
 
-A receipt's response keeps text, usage, errors and an `embedding_vectors_ref`:
-bucket, content-addressed key, SHA-256, uncompressed byte size and format
-version. The vectors themselves are an object. Receipt identity, outcome and
-acknowledgement timestamps remain in Postgres. No object lifecycle expiration
-or garbage collection may remove referenced objects.
+A receipt's response (text, usage, error, finish reason and, for embeddings,
+an `embedding_vectors_ref`) is a member of a verified bundle object, named by
+`response_sha256` with the bundle in `response_object` and
+`response_object_size`; `response` is NULL. The four are set together or not
+at all (`ck_batch_result_receipts_response_whole`). Receipt identity, outcome,
+acknowledgement timestamps, `finish_reason` and `output_tokens` remain on the
+row, so outcome counts and the job profile report read no object. No object
+lifecycle expiration or garbage collection may remove referenced objects.
+
+**The checkpoint uploads before the receipt exists.** `checkpoint` bundles
+the responses it is given with `put_values` and reads them back before its
+transaction, as it does an embedding's vectors (`put_verified`); a storage
+failure raises `PayloadUnavailable` before any receipt is written or any
+batch ID removed, so the batch is collected again. While a worker below
+`api.data_level` 3 runs, the response is written inline instead, because that
+image reads the column itself.
+
+**Readers resolve.** `unconsumed` and payload recovery pass receipt rows
+through `batch_results.resolve_responses`, which reads each bundle once,
+concurrently, outside any transaction. Consumed responses are never read
+back by the replay path.
+
+**Inline responses are moved, oldest first.** `move_receipt_responses`
+(`tasks.receipt_responses`) moves every receipt still inline, found through
+`idx_batch_result_receipts_inline`, once every running worker is at data
+level 3, and stops between steps when `receipt_response_move_enabled` is off.
+A step reads rows through a cursor until they hold a bundle per upload
+connection. A moved row keeps its key, outcome and consumption.
+
+The vectors themselves are an object of their own: `embedding_vectors_ref`
+holds the bucket, content-addressed key, SHA-256, uncompressed byte size and
+format version.
 
 **Resume PDF parts remain available while any resume or revision references
 them.** Do not expire or delete `uploads/v1/` objects or their receipts.

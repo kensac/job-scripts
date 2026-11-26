@@ -52,7 +52,7 @@ def retry(task_id: int, store: PayloadStore | None = None) -> str:
         for row in requests:
             if not collection_finished or row["custom_id"] in required_ids:
                 request_snapshots.resolve(row, store, cache)
-        for row in unconsumed:
+        for row in batch_results.resolve_responses(unconsumed, store, cache):
             batch_results.response_payload(row["response"], store)
     except PayloadUnavailable:
         return "unavailable"

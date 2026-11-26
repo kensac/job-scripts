@@ -113,6 +113,17 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("tier_page_text", {"cycle": cycle}, dedupe_key=f"tier-page-text:{cycle}")
+    # Receipt responses still inline move to object storage
+    # (tasks.receipt_responses). One at a time, for the same reason.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'move_receipt_responses' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue(
+            "move_receipt_responses",
+            {"cycle": cycle},
+            dedupe_key=f"move-receipt-responses:{cycle}",
+        )
     # Messages whose current event or match pointer lags its log
     # (tasks.mail.pointers). Counting them is a pass over every message,
     # 0.9 s on production on 2026-10-10, so the task counts once a cycle

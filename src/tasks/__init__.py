@@ -42,6 +42,7 @@ from tasks.mail.sync import (
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
 from tasks.page_text_tiering import handle_tier_page_text
+from tasks.receipt_responses import handle_move_receipt_responses
 from tasks.resume_uploads import handle_process_resume_upload
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
@@ -69,6 +70,7 @@ HANDLERS = {
     "ingest_source": handle_ingest_source,
     "retire_switched_off": handle_retire_switched_off,
     "tier_page_text": handle_tier_page_text,
+    "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,
     "reverify_chunk": handle_reverify_chunk,
     "recompute_board": handle_recompute_board,

@@ -104,8 +104,10 @@ def test_resolving_a_whole_task_gets_each_bundle_once(f, objects):
     )
     objects.client.gets.clear()
     assert [result.request for result in batch_results.unconsumed(task_id)] == specs
-    assert len(objects.client.gets) == 2
-    assert len(set(objects.client.gets)) == 2
+    # The two request bundles and the one bundle the checkpoint wrote the
+    # responses to, each read once.
+    assert len(objects.client.gets) == 3
+    assert len(set(objects.client.gets)) == 3
 
 
 def test_recovery_and_freeze_get_each_bundle_once(f, objects):

@@ -70,16 +70,17 @@ def test_recovery_preflights_receipt_vectors(f, monkeypatch):
     from core.batch import BatchResult
     from core.payloads.objects import PayloadStore
     from tasks.runtime.payload_recovery import retry
-    from tests.factories import ObjectClient
+    from tests.factories import ObjectClient, change_receipt_responses
 
     objects = PayloadStore(ObjectClient(), "test-payloads")
     task_id = recoverable(f)
     result = BatchResult("request", batch_id="paid")
     batch_results.checkpoint(task_id, [result], [])
     ref = objects.put_verified([[0.1]])
-    db.execute(
-        "UPDATE batch_result_receipts SET response=response || %s WHERE task_id=%s",
-        (db.jsonb({"embedding_vectors_ref": asdict(ref)}), task_id),
+    change_receipt_responses(
+        task_id,
+        lambda response: {**response, "embedding_vectors_ref": asdict(ref)},
+        objects,
     )
     saved = dict(objects.client.objects)
     objects.client.objects.clear()
