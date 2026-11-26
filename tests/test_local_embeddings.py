@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from api import db
+from core.derivations import company_text
 from core.derivations import local_embeddings as core
 from tasks.derivations import local_embeddings
 from tests.factories import make_task
@@ -110,6 +111,21 @@ def test_special_token_strings_in_a_page_stay_text():
     server.post = recording
     core.embed_document(server, "http://emb", "a page with [SEP] in it")
     assert sent and all(body["parse_special"] is False for body in sent)
+
+
+def test_the_batch_helpers_a_process_runs_match_the_one_at_a_time_functions():
+    roles = ["Backend Engineer", "Account Executive", "Data Analyst"]
+    postings = [(r, _posting(r)) for r in roles]
+    _, shared = company_text.shared_paragraphs("Acme Robotics, Inc.", postings)
+    assert company_text.shared_paragraphs_of([("Acme Robotics, Inc.", postings)]) == [
+        company_text.shared_paragraphs("Acme Robotics, Inc.", postings)
+    ]
+    texts = [(t, "Acme Robotics, Inc.", shared) for _, t in postings] + [
+        (postings[0][1], "Acme Robotics, Inc.", set())
+    ]
+    assert company_text.embedding_texts(texts) == [
+        company_text.embedding_text(t, c, s) for t, c, s in texts
+    ]
 
 
 def test_a_long_posting_is_embedded_whole_in_weighted_chunks(monkeypatch):
@@ -480,9 +496,9 @@ def test_the_next_batch_is_prepared_while_the_servers_embed_this_one(f, monkeypa
     prepare = local_embeddings._prepare
     calls = []
 
-    def counting(*args):
+    def counting(*args, **kwargs):
         calls.append(args)
-        result = prepare(*args)
+        result = prepare(*args, **kwargs)
         if len(calls) == 2:
             prepared.set()
         return result
