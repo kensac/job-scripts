@@ -242,6 +242,21 @@ Google rows in production were already spelled so on 2026-10-16). Both live in
 Rows stored before a host's rule existed keep their old spelling; nothing
 rewrites `jobs.url`.
 
+**A link that only redirects is resolved to the posting.** The vanshb03 lists
+(`internships_ouckah`, `fulltime_ouckah_2027`) link every posting through
+go.vansh.nyc, a link shortener that answers 302 to the employer's posting.
+No rule reduces such a link without asking, so the posting arrived twice: 252
+of 300 sampled links (2026-11-27) pointed at a posting the catalog already
+held. Ingest resolves every link on a host in `core.fetching.redirects.REDIRECTORS`
+before anything is stored: it asks for the redirect only (the page is never
+loaded), follows it while it stays on a redirector, canonicalises where it
+lands, and keeps the answer in `url_redirects`, so each link is asked once.
+The posting is stored under that URL with the link as its `raw_url`, and a row
+stored under the link before is observed `unlisted` by the source, which now
+lists the posting at its own URL: the row leaves every board while the posting
+stays open. A link that does not resolve stays as listed and is asked again on
+the next pull.
+
 ## A board host is paced per egress address, and the pace is learned
 
 `host_budget` holds one row per upstream host and egress address. A worker

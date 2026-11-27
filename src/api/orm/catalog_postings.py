@@ -219,3 +219,15 @@ class PageFetch(Base):
     content_chars: Mapped[int | None] = mapped_column(Integer)
     worker: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class UrlRedirect(Base):
+    """Where a redirector's link (core.fetching.redirects.REDIRECTORS) points,
+    as a canonical posting URL: resolved once at ingest and read on every
+    later pull."""
+
+    __tablename__ = "url_redirects"
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    target: Mapped[str] = mapped_column(Text)
+    resolved_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
