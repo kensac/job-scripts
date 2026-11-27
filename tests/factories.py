@@ -213,7 +213,7 @@ def make_fetch(
 def make_ready_job(
     *,
     source: str = "src-test",
-    content: str = "a long job description " * 20,
+    content: str | None = None,
     closed: str = "passed",
     clearance: str = "passed",
     **job_kwargs: Any,
@@ -226,7 +226,11 @@ def make_ready_job(
     row = db.query_one("SELECT url FROM jobs WHERE id = %s", (job_id,))
     assert row is not None
     url = row["url"]
-    make_fetch(url, content=content)
+    # A posting's own page names its role; one text under several titles
+    # that names none is a shell, which page_texts leaves out
+    # (core.page_fetches.foreign).
+    title = job_kwargs.get("title", "Engineer")
+    make_fetch(url, content=content or f"{title}: a long job description " * 20)
     if closed:
         make_verdict(url, "closed", closed)
     if clearance:

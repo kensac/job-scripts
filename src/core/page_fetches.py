@@ -1,7 +1,10 @@
 """The one writer of a page fetch, and the one reader of its text's two shapes.
 
 A fetch is a fact about a posting's page: when it was read, how, and what
-came back. Readers of the text alone use the page_texts view.
+came back. Readers of a posting's text use the page_texts view, which leaves
+out fetches whose text is not the posting's (page_text_rejections: a
+maintenance notice, a career site's shell); readers of what one fetch held,
+by its id, use page_fetch_texts, which keeps them.
 
 A fetch's text lives in object storage, as a member of a verified bundle
 (docs/agents/sources-and-boards.md, "A page's text is held by reference"):
@@ -17,8 +20,10 @@ length either way.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import logging
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
 
@@ -81,6 +86,132 @@ def record(url: str, status: str, method: str, content: str | None = None) -> in
     return record_many([Fetch(url, status, method, content)])[0]
 
 
+# The fetches that are the board's own record of one posting: the ATS
+# answering for that posting's id, and the text its listing carried. One text
+# under several titles there is one posting under variant names (a feed's
+# "Associate I" and "Associate II", a curated list's renamed title, the same
+# posting in French and English), so such a fetch is never judged foreign.
+# Measured on the 4,826 texts stored for more than one title (2026-11-27):
+# of the board-record fetches the role test below would reject, nearly all
+# were real postings, where of the pages the fetcher read itself nearly all
+# were maintenance notices, shells, cookie walls and "page not found".
+BOARD_RECORDS = ("ats text", "listing text")
+
+# Level numerals name the rung, not the role: "Engineer II" and "Engineer III"
+# are one role.
+_LEVELS = frozenset({"i", "ii", "iii", "iv", "v", "vi"})
+
+# The shortest title word a page must say. Shorter words are connectives and
+# abbreviations ("of", "in", "ai", "ml", "ui") that a posting spells out or
+# leaves out, so requiring them would reject an "AI Engineer" whose page says
+# "artificial intelligence".
+_MIN_ROLE_WORD = 3
+
+_WORD = re.compile(r"[a-z]+")
+
+
+def role(title: str) -> str:
+    """A title's role: its words without case, punctuation, digits or level
+    numerals, so "Engineer II" and "engineer 3" are one role."""
+    return " ".join(w for w in _WORD.findall(title.lower()) if w not in _LEVELS)
+
+
+def names_role(title: str, text: str) -> bool:
+    """Whether `text` says the role `title` names: every word of it, as the
+    start of a word of the text, so "engineer" is said by "engineering" and
+    "grad" by "graduate". A title with no word long enough says nothing to
+    check, and is named."""
+    said = sorted(set(_WORD.findall(text.lower())))
+    for word in role(title).split():
+        if len(word) < _MIN_ROLE_WORD:
+            continue
+        at = bisect.bisect_left(said, word)
+        if at == len(said) or not said[at].startswith(word):
+            return False
+    return True
+
+
+def foreign(members: Sequence[Mapping[str, Any]], text: str) -> list[int]:
+    """Which of one text's fetches it is not the posting's text for.
+
+    `members` are every passed fetch of the text, each with its `id`, its
+    `method` and its posting's `title`. A text stored for postings with
+    different roles is not each one's own posting text: it is a page that
+    came back the same whatever was asked for (a maintenance notice, a shell,
+    a cookie wall). It is still a posting's when it names that posting's role:
+    a shared description, a template under variant titles. So a fetch is
+    foreign when its text is shared across roles, it does not name its own
+    posting's role, and it is not a board's record (BOARD_RECORDS)."""
+    if len({role(m["title"]) for m in members}) < 2:
+        return []
+    return [
+        m["id"]
+        for m in members
+        if m["method"] not in BOARD_RECORDS and not names_role(m["title"], text)
+    ]
+
+
+_MEMBERS = """
+    SELECT f.id, f.content_sha256 AS sha, f.method, j.title
+    FROM page_fetches f JOIN jobs j ON j.url = f.url
+    WHERE f.content_sha256 = ANY(%s) AND f.status = 'passed'
+"""
+
+
+def members_of(shas: Iterable[bytes]) -> dict[bytes, list[dict[str, Any]]]:
+    """Every passed fetch of each text, by the text's digest, with its
+    posting's title (idx_page_fetches_content_sha256)."""
+    wanted = list(set(shas))
+    if not wanted:
+        return {}
+    groups: dict[bytes, list[dict[str, Any]]] = {}
+    with connection() as conn:
+        for row in conn.execute(_MEMBERS, (wanted,)).fetchall():
+            groups.setdefault(bytes(row["sha"]), []).append(row)
+    return groups
+
+
+def reject(fetch_ids: Iterable[int], conn: Any | None = None) -> list[int]:
+    """Record fetches as not their posting's text; the ids newly recorded."""
+    ids = sorted(set(fetch_ids))
+    if not ids:
+        return []
+    sql = (
+        "INSERT INTO page_text_rejections (fetch_id) SELECT unnest(%s::bigint[]) "
+        "ON CONFLICT DO NOTHING RETURNING fetch_id"
+    )
+    if conn is not None:
+        return [r["fetch_id"] for r in conn.execute(sql, (ids,)).fetchall()]
+    with connection() as own:
+        return [r["fetch_id"] for r in own.execute(sql, (ids,)).fetchall()]
+
+
+def _reject_new(ids: Sequence[int], fetches: Sequence[Fetch]) -> None:
+    """Judge fetches just written against the text's other fetches, so a
+    page already known to come back the same for every posting (the
+    maintenance notice) is never served as a new posting's text. Only these
+    fetches are judged here; the text's older fetches are the sweep's
+    (tasks.page_text_judging), which also undoes what was derived from them."""
+    texts = {
+        bytes.fromhex(digest(f.content)): f.content
+        for f in fetches
+        if f.status == "passed" and f.content and f.method not in BOARD_RECORDS
+    }
+    if not texts:
+        return
+    groups = members_of(texts)
+    new = set(ids)
+    rejected = [
+        fetch_id
+        for sha, members in groups.items()
+        for fetch_id in foreign(members, texts[sha])
+        if fetch_id in new
+    ]
+    if rejected:
+        reject(rejected)
+        logger.info("%s new page fetches are not their posting's text", len(rejected))
+
+
 def record_many(fetches: Sequence[Fetch]) -> list[int]:
     """Append fetches, their text uploaded first, and return their ids in
     order. Storage that cannot take the text leaves it inline rather than
@@ -118,7 +249,15 @@ def record_many(fetches: Sequence[Fetch]) -> list[int]:
             "ORDER BY n RETURNING id",
             (WORKER, *columns),
         ).fetchall()
-    return sorted(row["id"] for row in rows)
+    ids = sorted(row["id"] for row in rows)
+    # The fetches are stored; judging them now only spares a reader a page
+    # that is not its posting until the sweep (tasks.page_text_judging)
+    # judges them anyway, so a failure here must not read as a failed fetch.
+    try:
+        _reject_new(ids, fetches)
+    except Exception:
+        logger.warning("page fetches %s were not judged when written", ids, exc_info=True)
+    return ids
 
 
 def resolve(
@@ -153,9 +292,10 @@ def resolve(
 
 
 def text_of(fetch_id: int) -> str | None:
-    """One fetch's text, either shape; None when the fetch holds none."""
+    """One fetch's text, either shape, whether or not it is its posting's
+    (page_fetch_texts); None when the fetch holds none."""
     with connection() as conn:
         row = conn.execute(
-            "SELECT input_content, content_ref FROM page_texts WHERE id = %s", (fetch_id,)
+            "SELECT input_content, content_ref FROM page_fetch_texts WHERE id = %s", (fetch_id,)
         ).fetchone()
     return resolve([row])[0]["input_content"] if row else None

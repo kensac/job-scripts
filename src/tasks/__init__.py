@@ -43,6 +43,7 @@ from tasks.mail.sync import (
     handle_sync_gmail,
 )
 from tasks.managed_boards import handle_run_managed_board, handle_run_managed_board_batch
+from tasks.page_text_judging import handle_judge_page_texts
 from tasks.page_text_tiering import handle_tier_page_text
 from tasks.receipt_responses import handle_move_receipt_responses
 from tasks.resume_uploads import handle_process_resume_upload
@@ -73,6 +74,7 @@ HANDLERS = {
     "retire_switched_off": handle_retire_switched_off,
     "fold_latest_posting_checks": handle_fold_latest_posting_checks,
     "tier_page_text": handle_tier_page_text,
+    "judge_page_texts": handle_judge_page_texts,
     "embed_postings_local": handle_embed_postings_local,
     "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,

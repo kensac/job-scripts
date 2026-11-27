@@ -125,6 +125,21 @@ class PostingUpload(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
 
 
+class PageTextRejection(Base):
+    """A fetch whose text is not its posting's: a page that came back as a
+    maintenance notice, a career site's shell or a cookie wall
+    (core.page_fetches.foreign). page_texts leaves the fetch out, so every
+    reader of the posting's text falls back to its newest own fetch; the
+    fetch itself stays, as the record of what the page said."""
+
+    __tablename__ = "page_text_rejections"
+
+    fetch_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("page_fetches.id", ondelete="CASCADE"), primary_key=True
+    )
+    rejected_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
 class PageFetch(Base):
     """One fetch of a posting's page: what came back and how it was read.
 
@@ -135,7 +150,8 @@ class PageFetch(Base):
     It is inline in content only on a row written before that or while
     storage was unavailable, and the one update moves it
     (tasks.page_text_tiering).
-    page_texts is the view of the fetches that brought text back, either way.
+    page_texts is the view of the fetches that brought text back, either way,
+    less those page_text_rejections names; page_fetch_texts keeps them.
 
     Ids come from ai_queries' sequence: the fetches stored there before
     2026-10-10 kept their ids when they moved, so every content_row_id that
@@ -175,6 +191,13 @@ class PageFetch(Base):
         # ledger_rows, as they do on ai_queries (routers/admin/queries.py).
         Index("idx_page_fetches_status", "status"),
         Index("idx_page_fetches_worker_recent", "worker", "created_at"),
+        # A text's other fetches, which tasks.page_text_judging groups by
+        # (migration 0838a60ed6e9).
+        Index(
+            "idx_page_fetches_content_sha256",
+            "content_sha256",
+            postgresql_where=text("content_sha256 IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(

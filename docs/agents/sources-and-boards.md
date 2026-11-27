@@ -680,6 +680,74 @@ oldest-first keeps each step inside a few hours. The TOAST space a move frees
 is reused by new rows, and comes back to disk only when the table is
 rewritten (`VACUUM FULL page_fetches`).
 
+## A page that is not its posting is never the posting's text
+
+A fetch can bring back a page that is not the posting: Workday's maintenance
+notice ("Workday is currently unavailable"), saved as a passed fetch for 1,304
+postings across 113 Workday sites by 2026-11-27, most on its weekend
+maintenance windows; a career site's shell that renders without the posting
+(Tower Research's 37 roles shared one text); a cookie wall; "page not
+found". Every posting with such text embedded the same, read as a perfect
+match for every other, and was judged by filters on the notice: 385 custom
+verdicts were rejections read off the maintenance page.
+
+**Such a fetch is named in `page_text_rejections`, and `page_texts` leaves it
+out.** The fetch stays, as the record of what the page said, and keeps its
+status: re-verification judges the page it has just fetched, so it still
+reads a closure page ("This job is no longer available"), which is evidence.
+New-posting verification reads the posting's text through `page_texts` and
+does not see one. Every reader of a posting's text goes
+through `page_texts` and so falls back to the posting's newest fetch that is
+its own (`CONTENT_LATERAL` is `ORDER BY id DESC LIMIT 1` over the view), or
+finds none and fetches again. A reader asking what one fetch held, by id,
+reads `page_fetch_texts`, which keeps them: what an answer read
+(`core.page_fetches.text_of`, the admin ledger) and what a managed-board run
+froze.
+
+**The rule is `core.page_fetches.foreign`.** A text stored for postings with
+different roles is a page that came back the same whatever was asked for. It
+is still a posting's own when it names that posting's role, every title word
+of three letters or more as the start of a word of the text, without level
+numerals ("Engineer II" is the role "engineer"). So a fetch is rejected when
+its text is shared across roles and does not name its own role. ATS text and
+listing text (`BOARD_RECORDS`) are the board's own record of one posting and
+are never rejected: of the 4,826 texts stored for more than one title
+(2026-11-27), what the role test would reject among board records was nearly
+all real postings under variant titles (a feed's "Associate I" and
+"Associate II", a curated list's renamed title, French and English names),
+where among pages the fetcher read itself it was nearly all notices, shells
+and cookie walls.
+
+**Judged when written, and again when a text becomes shared.**
+`page_fetches.record_many` judges each fetch it writes against the text's
+fetches so far, so a page already known to come back the same is never
+served as a new posting's text. A text becomes shared later, when another
+posting's page comes back the same; the `judge_page_texts` task
+(`tasks.page_text_judging`) walks `page_fetches` in id order, judges every
+text a new fetch carries across all of that text's fetches
+(`idx_page_fetches_content_sha256`), and resumes from the latest run's
+`through`. A fetch whose text is still inline has no stored digest until
+`tier_page_text` moves it, so the walk takes it from the text. It runs only
+beside the database, like `tier_page_text`: it reads the shared texts from
+object storage.
+
+**A wrong rejection backs off like a failed fetch.** The rule's known miss is a
+title carrying a word its page never says: a location or seniority suffix on
+one description shared by several postings ("Software Engineer - Austin" and
+"- Denver" on a page that says neither). Such a posting has no text and its
+next fetch is rejected again, so a rejected fetch counts toward the fetch
+streak (`verdicts.FETCH_STREAK`) and the posting is retried less often, then
+not at all, as any page that keeps failing is.
+
+**What was derived from a rejected text is redone.** The sweep removes a
+newly rejected fetch's local embedding in the same transaction, so
+`embed_postings_local` embeds the posting again from its own text, or leaves
+it unembedded when it has none. Pay, requirements, job profiles and the
+OpenAI embeddings compare their stored `content_row_id` with the posting's
+current text (`CONTENT_LATERAL`) and re-derive when it moved; a posting with
+no text of its own left keeps what they derived until a fetch brings one,
+since none of them is a candidate without text.
+
 ## A pull rewrites a catalog row only when the row would change
 
 `catalog.upsert_postings` follows the first two listings rules above for
@@ -1174,8 +1242,11 @@ worker, which was most of the fleet's block rate.
 
 ## A page that keeps failing is retried less often, then not at all
 
-The run of failed `page_fetches` rows since the URL's last passed one decides
-whether an automatic path may fetch it (`verdicts.fetch_parked_sql`). After
+The run of `page_fetches` rows that brought back no posting text since the
+URL's last one that did decides whether an automatic path may fetch it
+(`verdicts.fetch_parked_sql`): failed rows, and passed rows whose text is
+rejected as not the posting's, so a site that only ever serves its shell is
+retried less often like any other failure, not fetched every cycle. After
 the k-th consecutive failure the wait is `fetch_retry_after_hours * 2^(k-1)`,
 capped at `fetch_retry_max_hours`. At `fetch_give_up_after_failures` the
 posting is unfetchable and nothing automatic fetches it again.

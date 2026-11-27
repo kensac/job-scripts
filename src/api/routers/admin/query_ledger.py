@@ -463,7 +463,7 @@ def _held_inputs(rows: list[dict]) -> dict[int, str]:
         page["id"]: page["input_content"]
         for page in page_fetches.resolve(
             db.query(
-                "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
+                "SELECT id, input_content, content_ref FROM page_fetch_texts WHERE id = ANY(%s)",
                 (list(set(fetch_of.values())),),
             )
         )
