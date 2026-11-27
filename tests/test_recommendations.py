@@ -49,11 +49,11 @@ def _taste(user_id: int, weights: dict[int, float]) -> int:
 
 
 def test_only_admins_see_the_page(client, user_headers):
-    assert client.get("/user/recommendations", headers=user_headers).status_code == 403
+    assert client.get("/v1/user/recommendations", headers=user_headers).status_code == 403
 
 
 def test_with_no_model_a_fit_is_asked_for(client, admin_headers):
-    body = client.get("/user/recommendations", headers=admin_headers).json()
+    body = client.get("/v1/user/recommendations", headers=admin_headers).json()
     assert body["nodes"] == [] and body["model"] is None and body["training"] is True
     assert db.query_one(
         "SELECT 1 FROM tasks WHERE kind = 'train_taste' AND payload->>'user_id' = %s",
@@ -76,7 +76,7 @@ def test_postings_come_in_taste_order_with_why(client, admin_headers, f):
     _posting(f, "out of scope", {0: 1.0}, in_scope=False)
     _taste(admin, {0: 1.0})
 
-    first = client.get("/user/recommendations?first=2", headers=admin_headers).json()
+    first = client.get("/v1/user/recommendations?first=2", headers=admin_headers).json()
     assert first["total_count"] == 4
     assert [n["job_id"] for n in first["nodes"]] == [repost, best]
     repost_node, best_node = first["nodes"]
@@ -88,7 +88,7 @@ def test_postings_come_in_taste_order_with_why(client, admin_headers, f):
     assert first["page_info"]["has_next_page"] is True
 
     after = first["page_info"]["end_cursor"]
-    rest = client.get(f"/user/recommendations?after={after}", headers=admin_headers).json()
+    rest = client.get(f"/v1/user/recommendations?after={after}", headers=admin_headers).json()
     assert [n["job_id"] for n in rest["nodes"]][:1] == [middling]
     assert rest["page_info"]["has_next_page"] is False
     assert first["model"]["held_out_in_top_share"] == 0.8
@@ -99,11 +99,11 @@ def test_a_cursor_from_an_older_model_is_refused(client, admin_headers, f):
     _posting(f, "a", {0: 1.0})
     _posting(f, "b", {1: 1.0})
     _taste(admin, {0: 1.0})
-    after = client.get("/user/recommendations?first=1", headers=admin_headers).json()["page_info"][
-        "end_cursor"
-    ]
+    after = client.get("/v1/user/recommendations?first=1", headers=admin_headers).json()[
+        "page_info"
+    ]["end_cursor"]
     _taste(admin, {1: 1.0})
-    response = client.get(f"/user/recommendations?after={after}", headers=admin_headers)
+    response = client.get(f"/v1/user/recommendations?after={after}", headers=admin_headers)
     assert response.status_code == 400
 
 
@@ -112,6 +112,6 @@ def test_similar_postings_leave_out_near_copies(client, admin_headers, f):
     _posting(f, "copy", {0: 1.0})
     near = _posting(f, "near", {0: 0.8, 1: 0.6})
     far = _posting(f, "far", {1: 1.0})
-    body = client.get(f"/user/jobs/{source}/similar", headers=admin_headers).json()
+    body = client.get(f"/v1/user/jobs/{source}/similar", headers=admin_headers).json()
     assert [n["job_id"] for n in body["nodes"]] == [near, far]
     assert body["nodes"][0]["similarity"] < recommendations.NEAR_COPY

@@ -14133,7 +14133,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/api__routers__requirements__Similar"
+                  "$ref": "#/components/schemas/Similar"
                 }
               }
             }
@@ -55894,11 +55894,97 @@
         "title": "Signals",
         "description": "Every signal is null when it cannot clear its floor.\n\nIt used to be absent instead, because a caller renders \"no signal\" as\nnothing at all and an empty object is a correct answer. Declaring the\nshape made the keys appear with null, which the one consumer reads\nidentically: `!signals?.posting_age` is true either way. Null is kept\nrather than serialised away because a key that is sometimes absent cannot\nbe typed, and being able to type it is the reason this exists.\n\nWhat must not change is that a null here means the signal DOES NOT EXIST.\nNever a zero, and never something for the caller to re-derive."
       },
+      "Similar": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "neighbours": {
+            "items": {
+              "$ref": "#/components/schemas/Neighbour"
+            },
+            "type": "array",
+            "title": "Neighbours"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "neighbours"
+        ],
+        "title": "Similar"
+      },
+      "SimilarPosting": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted"
+          },
+          "pay": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "company",
+          "title",
+          "locations",
+          "posted",
+          "pay",
+          "similarity"
+        ],
+        "title": "SimilarPosting"
+      },
       "SimilarPostings": {
         "properties": {
           "nodes": {
             "items": {
-              "$ref": "#/components/schemas/api__routers__recommendations__Similar"
+              "$ref": "#/components/schemas/SimilarPosting"
             },
             "type": "array",
             "title": "Nodes"
@@ -61244,92 +61330,6 @@
         ],
         "title": "YearsExperience",
         "description": "`stated` is how many postings said anything at all. The silent\nmajority is the finding as often as the stated minority is, which is why\nthis is a count beside the distribution and not a percentage."
-      },
-      "api__routers__recommendations__Similar": {
-        "properties": {
-          "job_id": {
-            "type": "integer",
-            "title": "Job Id"
-          },
-          "url": {
-            "type": "string",
-            "title": "Url"
-          },
-          "company": {
-            "type": "string",
-            "title": "Company"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "locations": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Locations"
-          },
-          "posted": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Posted"
-          },
-          "pay": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Pay"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "similarity": {
-            "type": "number",
-            "title": "Similarity"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id",
-          "url",
-          "company",
-          "title",
-          "locations",
-          "posted",
-          "pay",
-          "similarity"
-        ],
-        "title": "Similar"
-      },
-      "api__routers__requirements__Similar": {
-        "properties": {
-          "job_id": {
-            "type": "integer",
-            "title": "Job Id"
-          },
-          "neighbours": {
-            "items": {
-              "$ref": "#/components/schemas/Neighbour"
-            },
-            "type": "array",
-            "title": "Neighbours"
-          }
-        },
-        "type": "object",
-        "required": [
-          "job_id",
-          "neighbours"
-        ],
-        "title": "Similar"
       }
     }
   }

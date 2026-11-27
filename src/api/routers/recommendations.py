@@ -81,7 +81,7 @@ class Recommendations(BaseModel):
     training: bool
 
 
-class Similar(BaseModel):
+class SimilarPosting(BaseModel):
     job_id: int
     url: str
     company: str
@@ -93,7 +93,7 @@ class Similar(BaseModel):
 
 
 class SimilarPostings(BaseModel):
-    nodes: list[Similar]
+    nodes: list[SimilarPosting]
     page_info: PageInfo
     total_count: int
 
@@ -272,7 +272,7 @@ def similar_postings(
     last = rows[-1] if rows else None
     return SimilarPostings(
         nodes=[
-            Similar(
+            SimilarPosting(
                 job_id=r["id"],
                 url=r["url"],
                 company=r["company"],
