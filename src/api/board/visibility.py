@@ -113,6 +113,24 @@ WHERE TRUE
 """
 
 
+# One catalog posting as an administrator may address it: any posting but
+# another person's private upload, with the same columns FAST serves (the
+# person's own row, the posting's pay). Administrators see the whole catalog
+# (the admin catalog, the For you page), so the per-posting routes they open
+# from there (the job drawer and what it reads) admit any such posting;
+# everyone else is held to FAST. Read only through api.board.access.
+ADMIN_CATALOG = """
+SELECT {columns}
+FROM jobs j
+LEFT JOIN user_jobs uj ON uj.job_id = j.id AND uj.user_id = %(uid)s
+LEFT JOIN job_comp pay ON pay.url = j.url
+WHERE NOT EXISTS (
+    SELECT 1 FROM posting_uploads pu WHERE pu.job_id = j.id AND pu.uploaded_by <> %(uid)s
+)
+{extra}
+"""
+
+
 def across_users(columns: str) -> str:
     """Existential projection of FAST for enrichment consumers.
 
