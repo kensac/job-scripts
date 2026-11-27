@@ -1092,12 +1092,14 @@ the database: away from it the hosts exclude `train_tech_scope`.
 ## A person's taste
 
 `core.taste` fits a logistic regression per person on the embeddings of the
-postings they applied to (`applications` with a posting) against
-`BACKGROUND` recent in-scope postings they never touched, and stores it as a
-`ranking_models` row of kind `taste`; a posting's score is one inner product
-in SQL. "No Longer Interested" is not a negative: it meant closed or needs
-sponsorship as often as not for me. With no true negatives the untouched
-sample stands in, so a score orders postings and does not judge one.
+postings they applied to (`applications` with a posting) against the
+postings they marked `NOT_FOR_ME` ("Not For Me", a board status, terminal and
+withdrawn) and `BACKGROUND` recent in-scope postings they never touched, and
+stores it as a `ranking_models` row of kind `taste`; a posting's score is one
+inner product in SQL. "No Longer Interested" is not a negative: it meant
+closed or needs sponsorship as often as not for me, which is why "Not For Me"
+is its own status. Until a person has marked many, the untouched sample
+carries the negatives, so a score orders postings and does not judge one.
 
 **Every model carries its own evaluation.** Before the stored fit, the same
 recipe is fitted on folds of the applications and the background and scored

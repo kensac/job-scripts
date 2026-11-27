@@ -14,7 +14,7 @@ from api.board import visibility
 from api.board.ats import ATS_SQL, AtsName
 from api.mail import applications
 from api.reports import ReportKind, report_kinds
-from core import catalog, verdict_reads
+from core import catalog, taste, verdict_reads
 from core.derivations.compensation import CompBasis, CompPeriod
 from core.verdict_reads import Openness
 
@@ -89,6 +89,7 @@ DEFAULT_STATUSES = [
     "Accepted",
     "Rejected",
     "No Longer Interested",
+    taste.NOT_FOR_ME,
 ]
 
 # (terminal, outcome) per status; see StatusMeta. The withdrawn pair mirrors
@@ -97,6 +98,8 @@ _STATUS_META: dict[str, tuple[bool, Outcome | None]] = {
     "Accepted": (True, "won"),
     "Rejected": (True, "lost"),
     "No Longer Interested": (True, "withdrawn"),
+    # Decided against before applying; the taste model's negative (core.taste).
+    taste.NOT_FOR_ME: (True, "withdrawn"),
     "Withdrawn": (True, "withdrawn"),
 }
 
