@@ -185,27 +185,21 @@ def _take_twin_verdicts(
     return still
 
 
-async def _run_filters(
-    task_id: int,
-    user_id: int,
+def _plan_filter_units(
     filters: list[dict[str, Any]],
-    batched: bool = False,
-    ignore_budget: bool = False,
-) -> None:
-    """Shard scheduled work for content preparation and batching; interactive work stays live."""
-    ent, cfg = load_config(user_id, ignore_budget)
-    use_batch = batched and batch_policy.transport(task_id, cfg) == "batch"
-    held = in_flight_urls(user_id)
-    candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
-    urls = [j["url"] for j in candidates]
-    units: list[tuple] = []
+    candidates: list[dict[str, Any]],
+    urls: list[str],
+    model: str,
+    held: set[str],
+    use_batch: bool,
+) -> list[tuple[str, dict[str, Any], list[dict[str, Any]]]]:
+    units: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
     chunk_size = int(db.get_config("filter_chunk_size"))
     batch_chunk_size = int(db.get_config("filter_batch_chunk_size"))
     recipes = db.get_config("title_screens")
+    models = answering_models("custom", model)
     for flt in filters:
-        decided = decided_custom_urls(
-            urls, flt["prompt_hash"], answering_models("custom", cfg.model)
-        )
+        decided = decided_custom_urls(urls, flt["prompt_hash"], models)
         todo = [j for j in candidates if j["url"] not in decided]
         metrics.CACHED_VERDICTS.inc(len(candidates) - len(todo))
         # A screened posting has no verdict, so without this every run chunked
@@ -215,23 +209,22 @@ async def _run_filters(
             todo = [
                 j for j in todo if not screen(recipe, title=j["title"], source=j["source"]).skip
             ]
-        todo = _take_twin_verdicts(todo, flt, cfg.model, held)
-        if use_batch and todo:
-            for start in range(0, len(todo), batch_chunk_size):
-                units.append(("batch", flt, todo[start : start + batch_chunk_size]))
-            todo = []
-        for start in range(0, len(todo), chunk_size):
-            units.append(("live", flt, todo[start : start + chunk_size]))
-    if not units:
-        materialize_passing(user_id)
-        set_progress(task_id, 0, 0, "everything already decided")
-        return
-    if len(units) == 1 and units[0][0] == "live":
-        _, flt, jobs = units[0]
-        await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
-        materialize_passing(user_id)
-        return
-    total = sum(len(jobs) for _, _, jobs in units)
+        todo = _take_twin_verdicts(todo, flt, model, held)
+        mode = "batch" if use_batch else "live"
+        size = batch_chunk_size if use_batch else chunk_size
+        for start in range(0, len(todo), size):
+            units.append((mode, flt, todo[start : start + size]))
+    return units
+
+
+def _enqueue_filter_units(
+    task_id: int,
+    user_id: int,
+    units: list[tuple[str, dict[str, Any], list[dict[str, Any]]]],
+    *,
+    batched: bool,
+    ignore_budget: bool,
+) -> bool:
     # A batch chunk's list is a verified object and its payload holds only the
     # reference and URLs (api.task_jobs): the chunk waits hours at the provider
     # while its payload is rewritten. Every upload finishes before the first
@@ -267,12 +260,42 @@ async def _run_filters(
                 "scheduled": batched,
             },
         )
+    return bool(batch_lists)
+
+
+async def _run_filters(
+    task_id: int,
+    user_id: int,
+    filters: list[dict[str, Any]],
+    batched: bool = False,
+    ignore_budget: bool = False,
+) -> None:
+    """Shard scheduled work for content preparation and batching; interactive work stays live."""
+    ent, cfg = load_config(user_id, ignore_budget)
+    use_batch = batched and batch_policy.transport(task_id, cfg) == "batch"
+    held = in_flight_urls(user_id)
+    candidates = [j for j in candidates_for(user_id) if j["url"] not in held]
+    urls = [j["url"] for j in candidates]
+    units = _plan_filter_units(filters, candidates, urls, cfg.model, held, use_batch)
+    if not units:
+        materialize_passing(user_id)
+        set_progress(task_id, 0, 0, "everything already decided")
+        return
+    if len(units) == 1 and units[0][0] == "live":
+        _, flt, jobs = units[0]
+        await _process_jobs(task_id, user_id, ent, cfg, flt, jobs)
+        materialize_passing(user_id)
+        return
+    total = sum(len(jobs) for _, _, jobs in units)
+    has_batch = _enqueue_filter_units(
+        task_id, user_id, units, batched=batched, ignore_budget=ignore_budget
+    )
     # Shown to the person on their filters page, beside done/total.
     park_waiting(
         task_id,
         total,
         "answers arrive in batches, which can take hours"
-        if batch_lists
+        if has_batch
         else f"checked in {len(units)} parts",
     )
 
