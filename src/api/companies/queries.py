@@ -3,7 +3,11 @@
 from api.mail.current import current_event, current_match
 from core import verdict_reads
 
+# A count is not a rate: presence is the only threshold for applications.
 APPLICATIONS_MIN = 1
+# The open share renders as counts ("9 of 14 still answer"), not a rate, so no
+# binomial floor applies; below five the phrase is not worth a sentence. It still
+# omits the field for about 92% of names (616 of 7,564 reach it).
 OPEN_MIN_CHECKED = 5
 
 # Keyed by lower(btrim(company)).
@@ -11,8 +15,13 @@ OPEN_MIN_CHECKED = 5
 #   of mode() (2.7-3.2 s vs 3.6-4.2 s, production 2026-11-01).
 # - Pay aggregates over job_comp before joining to avoid sort spill (2.9 s vs
 #   4.3 s joining job_comp to all jobs first, production 2026-10-10).
+# - Comp splits three ways: a job_comp row says the extractor ran, an amount that
+#   it found one. Ran-and-found-nothing cannot tell "stated no pay" from "we
+#   missed it", so it is its own bucket, named for what we did.
 # - `apps` is strictly scoped to `user_id` and reads `applications` (including
 #   mail-derived rows without a `user_jobs` entry), excluding dismissed rows.
+#   Reading `user_jobs` reported 605 companies when 1,283 had evidence; a
+#   dismissal says the row should not exist, so counting it counts a mistake.
 _BASE_CTES = """
 WITH seen AS (
     SELECT DISTINCT ON (company_key) company_key, company AS company_name,
@@ -82,7 +91,8 @@ _CUTS = """(%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
          AND max(r.date_posted) - min(r.date_posted) > make_interval(days => %(min_span)s)))"""
 
 
-# Decisive reply kinds (excludes automated acknowledgements).
+# Decisive reply kinds. Counting acknowledgements (a mail server confirming the
+# form) would report a 100% response rate for every company running an ATS.
 _OUTCOME_KINDS = (
     "rejection",
     "interview_invite",
@@ -94,6 +104,9 @@ _OUTCOME_KINDS = (
 
 # Excludes applications whose matched mail includes an intermediary domain, and
 # restricts timing percentiles to tracker-sourced rows with first_outcome_at >= applied_at.
+# The platform exclusion exists because a course provider replying to everyone put
+# a perfect response rate on a university. The >= guard drops three rows whose
+# outcome predates the hand-entered applied date.
 _RESPONSE_SQL = f"""
 WITH scoped AS (
     SELECT a.id, lower(btrim(a.company_name)) AS company_key,
@@ -156,7 +169,9 @@ _COUNT_SQL = (
     + "WHERE {cuts}\n"
 )
 
-# Keeps NULL currency as its own bucket rather than assuming USD.
+# Keeps NULL currency as its own bucket rather than assuming USD: currency is
+# present on 452 of 11,442 extracted rows, and an amount with no captured
+# currency is not a dollar figure.
 _CURRENCY_SQL = """
 SELECT lower(btrim(j.company)) AS company_key, pay.comp_currency AS currency,
        count(*) AS n, min(pay.comp_min) AS min, max(pay.comp_max) AS max
@@ -169,6 +184,8 @@ GROUP BY lower(btrim(j.company)), pay.comp_currency
 
 # Keyed and filtered on `applications` to stay consistent with `apps` counts;
 # mail-only applications without a `user_jobs` row contribute to no status.
+# The count and this breakdown render together, so they share table and key;
+# they disagreed when this read `user_jobs` keyed on jobs.company.
 _STATUS_SQL = """
 SELECT lower(btrim(a.company_name)) AS company_key, uj.status, count(*) AS n
 FROM applications a
@@ -181,6 +198,9 @@ WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
 GROUP BY lower(btrim(a.company_name)), uj.status
 """
 
+# The same instrument as the board row and the per-job signal: the latest closed
+# verdict per posting. Counting any closed row (failed ones too) would let this
+# page and the board disagree with nobody able to see which was wrong.
 _LATEST_CLOSED_PER_JOB = verdict_reads.latest_per(
     "j.id",
     "lower(btrim(j.company)) AS company_key, v.status, v.created_at",
@@ -200,6 +220,8 @@ FROM latest GROUP BY company_key
 """
 
 # Largest same-source, same-location recurring `(company, title)` group per company.
+# Location is in the key: without it one chain listing a role across 120 locations
+# read as a 1,056-url repost, which is bulk hiring, not re-listing.
 # mode() runs only on the winning group so the outer GROUP BY can parallelize
 # (430 ms vs 850 ms on a synthetic top page, 2026-10-04).
 _REPOST_SQL = """
