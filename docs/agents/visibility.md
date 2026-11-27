@@ -479,6 +479,26 @@ A report from an anonymous visitor to a public list never queues one. It
 joins the same queue, and the administrator decides; otherwise whoever submits
 the public form sets the fleet's spend.
 
+## The For you page ranks the catalog, so it is an administrator's
+
+`GET /user/recommendations` ranks a person's recent tech postings they have
+not touched (`posting_scopes`, `core.tech_scope`) by their taste model
+(`core.taste`), and `GET /user/jobs/{id}/similar` lists the ones nearest to a
+posting (`core.recommendations`). Both read the whole catalog, past the
+person's board: of the first 40 postings the study ranked for one person, 4
+came from sources they subscribe to and 18 were on their board. Seeing
+postings beyond one's board is what visibility grants administrators alone,
+so both routes are `require_admin`. A person acts on a posting there through
+`PATCH /user/jobs/{id}`, which lets anyone pin a public catalog posting.
+
+A node says why it is there: the application it is nearest to, and whether
+it is a near copy (`NEAR_COPY`) of an application or of a higher posting on
+the page. A cursor names the model it was read under, so a cursor from before
+a refit is refused rather than read in another order. The page asks for a
+fit when the person has no model or theirs is from before today, and says so
+(`training`). The administrative surface has no version of this page: it is a
+person's own ranking.
+
 ## A person's settings have one owner
 
 `user_settings` is read and written only by `api/user_settings.py`. It holds
