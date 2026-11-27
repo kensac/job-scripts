@@ -149,20 +149,12 @@ def read_verdict_breakdowns(
     list[VerdictModelSpend],
     list[VerdictDaySpend],
 ]:
-    """Totals, batching and the check type, model and day cuts of the verdict
-    log, from ONE scan of its answers (each with its call's usage on the
-    first answer naming it) grouped by every dimension they cut by.
+    """Read totals, batching, check_type, model, and day cuts in one rollup scan.
 
-    Each used to be its own full scan: five of the eight scans /admin/spend
-    ran, which took about 97 s between them on a loaded production host on
-    2026-10-04. One pass grouped by a superset of these keys measured
-    3.2-4.0 s there (327 groups); the rows returned are the window's distinct
-    (day, model, check_type), not its calls. Batching splits are FILTERs
-    inside each group rather than keys. The groups come from the hourly sums
-    (api.ledger_rollup), exact by construction: the same pass over the
-    window's answers took 15 s on production (2026-10-13). Day is
-    `hour::date`, an answer's `created_at::date` in any whole-hour timezone. Costs fold as the Decimals
-    Postgres returned, so a sum of group sums is the number one SUM gave.
+    Uses `api.ledger_rollup` hourly sums grouped by `(day, model, check_type)`
+    and folds Decimals in Python so all cuts stay consistent without rescanning
+    `ai_queries` (measured 97s across five raw scans on 2026-10-04; 15s single
+    raw scan on 2026-10-13).
     """
     groups = db.query(
         f"""
@@ -266,35 +258,9 @@ def verdict_waste(params: dict, answers: str = _ANSWERS, later: str = "ai_querie
 def verdict_reach(
     params: dict, answers: str = _ANSWERS
 ) -> tuple[list[VerdictReachSpend], list[VerdictSourceReachSpend]]:
-    # Why source reach has its own breakdown (historical measurement):
-    #
-    # The sweeps that spend tokens selected postings with no reference to who
-    # subscribes to what, so 21.7M of a 99.7M-token 30-day bill went to boards
-    # no user had enabled and to one an admin had switched off. This motivated
-    # the AI_ELIGIBLE_JOB gate and retaining a source-reach breakdown,
-    # because the only symptom was a number in a bill nobody attributed.
-    #
-    # Measured 2026-09-03. The ticket's own figure was 31.6%, counting
-    # `sheet_import` as unsubscribed; it is reachable, so the honest share is
-    # 21.8%.
-    #
-    # Those figures describe the recorded 2026-09-03 sample, not today's usage
-    # or a reconciled provider invoice. This query joins current jobs and
-    # subscriptions; it cannot reconstruct reach when an older request ran.
-    #
-    # Three buckets, not two. 'no_posting' is a call whose url has no jobs row,
-    # and the original url-keyed extraction design deliberately reached the
-    # fifth of that corpus whose posting row was gone and whose cached page
-    # could not be scraped again. That historical population does not establish
-    # eligibility in today's sweep; inspect its current candidate query. That work cannot be attributed to a source, which is a different
-    # fact from being unwanted - folding it into 'unreachable' would report
-    # deliberate work as waste. Unpriced calls are counted, never summed as
-    # zero: a NULL cost is a rate nobody looked up, not a free call.
-    #
-    # Read untyped, because these rows answer two questions: one row per
-    # (source, reach), and the reach totals rolled up from them. The rollup
-    # adds the costs as the Decimals the database returned rather than as the
-    # floats the response carries.
+    # Group answers against current `jobs` and subscription eligibility into
+    # three buckets: `no_posting` (missing job row, distinct from unwanted),
+    # `reachable`, and `unreachable`. Read untyped to fold Decimal costs cleanly.
     reach_rows = db.query(
         f"""
         SELECT COALESCE(j.source, '') AS source,
@@ -311,10 +277,7 @@ def verdict_reach(
         """,
         params,
     )
-    # Per source, only the unreachable rows: they name where wasted spend came
-    # from, and they are all a client shows. The reachable rows were two
-    # thirds of a 845 kB response (3,325 rows, 2026-11-01) and the reach
-    # totals below already count them.
+    # Return only unreachable rows per source; reachable counts live in by_reach.
     by_source_reach = [
         VerdictSourceReachSpend(**row) for row in reach_rows if row["reach"] == "unreachable"
     ]
@@ -338,12 +301,10 @@ def verdict_reach(
     return by_reach, by_source_reach
 
 
-# The window's answers with their usage, read once into a temporary table so
-# the cuts above aggregate a narrow table instead of each rebuilding the join
-# over ai_queries' wide rows. Each rebuilt it from scratch: 15 s, 19 s and
-# 33 s for the 30-day window on production (2026-10-13), and the replaced-
-# verdict check scanned every answer again. The model filter is applied when
-# read, not here: a verdict with no model still replaces an older one.
+# Materialize the window's answers once per transaction so downstream cuts scan
+# a narrow temp table instead of repeating the ai_queries join (15-33s each on
+# production, 2026-10-13). Keep model IS NULL rows here because they still
+# supersede older verdicts in verdict_waste.
 _WINDOW_TABLE = f"""
     CREATE TEMP TABLE spend_window ON COMMIT DROP AS
     SELECT * FROM {model_calls.answers_with_usage(f"q.{_WINDOW}")} a
