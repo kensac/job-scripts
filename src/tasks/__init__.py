@@ -47,6 +47,7 @@ from tasks.page_text_judging import handle_judge_page_texts
 from tasks.page_text_tiering import handle_tier_page_text
 from tasks.receipt_responses import handle_move_receipt_responses
 from tasks.resume_uploads import handle_process_resume_upload
+from tasks.taste import handle_train_taste
 from tasks.tech_scope import handle_score_tech_scope, handle_train_tech_scope
 from tasks.uploads import handle_extract_upload
 from tasks.verify import (
@@ -78,6 +79,7 @@ HANDLERS = {
     "judge_page_texts": handle_judge_page_texts,
     "train_tech_scope": handle_train_tech_scope,
     "score_tech_scope": handle_score_tech_scope,
+    "train_taste": handle_train_taste,
     "embed_postings_local": handle_embed_postings_local,
     "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,
