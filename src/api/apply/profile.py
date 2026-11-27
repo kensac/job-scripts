@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -104,64 +105,78 @@ ApplicationOptions = list[str]
 CONSENT = "Yes | I agree | I accept | I acknowledge | I consent | I confirm | I certify"
 
 
+def _preferred_name(profile: Profile) -> str:
+    # A preferred name that is the first name is no preferred name: Workday
+    # ticked "I have a preferred name" and filled it (2026-09-08).
+    pref = profile.preferred_name.strip()
+    return "" if pref.lower() == profile.first_name.strip().lower() else pref
+
+
+def _state_value(profile: Profile) -> str:
+    # A state box may list abbreviations or full names; offer both.
+    if not profile.state:
+        return ""
+    full = US_STATES.get(profile.state.upper())
+    return (
+        f"{profile.state} | {full}"
+        if full and full.lower() != profile.state.lower()
+        else profile.state
+    )
+
+
+def _experience_fact(profile: Profile, index: int, attr: str) -> str:
+    if len(profile.experience) <= index:
+        return ""
+    return getattr(profile.experience[index], attr)
+
+
+def _education_fact(profile: Profile, attr: str) -> str:
+    if not profile.education:
+        return ""
+    return getattr(profile.education[0], attr) or ""
+
+
+_STATIC_FACTS: dict[str, str] = {
+    "consent": CONSENT,
+    "decline": DECLINE,
+    "yes": "Yes",
+    "no": "No",
+    # A flow step in a config-driven reader (a begin or save button, a wait)
+    # carries no value; the engine runs it at its place in the order.
+    "step": "",
+}
+
+_DERIVED_FACTS: dict[str, Callable[[Profile], str]] = {
+    "experience": lambda p: f"{len(p.experience)} entries" if p.experience else "",
+    "education": lambda p: f"{len(p.education)} entries" if p.education else "",
+    "preferred_name": _preferred_name,
+    # The phone's country picker: the person's country.
+    "phone_country": lambda p: p.country,
+    "today": lambda _p: datetime.datetime.now(datetime.UTC).date().isoformat(),
+    "phone_digits": lambda p: re.sub(r"\D", "", p.phone),
+    "full_name": lambda p: p.full_name,
+    "location": lambda p: p.location,
+    "state": _state_value,
+    "current_company": lambda p: _experience_fact(p, 0, "company"),
+    "current_title": lambda p: _experience_fact(p, 0, "title"),
+    "previous_company": lambda p: _experience_fact(p, 1, "company"),
+    "previous_title": lambda p: _experience_fact(p, 1, "title"),
+    "school": lambda p: _education_fact(p, "school"),
+    "degree": lambda p: _education_fact(p, "degree"),
+    "field_of_study": lambda p: _education_fact(p, "field"),
+    "gpa": lambda p: _education_fact(p, "gpa"),
+    "graduation": lambda p: _education_fact(p, "end"),
+}
+
+
 def profile_value(profile: Profile, fact: str) -> str:
     """The profile's answer for a fact, "" when it has none. A few facts are
     not on the profile: consent (always given), today's date, "yes" (a
     config-driven reader's over-18 check), the phone as digits."""
-    if fact == "consent":
-        return CONSENT
-    if fact == "decline":
-        return DECLINE
-    if fact in ("experience", "education"):
-        rows = getattr(profile, fact)
-        return f"{len(rows)} entries" if rows else ""
-    if fact == "yes":
-        return "Yes"
-    # A preferred name that is the first name is no preferred name: Workday
-    # ticked "I have a preferred name" and filled it (2026-09-08).
-    if fact == "preferred_name":
-        pref = profile.preferred_name.strip()
-        return "" if pref.lower() == profile.first_name.strip().lower() else pref
-    if fact == "no":
-        return "No"
-    # A flow step in a config-driven reader (a begin or save button, a wait)
-    # carries no value; the engine runs it at its place in the order.
-    if fact == "step":
-        return ""
-    # The phone's country picker: the person's country.
-    if fact == "phone_country":
-        return profile.country
-    if fact == "today":
-        return datetime.datetime.now(datetime.UTC).date().isoformat()
-    if fact == "phone_digits":
-        return re.sub(r"\D", "", profile.phone)
-    if fact in ("full_name", "location"):
-        return getattr(profile, fact)
-    # A state box may list abbreviations or full names; offer both.
-    if fact == "state" and profile.state:
-        full = US_STATES.get(profile.state.upper())
-        return (
-            f"{profile.state} | {full}"
-            if full and full.lower() != profile.state.lower()
-            else profile.state
-        )
-    if fact in ("current_company", "current_title", "previous_company", "previous_title"):
-        index = 0 if fact.startswith("current") else 1
-        if len(profile.experience) <= index:
-            return ""
-        role = profile.experience[index]
-        return role.company if fact.endswith("company") else role.title
-    if fact in ("school", "degree", "field_of_study", "gpa", "graduation"):
-        if not profile.education:
-            return ""
-        edu = profile.education[0]
-        return {
-            "school": edu.school,
-            "degree": edu.degree,
-            "field_of_study": edu.field,
-            "gpa": edu.gpa,
-            "graduation": edu.end,
-        }[fact] or ""
+    if fact in _STATIC_FACTS:
+        return _STATIC_FACTS[fact]
+    if handler := _DERIVED_FACTS.get(fact):
+        return handler(profile)
     return str(getattr(profile, fact, "") or "")
 
 
