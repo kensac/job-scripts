@@ -19,6 +19,48 @@ from core.fetching.posting import JobPosting
 _TALEO_SECTION = re.compile(r"^/careersection/([^/]+)/jobsearch\.ftl$")
 
 
+def _taleo_search_page(endpoint: str, lang: str, portal: str, page_no: int) -> dict:
+    # Omit pageSize because Taleo caches pages by (query, pageNo) ignoring size.
+    # A `tz` header is required or the endpoint returns HTTP 500.
+    resp = _post(
+        f"{endpoint}?lang={lang}&portal={portal}",
+        json={
+            "multilineEnabled": False,
+            "sortingSelection": {"sortBySelectionParam": "3", "ascendingSortingOrder": "false"},
+            "fieldData": {
+                "fields": {"KEYWORD": "", "LOCATION": "", "ORGANIZATION": ""},
+                "valid": True,
+            },
+            "filterSelectionParam": {"searchFilterSelections": []},
+            "advancedSearchFiltersSelectionParam": {"searchFilterSelections": []},
+            "pageNo": page_no,
+        },
+        headers={"tz": "GMT+00:00"},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _taleo_requisition_posting(
+    item: dict, company: str, detail: str, lang: str
+) -> JobPosting | None:
+    columns = item.get("column") or []
+    linked = item.get("linkedColumn", 0)
+    located = item.get("locationsColumns") or []
+    places = [p for i in located if i < len(columns) for p in _taleo_places(columns[i])]
+    dates = [
+        _taleo_date(c, lang) for i, c in enumerate(columns) if i != linked and i not in located
+    ]
+    return posting_from_listing(
+        company,
+        columns[linked] if linked < len(columns) else None,
+        places,
+        detail + item["contestNo"] if item.get("contestNo") else None,
+        next((d for d in dates if d), 0),
+        raw=item,
+    )
+
+
 def _taleo(url: str, company: str) -> list[JobPosting]:
     """POST https://{tenant}.taleo.net/careersection/rest/jobboard/searchjobs?lang=en&portal={portal}
 
@@ -73,47 +115,15 @@ def _taleo(url: str, company: str) -> list[JobPosting]:
     seen: dict[str, JobPosting] = {}
     page_no = total = last = 1
     while True:
-        resp = _post(
-            f"{endpoint}?lang={lang}&portal={portal}",
-            json={
-                "multilineEnabled": False,
-                "sortingSelection": {"sortBySelectionParam": "3", "ascendingSortingOrder": "false"},
-                "fieldData": {
-                    "fields": {"KEYWORD": "", "LOCATION": "", "ORGANIZATION": ""},
-                    "valid": True,
-                },
-                "filterSelectionParam": {"searchFilterSelections": []},
-                "advancedSearchFiltersSelectionParam": {"searchFilterSelections": []},
-                "pageNo": page_no,
-            },
-            headers={"tz": "GMT+00:00"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = _taleo_search_page(endpoint, lang, portal, page_no)
         if page_no == 1:
             paging = data["pagingData"]
             total = int(paging["totalCount"])
             last = -(-total // int(paging["pageSize"]))
-        for j in data.get("requisitionList") or []:
-            columns = j.get("column") or []
-            linked = j.get("linkedColumn", 0)
-            located = j.get("locationsColumns") or []
-            places = [p for i in located if i < len(columns) for p in _taleo_places(columns[i])]
-            dates = [
-                _taleo_date(c, lang)
-                for i, c in enumerate(columns)
-                if i != linked and i not in located
-            ]
-            p = posting_from_listing(
-                company,
-                columns[linked] if linked < len(columns) else None,
-                places,
-                detail + j["contestNo"] if j.get("contestNo") else None,
-                next((d for d in dates if d), 0),
-                raw=j,
-            )
-            if p:
-                seen[p.url] = p
+        for item in data.get("requisitionList") or []:
+            posting = _taleo_requisition_posting(item, company, detail, lang)
+            if posting:
+                seen[posting.url] = posting
         if page_no >= last:
             break
         page_no += 1
@@ -130,6 +140,25 @@ _TALEO_LIST_SIZE = re.compile(
 # The cell "Submission for the position: <title> - (Job Number: <code>)", its
 # separators written "%5C:", ends on the code the posting URL takes.
 _TALEO_CODE = re.compile(r"%5C: ([^()]+)\)$")
+
+
+def _taleo_list_page(ajax: str, page_id: str, page_no: int, lang: str) -> list[list[str]]:
+    resp = _post(
+        ajax,
+        data={
+            "ftlpageid": page_id,
+            "ftlinterfaceid": "requisitionListInterface",
+            "ftlcompid": "rlPager",
+            "jsfCmdId": "rlPager",
+            "ftlcompclass": "PagerComponent",
+            "ftlcallback": "ftlPager_processResponse",
+            "ftlajaxid": "ftlx1",
+            "rlPager.currentPage": str(page_no),
+            "lang": lang,
+        },
+    )
+    resp.raise_for_status()
+    return _taleo_rows(html.unescape(resp.text).split("!|!"))
 
 
 def _taleo_list(page, detail: str, lang: str, company: str) -> list[JobPosting]:
@@ -163,24 +192,9 @@ def _taleo_list(page, detail: str, lang: str, company: str) -> list[JobPosting]:
     ajax = page.url.split("?", 1)[0].rsplit(".ftl", 1)[0] + ".ajax"
     seen: dict[str, JobPosting] = {}
     for page_no in range(1, -(-total // size) + 1):
-        resp = _post(
-            ajax,
-            data={
-                "ftlpageid": page_id.group(1),
-                "ftlinterfaceid": "requisitionListInterface",
-                "ftlcompid": "rlPager",
-                "jsfCmdId": "rlPager",
-                "ftlcompclass": "PagerComponent",
-                "ftlcallback": "ftlPager_processResponse",
-                "ftlajaxid": "ftlx1",
-                "rlPager.currentPage": str(page_no),
-                "lang": lang,
-            },
-        )
-        resp.raise_for_status()
-        for row in _taleo_rows(html.unescape(resp.text).split("!|!")):
+        for row in _taleo_list_page(ajax, page_id.group(1), page_no, lang):
             code = next((m.group(1) for c in row if (m := _TALEO_CODE.search(c))), None)
-            p = posting_from_listing(
+            posting = posting_from_listing(
                 company,
                 unquote(row[1]),
                 [],
@@ -188,8 +202,8 @@ def _taleo_list(page, detail: str, lang: str, company: str) -> list[JobPosting]:
                 next((d for c in row if (d := _taleo_date(c, lang))), 0),
                 raw={"requisitionNo": row[0], "cells": row},
             )
-            if p:
-                seen[p.url] = p
+            if posting:
+                seen[posting.url] = posting
     postings = list(seen.values())
     if len(postings) < total:
         raise PartialPull(postings)
