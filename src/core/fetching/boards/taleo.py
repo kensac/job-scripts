@@ -20,8 +20,7 @@ _TALEO_SECTION = re.compile(r"^/careersection/([^/]+)/jobsearch\.ftl$")
 
 
 def _taleo_search_page(endpoint: str, lang: str, portal: str, page_no: int) -> dict:
-    # Omit pageSize because Taleo caches pages by (query, pageNo) ignoring size.
-    # A `tz` header is required or the endpoint returns HTTP 500.
+    # No pageSize, and a `tz` header: `_taleo`'s docstring has the measurements.
     resp = _post(
         f"{endpoint}?lang={lang}&portal={portal}",
         json={
