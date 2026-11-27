@@ -48,6 +48,8 @@ def cache_write_rate(tier: Tier) -> Decimal | None:
 def is_off_peak(rates: Rates, at: datetime.datetime | None) -> bool:
     """Return whether `at` (UTC, isodow 1=Monday) falls outside all declared peak windows.
 
+    isodow is converted here and only here so the SQL rendering and this one agree.
+
     Returns False when `at`, peak windows, or off-peak multiplier is missing so
     undiscounted peak rates apply by default.
     """
@@ -72,6 +74,9 @@ def estimate_cost_usd(
     cache_write_tokens: int | _UnspecifiedCacheWrite | None = _UNSPECIFIED_CACHE_WRITE,
 ) -> Decimal | None:
     """Price a single call, or return None when the model or cache-write cost is unknown.
+
+    None, not 0: summed zeros silently understate the bill, summed NULLs show
+    incomplete coverage.
 
     Must be called per request because prompt-length tier selection depends on a
     single request's prompt tokens. Omitting `at` bills peak rates rather than
@@ -105,6 +110,8 @@ def estimate_cost_usd(
         + cache_write * (write_rate if write_rate is not None else tier.rate_in)
         + completion * tier.rate_out
     ) / _PER_MTOK
+    # A batched call with no batch lane bills at the synchronous rate; a discount
+    # there would under-report cost.
     if batched and rates.batch_rate is not None:
         cost *= rates.batch_rate
     if is_off_peak(rates, at) and rates.off_peak_multiplier is not None:
@@ -126,6 +133,9 @@ def cost_sql(
     batched: str,
 ) -> str:
     """Render `estimate_cost_usd` as a SQL expression for bulk pricing.
+
+    Both renderings live here and are tested against each other; never hand-copy
+    the formula elsewhere.
 
     Callers bind per-tier rates (and 1 for `batch_rate` when a model has no batch
     lane), filter rows by tier prompt range when needed, and handle wall-clock

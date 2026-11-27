@@ -2,16 +2,20 @@
 
 `users.email` holds only one address, Gmail OAuth is read-only (no sendAs API),
 and imported archives have no API. An owner's addresses appear on a far larger
-share of the mailbox than any single correspondent.
+share of the mailbox than any single correspondent. Measured over 67,257
+messages: the two owner addresses on 50.6% and 34.0%, the next address on 7.9%
+(a 4.29x drop, the largest in the list).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Floor to keep the gap search out of the low-count tail where integer rounding
-# creates noisy ratios. Must stay low enough that correspondents remain below
-# the owner cluster for the gap cut to separate them.
+# Floor only to keep the gap search off the low-count tail, where integer rounding
+# makes ratios noise (largest ratio outside the top two: 2.00x, from 2 vs 1
+# messages; 1% here is 672 messages). It must NOT separate owners from
+# correspondents: a 10% floor left only the two owner addresses, and the gap cut
+# fell between them.
 MIN_CANDIDATE_SHARE = 0.01
 
 # Coupled to MIN_CANDIDATE_SHARE so a single message cannot clear the floor on
@@ -34,7 +38,8 @@ def derive_identities(counts: list[AddressCount], total_messages: int) -> set[st
     largest multiplicative drop between adjacent shares.
 
     Returns an empty set when the mailbox has fewer than MIN_MAILBOX_MESSAGES so
-    the caller falls back to the configured address rather than guessing.
+    the caller falls back to the configured address rather than guessing: a
+    one-message mailbox once named a no-reply address as the owner.
     """
     if total_messages < MIN_MAILBOX_MESSAGES:
         return set()

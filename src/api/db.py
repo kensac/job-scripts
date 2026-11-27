@@ -32,12 +32,15 @@ _APP_CONFIG_SEED = [(key, spec.default) for key, spec in CONFIG_KEYS.items()]
 _APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)
 
 
-# Advisory lock key serializing startup `alembic upgrade head` across hosts.
+# Advisory lock key serializing startup `alembic upgrade head` across hosts: on a
+# lockstep roll up to four processes can enter it within the same minute.
 _SCHEMA_LOCK_KEY = 8_274_113_907_441_002
+# 1 s of polling slack is invisible beside a peer's seconds-long migration.
 _SCHEMA_LOCK_POLL_SECONDS = 1.0
 
 
 def init_schema() -> None:
+    # Wait, never skip: running against a half-migrated schema is wrong.
     # Poll pg_try_advisory_lock and commit every attempt so neither waiters nor
     # the lock holder keep an open snapshot that blocks CREATE INDEX CONCURRENTLY
     # (reproduced 2026-10-03). The session advisory lock outlives the commit.
@@ -71,7 +74,12 @@ def seed_defaults() -> None:
 
 
 def get_config(key: str, default: Any = None) -> Any:
-    """Read an app_config key, falling back to its seeded default if unseeded."""
+    """Read an app_config key, falling back to its seeded default if unseeded.
+
+    The seed runs after `_migrate()`, so a container that migrates and then dies
+    leaves the row absent. A caller's own fallback would then silently turn a
+    feature gate off; the seeded value is what a successful seed would have written.
+    """
     row = query_one("SELECT value FROM app_config WHERE key = %s", (key,))
     if row:
         return row["value"]
@@ -89,7 +97,11 @@ def _migrate() -> None:
 
 
 def _as_query(sql: str) -> LiteralString:
-    """Centralize the LiteralString cast for queries built from whitelisted SQL fragments."""
+    """Centralize the LiteralString cast for queries built from whitelisted SQL fragments.
+
+    Runtime SQL only interpolates whitelisted fragments; a user value always travels
+    as a bound parameter.
+    """
     return cast("LiteralString", sql)
 
 
@@ -105,7 +117,11 @@ def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
 
 
 def query_as[Row](row: type[Row], sql: str, params: Any = None) -> list[Row]:
-    """Run raw SQL and construct `row(**r)` per result row (raises TypeError on column drift)."""
+    """Run raw SQL and construct `row(**r)` per result row (raises TypeError on column drift).
+
+    Not an ORM and must not become one: hot-path SQL carries query plans measured
+    against production, and a query builder would hide them.
+    """
     with statement() as conn:
         return [row(**r) for r in conn.execute(_as_query(sql), params).fetchall()]
 
