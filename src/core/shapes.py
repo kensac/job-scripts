@@ -1,10 +1,9 @@
 """Task declarations shared by handlers, routing, and fleet pricing.
 
 SHAPES declares each task's purpose, candidate models, output cap, token
-estimate, cycle size, and supporting evidence. The registry is complete at
-import time, so budget readers do not need to import task handlers. A declared
-cycle size seeds app_config; handlers and the fleet budget read the persisted
-value through api.task_config.configured_shape."""
+estimate, cycle size, and supporting evidence. Declared cycle sizes seed
+app_config; handlers and the fleet budget read persisted overrides via
+api.task_config.configured_shape."""
 
 from __future__ import annotations
 
@@ -18,12 +17,8 @@ from core.routing import Evidence, TaskShape
 
 # --- compensation extraction ---
 
-# Comp extraction runs hourly and each pass is bounded, so one task cannot pull
-# the whole catalog into memory or occupy a worker indefinitely. The size is
-# chosen to fill the batch-wave concurrency rather than picked arbitrarily: a
-# comp spec is ~6.5k tokens against a 1.8M-token wave budget, so ~276 specs per
-# wave, and waves now run BATCH_WAVE_CONCURRENCY at a time. The default for
-# comp_extract_per_cycle in app_config, which is what the sweep reads.
+# Default for comp_extract_per_cycle: ~6.5k tokens/spec against 1.8M/wave (~276/wave)
+# across BATCH_WAVE_CONCURRENCY concurrent waves.
 EXTRACT_COMP_PER_CYCLE = 1100
 
 
@@ -47,66 +42,20 @@ COMP_TASK = TaskShape(
 
 # --- requirements extraction ---
 
-# Audited over 60 real postings against whether the page even mentions the
-# fact: nano at "low" effort invented a clearance level for 12 of
-# 55 postings that never mention clearance, and lost 5 of 60 responses to the
-# output cap; nano at "minimal" filled 0 and "none" wherever the honest answer
-# was "unstated", which is the one distinction this schema exists to keep.
-# gpt-5-mini at "minimal" invented one degree, one yoe and no clearances, and
-# truncated nothing. Batched over the whole corpus that is $9.89 against nano's
-# $1.98 - a one-time pass over postings that can never be re-scraped.
 REQUIREMENTS_MODEL = os.environ.get("JOBTRACKER_REQUIREMENTS_MODEL", "gpt-5.6-luna")
 
-
-# Cheapest first, and every value here is accepted by SOME model in the
-# registry, so swapping the model swaps the effort with it rather than sending
-# one the model refuses. luna takes "none"; nano takes "minimal", and sent
-# the same request directly on 2026-09-05 it completed at ~200 output tokens
-# with no reasoning, against 750 to 1,450 at "low". The 21,525-line failure
-# of 2026-09-04 was not the effort: OpenAI's error file for those batches says
-# every line carried "none", which nano rejects, from a routing path that did
-# not yet re-pick the effort for an overridden model.
+# Cheapest accepted effort first so model swaps pick a supported value.
 _REQUIREMENTS_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
-
-# Measured p100 over the pilot was 378 tokens; the JSON's whole variable part is
-# the two skill arrays, so the budget is set to carry roughly three times the
-# widest skill list seen. An unfinished response is unparseable JSON, and an
-# unparseable line leaves the url unextracted for the next sweep to re-pay
-# forever, so the headroom is worth more than the tokens - a cap is a ceiling,
-# not a charge. 2000 rather than 1000 because nano at low effort spent 802
-# output tokens a posting in the pilot before the JSON, and a cap the
-# reasoning alone can hit turns every long posting into an unparseable line.
+# Pilot p100 output was 378 tokens (up to 802 reasoning tokens at low effort);
+# 2000 leaves headroom so responses do not truncate mid-JSON and re-queue.
 REQUIREMENTS_MAX_OUTPUT_TOKENS = 2000
 
-
-# Bounded per cycle for the same reason comp extraction is: one task must not
-# pull the whole corpus into memory or hold a worker indefinitely. Sized to fill
-# the batch-wave concurrency rather than picked round, using core.batch's own
-# estimator since that is what actually chunks the waves: instructions (3,611
-# chars) plus a posting (5,608 chars, the corpus mean after truncation) is 2,302
-# tokens at BATCH_CHARS_PER_TOKEN, plus REQUIREMENTS_MAX_OUTPUT_TOKENS reserved,
-# so 3,304 tokens a spec against the 1.8M-token BATCH_TOKEN_BUDGET is 545 specs
-# per wave, and waves run BATCH_WAVE_CONCURRENCY (4) at a time: 2,179.
-#
-# That estimate is deliberately conservative, and it is worth knowing by how
-# much. Fitted against real API usage over a 60-posting pilot, the true cost of
-# a request is 1,255 + 0.181 x content_chars input tokens: job postings tokenize
-# at about 5.5 characters per token, not the 4 that BATCH_CHARS_PER_TOKEN
-# assumes, and the 1,255 fixed is the instructions plus the JSON schema, which
-# is roughly 45% of a request's input at this posting length. So real waves run
-# under budget rather than over it, which is the safe direction. Whole corpus:
-# 47.0M input and 4.0M output tokens, $9.89 batched at REQUIREMENTS_MODEL.
-# The default for requirements_extract_per_cycle in app_config.
+# Default for requirements_extract_per_cycle: ~3,304 estimated tokens/spec
+# against 1.8M BATCH_TOKEN_BUDGET (~545/wave) x 4 waves = 2,179.
 EXTRACT_REQUIREMENTS_PER_CYCLE = 2179
 
 
-# The same declaration every other batched extraction makes. The model is the
-# caller's judgment - the evidence and notes below are why luna and not nano or
-# mini - and the router checks it can do what this task needs rather than
-# choosing it for cost. est_prompt_tokens is the fitted figure from the pilot
-# above, not the conservative chunking estimate: it ranks candidates and never
-# becomes a bill.
 REQUIREMENTS_TASK = TaskShape(
     purpose="requirements",
     label="Requirements extraction",
@@ -171,11 +120,8 @@ REQUIREMENTS_TASK = TaskShape(
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
     max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
+    # Fitted against a 60-posting pilot (1,255 fixed + 0.181/char at ~5.5 chars/token).
     est_prompt_tokens=2270,
-    # Preference, not a pin. luna REJECTS "minimal" and mini rejects "none",
-    # so a literal effort makes the model unswappable: point this at the other
-    # one and resolve() refuses, or worse a batch submits and fails whole on a
-    # 400. That is #179 exactly. The model picks the first value it accepts.
     effort_preference=_REQUIREMENTS_EFFORT_PREFERENCE,
     candidates=(REQUIREMENTS_MODEL,),
 )
@@ -183,12 +129,7 @@ REQUIREMENTS_TASK = TaskShape(
 
 # --- location classification ---
 
-# Strings are short and the answer is a lookup the model already knows, so the
-# whole backlog (8,735 distinct strings on 2026-09-04) fits one cycle; after
-# that a cycle carries only the strings new boards wrote since the last one.
-# The default for classify_locations_per_cycle in app_config, so the first
-# pass can be a small sample read off GET /admin/locations before the backlog
-# is paid for.
+# Default for classify_locations_per_cycle.
 CLASSIFY_LOCATIONS_PER_CYCLE = 10000
 
 LOCATIONS_TASK = TaskShape(
@@ -203,8 +144,7 @@ LOCATIONS_TASK = TaskShape(
     ),
     structured=StructuredOutput.JSON_SCHEMA,
     batched=True,
-    # Allow roughly 32 places at 64 tokens per structured place, rather than
-    # truncating multi-city strings. Short answers only pay for tokens emitted.
+    # Room for ~32 places at ~64 tokens each without truncating multi-city strings.
     max_output_tokens=2048,
     est_prompt_tokens=260,
     effort_preference=("minimal", "low"),
@@ -234,88 +174,23 @@ VERIFY_TASK = TaskShape(
 
 # --- mail classification ---
 
-# The one-time historical sweep and the ongoing trickle are priced differently
-# enough to be different models, and neither is the fleet default.
-#
-# gpt-5-nano is excluded on evidence rather than price: measured on
-# extraction-shaped work it FABRICATES, inventing 12 clearances across 55
-# postings and filling 0/"none" wherever the true answer is "unstated". This is
-# the same shape - a deadline that was never stated must not become a guessed
-# date, and silence must not become a fabricated rejection.
-#
-# Measured over the 38,685-message mailbox, batched: luna $10.44, mini $14.99.
-#
-# ONE model for both paths, on Kanishk's call, and the reason is consistency
-# rather than the $4.55. The backfill classified 67k messages on luna; an
-# ongoing feed on a different model reads the same mail by different standards,
-# so a rejection recognised in the archive might not be recognised next week -
-# and the difference would show up as a change in the funnel that nothing in
-# the funnel explains.
-#
-# The two constants stay separate because their ENV OVERRIDES are separate: the
-# per-task model config can move one path without the other, which is the point
-# of that feature. They simply default to the same model now.
+# Separate env overrides so backfill and ongoing can be moved independently.
 BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-6-luna")
 ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-6-luna")
 
-# Reasoning effort is PER MODEL, because these two do not accept the same
-# values. Probed against the live APIs, which name the sets in their 400s:
-#
-#   gpt-5-mini    accepts minimal, low, medium, high   REJECTS none
-#   gpt-6-luna    accepts none, low, medium, high,     REJECTS minimal
-#                         xhigh, max
-#
-# gpt-6-luna accepts exactly what gpt-5.6-luna did, which is why the move
-# between them needed nothing here.
-#
-# The intersection is only {low, medium, high}, so a single shared constant
-# would have to give up the cheapest setting on both. Each gets its cheapest
-# accepted value instead: classification is a labelling task that gains
-# nothing from reasoning, and a dry run measured ~40 output tokens per message
-# at luna/none against the ~200 assumed - most of why the corpus estimate fell
-# from $10.44 to $7.35.
-#
-# A shared constant is what shipped first, and it 400'd on every ongoing call
-# while backfill worked, because the value chosen suited only the model that
-# had been dry-run by hand.
-#
-# Which value each model accepts is NOT restated here. It is declared in
-# core/providers/, the model picks the first of these it accepts, and a second
-# copy keyed by model name would drift the moment a model is swapped by env
-# var - which both model constants above can be.
+# Cheapest accepted effort first; accepted sets live in core/providers/.
 _CLASSIFY_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
-
-# Enough for the schema's handful of short fields. The model does not reason
-# here, so a larger ceiling buys nothing and a smaller one truncates JSON
-# mid-string, which arrives as an unparsable line rather than an error.
 CLASSIFY_MAX_TOKENS = 400
 
-
-# Messages one classification task sends: enough to fill every wave core.batch
-# runs at once, because more only queues work the provider will not start any
-# sooner. The default for mail_classify_per_cycle in app_config, which the
-# ongoing sweep, a backfill and the fleet budget all read.
-#
-# A spec's size is core.batch's own estimate, since that is what chunks the
-# waves: characters over BATCH_CHARS_PER_TOKEN plus CLASSIFY_MAX_TOKENS
-# reserved. Measured from ai_batches.est_tokens over every classification
-# batch production submitted (270 batches, 89,413 requests, 2026-09-02 to
-# 09-13): 2,162 a request. The two figures this replaced were 1,500 and 6,000,
-# and gave caps of 5,000 and 1,200.
+# Default for mail_classify_per_cycle, sized to fill BATCH_WAVE_CONCURRENCY waves.
+# Measured from ai_batches.est_tokens (270 batches, 89,413 requests, 2026-09-02 to 09-13).
 CLASSIFY_SPEC_EST_TOKENS = 2162
 CLASSIFY_PER_CYCLE = BATCH_WAVE_CONCURRENCY * BATCH_TOKEN_BUDGET // CLASSIFY_SPEC_EST_TOKENS
 
 
 def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
-    """One model per shape, never a list.
-
-    The choice above is an evidence judgment, not an optimisation: a router
-    minimising cost subject to declared capability would pick nano and reinstate
-    exactly the fabrication these two models were chosen to avoid. Resolution
-    still earns its place - it checks the key, the schema capability and the
-    price, and it is where the effort walk happens.
-    """
+    """Single-candidate classification shape pinned by quality evidence."""
     return TaskShape(
         purpose=purpose,
         label=label,
@@ -334,7 +209,6 @@ def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
                 measured_on=datetime.date(2026, 9, 2),
             ),
         ),
-        # Show this evidence in the model picker, where an override is made.
         notes=(
             "gpt-5-nano is excluded on evidence rather than price: measured on "
             "extraction-shaped work it fabricates, inventing 12 clearances "
@@ -349,9 +223,7 @@ def _classify_task(model: str, purpose: str, label: str) -> TaskShape:
         structured=StructuredOutput.JSON_SCHEMA,
         batched=True,
         max_output_tokens=CLASSIFY_MAX_TOKENS,
-        # Billed input a request, over the same 2026-09-02 to 09-13 batches:
-        # ai_batches.input_tokens / completed was 2,580 (84,345 completed).
-        # It prices the fleet cycle; ranking has one candidate.
+        # Mean billed input tokens over 84,345 completed requests (2026-09-02 to 09-13).
         est_prompt_tokens=2580,
         effort_preference=_CLASSIFY_EFFORT_PREFERENCE,
         candidates=(model,),
@@ -390,7 +262,7 @@ APPLICATION_TASK = TaskShape(
 JOB_PROFILE_TASK = TaskShape(
     purpose="job_profile",
     label="Job profile shadow classification",
-    # The default for job_profiles_per_cycle in app_config.
+    # Default for job_profiles_per_cycle in app_config.
     per_cycle=500,
     notes=(
         "A shadow-only compact taxonomy used to compare general job classifications. "
@@ -405,10 +277,6 @@ JOB_PROFILE_TASK = TaskShape(
 )
 
 
-# Every configurable task, keyed by the purpose its own shape declares. This
-# is the list the configuration screen offers and the list resolve() is asked
-# about - one registry, so a task cannot be configurable but unreported, or
-# reported under a name nothing configures.
 SHAPES = {
     shape.purpose: shape
     for shape in (

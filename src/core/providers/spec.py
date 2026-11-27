@@ -1,9 +1,8 @@
 """Shared shapes for provider and model facts.
 
-A provider declares its endpoint, wire protocol, and authentication. Each
-model declares its own rates, context, structured output, and reasoning values.
-Those values can differ within one provider. An unknown fact is None; it is
-never inferred from another model or treated as zero."""
+A provider declares its endpoint, wire protocol, and authentication. Each model
+declares its own rates, context, structured output, and reasoning values. An
+unknown fact is None, never inferred from another model or treated as zero."""
 
 from __future__ import annotations
 
@@ -17,21 +16,14 @@ class StructuredOutput(StrEnum):
     """How far a provider can be trusted to return a parseable object."""
 
     NONE = "none"
-    # Valid JSON, but the shape is not enforced - the model may return
-    # different keys than asked for.
+    # Valid JSON, but keys and types are not schema-enforced.
     JSON_OBJECT = "json_object"
-    # A schema the provider enforces. This is what the OpenAI SDK's .parse()
-    # sends, so it is the only mode that path can use.
+    # Provider-enforced schema; required by the OpenAI SDK's .parse().
     JSON_SCHEMA = "json_schema"
 
 
 class Wire(StrEnum):
-    """Which request/response protocol the provider speaks.
-
-    Sharing a wire format is not sharing a contract: xAI speaks OpenAI's chat
-    protocol and still has its own rates, its own batch eligibility and its own
-    schema rules. Wire decides which client code runs, and nothing else.
-    """
+    """Request/response protocol used to select the client implementation."""
 
     OPENAI_RESPONSES = "openai_responses"
     OPENAI_CHAT = "openai_chat"
@@ -40,13 +32,10 @@ class Wire(StrEnum):
 
 @dataclass(frozen=True)
 class Source:
-    """Where a number came from and when someone last looked.
+    """Provenance for a published provider or pricing fact.
 
-    Kanishk reviews these roughly monthly, which only works if every number can
-    be re-checked without archaeology. `vendor` separates a rate read off the
-    provider's own page from one taken second-hand - while this table was being
-    built the aggregators contradicted both the vendors and each other, on
-    DeepSeek's cache rate, on Qwen's tiering and on Alibaba's regional spread.
+    `vendor` is True for primary vendor documentation and False for third-party
+    sources.
     """
 
     url: str
@@ -57,39 +46,27 @@ class Source:
 
 @dataclass(frozen=True)
 class Tier:
-    """Rates that apply when a request's prompt is at or below `up_to_prompt_tokens`.
+    """Rates for requests whose prompt is at or below `up_to_prompt_tokens`.
 
-    A tier carries all three rates rather than just the input one, because the
-    providers that tier bill the WHOLE request at the tier its prompt selects.
-    `up_to_prompt_tokens=None` is the last tier and has no ceiling.
+    A tier carries all rates because tiered providers bill the whole request at
+    the selected tier. `up_to_prompt_tokens=None` is the unbounded final tier.
     """
 
     up_to_prompt_tokens: int | None
     rate_in: Decimal
     rate_out: Decimal
-    # None means the vendor does not publish a cached rate for this model, not
-    # that caching is free. Callers bill it at the full input rate: that
-    # overstates a cache hit rather than inventing a discount.
+    # None: no published cached rate; callers bill cache hits at full input rate.
     rate_cached_in: Decimal | None
-    # None means the vendor does not publish a cache-write rate for this
-    # model. A reported write with no rate is unpriced, not free.
+    # None: no published cache-write rate; reported writes remain unpriced.
     rate_cache_write_in: Decimal | None = None
 
 
 @dataclass(frozen=True)
 class PeakWindow:
-    """Hours during which a vendor charges its undiscounted rate.
+    """Undiscounted hours in UTC.
 
-    isodow numbering: 1 is Monday through 7 is Sunday, which is what
-    PostgreSQL's EXTRACT(isodow) returns. Python's date.weekday() is 0-based
-    for Monday, so the conversion happens exactly once - in pricing, at the
-    boundary - rather than in each rendering of the formula. Two renderings
-    with different day origins would misprice one day a week, silently, by the
-    whole discount.
-
-    Half-open on the hour: [start_hour_utc, end_hour_utc). "01:00-04:00" means
-    04:00:00 is already off-peak. Stated because closed-closed and open-open
-    both leave 04:00:30 belonging to no window at all.
+    `isodows` uses ISO 1..7 (Monday..Sunday, matching Postgres EXTRACT(isodow)).
+    Hours are half-open: [start_hour_utc, end_hour_utc).
     """
 
     isodows: tuple[int, ...]
@@ -99,39 +76,22 @@ class PeakWindow:
 
 @dataclass(frozen=True)
 class Rates:
-    """What one model costs, as published.
+    """Published pricing for one model.
 
-    `batch_rate` is None when the vendor runs no batch lane for this model, in
-    which case a batched call bills at the synchronous rate. It is per-model
-    and not global: a single 0.5 multiplier would report half the true cost of
-    a batched call on a model its vendor never discounted.
+    `batch_rate` is None when the model has no batch discount, so batched calls
+    bill at synchronous rates.
     """
 
     tiers: tuple[Tier, ...]
     batch_rate: Decimal | None
     source: Source
-    # Separate provenance, because a vendor that publishes its rates plainly
-    # may say nothing about its batch lane. xAI is the case that forced this:
-    # its per-token rates are on its own model page and its 20% batch discount
-    # appears only second-hand. None means no batch lane is claimed at all.
+    # Separate from `source` when batch pricing comes from a different reference.
     batch_source: Source | None = None
     cache_write_source: Source | None = None
 
-    # Some vendors bill by wall-clock time. DeepSeek charges its published rate
-    # during peak hours and exactly half outside them, which covers 133 of a
-    # week's 168 hours - so for that provider the time a request is made moves
-    # the bill more than any batch lane would.
-    #
-    # The tier rates above are the PEAK rates, and this multiplier is the
-    # discount applied outside `peak_windows`. Peak is the base deliberately:
-    # a caller that cannot say when a request happened then overstates, which
-    # is the same direction rate_cached_in=None takes, rather than inventing a
-    # discount it cannot justify.
-    #
-    # It multiplies ALL THREE rates - input, output and cached - because that
-    # is what the one vendor doing this does. A vendor discounting them
-    # unevenly would need per-rate values, and this name must not be read as
-    # already handling that case.
+    # Tier rates above are peak rates; `off_peak_multiplier` scales input,
+    # output, and cached rates outside `peak_windows`. Unknown call times bill
+    # at peak rates rather than assuming a discount.
     off_peak_multiplier: Decimal | None = None
     peak_windows: tuple[PeakWindow, ...] = ()
     off_peak_source: Source | None = None
@@ -139,18 +99,10 @@ class Rates:
 
 @dataclass(frozen=True)
 class Reasoning:
-    """Which thinking control a model takes, and what it will actually accept.
+    """Per-model reasoning control and accepted values.
 
-    Declared per model, because the accepted set moves between generations -
-    the newer OpenAI models reject "minimal" with a 400 while the older ones
-    require it, and a union covering both accepts values that half the catalogue
-    refuses.
-
-    A model absent from the registry is NOT validated against anything. That is
-    deliberate: a wrong rejection blocks a model that works and reads as a
-    mystery outage, while a wrong acceptance comes back as the provider's own
-    error naming what it supports. Being stricter than the vendor only makes us
-    slower than the vendor.
+    Models absent from the registry bypass local validation so unknown models
+    are not blocked ahead of the provider.
     """
 
     param: str | None
@@ -162,10 +114,10 @@ class Reasoning:
 
 @dataclass(frozen=True)
 class Output:
-    """Output limits, and what failure looks like when they are hit.
+    """Output token limits and truncation behavior.
 
-    `truncates_silently` is the field worth reading: a provider that stops
-    mid-JSON and reports success produces a parse error far from its cause.
+    `truncates_silently` marks providers that stop mid-JSON without reporting a
+    truncation finish reason.
     """
 
     max_output_tokens: int | None
@@ -176,13 +128,7 @@ class Output:
 
 @dataclass(frozen=True)
 class StructuredOutputSpec:
-    """How a provider wants a structured request shaped.
-
-    Every flag here answers that one question, which is what keeps it from
-    becoming a drawer for whatever a vendor does oddly. DeepSeek requiring the
-    literal word "json" in the prompt is a schema-request-shaping fact and
-    belongs here; something that is not would need its own home.
-    """
+    """Provider-specific requirements for shaping a structured-output request."""
 
     mode: StructuredOutput
     requires_literal_json_in_prompt: bool = False
@@ -195,19 +141,16 @@ class Model:
     name: str
     # Shown in the UI model picker.
     note: str
-    # None means nobody has looked it up yet, and it shows as a gap in review.
+    # None means unverified.
     context_tokens: int | None
     structured_output: StructuredOutputSpec
     rates: Rates
     reasoning: Reasoning
     output: Output
-    # False for a model that is used internally but must never appear in the
-    # user's model picker - an embedding model has no chat interface to offer.
-    # It is still priced: being unofferable and being unpriced are different
-    # things, and conflating them is how a real cost becomes invisible.
+    # False hides internal-only models (e.g. embeddings) from the UI picker while keeping pricing.
     selectable: bool = True
     supports_explicit_prompt_cache: bool | None = None
-    # Vendor support is not an implemented collector. None is unverified.
+    # Whether this codebase has a batch collector for the model (None = unverified).
     batch_supported: bool | None = None
     cache_write_5m_per_mtok: Decimal | None = None
     cache_write_1h_per_mtok: Decimal | None = None
@@ -217,17 +160,13 @@ class Model:
 class Provider:
     name: str
     wire: Wire
-    # None means the SDK's own default endpoint.
+    # None uses the SDK's default endpoint.
     base_url: str | None
     api_key_env: str
     supports_temperature: bool
     batch_endpoint: str | None
     models: tuple[Model, ...]
     source: Source
-    # Lowercase fragments of this vendor's error text or code that mean the
-    # account cannot pay: out of credit, a billing hard limit, a quota used up.
-    # core.fallback matches them against an error's text, code and body. Never
-    # a rate limit, a 5xx or a timeout: those keep their own retry. Empty
-    # means no exhaustion shape has been recorded for this vendor, so nothing
-    # it returns is read as one.
+    # Lowercase error fragments indicating account credit/billing exhaustion
+    # (never rate limits, 5xx, or timeouts). Empty means no exhaustion markers.
     exhaustion_markers: tuple[str, ...] = ()
