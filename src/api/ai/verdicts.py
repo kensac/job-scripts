@@ -331,6 +331,14 @@ def fetch_failure_streaks(urls: list[str]) -> dict[str, int]:
     return {r["url"]: r["failures"] for r in rows}
 
 
+async def _page(fetch_id: int, text: str) -> Page:
+    """A page the fetcher read, marked not the posting's own when its writer
+    judged it so (core.page_fetches.foreign): the maintenance notice, a
+    shell. ATS text is the board's own record and never is."""
+    foreign = await asyncio.to_thread(page_fetches.rejected, [fetch_id])
+    return Page(fetch_id, text, own=fetch_id not in foreign)
+
+
 async def refresh_content(
     url: str,
     company: str = "",
@@ -338,9 +346,11 @@ async def refresh_content(
     context: str = "manual",
     scrape_sem: asyncio.Semaphore | None = None,
 ) -> tuple[str | None, str | None]:
-    """refresh_page, for a caller that keeps no answer pointing at the fetch."""
+    """refresh_page, for a caller that keeps no answer pointing at the fetch
+    and wants the posting's text: None when the page that came back is not
+    the posting's own (Page.own), as when nothing came back."""
     page, closure = await refresh_page(url, company, job_title, context, scrape_sem)
-    return (page.text if page else None), closure
+    return (page.text if page and page.own else None), closure
 
 
 async def refresh_page(
@@ -436,7 +446,7 @@ async def refresh_page(
         static = await fetching.fetch_static(url, int(db.get_config("static_fetch_min_chars")))
         if static:
             fetch_id = await asyncio.to_thread(page_fetches.record, url, "passed", "static", static)
-            return Page(fetch_id, static), None
+            return await _page(fetch_id, static), None
     if scrape_sem is not None:
         async with scrape_sem:
             content, redirected = await fetching.fetch_page(url)
@@ -453,7 +463,7 @@ async def refresh_page(
         if redirected:
             logger.info(f"{url} landed elsewhere; letting the check judge the page")
         fetch_id = await asyncio.to_thread(page_fetches.record, url, "passed", "scraped", content)
-        return Page(fetch_id, content), None
+        return await _page(fetch_id, content), None
     else:
         # A fetch that came back with nothing (blocked, timed out, empty) left
         # no record, so every hourly ingest and every backfill tried it again:

@@ -15,9 +15,12 @@ stopped, and the first run walks the history. A fetch that commits after the
 walk passed its id was judged when written; the older fetches of its text
 are judged again when the next fetch of that text arrives.
 
-A newly rejected fetch's local embedding is removed with it, in one
-transaction, so tasks.derivations.local_embeddings embeds the posting again
-from its own text, or leaves it unembedded when it has none. The other
+An answer that read a rejected fetch stops counting (the verdicts view,
+migration 835b21f59b79), so the postings it judged are marked for the
+latest-check fold in the same transaction. A newly rejected fetch's local
+embedding is removed with it there too, so tasks.derivations.local_embeddings
+embeds the posting again from its own text, or leaves it unembedded when it
+has none. The other
 derivations re-derive by themselves: each compares its stored content_row_id
 with the posting's current text, which no longer is the rejected fetch.
 """
@@ -127,6 +130,14 @@ def step(after: int, through: int) -> tuple[int, int, int]:
         with connection() as conn, conn.transaction():
             rejected = page_fetches.reject(foreign, conn)
             if rejected:
+                # An answer read off a rejected fetch no longer counts
+                # (verdicts); its postings' latest checks are folded again,
+                # and read live from verdicts until they are.
+                conn.execute(
+                    "INSERT INTO latest_posting_checks_dirty (url) "
+                    "SELECT DISTINCT url FROM page_fetches WHERE id = ANY(%s)",
+                    (rejected,),
+                )
                 removed = conn.execute(
                     "DELETE FROM posting_embeddings e USING page_fetches f "
                     "WHERE f.id = ANY(%s) AND e.url = f.url AND e.content_row_id = f.id",

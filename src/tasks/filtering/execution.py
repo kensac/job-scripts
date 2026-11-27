@@ -191,7 +191,9 @@ async def execute_live(
                 context="filter-run",
                 scrape_sem=scrape_sem,
             )
-        if not page:
+        # A page that is not the posting's own (a maintenance notice, a
+        # shell) answers nothing about it; the posting waits for its text.
+        if not page or not page.own:
             return None
         return await check_filter(cfg, job, page, snapshot, hooks)
 
@@ -264,7 +266,7 @@ async def prepare_content(
                     job_title=job.get("title") or "",
                     context="filter-prepare",
                 )
-                if page:
+                if page and page.own:
                     contents[job["url"]] = page
             except Exception:
                 logger.warning(
