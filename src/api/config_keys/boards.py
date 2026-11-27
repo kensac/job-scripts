@@ -36,7 +36,7 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         section="Boards",
         default=30,
         value_type=PositiveInt,
-        help="How recent an active posting must be (posted, or first seen when the board gives "
+        help="How recent an open posting must be (posted, or first seen when the board gives "
         "no date) to be scoped as tech work and ranked on the For you page. The tech-scope "
         "classifier also learns from postings this recent. A longer window ranks more postings "
         "and scores more each hour.",

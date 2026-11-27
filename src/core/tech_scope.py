@@ -26,6 +26,7 @@ import logging
 from typing import Any, LiteralString, cast
 
 from core import screening
+from core.catalog.observations import IS_AVAILABLE
 from core.pool import connection
 
 logger = logging.getLogger(__name__)
@@ -59,12 +60,15 @@ def out_by_title(title: str = "j.title") -> str:
     return f"({_skips(SOFTWARE, title)} AND {_skips(TECHNICAL, title)})"
 
 
-# Recent postings: active, available, and posted (or first seen, when the
-# board gives no date) within the window. %(window_days)s is a parameter.
-RECENT = """
-    j.active AND j.available IS NOT FALSE
+# Recent postings: available (a source says it is open) and posted, or
+# first seen when the board gives no date, within the window.
+# %(window_days)s is a parameter.
+RECENT = (
+    IS_AVAILABLE.format(job="j")
+    + """
     AND COALESCE(j.date_posted, j.created_at) > now() - make_interval(days => %(window_days)s)
 """
+)
 
 _LATEST_MODEL = (
     "SELECT id, weights, intercept FROM ranking_models "
@@ -119,11 +123,11 @@ def score(window_days: int) -> int:
         return cur.rowcount
 
 
-def _examples(conn: Any, where: str, window_days: int) -> list[str]:
+def _examples(conn: Any, where: str, window_days: int) -> list[list[float]]:
     sql = cast(
         "LiteralString",
         f"""
-        SELECT pe.embedding::text AS embedding FROM jobs j
+        SELECT pe.embedding::vector::real[] AS embedding FROM jobs j
         JOIN posting_embeddings pe ON pe.url = j.url
         WHERE {RECENT} AND {where}
         ORDER BY random() LIMIT %(n)s
@@ -146,10 +150,7 @@ def train(window_days: int, embedding_model: str) -> dict[str, Any]:
         other = _examples(conn, out_by_title(), window_days)
     if not software or not other:
         raise ValueError("no recent postings of one of the title groups to fit the scope on")
-    x = np.array(
-        [np.array(e[1:-1].split(","), dtype=np.float32) for e in software + other],
-        dtype=np.float32,
-    )
+    x = np.array(software + other, dtype=np.float32)
     y = np.r_[np.ones(len(software)), np.zeros(len(other))]
     fit = LogisticRegressionCV(
         Cs=_STRENGTHS,

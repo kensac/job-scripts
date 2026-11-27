@@ -1066,8 +1066,9 @@ is re-stamped (`tasks.rescrape`).
 ## The tech scope
 
 `posting_scopes` says, for each recent embedded posting, whether it is tech
-work (`core.tech_scope`); the For you page ranks only those. Recent is active,
-available and posted (or first seen) within `recommendation_window_days`.
+work (`core.tech_scope`); the For you page ranks only those. Recent is open
+(`catalog.IS_AVAILABLE`) and posted (or first seen) within
+`recommendation_window_days`.
 
 **The title decides when it can, the text when it cannot.** Two title
 recipes (`core.screening`): `software_title_v1` keeps a title naming software,
