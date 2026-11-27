@@ -130,29 +130,8 @@ def classification_consistency(
     )
 
 
-@router.get("/admin/mail/analytics")
-def mail_analytics(
-    days: int = Query(default=0, ge=0, le=3650),
-    user: AuthedUser = Depends(require_admin),
-) -> MailAnalytics:
-    """Where the pipeline is wrong, as distributions rather than examples.
-
-    /admin/mail answers "why did THIS message get that answer" and has to show
-    the message to do it. That is the wrong tool for finding a pattern: reading
-    a hundred messages to notice that one model is producing low-confidence
-    answers is work a GROUP BY does in a second.
-
-    days=0 means the whole corpus, which is the right default here. This is a
-    historical import spanning 2018 to now, so a 30-day window would describe
-    the tail of an eight-year backfill rather than the backfill.
-    """
-    window = "AND m.sent_at >= now() - make_interval(days => %(days)s)" if days else ""
-    params: dict[str, Any] = {"days": days} if days else {}
-
-    def query_window_rows[Row](row: type[Row], sql: str) -> list[Row]:
-        return db.query_as(row, sql, params)
-
-    classification = query_window_rows(
+def _classification_cells(window: str, params: dict[str, Any]) -> list[ClassificationCell]:
+    return db.query_as(
         ClassificationCell,
         f"""
         WITH ce AS (
@@ -166,9 +145,12 @@ def mail_analytics(
         WHERE TRUE {window}
         GROUP BY 1, 2, 3 ORDER BY 4 DESC
         """,
+        params,
     )
 
-    matching = query_window_rows(
+
+def _matching_cells(window: str, params: dict[str, Any]) -> list[MatchingCell]:
+    return db.query_as(
         MatchingCell,
         f"""
         WITH ce AS (
@@ -186,14 +168,17 @@ def mail_analytics(
         WHERE ce.kind <> 'not_job_related' {window}
         GROUP BY 1, 2 ORDER BY 3 DESC
         """,
+        params,
     )
 
+
+def _prefilter_cells(window: str, params: dict[str, Any]) -> list[PrefilterCell]:
     # The prefilter gates nothing on purpose - a filtered-out email is the one
     # unrecoverable failure, because the posting is closed and the thread is
     # not coming back. It survives to measure, after the fact, how much a gate
     # WOULD have missed. That is the only honest basis for ever letting the
     # ongoing feed use one, and it is a question only this endpoint can answer.
-    prefilter = query_window_rows(
+    return db.query_as(
         PrefilterCell,
         f"""
         WITH ce AS (
@@ -206,11 +191,12 @@ def mail_analytics(
         WHERE TRUE {window}
         GROUP BY 1, 2
         """,
+        params,
     )
-    missed = sum(r.messages for r in prefilter if not r.prefilter_hit and r.job_related)
-    job_related_total = sum(r.messages for r in prefilter if r.job_related)
 
-    senders = query_window_rows(
+
+def _sender_domains(window: str, params: dict[str, Any]) -> tuple[list[SenderDomainRow], int]:
+    senders = db.query_as(
         SenderDomainRow,
         f"""
         WITH ce AS (
@@ -228,8 +214,18 @@ def mail_analytics(
         WHERE ce.kind <> 'not_job_related' {window}
         GROUP BY 1 ORDER BY 2 DESC LIMIT 40
         """,
+        params,
     )
+    domain_total = db.query_one(
+        "SELECT count(DISTINCT split_part(lower(m.from_email), '@', 2)) AS domains "
+        f"FROM email_messages m JOIN ({current_event('kind')}) ce ON ce.message_id = m.id "
+        f"WHERE ce.kind <> 'not_job_related' {window}",
+        params,
+    )
+    return senders, (domain_total or {}).get("domains", 0)
 
+
+def _mail_corpus() -> MailCorpus:
     # Deliberately NOT windowed, and named `corpus` so it cannot be read as
     # though it were. "How much mail exists, when does it start, how much is
     # still unclassified" are properties of the import, not of a slice: the
@@ -252,26 +248,47 @@ def mail_analytics(
         )
         or {}
     )
-    domain_total = db.query_one(
-        "SELECT count(DISTINCT split_part(lower(m.from_email), '@', 2)) AS domains "
-        f"FROM email_messages m JOIN ({current_event('kind')}) ce ON ce.message_id = m.id "
-        f"WHERE ce.kind <> 'not_job_related' {window}",
-        params,
+    return MailCorpus(
+        messages=corpus.get("messages", 0),
+        unclassified=corpus.get("unclassified", 0),
+        oldest=corpus.get("oldest"),
+        newest=corpus.get("newest"),
+        by_source=db.query_as(
+            SourceRow,
+            "SELECT m.source, count(*) AS messages FROM email_messages m GROUP BY 1 ORDER BY 2 DESC",
+        ),
     )
+
+
+@router.get("/admin/mail/analytics")
+def mail_analytics(
+    days: int = Query(default=0, ge=0, le=3650),
+    user: AuthedUser = Depends(require_admin),
+) -> MailAnalytics:
+    """Where the pipeline is wrong, as distributions rather than examples.
+
+    /admin/mail answers "why did THIS message get that answer" and has to show
+    the message to do it. That is the wrong tool for finding a pattern: reading
+    a hundred messages to notice that one model is producing low-confidence
+    answers is work a GROUP BY does in a second.
+
+    days=0 means the whole corpus, which is the right default here. This is a
+    historical import spanning 2018 to now, so a 30-day window would describe
+    the tail of an eight-year backfill rather than the backfill.
+    """
+    window = "AND m.sent_at >= now() - make_interval(days => %(days)s)" if days else ""
+    params: dict[str, Any] = {"days": days} if days else {}
+
+    classification = _classification_cells(window, params)
+    matching = _matching_cells(window, params)
+    prefilter = _prefilter_cells(window, params)
+    missed = sum(r.messages for r in prefilter if not r.prefilter_hit and r.job_related)
+    job_related_total = sum(r.messages for r in prefilter if r.job_related)
+    senders, domains_total = _sender_domains(window, params)
 
     return MailAnalytics(
         window_days=days or None,
-        corpus=MailCorpus(
-            messages=corpus.get("messages", 0),
-            unclassified=corpus.get("unclassified", 0),
-            oldest=corpus.get("oldest"),
-            newest=corpus.get("newest"),
-            by_source=db.query_as(
-                SourceRow,
-                "SELECT m.source, count(*) AS messages FROM email_messages m "
-                "GROUP BY 1 ORDER BY 2 DESC",
-            ),
-        ),
+        corpus=_mail_corpus(),
         # Each section below counts a DIFFERENT population, and nothing in the
         # rows says so. Presented side by side they invite a subtraction that
         # means nothing, so the denominators ship here rather than being
@@ -288,7 +305,7 @@ def mail_analytics(
                 messages=sum(r.messages for r in senders),
                 excludes=["not_job_related"],
                 domains_shown=len(senders),
-                domains_total=(domain_total or {}).get("domains", 0),
+                domains_total=domains_total,
             ),
         ),
         classification=classification,
