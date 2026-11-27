@@ -489,7 +489,10 @@ person's board: of the first 40 postings the study ranked for one person, 4
 came from sources they subscribe to and 18 were on their board. Seeing
 postings beyond one's board is what visibility grants administrators alone,
 so both routes are `require_admin`. A person acts on a posting there through
-`PATCH /user/jobs/{id}`, which lets anyone pin a public catalog posting.
+`PATCH /user/jobs/{id}`, which lets anyone pin a public catalog posting, and
+opens its drawer: the per-posting gate (`api.board.access`) admits an
+administrator to any catalog posting but another person's private upload
+(`visibility.ADMIN_CATALOG`), and holds everyone else to `FAST`.
 
 A node says why it is there: the application it is nearest to, and whether
 it is a near copy (`NEAR_COPY`) of an application or of a higher posting on

@@ -10,7 +10,7 @@ from __future__ import annotations
 from api import db
 from api.board import visibility
 from api.problem import refuse
-lazy from api.auth import AuthedUser
+lazy from api.auth import AuthedUser, is_admin
 
 
 def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
@@ -27,10 +27,15 @@ def _visible_job(user: AuthedUser, job_id: int, columns: str) -> dict | None:
     a new predicate. A fourth spelling of "can this user see this job" is how
     the first three drifted.
     """
-    return db.query_one(
-        visibility.FAST.format(columns=columns, extra="AND j.id = %(jid)s"),
-        {"uid": user.id, "jid": job_id},
-    )
+    params = {"uid": user.id, "jid": job_id}
+    job = db.query_one(visibility.FAST.format(columns=columns, extra="AND j.id = %(jid)s"), params)
+    if job is None and is_admin(user.groups):
+        # An administrator addresses the catalog, less other people's
+        # private uploads (visibility.ADMIN_CATALOG).
+        job = db.query_one(
+            visibility.ADMIN_CATALOG.format(columns=columns, extra="AND j.id = %(jid)s"), params
+        )
+    return job
 
 
 def require_visible_job(user: AuthedUser, job_id: int, columns: str) -> dict:
