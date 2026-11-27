@@ -13,33 +13,32 @@ from api.health.evidence import (
 )
 
 logger = logging.getLogger(__name__)
-# a thread limit). Three in a row is three hours of the same thing.
+
+# Consecutive failed pulls before alerting. Three in a row is three hours of the same thing.
 INGEST_FAILURE_STREAK = 3
 
 # Below this many page fetches a worker's failure rate is noise.
 MIN_FETCH_SAMPLES = 20
 
+_ATS_BY_URL = """CASE
+         WHEN url LIKE '%%greenhouse.io%%' OR url LIKE '%%gh_jid=%%' THEN 'greenhouse'
+         WHEN url LIKE '%%lever.co%%' THEN 'lever'
+         WHEN url LIKE '%%ashbyhq.com%%' THEN 'ashby'
+         WHEN url LIKE '%%myworkdayjobs.com%%' THEN 'workday'
+         WHEN url LIKE '%%smartrecruiters.com%%' THEN 'smartrecruiters'
+       END"""
 
-def _detect_boards() -> list[dict[str, Any]]:
-    """The ways a board stops delivering without anything reporting an error.
 
-    Each reads the counts an ingest leaves on its task (fetched, kept, cached,
-    fetch_failed), which is the only record of what one fetch of a feed saw.
-    A board can be 'done' every hour and contribute nothing: the feed moved
-    and returns an empty table, the title pattern admits no title, a worker's
-    IP is being refused. The admin list shows last_new_posting_at, which goes
-    quiet for a healthy mirror too, so it cannot tell these apart.
-    """
+def _failing_ingests() -> list[dict[str, Any]]:
+    # The fetch itself failing, pull after pull. One failure is a blip.
+    # Read as a run rather than a window, because a failing board backs
+    # off (queue.backing_off) and a daily board's third failure lands three
+    # days after its first. A board that ran into
+    # ingest_give_up_after_failures has been switched off by its last pull
+    # (tasks.ingest), and says so until someone switches it back on or
+    # deletes it: its postings are retired, which nobody should learn
+    # from a board going quiet.
     found: list[dict[str, Any]] = []
-
-    # 1. The fetch itself failing, pull after pull. One failure is a blip.
-    #    Read as a run rather than a window, because a failing board backs
-    #    off (queue.backing_off) and a daily board's third failure lands three
-    #    days after its first. A board that ran into
-    #    ingest_give_up_after_failures has been switched off by its last pull
-    #    (tasks.ingest), and says so until someone switches it back on or
-    #    deletes it: its postings are retired, which nobody should learn
-    #    from a board going quiet.
     give_up = int(db.get_config("ingest_give_up_after_failures"))
     for name, r in sorted(queue.failure_runs(at_least=INGEST_FAILURE_STREAK).items()):
         error = (r["last_error"] or "")[:160]
@@ -77,13 +76,16 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": detail,
                 }
             )
+    return found
 
-    # 1b. A board that pulls fine and has never listed a posting. Not a
-    #     failure: an empty pull may be a company with no open roles, and
-    #     switching it off would miss the day it posts one, for about one
-    #     request a day. But pulled forever unseen, it is a slug that never
-    #     matched anything; 105 such boards on 2026-10-04. One alert for the
-    #     set, since each is a cleanup and not an incident.
+
+def _never_produced_sources() -> list[dict[str, Any]]:
+    # A board that pulls fine and has never listed a posting. Not a
+    # failure: an empty pull may be a company with no open roles, and
+    # switching it off would miss the day it posts one, for about one
+    # request a day. But pulled forever unseen, it is a slug that never
+    # matched anything; 105 such boards on 2026-10-04. One alert for the
+    # set, since each is a cleanup and not an incident.
     never = [
         r["source"]
         for r in db.query(
@@ -104,25 +106,29 @@ def _detect_boards() -> list[dict[str, Any]]:
             """
         )
     ]
-    if never:
-        found.append(
-            {
-                "kind": "sources_never_produced",
-                "subject": "boards",
-                "severity": "warning",
-                "message": (
-                    f"{len(never)} switched-on boards older than a week pulled fine for the "
-                    "last 8 days, listed nothing, and have never put a posting in the "
-                    f"catalog: {', '.join(never[:10])}{', ...' if len(never) > 10 else ''}. "
-                    "Check each listings URL; an empty board may only have no open roles."
-                ),
-                "detail": {"sources": never},
-            }
-        )
+    if not never:
+        return []
+    return [
+        {
+            "kind": "sources_never_produced",
+            "subject": "boards",
+            "severity": "warning",
+            "message": (
+                f"{len(never)} switched-on boards older than a week pulled fine for the "
+                "last 8 days, listed nothing, and have never put a posting in the "
+                f"catalog: {', '.join(never[:10])}{', ...' if len(never) > 10 else ''}. "
+                "Check each listings URL; an empty board may only have no open roles."
+            ),
+            "detail": {"sources": never},
+        }
+    ]
 
-    # 2. The fetch succeeding and returning nothing, or a title pattern that
-    #    admits nothing. Only for a board that has produced before: a board
-    #    that never has is 'never produced' on the admin list, not an alert.
+
+def _feed_and_pattern_anomalies() -> list[dict[str, Any]]:
+    # The fetch succeeding and returning nothing, or a title pattern that
+    # admits nothing. Only for a board that has produced before: a board
+    # that never has is 'never produced' on the admin list, not an alert.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         f"""
         WITH ingests AS (
@@ -209,10 +215,14 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
+
+def _failing_ingest_hosts() -> list[dict[str, Any]]:
     # Ingests failing against one upstream host, whichever boards they were.
     # 143 Workable boards failed on one per-address limit on 2026-09-05 and
     # each looked like its own transient failure; the host was the story.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         SELECT substring(s.listings_url from '//([^/]+)') AS host,
@@ -242,10 +252,14 @@ def _detect_boards() -> list[dict[str, Any]]:
                 "detail": dict(r),
             }
         )
+    return found
 
-    # 3. One worker's page fetches failing where they used to land: the
-    #    egress-blocked signature, per fleet host rather than per site.
-    #    Relative to the worker's own prior week, like extraction_failing.
+
+def _failing_worker_fetches() -> list[dict[str, Any]]:
+    # One worker's page fetches failing where they used to land: the
+    # egress-blocked signature, per fleet host rather than per site.
+    # Relative to the worker's own prior week, like extraction_failing.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         f"""
         SELECT worker,
@@ -285,21 +299,19 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
-    # 4. One applicant-tracking system's API path going quiet. When a resolver
-    #    stops returning text we fall back to chromium for that system's
-    #    postings, and ats_text_collapse only sees it per source, where an
-    #    aggregator mixes five systems. Grouped by system, a broken resolver is
-    #    one row.
+
+def _bypassed_resolvers() -> list[dict[str, Any]]:
+    # One applicant-tracking system's API path going quiet. When a resolver
+    # stops returning text we fall back to chromium for that system's
+    # postings, and ats_text_collapse only sees it per source, where an
+    # aggregator mixes five systems. Grouped by system, a broken resolver is
+    # one row.
+    found: list[dict[str, Any]] = []
     for r in db.query(
-        """
-        SELECT CASE
-                 WHEN url LIKE '%%greenhouse.io%%' OR url LIKE '%%gh_jid=%%' THEN 'greenhouse'
-                 WHEN url LIKE '%%lever.co%%' THEN 'lever'
-                 WHEN url LIKE '%%ashbyhq.com%%' THEN 'ashby'
-                 WHEN url LIKE '%%myworkdayjobs.com%%' THEN 'workday'
-                 WHEN url LIKE '%%smartrecruiters.com%%' THEN 'smartrecruiters'
-               END AS ats,
+        f"""
+        SELECT {_ATS_BY_URL} AS ats,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS recent_total,
                COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours'
                                 AND method IN ('ats text', 'listing text')) AS recent_ats,
@@ -312,13 +324,7 @@ def _detect_boards() -> list[dict[str, Any]]:
         WHERE method IN ('ats text', 'listing text', 'scraped', 'static')
           AND created_at > now() - interval '8 days'
         GROUP BY 1
-        HAVING CASE
-                 WHEN url LIKE '%%greenhouse.io%%' OR url LIKE '%%gh_jid=%%' THEN 'greenhouse'
-                 WHEN url LIKE '%%lever.co%%' THEN 'lever'
-                 WHEN url LIKE '%%ashbyhq.com%%' THEN 'ashby'
-                 WHEN url LIKE '%%myworkdayjobs.com%%' THEN 'workday'
-                 WHEN url LIKE '%%smartrecruiters.com%%' THEN 'smartrecruiters'
-               END IS NOT NULL
+        HAVING {_ATS_BY_URL} IS NOT NULL
         """
     ):
         if r["recent_total"] < MIN_CONTENT_SAMPLES or r["base_total"] < MIN_CONTENT_SAMPLES:
@@ -340,7 +346,10 @@ def _detect_boards() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
+
+def _unreached_sources() -> list[dict[str, Any]]:
     # A switched-on board that reaches nobody: no person holds it (picked or
     # through a bundle) and no managed board reads it. Adding a board puts it
     # in no bundle, so it is pulled every cycle for no one. On 2026-10-15 that
@@ -359,19 +368,39 @@ def _detect_boards() -> list[dict[str, Any]]:
             """
         )
     ]
-    if unreached:
-        found.append(
-            {
-                "kind": "sources_unreached",
-                "subject": "boards",
-                "severity": "warning",
-                "message": (
-                    f"{len(unreached)} switched-on boards reach no person and no managed "
-                    f"board: {', '.join(unreached[:10])}{', ...' if len(unreached) > 10 else ''}. "
-                    "Add each to a bundle, or switch it off."
-                ),
-                "detail": {"sources": unreached},
-            }
-        )
+    if not unreached:
+        return []
+    return [
+        {
+            "kind": "sources_unreached",
+            "subject": "boards",
+            "severity": "warning",
+            "message": (
+                f"{len(unreached)} switched-on boards reach no person and no managed "
+                f"board: {', '.join(unreached[:10])}{', ...' if len(unreached) > 10 else ''}. "
+                "Add each to a bundle, or switch it off."
+            ),
+            "detail": {"sources": unreached},
+        }
+    ]
 
-    return found
+
+def _detect_boards() -> list[dict[str, Any]]:
+    """The ways a board stops delivering without anything reporting an error.
+
+    Each reads the counts an ingest leaves on its task (fetched, kept, cached,
+    fetch_failed), which is the only record of what one fetch of a feed saw.
+    A board can be 'done' every hour and contribute nothing: the feed moved
+    and returns an empty table, the title pattern admits no title, a worker's
+    IP is being refused. The admin list shows last_new_posting_at, which goes
+    quiet for a healthy mirror too, so it cannot tell these apart.
+    """
+    return [
+        *_failing_ingests(),
+        *_never_produced_sources(),
+        *_feed_and_pattern_anomalies(),
+        *_failing_ingest_hosts(),
+        *_failing_worker_fetches(),
+        *_bypassed_resolvers(),
+        *_unreached_sources(),
+    ]
