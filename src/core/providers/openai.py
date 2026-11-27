@@ -56,8 +56,9 @@ _GPT6_PRICES = Source(
     note="short- and long-context rows for gpt-6-luna, gpt-6-sol and gpt-6-astra",
 )
 
-# Prompts above 272K input tokens rebill the full request at the long-context
-# tier. Both tiers are written out explicitly per model rather than derived.
+# Each model's page, read 2026-09-22: a prompt over 272K input tokens rebills the
+# whole request at 2x input and cache rates and 1.5x output. Both tiers are written
+# out per model, since the multipliers are today's price list, not a committed rule.
 _GPT6_TIER_TOKENS = 272_000
 
 _EARLIER_GEN = Reasoning(
@@ -157,7 +158,11 @@ def _gpt6_rates(
     hi_out: str,
     hi_cached: str,
 ) -> Rates:
-    """Two-tier rates split at `_GPT6_TIER_TOKENS`, with 1.25x cache-write pricing."""
+    """Two-tier rates split at `_GPT6_TIER_TOKENS`, with 1.25x cache-write pricing.
+
+    The 1.25x is inferred, not published per model: the caching guide states it for
+    "GPT-5.6 and later", and the pricing page confirms that sentence's 0.1x read rate.
+    """
     return Rates(
         tiers=(
             Tier(
@@ -202,6 +207,7 @@ PROVIDER = Provider(
     supports_temperature=False,
     batch_endpoint="/v1/responses",
     # Match both OpenAI error codes and messages for billing exhaustion (400/429).
+    # "Billing hard limit" refused 883 batch waves on 2026-10-31 (worker logs).
     exhaustion_markers=(
         "billing hard limit has been reached",
         "billing_hard_limit_reached",

@@ -77,6 +77,7 @@ _REASONING = Reasoning(
 )
 
 
+# Not silent, as probed: a 200 with finish_reason='length' and the partial content.
 _OUTPUT = Output(
     max_output_tokens=384_000,
     default_max_output_tokens=6000,

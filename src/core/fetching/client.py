@@ -3,7 +3,11 @@
 `session` handles board pulls, ATS resolvers, form reads, and aggregator feeds
 with uniform User-Agent, timeout, and 5xx retries. `stdlib_session` exists for
 Workday, whose Cloudflare returns 429 to `requests`. HTTP 429 is never retried
-here; callers report it to the host budget (`api.hosts`).
+here; callers report it to the host budget (`api.hosts`), which widens the gap for
+every worker on the address, while a retry here would spend that address again first.
+
+`pace` floors are ingest_host_pace_seconds, handed in by the ingest task before each
+pull because core cannot read app_config.
 """
 
 from __future__ import annotations
@@ -25,11 +29,13 @@ from urllib3.util.retry import Retry
 
 from core.fetching.hosts import pace_key, slot_key
 
-# Prefer JSON first in Accept so Oracle returns application/json instead of vnd.oracle.*.
+# One user agent for every fetcher: three active sources of each board format gave
+# the same status and length under it and the resolvers' old one (2026-10-10).
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
+# Clears the slowest page measured, ByteDance's 500-row reply at ~11 s (2026-10-05).
 TIMEOUT = 30.0
 # Retry 5xx up to 3 times (1s, 2s, 4s) on idempotent methods; raise_on_status=False
 # returns the final 5xx response to the caller. Never retry 429.
@@ -51,6 +57,8 @@ class _Session(requests.Session):
 
 
 session = _Session()
+# JSON first: Oracle labels JSON application/json only when asked for it (it sends
+# vnd.oracle.adf.resourcecollection+json to "*/*"); anything else is still accepted.
 session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json, text/plain, */*"})
 for _prefix in ("https://", "http://"):
     session.mount(_prefix, HTTPAdapter(max_retries=_RETRY))
@@ -70,7 +78,10 @@ class _StdlibSession:
         return self._send("POST", url, _json.dumps(json).encode(), timeout)
 
     def _send(self, method: str, url: str, data: bytes | None, timeout: float):
-        """Send one request with 1/2/4s backoff on 5xx; return 429 immediately."""
+        """Send one request with 1/2/4s backoff on 5xx; return 429 immediately.
+
+        Without the retry, a tenant read through thousands of sliced searches failed
+        whole on one 5xx: Walmart failed every pull from 2026-11-21 on a 502."""
         for attempt in range(_RETRIES):
             response = self._once(method, url, data, timeout)
             if response.status_code not in _RETRY_STATUSES:
@@ -113,6 +124,8 @@ stdlib_session = _StdlibSession()
 _PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
 _pace_lock = threading.Lock()
+# A pull runs in one thread (asyncio.to_thread copies the context), so a watcher
+# sees every request of its own pull and none of another's.
 _on_request: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
     "on_request", default=None
 )
