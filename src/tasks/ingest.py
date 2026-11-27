@@ -95,6 +95,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
         logger.info(f"Ingest {source['name']}: stopped mid-pull, the task is no longer ours")
         return
     hosts.succeeded(host)
+    listed, moved = await asyncio.to_thread(_resolve_redirects, listed)
     fetched = len(listed)
     pattern_enforced = bool(db.get_config("source_title_patterns_enabled"))
     if source["title_pattern"]:
@@ -137,7 +138,7 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     observed = catalog.observe(
         source["name"],
         task_id,
-        listed,
+        listed + moved,
         {p.url for p in pattern_matched},
         None if not (fetched and complete) else "unlisted" if authoritative else "not_listed",
     )
@@ -191,6 +192,37 @@ async def handle_ingest_source(task_id: int, payload: dict[str, Any]) -> None:
     )
 
     schedule_filter_runs(payload.get("cycle", "manual"))
+
+
+def _resolve_redirects(listed: list[Any]) -> tuple[list[Any], list[Any]]:
+    """The pull with each redirector link (core.fetching.redirects) replaced
+    by the posting it points to, its raw_url keeping the link; and, for each
+    replaced, the link as an inactive posting, so a catalog row stored under
+    the link before is observed unlisted: the source lists that posting at
+    its own URL now. A link that could not be resolved stays as listed and
+    is asked again next pull. Two links to one posting, or a link to a
+    posting the pull also lists, are one posting."""
+    from dataclasses import replace
+
+    from core.fetching import redirects
+
+    targets = redirects.resolve(p.url for p in listed if p.url)
+    if not targets:
+        return listed, []
+    out: list[Any] = []
+    seen: set[str] = set()
+    moved = []
+    for listed_posting in listed:
+        posting = listed_posting
+        target = targets.get(posting.url)
+        if target and target != posting.url:
+            moved.append(replace(posting, active=False))
+            posting = replace(posting, url=target)
+        if posting.url and posting.url in seen:
+            continue
+        seen.add(posting.url)
+        out.append(posting)
+    return out, moved
 
 
 # How often a pull reports the requests it has made. The stall detector waits
