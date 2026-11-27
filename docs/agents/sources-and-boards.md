@@ -688,7 +688,7 @@ postings across 113 Workday sites by 2026-11-27, most on its weekend
 maintenance windows; a career site's shell that renders without the posting
 (Tower Research's 37 roles shared one text); a cookie wall; "page not
 found". Every posting with such text embedded the same, read as a perfect
-match for every other, and was judged by filters on the notice: 364 custom
+match for every other, and was judged by filters on the notice: 385 custom
 verdicts were rejections read off the maintenance page.
 
 **Such a fetch is named in `page_text_rejections`, and `page_texts` leaves it
