@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 
 from api import db
 from core import page_fetches, store
@@ -43,4 +44,7 @@ def test_the_text_lookups_are_index_only():
             plan = "\n".join(
                 r["QUERY PLAN"] for r in conn.execute(db._as_query("EXPLAIN " + sql)).fetchall()
             )
-            assert "Index Only Scan using idx_page_fetches_url_text" in plan, plan
+            # Forward or backward: the newest row first is the lateral's order.
+            assert re.search(
+                r"Index Only Scan (Backward )?using idx_page_fetches_url_text", plan
+            ), plan
