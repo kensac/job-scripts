@@ -38,6 +38,8 @@ class FilterField(BaseModel):
 
 
 _LIST_OPERATORS = ("any_of", "none_of")
+_EMPTY_OPERATORS = ("is_empty", "is_not_empty")
+_COMPARISON_OPS = {"equals": "=", "not_equals": "<>", "gte": ">=", "lte": "<="}
 _OPERATORS = {
     "text": [
         "contains",
@@ -171,10 +173,86 @@ def _place_clause(rule: ColumnFilter, name: str, params: dict) -> str:
     return f"AND {match}" if rule.operator == "any_of" else f"AND NOT {match}"
 
 
+def _list_clause(rule: ColumnFilter, expression: str, name: str, params: dict) -> str:
+    params[name] = [v.lower() for v in _list_value(rule)]
+    match = f"lower({expression}) = ANY(%({name})s)"
+    return f"AND {match}" if rule.operator == "any_of" else f"AND NOT {match}"
+
+
+def _empty_clause(rule: ColumnFilter, kind: FilterKind, expression: str) -> str:
+    if rule.value is not None:
+        raise ValueError("Empty-value operators do not take a value")
+    empty = (
+        f"NULLIF(btrim({expression}), '') IS NULL" if kind == "text" else f"{expression} IS NULL"
+    )
+    return f"AND ({empty})" if rule.operator == "is_empty" else f"AND NOT ({empty})"
+
+
+def _like_pattern(raw: str) -> str:
+    return "%" + raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _parse_scalar_value(
+    rule: ColumnFilter,
+    kind: FilterKind,
+    raw: str,
+    pay_units: dict[str, str | None],
+) -> object:
+    if kind == "date":
+        return datetime.date.fromisoformat(raw)
+    if kind == "number":
+        value = Decimal(raw)
+        if not value.is_finite():
+            raise ValueError("Pay must be a finite number")
+        if abs(value) > Decimal("1e18"):
+            raise ValueError("Pay value exceeds the supported numeric range")
+        if (
+            not pay_units.get("comp_currency")
+            or canonical_compensation_period(pay_units.get("comp_period")) is None
+        ):
+            raise ValueError("Pay comparisons require an exact currency and pay period")
+        return value
+    if rule.field == "comp_period" and rule.operator in ("equals", "not_equals"):
+        return canonical_compensation_period(raw) or raw
+    if kind == "boolean":
+        if raw not in ("true", "false"):
+            raise ValueError("Boolean filters accept true or false")
+        return raw == "true"
+    return raw
+
+
+def _comparison_clauses(
+    rule: ColumnFilter,
+    kind: FilterKind,
+    expression: str,
+    name: str,
+    params: dict,
+    pay_units: dict[str, str | None],
+) -> list[str]:
+    if rule.value is None or not rule.value.strip():
+        raise ValueError(f"A value is required for {rule.field}")
+    clauses: list[str] = []
+    if rule.operator in ("not_equals", "not_contains"):
+        clauses.append(f"AND NULLIF(btrim({expression}), '') IS NOT NULL")
+    value = _parse_scalar_value(rule, kind, rule.value, pay_units)
+    if rule.operator in ("contains", "not_contains"):
+        value = _like_pattern(rule.value)
+        op = "ILIKE" if rule.operator == "contains" else "NOT ILIKE"
+    else:
+        op = _COMPARISON_OPS[rule.operator]
+    if kind == "text" and rule.operator in ("equals", "not_equals"):
+        clauses.append(f"AND lower({expression}) {op} lower(%({name})s)")
+    else:
+        clauses.append(f"AND {expression} {op} %({name})s")
+    params[name] = value
+    return clauses
+
+
 def compile_rules(rules: list[ColumnFilter], catalog_only: bool) -> tuple[list[str], dict]:
     """AND of the rules as SQL clauses over `j`, `uj` and `pay`. Raises
     ValueError for a rule the endpoint does not offer."""
     offered = _offered(catalog_only)
+    pay_units = {r.field: r.value for r in rules if r.operator == "equals"}
     clauses: list[str] = []
     params: dict = {}
     for index, rule in enumerate(rules):
@@ -186,61 +264,12 @@ def compile_rules(rules: list[ColumnFilter], catalog_only: bool) -> tuple[list[s
         name = f"column_filter_{index}"
         if kind == "place":
             clauses.append(_place_clause(rule, name, params))
-            continue
-        if rule.operator in _LIST_OPERATORS:
-            params[name] = [v.lower() for v in _list_value(rule)]
-            match = f"lower({expression}) = ANY(%({name})s)"
-            clauses.append(f"AND {match}" if rule.operator == "any_of" else f"AND NOT {match}")
-            continue
-        if rule.operator in ("is_empty", "is_not_empty"):
-            if rule.value is not None:
-                raise ValueError("Empty-value operators do not take a value")
-            empty = (
-                f"NULLIF(btrim({expression}), '') IS NULL"
-                if kind == "text"
-                else f"{expression} IS NULL"
-            )
-            clauses.append(
-                f"AND ({empty})" if rule.operator == "is_empty" else f"AND NOT ({empty})"
-            )
-            continue
-        if rule.value is None or not rule.value.strip():
-            raise ValueError(f"A value is required for {rule.field}")
-        value: object = rule.value
-        if rule.operator in ("not_equals", "not_contains"):
-            clauses.append(f"AND NULLIF(btrim({expression}), '') IS NOT NULL")
-        if kind == "date":
-            value = datetime.date.fromisoformat(rule.value)
-        elif kind == "number":
-            value = Decimal(rule.value)
-            if not value.is_finite():
-                raise ValueError("Pay must be a finite number")
-            if abs(value) > Decimal("1e18"):
-                raise ValueError("Pay value exceeds the supported numeric range")
-            units = {r.field: r.value for r in rules if r.operator == "equals"}
-            if (
-                not units.get("comp_currency")
-                or canonical_compensation_period(units.get("comp_period")) is None
-            ):
-                raise ValueError("Pay comparisons require an exact currency and pay period")
-        elif rule.field == "comp_period" and rule.operator in ("equals", "not_equals"):
-            value = canonical_compensation_period(rule.value) or rule.value
-        elif kind == "boolean":
-            if rule.value not in ("true", "false"):
-                raise ValueError("Boolean filters accept true or false")
-            value = rule.value == "true"
-        if rule.operator in ("contains", "not_contains"):
-            value = (
-                "%" + rule.value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            )
-            op = "ILIKE" if rule.operator == "contains" else "NOT ILIKE"
+        elif rule.operator in _LIST_OPERATORS:
+            clauses.append(_list_clause(rule, expression, name, params))
+        elif rule.operator in _EMPTY_OPERATORS:
+            clauses.append(_empty_clause(rule, kind, expression))
         else:
-            op = {"equals": "=", "not_equals": "<>", "gte": ">=", "lte": "<="}[rule.operator]
-        if kind == "text" and rule.operator in ("equals", "not_equals"):
-            clauses.append(f"AND lower({expression}) {op} lower(%({name})s)")
-        else:
-            clauses.append(f"AND {expression} {op} %({name})s")
-        params[name] = value
+            clauses.extend(_comparison_clauses(rule, kind, expression, name, params, pay_units))
     return clauses, params
 
 

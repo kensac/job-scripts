@@ -18,23 +18,11 @@ from core.checks import POSTING_CHECK_NAMES
 logger = logging.getLogger(__name__)
 
 
-def _detect_sources() -> list[dict[str, Any]]:
-    """The per-source comparisons: ATS text share, first-check verdict rates,
-    extraction failures concentrated on one host, and the batch failures that
-    close clean.
-
-    A section rather than code inline in detect(), because inline is what it
-    was and inline meant unprotected. The loop in detect() wrapped the four
-    extracted detectors; these ran ahead of it, so one of them raising took the
-    whole hourly run down and every open alert auto-resolved with nothing left
-    to re-observe it. That is the exact failure the loop was added for on
-    2026-09-04, and it never covered these.
-    """
+def _ats_text_collapses() -> list[dict[str, Any]]:
+    # The ATS text path silently breaking. When a resolver stops returning
+    # usable text we fall back to chromium, so the share collapses long
+    # before anything is visibly wrong. This is the earliest warning we get.
     found: list[dict[str, Any]] = []
-
-    # 1. The ATS text path silently breaking. When a resolver stops returning
-    #    usable text we fall back to chromium, so the share collapses long
-    #    before anything is visibly wrong. This is the earliest warning we get.
     for r in db.query(
         """
         SELECT j.source,
@@ -88,20 +76,24 @@ def _detect_sources() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
-    # 2. Verdict-rate shifts on FIRST-EVER checks only. Re-checks flipping to
-    #    closed is the system working. Postings expire, and a sweep that newly
-    #    covers a backlog of old jobs will legitimately reject a lot of them at
-    #    once. Mixing the two makes coverage changes look like breakage (it did:
-    #    the first live alert was a reverify backlog on a board whose postings
-    #    expire in ~2 days). What genuinely indicates something upstream broke
-    #    is FRESHLY-SEEN jobs being classified closed at an unusual rate.
+
+def _verdict_rate_spikes() -> list[dict[str, Any]]:
+    # Verdict-rate shifts on FIRST-EVER checks only. Re-checks flipping to
+    # closed is the system working. Postings expire, and a sweep that newly
+    # covers a backlog of old jobs will legitimately reject a lot of them at
+    # once. Mixing the two makes coverage changes look like breakage (it did:
+    # the first live alert was a reverify backlog on a board whose postings
+    # expire in ~2 days). What genuinely indicates something upstream broke
+    # is FRESHLY-SEEN jobs being classified closed at an unusual rate.
     #
-    #    Two confounds survive the first-ever restriction and are handled in the
-    #    CTE: backlog sweeps hand OLD jobs their first check (FRESH_CHECK_WINDOW),
-    #    and one employer's bulk drop is one decision rather than N independent
-    #    samples (MAX_PER_COMPANY). Both are applied per window so the recent and
-    #    baseline rates stay comparable.
+    # Two confounds survive the first-ever restriction and are handled in the
+    # CTE: backlog sweeps hand OLD jobs their first check (FRESH_CHECK_WINDOW),
+    # and one employer's bulk drop is one decision rather than N independent
+    # samples (MAX_PER_COMPANY). Both are applied per window so the recent and
+    # baseline rates stay comparable.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         WITH firsts AS (
@@ -156,12 +148,16 @@ def _detect_sources() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
-    # 3. Extraction failures concentrated on one host: the bot-wall signature.
-    #    Relative to the host's own prior week, not an absolute rate. A site
-    #    that has always failed 60% is a known cost of doing business, and an
-    #    alert that fires forever on it is one the reader learns to skip. What
-    #    matters is a host that STARTED failing.
+
+def _failing_extractions() -> list[dict[str, Any]]:
+    # Extraction failures concentrated on one host: the bot-wall signature.
+    # Relative to the host's own prior week, not an absolute rate. A site
+    # that has always failed 60% is a known cost of doing business, and an
+    # alert that fires forever on it is one the reader learns to skip. What
+    # matters is a host that STARTED failing.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         SELECT substring(url from '//([^/]+)') AS host,
@@ -195,13 +191,17 @@ def _detect_sources() -> list[dict[str, Any]]:
                     "detail": dict(r),
                 }
             )
+    return found
 
+
+def _invalid_oauth_tokens() -> list[dict[str, Any]]:
     # A stored mailbox credential the provider has rejected. Nothing else in
     # the system surfaces this: mail ingest simply stops finding anything,
     # which is indistinguishable from a quiet week. The OAuth client is in
     # Testing mode with a restricted scope, so Google expires its refresh
     # tokens after seven days and this is expected to fire on that cadence -
     # it is the reconnect prompt, not a symptom of a bug.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         SELECT t.user_id, t.provider, t.account_email, t.invalid_reason,
@@ -227,7 +227,10 @@ def _detect_sources() -> list[dict[str, Any]]:
                 "detail": dict(r),
             }
         )
+    return found
 
+
+def _parked_batches(window: int) -> list[dict[str, Any]]:
     # A task parked on a provider batch, past the provider's own guarantee.
     #
     # This matters more now that every batched sweep refuses to start while one
@@ -241,9 +244,7 @@ def _detect_sources() -> list[dict[str, Any]]:
     # past it, the provider has broken its own promise AND poll_batches has
     # failed to give up on it, which is two things wrong at once. It moves
     # automatically if BATCH_COMPLETION_WINDOW ever changes.
-    from core.batch import completion_window_seconds
-
-    window = completion_window_seconds()
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         SELECT kind, COUNT(*) AS parked,
@@ -274,7 +275,10 @@ def _detect_sources() -> list[dict[str, Any]]:
                 },
             }
         )
+    return found
 
+
+def _whole_failed_batches(window: int) -> list[dict[str, Any]]:
     # A batch is submitted whole and fails whole, so failed_count = requests is
     # a DIFFERENT event from some requests failing: it means the submission was
     # rejected on grounds that applied to every request in it (an unsupported
@@ -304,6 +308,7 @@ def _detect_sources() -> list[dict[str, Any]]:
     # The message carries the provider's reason where one was stored
     # (ai_batch_errors, the most frequent text): "rejected" alone left the
     # 21,525-request failure unanswerable.
+    found: list[dict[str, Any]] = []
     for r in db.query(
         """
         WITH failed AS (
@@ -351,5 +356,29 @@ def _detect_sources() -> list[dict[str, Any]]:
                 },
             }
         )
-
     return found
+
+
+def _detect_sources() -> list[dict[str, Any]]:
+    """The per-source comparisons: ATS text share, first-check verdict rates,
+    extraction failures concentrated on one host, and the batch failures that
+    close clean.
+
+    A section rather than code inline in detect(), because inline is what it
+    was and inline meant unprotected. The loop in detect() wrapped the four
+    extracted detectors; these ran ahead of it, so one of them raising took the
+    whole hourly run down and every open alert auto-resolved with nothing left
+    to re-observe it. That is the exact failure the loop was added for on
+    2026-09-04, and it never covered these.
+    """
+    from core.batch import completion_window_seconds
+
+    window = completion_window_seconds()
+    return [
+        *_ats_text_collapses(),
+        *_verdict_rate_spikes(),
+        *_failing_extractions(),
+        *_invalid_oauth_tokens(),
+        *_parked_batches(window),
+        *_whole_failed_batches(window),
+    ]
