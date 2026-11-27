@@ -132,6 +132,107 @@ def _headroom(
     }
 
 
+def _spend_summary(
+    provider: str,
+    daily: list[dict[str, Any]],
+    today: datetime.date,
+    month_to_date: Decimal,
+    rate: Decimal,
+) -> dict[str, Any]:
+    last_30 = [b for b in daily if _day(b["start_time"]) >= today - datetime.timedelta(days=30)]
+    by_item: dict[str, Decimal] = {}
+    for bucket in last_30:
+        for item in bucket["items"]:
+            name = item["model"] or item["line_item"] or "unlabelled"
+            by_item[name] = by_item.get(name, Decimal(0)) + item["amount_usd"]
+    return {
+        "yesterday_usd": _sum(daily, today - datetime.timedelta(days=1)),
+        "last_7_days_usd": rate * 7,
+        "last_30_days_usd": sum((b["total_usd"] for b in last_30), Decimal(0)),
+        "month_to_date_usd": month_to_date,
+        "daily_rate_usd": rate,
+        # OpenAI's line items name a model and a token kind together; the
+        # Anthropic report names the model on its own.
+        "item_basis": "model" if provider == "anthropic" else "line_item",
+        "by_item": [
+            {"item": name, "amount_usd": amount}
+            for name, amount in sorted(by_item.items(), key=lambda kv: kv[1], reverse=True)
+        ],
+        "daily": [
+            {"day": _day(b["start_time"]).isoformat(), "total_usd": b["total_usd"]} for b in last_30
+        ],
+    }
+
+
+def _prepaid_headroom(
+    provider: str,
+    costs: dict[str, Any],
+    prepaid: dict[str, Any],
+    rate: Decimal,
+    today: datetime.date,
+    alert_usd: int,
+    alert_days: int,
+) -> dict[str, Any]:
+    granted_on = datetime.date.fromisoformat(prepaid["granted_on"])
+    if _day(costs["start_time"]) > granted_on:
+        return _unknown("prepaid", "GRANT_OUTSIDE_WINDOW")
+    expires_on = (
+        datetime.date.fromisoformat(prepaid["expires_on"]) if prepaid.get("expires_on") else None
+    )
+    granted = Decimal(str(prepaid["amount_usd"]))
+    spent = _sum(costs["daily"], granted_on)
+    return _headroom(
+        basis="prepaid",
+        label=f"{provider} prepaid credit (derived)",
+        amount=granted - spent,
+        rate=rate,
+        ends_on=expires_on,
+        ends_with_money_kept=False,
+        today=today,
+        alert_usd=alert_usd,
+        alert_days=alert_days,
+        detail={
+            "derivation": "configured_prepaid_minus_reported_spend",
+            "granted_usd": granted,
+            "granted_on": granted_on.isoformat(),
+            "spent_usd": spent,
+        },
+    )
+
+
+def _spend_limit_headroom(
+    provider: str,
+    costs: dict[str, Any],
+    limit: dict[str, Any],
+    month_start: datetime.date,
+    month_to_date: Decimal,
+    rate: Decimal,
+    today: datetime.date,
+    alert_usd: int,
+    alert_days: int,
+) -> dict[str, Any]:
+    if costs["scope"] != "organization":
+        # The limit is the organization's; project-scoped spend under it
+        # would overstate the headroom.
+        return _unknown("spend_limit", "COSTS_PROJECT_SCOPED")
+    return _headroom(
+        basis="spend_limit",
+        label=f"{provider} hard spend limit headroom (derived)",
+        amount=limit["threshold_usd"] - month_to_date,
+        rate=rate,
+        ends_on=(month_start + datetime.timedelta(days=32)).replace(day=1),
+        ends_with_money_kept=True,
+        today=today,
+        alert_usd=alert_usd,
+        alert_days=alert_days,
+        detail={
+            "derivation": "provider_limit_minus_reported_month_spend",
+            "limit_usd": limit["threshold_usd"],
+            "spent_usd": month_to_date,
+        },
+    )
+
+
 def summarize(
     provider: str,
     raw: dict[str, Any],
@@ -157,86 +258,27 @@ def summarize(
         return report
     daily = costs["daily"]
     rate = _sum(daily, today - datetime.timedelta(days=7)) / 7
-    last_30 = [b for b in daily if _day(b["start_time"]) >= today - datetime.timedelta(days=30)]
-    by_item: dict[str, Decimal] = {}
-    for bucket in last_30:
-        for item in bucket["items"]:
-            name = item["model"] or item["line_item"] or "unlabelled"
-            by_item[name] = by_item.get(name, Decimal(0)) + item["amount_usd"]
     month_start = today.replace(day=1)
     month_to_date = _sum(daily, month_start)
-    report["spend"] = {
-        "yesterday_usd": _sum(daily, today - datetime.timedelta(days=1)),
-        "last_7_days_usd": rate * 7,
-        "last_30_days_usd": sum((b["total_usd"] for b in last_30), Decimal(0)),
-        "month_to_date_usd": month_to_date,
-        "daily_rate_usd": rate,
-        # OpenAI's line items name a model and a token kind together; the
-        # Anthropic report names the model on its own.
-        "item_basis": "model" if provider == "anthropic" else "line_item",
-        "by_item": [
-            {"item": name, "amount_usd": amount}
-            for name, amount in sorted(by_item.items(), key=lambda kv: kv[1], reverse=True)
-        ],
-        "daily": [
-            {"day": _day(b["start_time"]).isoformat(), "total_usd": b["total_usd"]} for b in last_30
-        ],
-    }
+    report["spend"] = _spend_summary(provider, daily, today, month_to_date, rate)
     if prepaid:
-        granted_on = datetime.date.fromisoformat(prepaid["granted_on"])
-        expires_on = (
-            datetime.date.fromisoformat(prepaid["expires_on"])
-            if prepaid.get("expires_on")
-            else None
+        report["headrooms"].append(
+            _prepaid_headroom(provider, costs, prepaid, rate, today, alert_usd, alert_days)
         )
-        if _day(costs["start_time"]) > granted_on:
-            report["headrooms"].append(_unknown("prepaid", "GRANT_OUTSIDE_WINDOW"))
-        else:
-            granted = Decimal(str(prepaid["amount_usd"]))
-            spent = _sum(daily, granted_on)
-            report["headrooms"].append(
-                _headroom(
-                    basis="prepaid",
-                    label=f"{provider} prepaid credit (derived)",
-                    amount=granted - spent,
-                    rate=rate,
-                    ends_on=expires_on,
-                    ends_with_money_kept=False,
-                    today=today,
-                    alert_usd=alert_usd,
-                    alert_days=alert_days,
-                    detail={
-                        "derivation": "configured_prepaid_minus_reported_spend",
-                        "granted_usd": granted,
-                        "granted_on": granted_on.isoformat(),
-                        "spent_usd": spent,
-                    },
-                )
-            )
     if limit and limit["status"] == "available" and limit["threshold_usd"] > 0:
-        if costs["scope"] != "organization":
-            # The limit is the organization's; project-scoped spend under it
-            # would overstate the headroom.
-            report["headrooms"].append(_unknown("spend_limit", "COSTS_PROJECT_SCOPED"))
-        else:
-            report["headrooms"].append(
-                _headroom(
-                    basis="spend_limit",
-                    label=f"{provider} hard spend limit headroom (derived)",
-                    amount=limit["threshold_usd"] - month_to_date,
-                    rate=rate,
-                    ends_on=(month_start + datetime.timedelta(days=32)).replace(day=1),
-                    ends_with_money_kept=True,
-                    today=today,
-                    alert_usd=alert_usd,
-                    alert_days=alert_days,
-                    detail={
-                        "derivation": "provider_limit_minus_reported_month_spend",
-                        "limit_usd": limit["threshold_usd"],
-                        "spent_usd": month_to_date,
-                    },
-                )
+        report["headrooms"].append(
+            _spend_limit_headroom(
+                provider,
+                costs,
+                limit,
+                month_start,
+                month_to_date,
+                rate,
+                today,
+                alert_usd,
+                alert_days,
             )
+        )
     return report
 
 

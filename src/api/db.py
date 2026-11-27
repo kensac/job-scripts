@@ -32,28 +32,18 @@ _APP_CONFIG_SEED = [(key, spec.default) for key, spec in CONFIG_KEYS.items()]
 _APP_CONFIG_DEFAULTS = dict(_APP_CONFIG_SEED)
 
 
-# One constant key, so every process that does startup DDL queues behind the
-# same lock. Nothing else serialises this: on a lockstep roll the three CD runs
-# execute in parallel and hetzner recreates api+worker together, so up to four
-# processes can enter `alembic upgrade head` within the same minute, from
-# different hosts. It has held only because every migration so far was additive
-# and the losers of the race landed on idempotent guards.
+# Advisory lock key serializing startup `alembic upgrade head` across hosts: on a
+# lockstep roll up to four processes can enter it within the same minute.
 _SCHEMA_LOCK_KEY = 8_274_113_907_441_002
-# A waiter re-asks once a second: startup already waits seconds for a peer's
-# migration, so a second of slack is invisible beside it.
+# 1 s of polling slack is invisible beside a peer's seconds-long migration.
 _SCHEMA_LOCK_POLL_SECONDS = 1.0
 
 
 def init_schema() -> None:
-    # Wait, never skip: a worker waiting a few seconds for a peer's
-    # migration is correct; skipping it and then running against a
-    # half-converted schema is not. CREATE INDEX CONCURRENTLY in a migration
-    # waits for every transaction holding an older snapshot, so no session
-    # here may keep one: not a waiter blocked inside pg_advisory_lock, and not
-    # the holder idling in the transaction its lock statement opened. Each
-    # did, and each hung the build invisibly to the deadlock detector
-    # (reproduced on 2026-10-03). So the wait polls a try-lock and every
-    # attempt commits; the session lock outlives the commit.
+    # Wait, never skip: running against a half-migrated schema is wrong.
+    # Poll pg_try_advisory_lock and commit every attempt so neither waiters nor
+    # the lock holder keep an open snapshot that blocks CREATE INDEX CONCURRENTLY
+    # (reproduced 2026-10-03). The session advisory lock outlives the commit.
     with pool.connection() as conn:
         try_lock = "SELECT pg_try_advisory_lock(%s) AS held"
         while True:
@@ -70,8 +60,7 @@ def init_schema() -> None:
 
 
 def seed_defaults() -> None:
-    # Share startup and test defaults. One transaction preserves existing
-    # overrides and prevents a failed batch leaving only one table seeded.
+    # Seed both tables in one transaction while preserving existing overrides.
     with transaction(), _connection() as conn, conn.cursor() as cursor:
         cursor.executemany(
             "INSERT INTO group_budgets (group_name, weekly_token_budget) "
@@ -85,19 +74,11 @@ def seed_defaults() -> None:
 
 
 def get_config(key: str, default: Any = None) -> Any:
-    """A seeded key's declared value IS its default, so an unseeded row behaves
-    exactly like a seeded one.
+    """Read an app_config key, falling back to its seeded default if unseeded.
 
-    The seed runs after `_migrate()`, in its own transaction and outside the
-    advisory lock. A container that migrates and then dies before reaching it
-    leaves alembic reporting head with the row absent - and every caller that
-    passed its own fallback silently getting that fallback instead. For a
-    feature gate that reads as "the feature did not ship", with no error, no
-    exception and nothing for a health check to see.
-
-    Falling back to the seed is not failing open: it is the same value a
-    successful seed would have written. `default` still covers keys that are
-    not seeded at all.
+    The seed runs after `_migrate()`, so a container that migrates and then dies
+    leaves the row absent. A caller's own fallback would then silently turn a
+    feature gate off; the seeded value is what a successful seed would have written.
     """
     row = query_one("SELECT value FROM app_config WHERE key = %s", (key,))
     if row:
@@ -116,15 +97,10 @@ def _migrate() -> None:
 
 
 def _as_query(sql: str) -> LiteralString:
-    """psycopg types execute() to accept only LiteralString, which is a good
-    default: it stops a caller passing a runtime-built string. This codebase
-    does build SQL at runtime, but only by interpolating whitelisted fragments
-    (_SORTABLE, fixed column names, re.escape'd literals) - never a user value,
-    which always travels as a bound parameter.
+    """Centralize the LiteralString cast for queries built from whitelisted SQL fragments.
 
-    The cast states that invariant in one place instead of scattering a type
-    ignore over every call site, so if the invariant ever breaks there is a
-    single obvious thing to re-read.
+    Runtime SQL only interpolates whitelisted fragments; a user value always travels
+    as a bound parameter.
     """
     return cast("LiteralString", sql)
 
@@ -141,20 +117,10 @@ def query_one(sql: str, params: Any = None) -> dict[str, Any] | None:
 
 
 def query_as[Row](row: type[Row], sql: str, params: Any = None) -> list[Row]:
-    """query(), with each row built into a shape a type checker knows.
+    """Run raw SQL and construct `row(**r)` per result row (raises TypeError on column drift).
 
-    The SQL stays exactly as written. This is not an ORM and must not become
-    one: the hot paths here carry query plans measured against production
-    (api/board/visibility.py records 320ms falling to 28ms, and why), and
-    hiding them behind a query builder would hide the one thing that has to
-    stay readable. What a dict costs is different and smaller: a renamed
-    column is a grep across every call site, and a typo is a KeyError at
-    runtime rather than a red line in the editor.
-
-    A column the shape does not declare raises TypeError here rather than
-    being carried silently, which is the point: a SELECT and its shape drift
-    apart in one commit and are found in the next test run, not in a bug
-    report about a missing field.
+    Not an ORM and must not become one: hot-path SQL carries query plans measured
+    against production, and a query builder would hide them.
     """
     with statement() as conn:
         return [row(**r) for r in conn.execute(_as_query(sql), params).fetchall()]
@@ -173,27 +139,19 @@ def execute(sql: str, params: Any = None) -> None:
 
 @contextmanager
 def pipeline() -> Iterator[None]:
-    """Send the writes issued inside without waiting for each reply.
-
-    The replies are read once, on exit, where any error raises. Only for
-    statements whose result nobody reads; a read inside forces its own wait.
-    """
+    """Batch write-only statements in a psycopg pipeline; replies are read on exit."""
     with _connection() as conn, conn.pipeline():
         yield
 
 
 def execute_count(sql: str, params: Any = None) -> int:
-    """execute(), but returns how many rows it touched - for the callers whose
-    whole purpose is that number (the reaper counting requeues, say)."""
+    """Execute a statement and return its affected rowcount."""
     with statement() as conn:
         return conn.execute(_as_query(sql), params).rowcount
 
 
 def _json_default(value: Any) -> Any:
-    """psycopg's default dumps refuses the types SQL hands back. A detector
-    building its detail from dict(row) gets Decimal for every rate and
-    datetime for every timestamp, and the write fails at the driver with a
-    message naming neither the column nor the detector."""
+    """Coerce SQL result types (Decimal, date/datetime) that json.dumps rejects."""
     if isinstance(value, decimal.Decimal):
         return float(value)
     if isinstance(value, (datetime.datetime, datetime.date)):

@@ -177,52 +177,38 @@ def _record_reverify_results(task_id: int, results: list) -> int:
     return recorded
 
 
-async def _reverify_jobs(
-    task_id: int,
-    rows: list[dict[str, Any]],
-    parent_id: int | None = None,
-    force: bool = False,
-) -> None:
-    """Two phases: gather evidence concurrently (ATS gone-detection, then
-    content, the fleet-distributed, network-bound part), then settle every
-    remaining verdict in ONE half-price batch instead of a call per job."""
-    if has_batch_work(task_id):
-        results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
-        _record_reverify_results(task_id, results)
-        done, total = progress_counts(task_id)
-        set_progress(task_id, done, total, "reverified")
-        if parent_id:
-            update_parent_progress(parent_id)
-        return
-    if not routing.server_key("openai"):
-        raise LookupError("no server OpenAI key for reverification")
-    # The model and effort verify_new submits with, configured override included.
-    model, effort, routed = _submission_model()
-    by_url = {r["url"]: r for r in rows}
-    hook = batch_event_hook(task_id, "reverify", model, fallback_from=routed)
-
+def _pending_reverify_rows(
+    rows: list[dict[str, Any]], force: bool
+) -> tuple[list[dict[str, Any]], int, int]:
     # Resumability: a requeued chunk skips rows already re-verified this cycle.
     # A forced sweep skips nothing. The point is to overturn existing verdicts.
     if force:
-        total = len(rows)
-        done = 0
-    else:
-        cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
-        fresh = {
-            r["url"]
-            for r in db.query(
-                "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
-                "AND check_type = 'closed' AND created_at > %s",
-                ([r["url"] for r in rows], cutoff),
-            )
-        }
-        # A page that keeps coming back empty waits longer each time and is
-        # eventually given up on; a forced sweep is an admin's call and asks
-        # anyway, like a manual re-check.
-        parked = verdicts.fetch_parked_urls([r["url"] for r in rows])
-        rows = [r for r in rows if r["url"] not in fresh and r["url"] not in parked]
-        total = len(rows) + len(fresh)
-        done = len(fresh)
+        return rows, len(rows), 0
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
+    urls = [r["url"] for r in rows]
+    fresh = {
+        r["url"]
+        for r in db.query(
+            "SELECT DISTINCT url FROM ai_queries WHERE url = ANY(%s) "
+            "AND check_type = 'closed' AND created_at > %s",
+            (urls, cutoff),
+        )
+    }
+    # A page that keeps coming back empty waits longer each time and is
+    # eventually given up on; a forced sweep is an admin's call and asks
+    # anyway, like a manual re-check.
+    parked = verdicts.fetch_parked_urls(urls)
+    todo = [r for r in rows if r["url"] not in fresh and r["url"] not in parked]
+    return todo, len(todo) + len(fresh), len(fresh)
+
+
+async def _gather_reverify_pages(
+    task_id: int,
+    rows: list[dict[str, Any]],
+    total: int,
+    done: int,
+    parent_id: int | None,
+) -> tuple[list[tuple[str, Page]], int] | None:
     limiter = AdaptiveLimiter()
     scrape_sem = asyncio.Semaphore(SCRAPE_CONCURRENCY)
     needs_ai: list[tuple[str, Page]] = []
@@ -270,7 +256,39 @@ async def _reverify_jobs(
         if cancelled(task_id) or (parent_id and parent_cancelled(parent_id)):
             for t in pending:
                 t.cancel()
-            return
+            return None
+    return needs_ai, done
+
+
+async def _reverify_jobs(
+    task_id: int,
+    rows: list[dict[str, Any]],
+    parent_id: int | None = None,
+    force: bool = False,
+) -> None:
+    """Two phases: gather evidence concurrently (ATS gone-detection, then
+    content, the fleet-distributed, network-bound part), then settle every
+    remaining verdict in ONE half-price batch instead of a call per job."""
+    if has_batch_work(task_id):
+        results = await collect_pending(task_id, batch_event_hook(task_id, "reverify", None))
+        _record_reverify_results(task_id, results)
+        done, total = progress_counts(task_id)
+        set_progress(task_id, done, total, "reverified")
+        if parent_id:
+            update_parent_progress(parent_id)
+        return
+    if not routing.server_key("openai"):
+        raise LookupError("no server OpenAI key for reverification")
+    # The model and effort verify_new submits with, configured override included.
+    model, effort, routed = _submission_model()
+    by_url = {r["url"]: r for r in rows}
+    hook = batch_event_hook(task_id, "reverify", model, fallback_from=routed)
+
+    todo, total, done = _pending_reverify_rows(rows, force)
+    gathered = await _gather_reverify_pages(task_id, todo, total, done, parent_id)
+    if gathered is None:
+        return
+    needs_ai, done = gathered
 
     # A forced sweep is an admin doubting the answers themselves, so it pays.
     if not force:
