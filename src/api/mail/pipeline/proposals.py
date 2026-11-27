@@ -59,16 +59,11 @@ class ProposalAnswered(BaseModel):
     response: str
     board_updated: bool
     board_status: str | None
-    # Whole sentences, capitalised and stopped: the client renders this
-    # verbatim rather than composing its own line, so a lowercase fragment
-    # would land mid-paragraph looking like a bug. Null when a row moved and
-    # there is nothing to explain.
+    # Complete sentences rendered verbatim by the client; None when a row moved.
     reason: str | None
 
 
-# What the mail implies the board should say. Only kinds where the evidence is
-# unambiguous about the OUTCOME - an acknowledgement means the application is
-# alive, which the board already says, so it proposes nothing.
+# Event kinds that imply a board status change (excludes acknowledgements).
 STATUS_FROM_EVENT = {
     "rejection": "Rejected",
     "position_closed": "No Longer Available",
@@ -77,12 +72,10 @@ STATUS_FROM_EVENT = {
     "interview_scheduled": "Interviewing",
 }
 
-# Board statuses that mean "still waiting". A proposal is only worth making
-# against one of these: if the user has already moved it on, the mail is
-# confirming what they know rather than telling them something.
+# "Still waiting" statuses: once the user has moved a row on, the mail only
+# confirms what they already know, so there is nothing to propose.
 UNRESOLVED_BOARD_STATUSES = ("Application Submitted", "Follow-up")
 
-# Why answering a proposal on an application with no board row moves nothing.
 NOT_ON_BOARD = "This application is not on your board, so there is no status to move."
 
 ACCEPTED = "accepted"
@@ -90,27 +83,12 @@ DISMISSED = "dismissed"
 
 
 def proposals_for(user_id: int) -> list[Proposal]:
-    """Where the mail and the board disagree, as things to confirm.
+    """Derive unanswered status proposals where mail disagrees with an unresolved
+    or absent board row. Never overwrites `user_jobs.status`, which the user typed.
 
-    Never an overwrite. `user_jobs.status` is what the user typed, and a system
-    that silently rewrites it stops being trustworthy at exactly the moment it
-    is most confident. So this says "we think you were rejected" and waits.
-
-    Derived at read time rather than stored, so a proposal disappears on its
-    own once the user acts on the board directly, or once a reclassification
-    retracts the evidence. Only their ANSWER is a fact worth keeping.
-
-    LEFT JOIN, not JOIN. The inner join asked "what does the board say" of
-    applications that have no board row, which is 1,817 of 2,543 here: mail
-    predating the catalog is the normal case and `applications.job_id` is
-    nullable by design. It silenced 947 of 1,159 proposals - not by deciding
-    they were wrong, but by never forming the question. The predicate that
-    survives is the one that was actually meant: there is no board row to
-    disagree with, or the board row still says the application is live.
-
-    `board_updatable` says whether answering can move anything, so the caller
-    states the consequence before the click rather than reporting a status it
-    did not write afterwards.
+    LEFT JOIN so mail-only applications (without a `user_jobs` row) still surface
+    with `board_updatable=False`: 1,817 of 2,543 applications had no board row,
+    and the inner join silenced 947 of 1,159 proposals.
     """
     rows = db.query_as(
         ProposedFrom,
@@ -164,25 +142,15 @@ def proposals_for(user_id: int) -> list[Proposal]:
 def answer_proposal(
     user_id: int, application_id: int, event_id: int, response: str
 ) -> ProposalAnswered | None:
-    """Record the answer, and move the board only where there is a board.
+    """Record a person's answer against `event_id` and update `user_jobs.status`
+    when accepted and a board row exists.
 
-    Returns None when the event is not currently evidence about this
-    application, which the caller renders as a 404. The event has to belong to
-    a message matched to THIS application - the same join the proposal list is
-    built from. Checking only that the application is owned left `event_id`
-    taken from the request and trusted, so another user's event could decide
-    which status this application moved to.
+    Returns None if the application is not owned by `user_id` or `event_id` does
+    not belong to a message currently matched to `application_id`; checking
+    ownership alone would let another user's event decide this status.
 
-    Both answers are recorded, against the EVENT, so a dismissal silences this
-    piece of evidence rather than the question. A later rejection from the same
-    company is new evidence and gets asked again - which is what makes
-    dismissing safe rather than a decision that can never be revisited. A
-    dismissal is also the signal that STATUS_FROM_EVENT is wrong for that case,
-    which is only readable because the decline is stored rather than dropped.
-
-    REPORTS WHAT IT TOUCHED, not what it would have touched. Accepting on an
-    application with no board row wrote nothing and said the status had moved,
-    so the caller was told about a change no SELECT could find.
+    Answers key on the event, so a dismissal silences this evidence only and a
+    later event asks again.
     """
     app = db.query_one(
         "SELECT id, job_id FROM applications WHERE id = %s AND user_id = %s",
@@ -209,10 +177,7 @@ def answer_proposal(
     answer(user_id, event_id, STATUS_QUESTION, response)
     updated = 0
     if response == ACCEPTED and app["job_id"] is not None:
-        # The COUNT, not the fact that the statement ran. `applications.job_id`
-        # survives the board row being deleted (ON DELETE SET NULL is on the
-        # job, not on user_jobs), so a non-null job_id is not proof there is a
-        # row to update - and an UPDATE that matched nothing exits cleanly.
+        # Check actual rowcount: applications.job_id survives user_jobs deletion.
         updated = db.execute_count(
             "UPDATE user_jobs SET status = %s, person_touched_at = now(), updated_at = now() "
             "WHERE user_id = %s AND job_id = %s",
@@ -222,13 +187,8 @@ def answer_proposal(
         ok=True,
         response=response,
         board_updated=bool(updated),
-        # Present only when a row actually moved. The proposed status is still
-        # readable from `suggested_status` on the item that offered it.
         board_status=status if updated else None,
-        # WHOLE SENTENCES, capitalised and stopped. These are shown to a person
-        # verbatim - the client is told never to claim a move that did not
-        # happen, so it renders this instead of composing its own line, and a
-        # lowercase fragment lands mid-paragraph looking like a bug.
+        # Complete sentences rendered verbatim by the client.
         reason=None
         if updated
         else (
