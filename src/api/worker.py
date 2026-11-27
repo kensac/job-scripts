@@ -241,7 +241,25 @@ async def run_task(task: dict[str, Any]) -> bool:
 # the worker until its backlog is drained (days, for a corpus backfill), which
 # on the main loop would keep every other main-loop kind off the embedding
 # host for all of it.
-THREADED_KINDS = frozenset({"ingest_source", "embed_postings_local"})
+#
+# judge_page_texts, train_tech_scope, score_tech_scope and train_taste,
+# audited 2026-11-27: no model client or loop-bound global. Each handler is
+# its work in one to_thread: judging reads page_fetches and shared texts
+# through the thread-safe pool and the shared payload store (as
+# embed_postings_local does from its threads); the two fits read embeddings
+# and fit scikit-learn models; scoring is one statement. On the main loop the
+# fit a person's For you page asks for waited behind a whole verify_new run
+# on 2026-11-27, with slots free.
+THREADED_KINDS = frozenset(
+    {
+        "ingest_source",
+        "embed_postings_local",
+        "judge_page_texts",
+        "train_tech_scope",
+        "score_tech_scope",
+        "train_taste",
+    }
+)
 
 
 class _MainLoop:
