@@ -1,9 +1,7 @@
 """Shared SQL builders for reading decided answers from verdicts.
 
-The builders select the latest answer or test whether one exists. Callers
-provide SQL expressions for URL and prompt hash. A named check is validated
-against the registry before it becomes a SQL literal. Custom checks are
-identified by their prompt hash."""
+Callers pass SQL expressions for URL and prompt hash. Named checks are validated
+against the registry before becoming SQL literals; custom checks use prompt_hash."""
 
 from __future__ import annotations
 
@@ -29,11 +27,8 @@ def latest(
     prompt_hash: str | None = None,
     model: str | None = None,
 ) -> str:
-    """The latest answer to `check` for one posting, as a subquery body: wrap
-    it in parentheses for a value, or join it LATERAL for several columns.
-
-    `vlast` is the alias so an unqualified column inside cannot be captured
-    by an outer table of the same name."""
+    """Latest answer to `check` for one posting as a subquery body (`vlast` alias
+    avoids outer column capture)."""
     where = f"vlast.url = {url} AND vlast.check_type = {_check(check)}"
     if prompt_hash is not None:
         where += f" AND vlast.prompt_hash = {prompt_hash}"
@@ -43,14 +38,11 @@ def latest(
 
 
 def latest_per(key: str, columns: str, where: str, *, alias: str = "v", join: str = "") -> str:
-    """The latest answer per `key` (one row each), as a statement: a CTE
-    body, a derived table, or a query on its own.
+    """Latest answer per `key` via DISTINCT ON ordered by `(key, id DESC)`.
 
-    The ORDER BY is the key then newest id, so an index on (url, check_type,
-    id) or (url, prompt_hash, id) yields rows already in order. A key on
-    jobs.id (`join="JOIN jobs j ON j.url = v.url"`) sorts integers where a
-    url key sorts text: api/analytics/queries.py measured 1.15 s against
-    245 ms for the same rows."""
+    Keying on integer `jobs.id` avoids text sorting (245 ms vs 1.15 s in
+    api/analytics/queries.py).
+    """
     return (
         f"SELECT DISTINCT ON ({key}) {columns} FROM verdicts {alias} {join} "
         f"WHERE {where} ORDER BY {key}, {alias}.id DESC"
@@ -58,31 +50,18 @@ def latest_per(key: str, columns: str, where: str, *, alias: str = "v", join: st
 
 
 def latest_status(url: str, check: str, *, prompt_hash: str | None = None) -> str:
-    """The latest answer's status ('passed' or 'rejected'), NULL when none."""
+    """Latest status ('passed' or 'rejected'), or NULL if unchecked."""
     return f"({latest(url, check, prompt_hash=prompt_hash)})"
 
 
 def posting_status(job: str, check: str) -> str:
-    """`latest_status` for the posting whose jobs row is aliased `job`, for
-    a scan over the catalog: read from latest_posting_checks, a probe into a
-    narrow table keyed on the job id, instead of into ai_queries.
+    """`latest_status` for catalog scans, reading `latest_posting_checks` unless
+    `latest_posting_checks_dirty` flags the URL for a live `verdicts` fallback.
 
-    A url with a dirty row has an answer or posting the fold has not taken in
-    yet, so it is read live from `verdicts`; every other url's projection row
-    is current (core.latest_posting_checks). An answer commits with its dirty
-    row and a fold clears a dirty row with the projection write, so in any
-    snapshot this is exactly `latest_status` for every write the triggers
-    see, which is every write the application makes. A write they cannot see
-    (a load with session_replication_role = replica, a TRUNCATE, rows loaded
-    before migration d81c5e2b7a43) is read stale until a fold over every job:
-    the daily one, or `fold(everything=True)` run after the load. The dirty test is a correlated
-    probe, not a set: the planner sizes the table from its current pages when
-    it plans, so a backlog the fold has not cleared turns it into an index
-    probe rather than a rescan per posting.
-
-    Measured on a production copy (2026-11-26), a person's board with no
-    filter (315,390 candidates): 16.7 s probing ai_queries, 5.0 s here, the
-    same 109,911 postings."""
+    Correlated dirty probe stays an index probe under backlog. Measured on a
+    production copy (2026-11-26, 315,390 candidates): 5.0 s vs 16.7 s probing
+    ai_queries directly.
+    """
     if check == "custom":
         raise ValueError("custom answers are keyed by prompt; use latest_status")
     stored = (
@@ -97,57 +76,26 @@ def posting_status(job: str, check: str) -> str:
 
 
 def closed_verdict(url: str) -> str:
-    """What a posting's latest closed answer shows a person: 'open', 'closed',
-    or NULL when nothing has looked. The board row, a public list card and
-    the job page all show this one value."""
+    """Latest closed check mapped to 'open', 'closed', or NULL when unchecked."""
     shown = "CASE vlast.status WHEN 'passed' THEN 'open' WHEN 'rejected' THEN 'closed' END"
     return f"({latest(url, 'closed', shown)})"
 
 
-# Whether the posting is still up, as the closed check saw it: what
-# closed_verdict() selects. Three-valued with NULL, and it must stay that way:
-# NULL is "never checked", which is not "open". `active` cannot answer this
-# question - it is whatever a board's feed last said and nothing ever clears
-# it, so on a board that is not re-listed (sheet_import, imported once from a
-# sheet) it reports our own stale copy as the posting's state. The closed check
-# observes the posting itself and is applied uniformly across boards, which is
-# what makes it comparable. Collapsing NULL into 'closed' would reintroduce
-# exactly the bug this column exists to fix: 114 of the applications flagged
-# dead by `active` have a closed-check that says the posting is open.
+# Three-valued with NULL ("never checked"); never collapse NULL into 'closed'.
 Openness = Literal["open", "closed"]
 
 
 def has_verdict(url: str, check: str) -> str:
-    """EXISTS an answer to `check`: the check has been answered at all.
-
-    It takes no status on purpose. "Ever rejected" and "ever passed" read as
-    the latest answer and were not: the content sweep skipped 99 active
-    postings rejected as closed once and open since, and the full re-check
-    re-ran 214 passed once and closed since (production, 2026-10-10). Ask
-    `latest_status` for what a posting is now."""
+    """Whether any answer exists for `check` (takes no status; use `latest_status`
+    for current pass/reject state)."""
     return (
         f"EXISTS (SELECT 1 FROM verdicts vany "
         f"WHERE vany.url = {url} AND vany.check_type = {_check(check)})"
     )
 
 
-# A posting whose latest closed and clearance verdicts both passed. The
-# extractors (comp, requirements) select on it: on 2026-09-06 the catalog
-# held 74,477 active postings of which 37,438 were verified open, and both
-# extractors were paying for the other half, whose numbers nothing reads
-# because a closed or restricted posting reaches no board. The narrower
-# option, extracting only for postings on someone's board (3,117 that day,
-# 4 percent), is not taken yet: a posting reaching a board later would wait
-# a cycle for its comp column, and the market table would be built from a
-# smaller slice than the filters admit. Written down here so it is a
-# decision and not an oversight.
-#
-# ai_queries is never pruned (docs/agents/engineering-standards.md, "Always
-# retain all data"); this reads the latest verdict per (url, check_type),
-# from latest_posting_checks or, for a url not yet folded in, from verdicts
-# (posting_status), and relies on it being there.
 def verified_open(job: str) -> str:
-    """For the posting whose jobs row is aliased `job` (posting_status)."""
+    """True when the posting's latest closed and clearance verdicts both passed."""
     return (
         f"{posting_status(job, 'closed')} = 'passed' "
         f"AND {posting_status(job, 'clearance')} = 'passed'"
@@ -170,8 +118,7 @@ _COLUMNS = "status, reason, config_name, model, created_at, request_sha256"
 def read_latest(
     url: str, check: str, *, prompt_hash: str | None = None, model: str | None = None
 ) -> LatestVerdict | None:
-    """The latest answer to `check` for one posting, or None when nothing
-    has answered it. With `model`, only that model's answers count."""
+    """Latest answer to `check` for one posting, optionally scoped to `model`."""
     sql = latest(
         "%(url)s",
         check,
@@ -188,8 +135,7 @@ def read_latest(
 def latest_checks(
     urls: list[str], checks: tuple[str, ...] = ("closed", "clearance")
 ) -> dict[str, dict[str, LatestVerdict]]:
-    """The latest answer to each of `checks` per posting, as url -> check ->
-    answer. A url or check nothing has answered is absent."""
+    """Latest answer to each of `checks` per posting, keyed as `{url: {check: verdict}}`."""
     sql = latest_per(
         "url, check_type",
         f"url, check_type, {_COLUMNS}",
