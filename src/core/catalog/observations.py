@@ -10,23 +10,16 @@ from core.pool import connection, pool, transaction
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
 
-# Whether listings row {listing} is on its source's latest pull. Rows are
-# never deleted, so existence says only that some pull once listed the url.
-# A pull refreshes every row it lists whose last_seen_at is older than
-# refresh_hours, so right after a pull every row it listed is at most
-# refresh_hours older than that pull; the source's newest last_seen_at is no
-# later than its latest pull, so a listed row is never older than that minus
-# refresh_hours. A row the board dropped falls behind within refresh_hours
-# plus one pull interval. A source whose pulls fail keeps its rows current,
-# because nothing newer moves its newest row. Measured on production
-# 2026-10-10: 1.6 s for retire_switched_off's select with it, 0.6 s without,
-# reading each candidate source's rows once per candidate. {source} is the
-# row's source column, or a parameter when the reader is one source's rows:
-# correlated to the row, the max is re-read for every row, which over one
-# source's 25k rows did not finish in 120 s; a parameter makes it one
-# InitPlan.
-# ponytail: max() per source scans that source's rows; a per-source
-# latest-pull column is the upgrade if a source's listings outgrow it.
+# Whether listings row `{listing}` appeared on its source's latest pull. A pull
+# refreshes every row it lists older than refresh_hours, so a listed row is never
+# older than the source's newest row minus refresh_hours; a source whose pulls
+# fail keeps its rows current, since nothing newer moves its newest row.
+# Pass a bound parameter for `{source}` when scanning one source so Postgres
+# evaluates the max() once as an InitPlan (correlated over one source's 25k rows
+# it did not finish in 120 s). The predicate itself costs retire_switched_off's
+# select 1.6 s against 0.6 s without it (production 2026-10-10).
+# ponytail: max() per source scans that source's rows; a per-source latest-pull
+# column is the upgrade if a source's listings outgrow it.
 LISTED_NOW: LiteralString = (
     "{listing}.last_seen_at >= (SELECT max(newest.last_seen_at) FROM listings newest "
     "WHERE newest.source = {source}) - make_interval(hours => %(refresh_hours)s)"
@@ -34,12 +27,9 @@ LISTED_NOW: LiteralString = (
 
 
 def set_active(job_id: int, active: bool) -> bool:
-    """An administrator's correction of whether a posting is available,
-    recorded as an observation under CORRECTION_SOURCE and stored in
-    jobs.available in the same transaction: it holds until a source says
-    something new about the posting. jobs.active is frozen and not written
-    (docs/agents/architecture-migration.md, the jobs.active contract). False
-    when no such job."""
+    """Record an admin availability correction under CORRECTION_SOURCE and update
+    jobs.available in the same transaction (jobs.active is frozen). Returns False
+    if the job does not exist."""
     with transaction(), connection() as conn:
         if conn.execute("SELECT 1 FROM jobs WHERE id = %s", (job_id,)).fetchone() is None:
             return False
@@ -53,36 +43,25 @@ def set_active(job_id: int, active: bool) -> bool:
 
 _ADMITTED = frozenset({"appeared", "reappeared"})
 
-
-# The source an administrator's correction is recorded under (set_active).
-# No sources row has this name, so no pull and no switch reaches it.
+# Synthetic source name for admin corrections; no row in `sources` uses it.
 CORRECTION_SOURCE = "admin"
 
-# Whether title patterns are enforced, read where availability is read so that
-# flipping source_title_patterns_enabled never rewrites history. An unseeded
-# row means the seed has not run yet, and reads as the seeded default
-# (api.config), which tests/test_source_observations.py holds equal.
+# Read at query time so toggling source_title_patterns_enabled never rewrites history.
+# Defaults to 'true' when unseeded, matching api.config (pinned by test_source_observations.py).
 PATTERNS_ENFORCED: LiteralString = (
     "(COALESCE((SELECT c.value FROM app_config c"
     " WHERE c.key = 'source_title_patterns_enabled'), 'true') = 'true')"
 )
 
-# Whether job {job} is available, as source_observations say. In order:
-# - an administrator's correction (CORRECTION_SOURCE) holds while it is the
-#   job's latest observation, so it lasts until a source says something new;
-# - true when some switched-on source's latest observation admits it:
-#   appeared, reappeared, not_listed (aggregator absence never closes), or
-#   filtered while patterns are not enforced;
-# - false when it has observations and none of those;
-# - false when no source has observed it and its owning source is switched
-#   off: nothing that is pulled says it is listed;
-# - false when it is a sheet_import row: imported once on 2026-08-24, with no
-#   sources row and nothing that pulls it, so it is a switched-off source
-#   (decided 2026-10-10). A person who touched one keeps it through their own
-#   state, which visibility reads separately;
-# - otherwise NULL, cannot tell.
-# Parameter-free, so it drops into SQL of either placeholder style. One
-# definition, for the shadow comparison and, through IS_AVAILABLE, readers.
+# Availability derived from source_observations (parameter-free SQL fragment):
+# 1. Latest admin correction wins until a newer source observation arrives.
+# 2. True if any active source's latest observation admits the job (appeared,
+#    reappeared, not_listed, or filtered while patterns are disabled).
+# 3. False if observations exist with none admitting.
+# 4. False if no source has observed it and its owning source is switched off,
+#    or it is a 'sheet_import' row: imported once 2026-08-24 and nothing pulls
+#    it, so it counts as switched off (decided 2026-10-10).
+# 5. Otherwise NULL (cannot tell).
 AVAILABLE: LiteralString = (
     """(
     COALESCE(
@@ -108,34 +87,27 @@ AVAILABLE: LiteralString = (
         END))"""
 )
 
-# What a reader of availability uses: jobs.available (_STORED) alone. A new
-# row is stored as it is inserted (upsert_postings, add_upload) and every
-# other row by the reconcile, so a NULL is a row nothing has stored yet and
-# reads as not available. Stored, because computed per row it cost every
-# reader: the AI-eligible count went from 2.0 s to 6.5 s, a board recompute
-# from 27 s to 38 s (production, 2026-10-10).
+# Readers query stored `jobs.available` rather than recomputing AVAILABLE per row
+# (AI-eligible count 2.0 s vs 6.5 s; board recompute 27 s vs 38 s, production 2026-10-10).
+# Every row is stored on insert or by the reconcile, so NULL is a row nothing has
+# stored yet and reads as not available.
 IS_AVAILABLE: LiteralString = "COALESCE({job}.available, false)"
 
-# What jobs.available stores: AVAILABLE where an observation decides, and
-# otherwise the posting's last known feed state, jobs.active. A row no pull
-# has observed since observations began keeps what its feed last said rather
-# than reading as cannot tell: a partial pull (a capped Workday or Oracle
-# search) never observes the rows past its cap and records no absence, and a
-# board not pulled yet has observed nothing. On 2026-10-11 at 04:10 UTC that
-# was 102,662 active postings, 81,644 of them on boards not yet pulled and
-# 14,693 behind a partial pull. Re-verification closes what a partial pull
-# cannot see (docs/agents/sources-and-boards.md).
+# Stored availability falls back to frozen `jobs.active` for rows never yet
+# observed by a pull: a capped (partial) pull records no absence past its cap,
+# and a board not yet pulled has observed nothing. On 2026-10-11 that was 102,662
+# active postings, 81,644 on unpulled boards and 14,693 past a partial-pull cap.
 _STORED: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
 
 
 def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
-    """Writes _STORED into jobs.available for these rows where it differs.
-    Locks first, in url order (_LOCK_ORDER), then evaluates in a second
-    statement: under READ COMMITTED that statement's snapshot is taken after
-    the locks are held, so every observation committed before them is seen,
-    and a writer that commits one after them refreshes again behind this
-    one. Evaluated with the lock in one statement, the value would come from
-    a snapshot older than the lock. Returns the rows written."""
+    """Update jobs.available where it differs from _STORED.
+
+    Locks in URL code-point order first, then evaluates in a second statement so
+    READ COMMITTED sees observations committed before the lock was acquired.
+    Evaluated in the locking statement, the value would come from a snapshot
+    older than the lock. Returns the rows written.
+    """
     if not ids:
         return 0
     locked = [
@@ -157,9 +129,7 @@ def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
 
 
 def refresh_available(ids: list[int]) -> int:
-    """jobs.available for rows whose observations just changed, in batches of
-    their own transaction (_BATCH), so a source's first pull does not hold
-    thousands of row locks against the other pulls."""
+    """Refresh jobs.available in per-batch transactions to bound row-lock duration."""
     written = 0
     for start in range(0, len(ids), _BATCH):
         with transaction(), connection() as conn:
@@ -168,26 +138,18 @@ def refresh_available(ids: list[int]) -> int:
 
 
 def reconcile_available() -> int:
-    """jobs.available over the whole catalog: what observations do not
-    announce, a source switched on or off and the title pattern setting
-    flipped, lands here within the hour, in the hourly retire_switched_off
-    task. Safe to stop and rerun. Returns the rows written.
+    """Reconcile stale jobs.available rows across the catalog (run hourly).
 
-    One read finds the rows whose stored value differs; it takes no lock,
-    and it is taken once per run, so a row that goes stale while the run
-    writes waits for the next run, inside the hour.
-    Only those rows are then written, in batches of their own transaction
-    that lock in url order and skip rows a concurrent writer holds for the
-    next run, so it cannot deadlock against an ingest, and each re-evaluates
-    under its lock (_refresh_available). It walked the id space in ranges
-    instead, and ingest upserts spend an id even when they only update: on
-    2026-11-26 the 2,145,156 jobs spread over ids 1 to 41,820,483, 2,092
-    range statements a run, 11 minutes on average. The single read took 21 s
-    on a production copy, and 34 s with JIT, which compiles the whole plan
-    (engineering-standards.md, "Measure a large statement with JIT on and
-    off")."""
-    # Its own connection and transaction, so the setting ends with the read
-    # and never reaches a caller's open transaction.
+    Catches what observations do not announce: a source switched on or off, or
+    the title pattern setting flipped.
+
+    Finds stale IDs in one unlocked scan (21 s with jit=off vs 34 s with jit=on
+    on 2.15M jobs, production copy 2026-11-26), then updates in URL-ordered
+    batches with SKIP LOCKED so it never deadlocks against concurrent ingests.
+    Not id ranges: upserts spend ids, so 2.15M jobs spread over ids 1 to 41.8M
+    and the range walk took 11 minutes a run (2026-11-26).
+    """
+    # Dedicated transaction so SET LOCAL jit = off does not leak to a caller.
     with pool.connection() as conn, conn.transaction():
         conn.execute("SET LOCAL jit = off")
         stale = [
@@ -211,21 +173,15 @@ def observe(
     kept: set[str],
     absence: str | None,
 ) -> dict[str, int]:
-    """Appends to source_observations what this pull says about each catalog
-    row that differs from the source's latest observation of it, and nothing
-    for a row it says the same about. Call after upsert_postings, so a row
-    this pull created has an id.
+    """Append source_observations for catalog rows whose state changed on this pull.
 
-    `postings` is everything the board listed, admitted or not, and `kept`
-    the urls its title pattern matched, whatever the enforcement switch says:
-    the switch is applied when availability is read, so turning it over does
-    not rewrite history. A listed posting whose record carries the feed's
-    inactive flag is unlisted. `absence` is the kind a listed-before row the
-    pull left out becomes: 'unlisted' after a complete pull of an
-    authoritative board, 'not_listed' after an aggregator's, None when the
-    pull cannot show it saw everything (partial or empty), which records no
-    absence. A posting no catalog row holds has nothing to point at and is
-    skipped; listings keeps it. Returns the count per kind."""
+    Call after upsert_postings so newly inserted jobs have IDs. `kept` records
+    title-pattern matches regardless of the enforcement switch. `absence` is
+    'unlisted' (authoritative complete pull), 'not_listed' (aggregator), or None
+    (partial/empty pull, recording no absence). A listed posting carrying the
+    feed's inactive flag is unlisted. A posting with no catalog row is skipped;
+    listings keeps it. Returns inserted counts per kind.
+    """
     posting_by_url = {posting.url: posting for posting in postings if posting.url}
     with pool.connection() as conn:
         last_observation_by_job = {
@@ -256,11 +212,9 @@ def observe(
             if observed_kind != previous_kind:
                 observation_rows.append((job["url"], job["id"], observed_kind))
         if absence == "unlisted":
-            # A row this board owns that it has never been observed listing
-            # (stored from the frozen feed flag, _STORED) is dropped by this
-            # complete pull like any other: record it, or nothing would ever
-            # close it. Only rows stored available, so the closed history is
-            # not written out again.
+            # Close currently available rows owned by this source that were never
+            # observed before (carried forward from frozen jobs.active), or nothing
+            # would close them. Only rows stored available, so closed history stays.
             observation_rows += [
                 (job["url"], job["id"], absence)
                 for job in conn.execute(
@@ -283,8 +237,7 @@ def observe(
                         "SELECT id, url FROM jobs WHERE id = ANY(%s)", (missing_job_ids,)
                     ).fetchall()
                 ]
-    # The foreign key share-locks each job row, so the inserts take them in
-    # url order (_LOCK_ORDER), in one transaction of their own.
+    # Foreign-key share locks on `jobs` follow URL code-point order (_LOCK_ORDER).
     observation_rows.sort(key=lambda row: row[0])
     if observation_rows:
         with pool.connection() as conn, conn.cursor() as cur:
@@ -293,20 +246,14 @@ def observe(
                 "VALUES (%s, %s, %s, %s)",
                 [(job_id, source, kind, run_id) for _, job_id, kind in observation_rows],
             )
-        # After the insert commits, so the refresh's snapshot sees it.
+        # Run after commit so refresh_available sees the new observations.
         refresh_available(sorted({job_id for _, job_id, _ in observation_rows}))
     return dict(Counter(kind for _, _, kind in observation_rows))
 
 
 _BATCH = 500
 
-
-# The one order every multi-row write to jobs and listings takes its row locks
-# in: url, compared by code point. Two writers that lock overlapping rows in
-# the same order cannot deadlock; two that each lock in their own order (a
-# board's listing order, a scan's heap order) can, and did: 36 ingests failed
-# on a deadlock in the 60 days to 2026-10-04, 32 of them inserting into
-# listings, whose upsert ran in board order. Python sorts str by code point,
-# and "C" collation compares UTF-8 bytes, which order the same way, so a
-# sorted executemany and an ORDER BY with this collation agree.
+# Canonical lock order for multi-row writes to jobs and listings: UTF-8 code-point
+# order matches Python str.sort() and prevents deadlocks (36 ingest deadlocks in
+# the 60 days to 2026-10-04 before unifying lock order).
 _LOCK_ORDER: LiteralString = 'COLLATE "C"'
