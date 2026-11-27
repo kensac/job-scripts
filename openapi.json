@@ -4182,6 +4182,341 @@
         }
       }
     },
+    "/v1/user/recommendations": {
+      "get": {
+        "summary": "Recommendations Page",
+        "description": "The person's recent tech postings they have not touched, best match\nfirst, with the application each is nearest to and whether it is a near\ncopy of one, or of a posting higher on the page.",
+        "operationId": "recommendations_page_v1_user_recommendations_get",
+        "parameters": [
+          {
+            "name": "first",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "First"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recommendations"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/jobs/{job_id}/similar": {
+      "get": {
+        "summary": "Similar Postings",
+        "description": "The person's recent tech postings nearest to one posting, less its\nnear copies, nearest first.",
+        "operationId": "similar_postings_v1_user_jobs__job_id__similar_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "first",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "First"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Service-Token"
+            }
+          },
+          {
+            "name": "x-user-sub",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Sub"
+            }
+          },
+          {
+            "name": "x-user-email",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Email"
+            }
+          },
+          {
+            "name": "x-user-name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Name"
+            }
+          },
+          {
+            "name": "x-user-groups",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-User-Groups"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarPostings"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/user/resumes": {
       "get": {
         "summary": "List Resumes",
@@ -13798,7 +14133,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Similar"
+                  "$ref": "#/components/schemas/api__routers__requirements__Similar"
                 }
               }
             }
@@ -44356,6 +44691,35 @@
         ],
         "title": "LevelCount"
       },
+      "LikeApplication": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "title",
+          "company",
+          "similarity"
+        ],
+        "title": "LikeApplication",
+        "description": "The application a posting is nearest to, and how near (cosine)."
+      },
       "ListFeedback": {
         "properties": {
           "message": {
@@ -47604,6 +47968,62 @@
           "excluded"
         ],
         "title": "PatternSamples"
+      },
+      "Pay": {
+        "properties": {
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min",
+          "max",
+          "period",
+          "currency"
+        ],
+        "title": "Pay"
       },
       "PendingKind": {
         "properties": {
@@ -52569,6 +52989,140 @@
         "title": "Reclassified",
         "description": "What a correction moved. The affected applications come back rather\nthan an `ok`, because a changed kind can change what an application is\nwaiting for - including one the person is not currently looking at."
       },
+      "Recommendation": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted"
+          },
+          "pay": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "match": {
+            "type": "number",
+            "title": "Match"
+          },
+          "like": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LikeApplication"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "applied_copy": {
+            "type": "boolean",
+            "title": "Applied Copy"
+          },
+          "copy_of": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "company",
+          "title",
+          "locations",
+          "posted",
+          "pay",
+          "match",
+          "like",
+          "applied_copy",
+          "copy_of"
+        ],
+        "title": "Recommendation"
+      },
+      "Recommendations": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "page_info": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TasteModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "training": {
+            "type": "boolean",
+            "title": "Training"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "page_info",
+          "total_count",
+          "model",
+          "training"
+        ],
+        "title": "Recommendations"
+      },
       "RefineBody": {
         "properties": {
           "instruction": {
@@ -55340,26 +55894,30 @@
         "title": "Signals",
         "description": "Every signal is null when it cannot clear its floor.\n\nIt used to be absent instead, because a caller renders \"no signal\" as\nnothing at all and an empty object is a correct answer. Declaring the\nshape made the keys appear with null, which the one consumer reads\nidentically: `!signals?.posting_age` is true either way. Null is kept\nrather than serialised away because a key that is sometimes absent cannot\nbe typed, and being able to type it is the reason this exists.\n\nWhat must not change is that a null here means the signal DOES NOT EXIST.\nNever a zero, and never something for the caller to re-derive."
       },
-      "Similar": {
+      "SimilarPostings": {
         "properties": {
-          "job_id": {
-            "type": "integer",
-            "title": "Job Id"
-          },
-          "neighbours": {
+          "nodes": {
             "items": {
-              "$ref": "#/components/schemas/Neighbour"
+              "$ref": "#/components/schemas/api__routers__recommendations__Similar"
             },
             "type": "array",
-            "title": "Neighbours"
+            "title": "Nodes"
+          },
+          "page_info": {
+            "$ref": "#/components/schemas/PageInfo"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
           }
         },
         "type": "object",
         "required": [
-          "job_id",
-          "neighbours"
+          "nodes",
+          "page_info",
+          "total_count"
         ],
-        "title": "Similar"
+        "title": "SimilarPostings"
       },
       "SkillCount": {
         "properties": {
@@ -57742,6 +58300,45 @@
         ],
         "title": "TasksCancelled",
         "description": "`skipped` names only ids the caller asked for by id and that were not\ncancellable. A selection by kind or status cancels whatever matches, so\nthere is nothing for it to skip."
+      },
+      "TasteModel": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "trained_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Trained At"
+          },
+          "applied": {
+            "type": "integer",
+            "title": "Applied"
+          },
+          "held_out_roc_auc": {
+            "type": "number",
+            "title": "Held Out Roc Auc"
+          },
+          "held_out_in_top_share": {
+            "type": "number",
+            "title": "Held Out In Top Share"
+          },
+          "top_share": {
+            "type": "number",
+            "title": "Top Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "trained_at",
+          "applied",
+          "held_out_roc_auc",
+          "held_out_in_top_share",
+          "top_share"
+        ],
+        "title": "TasteModel"
       },
       "Taxonomy": {
         "properties": {
@@ -60647,6 +61244,92 @@
         ],
         "title": "YearsExperience",
         "description": "`stated` is how many postings said anything at all. The silent\nmajority is the finding as often as the stated minority is, which is why\nthis is a count beside the distribution and not a percentage."
+      },
+      "api__routers__recommendations__Similar": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          },
+          "posted": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted"
+          },
+          "pay": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Pay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "company",
+          "title",
+          "locations",
+          "posted",
+          "pay",
+          "similarity"
+        ],
+        "title": "Similar"
+      },
+      "api__routers__requirements__Similar": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "neighbours": {
+            "items": {
+              "$ref": "#/components/schemas/Neighbour"
+            },
+            "type": "array",
+            "title": "Neighbours"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "neighbours"
+        ],
+        "title": "Similar"
       }
     }
   }

@@ -9,6 +9,7 @@ from api.routers import (
     job_tasks,
     job_uploads,
     person_jobs,
+    recommendations,
 )
 
 router = APIRouter()
@@ -22,3 +23,4 @@ router.include_router(person_jobs.delete_router)
 router.include_router(job_uploads.router)
 router.include_router(job_reports.router)
 router.include_router(job_tasks.router)
+router.include_router(recommendations.router)
