@@ -4185,7 +4185,7 @@
     "/v1/user/recommendations": {
       "get": {
         "summary": "Recommendations Page",
-        "description": "The person's recent tech postings they have not touched, best match\nfirst, each with the application it is nearest to, whether it is a near\ncopy of one, and its own near copies folded in. total_count counts the\npool's postings, copies included.",
+        "description": "The person's recent tech postings they have not touched, held to their\nboard's conditions (api.for_you.GATE), best match first: each with the\napplication it is nearest to, whether it is a near copy of one, what\ntheir enabled filters said, and its own near copies folded in. Read from\nthe person's computed ranking (tasks.for_you); total_count counts its\nrows.",
         "operationId": "recommendations_page_v1_user_recommendations_get",
         "parameters": [
           {
@@ -4218,6 +4218,16 @@
                 }
               ],
               "title": "After"
+            }
+          },
+          {
+            "name": "kept_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Kept Only"
             }
           },
           {
@@ -4348,7 +4358,7 @@
     "/v1/user/jobs/{job_id}/similar": {
       "get": {
         "summary": "Similar Postings",
-        "description": "The person's recent tech postings nearest to one posting, less its\nnear copies, nearest first.",
+        "description": "The rows of the person's ranking nearest to one posting, less its near\ncopies, nearest first.",
         "operationId": "similar_postings_v1_user_jobs__job_id__similar_get",
         "parameters": [
           {
@@ -53091,6 +53101,21 @@
             "type": "boolean",
             "title": "Applied Copy"
           },
+          "filter": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "kept",
+                  "unchecked"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
           "copies": {
             "items": {
               "$ref": "#/components/schemas/Copy"
@@ -53111,6 +53136,7 @@
           "match",
           "like",
           "applied_copy",
+          "filter",
           "copies"
         ],
         "title": "Recommendation"

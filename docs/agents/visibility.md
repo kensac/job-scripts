@@ -494,11 +494,31 @@ opens its drawer: the per-posting gate (`api.board.access`) admits an
 administrator to any catalog posting but another person's private upload
 (`visibility.ADMIN_CATALOG`), and holds everyone else to `FAST`.
 
+**It holds the person's board conditions, less where a posting is listed.**
+`api.for_you.GATE` applies their criteria (`criteria.SQL`) and hides a
+posting a shared check (closed, clearance unless they bypass it) or one of
+their enabled filters rejected. A posting nothing has looked at yet stays,
+since the pool reaches past the sources they subscribe to, where their
+filter's work stops; each row says whether every enabled filter `kept` it,
+and `kept_only` shows only those. On one person (2026-11-27) the gate took
+57,738 pooled postings to 12,413, 769 of them kept by their filter.
+
+**The ranking is computed, never evaluated on read**, as board membership is:
+evaluated per request the gated ranking took 6.8 s a page and its copies 6.6
+s. `rank_for_you` (`tasks.for_you`, `api.for_you.compute`) scores the gated
+pool with the person's latest taste model, folds copies, and replaces
+`recommended_postings` for them, after every fit of their model and every
+cycle; `recommendation_runs` names the run. The page reads the run's rows,
+dropping only what was touched or closed since. A cursor names the run it was
+read under and is refused after another, and a person whose stored run used
+an older model is told the ranking is being computed.
+
 A node says why it is there: the application it is nearest to, and whether
 it is a near copy (`NEAR_COPY`) of an application. A job listed several
 times (reposted, in other cities, on other boards) is one row: a posting with
-a near copy ranked above it anywhere in the pool is folded into that row's
-`copies` instead of being a row, and a page is refilled past what it folded. A cursor names the model it was read under, so a cursor from before
+a near copy ranked above it is folded into that row's `copies` instead of
+being a row (`api.for_you._fold`, 12,413 postings into 9,424 rows on the
+person above). A cursor names the model it was read under, so a cursor from before
 a refit is refused rather than read in another order. The page asks for a
 fit when the person has no model or theirs is from before today, and says so
 (`training`). The administrative surface has no version of this page: it is a

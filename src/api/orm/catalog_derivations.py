@@ -315,3 +315,49 @@ class PostingScope(Base):
         BigInteger, ForeignKey("ranking_models.id", ondelete="SET NULL")
     )
     scored_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class RecommendationRun(Base):
+    """A person's latest For you ranking (api.for_you): the model it ranked
+    with, how many postings it holds, and when."""
+
+    __tablename__ = "recommendation_runs"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    run_id: Mapped[int] = mapped_column(BigInteger)
+    model_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("ranking_models.id", ondelete="CASCADE")
+    )
+    postings: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class RecommendedPosting(Base):
+    """One posting of a person's latest For you ranking (api.for_you): its
+    taste score and rank, whether every enabled filter kept it, and the
+    posting it is a near copy of when one ranks above it, which is the row it
+    is folded into."""
+
+    __tablename__ = "recommended_postings"
+    __table_args__ = (
+        Index(
+            "idx_recommended_postings_rows",
+            "user_id",
+            "rank",
+            postgresql_where=text("copy_of IS NULL"),
+        ),
+        Index("idx_recommended_postings_copies", "user_id", "copy_of"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    score: Mapped[float] = mapped_column(Float)
+    rank: Mapped[int] = mapped_column(Integer)
+    kept: Mapped[bool] = mapped_column(Boolean)
+    copy_of: Mapped[int | None] = mapped_column(BigInteger)
