@@ -1089,6 +1089,29 @@ is scoped before the first model exists. Measured on 272,053 recent postings
 held-out AUC 0.996. Fitting reads its examples' embeddings, so it runs beside
 the database: away from it the hosts exclude `train_tech_scope`.
 
+## A person's taste
+
+`core.taste` fits a logistic regression per person on the embeddings of the
+postings they applied to (`applications` with a posting) against
+`BACKGROUND` recent in-scope postings they never touched, and stores it as a
+`ranking_models` row of kind `taste`; a posting's score is one inner product
+in SQL. "No Longer Interested" is not a negative: it meant closed or needs
+sponsorship as often as not for me. With no true negatives the untouched
+sample stands in, so a score orders postings and does not judge one.
+
+**Every model carries its own evaluation.** Before the stored fit, the same
+recipe is fitted on folds of the applications and the background and scored
+on the held-out rest: `held_out_roc_auc`, and `held_out_in_top_share`, the
+share of held-out applications that rank inside the top `TOP_SHARE` of
+held-out postings. A model whose number falls is one that stopped ranking
+what its person applies to. Measured on one person (2026-11-27): 0.979 and
+90% in the top 5%.
+
+**Fitted when asked, then daily.** The For you page asks for `train_taste`
+when its person has no model or theirs is a day old; the schedule refits
+every person who has one once a day. A person with fewer applications with
+embeddings than the evaluation's folds gets no model, and the task says so.
+
 ## Scheduled filter transport
 
 **Only the instructions are written to the prompt cache.** On a model with

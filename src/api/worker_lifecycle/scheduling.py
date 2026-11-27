@@ -249,6 +249,14 @@ def schedule_ingest_cycle() -> None:
     # previous model, and none is scored before a model exists.
     enqueue("train_tech_scope", {"cycle": day}, dedupe_key=f"train-tech-scope:{day}")
     enqueue("score_tech_scope", {"cycle": cycle}, dedupe_key=f"score-tech-scope:{cycle}")
+    # Each taste model refitted once a day (tasks.taste): everyone who has
+    # one asked for it by opening the For you page.
+    for row in db.query("SELECT DISTINCT user_id FROM ranking_models WHERE kind = 'taste'"):
+        enqueue(
+            "train_taste",
+            {"cycle": day, "user_id": row["user_id"]},
+            dedupe_key=f"train-taste:{row['user_id']}:{day}",
+        )
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync
     # above runs hourly, so without these two the pipeline would fill
