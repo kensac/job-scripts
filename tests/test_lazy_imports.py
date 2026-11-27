@@ -8,7 +8,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-HEAVY = ("anthropic", "openai", "boto3", "botocore", "pypdf", "fastapi", "starlette")
+HEAVY = (
+    "anthropic",
+    "openai",
+    "boto3",
+    "botocore",
+    "pypdf",
+    "fastapi",
+    "starlette",
+    "numpy",
+    "sklearn",
+)
 
 
 def test_a_fresh_worker_loads_no_heavy_sdk():

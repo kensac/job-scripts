@@ -145,5 +145,7 @@ def test_filter_scope_options_are_named_scoped_and_revision_bound(client, admin_
         "finance_experienced_v1",
         "finance_experienced_v2",
         "finance_experienced_v3",
+        "software_title_v1",
+        "technical_title_v1",
     ]
     assert body["filters"] == {"user": [str(first)]}

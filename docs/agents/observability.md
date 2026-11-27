@@ -1063,6 +1063,32 @@ walk past postings they could not embed.
 `local_embedding_enabled` switches the sweep off, and an unchanged re-scrape
 is re-stamped (`tasks.rescrape`).
 
+## The tech scope
+
+`posting_scopes` says, for each recent embedded posting, whether it is tech
+work (`core.tech_scope`); the For you page ranks only those. Recent is open
+(`catalog.IS_AVAILABLE`) and posted (or first seen) within
+`recommendation_window_days`.
+
+**The title decides when it can, the text when it cannot.** Two title
+recipes (`core.screening`): `software_title_v1` keeps a title naming software,
+data or ML work, and `technical_title_v1` skips one naming other engineering
+or no technical work. A title neither decides names technical work only
+vaguely ("Engineer II", "Analyst"), and a logistic regression on the
+posting's embedding decides it, fitted on the two clear groups. Its weights
+are a `ranking_models` row, so the score is one inner product in SQL
+(`<#>`), and the decision is the classifier's own: score at least 0.
+
+**Fitted daily, scored every cycle.** `train_tech_scope` fits a model a day on
+`EXAMPLES_PER_GROUP` of each clear group, choosing the regularisation by
+held-out ROC AUC and storing that AUC in `evaluation`. `score_tech_scope`
+scopes the postings with no scope, an embedding newer than their scope, or
+a text-decided scope from an older model, and writes only those rows. Nothing
+is scoped before the first model exists. Measured on 272,053 recent postings
+(2026-11-27): 31,165 in scope (11.5%), 93% of one person's applications kept,
+held-out AUC 0.996. Fitting reads its examples' embeddings, so it runs beside
+the database: away from it the hosts exclude `train_tech_scope`.
+
 ## Scheduled filter transport
 
 **Only the instructions are written to the prompt cache.** On a model with

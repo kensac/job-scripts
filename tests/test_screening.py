@@ -20,6 +20,8 @@ PINNED = {
     "finance_experienced_v1": "1d57087eb89dd09e",
     "finance_experienced_v2": "90039d35f8e38bc8",
     "finance_experienced_v3": "d27ab8bd27ab2052",
+    "software_title_v1": "d02cc1b702a906df",
+    "technical_title_v1": "16c4a9e74786769f",
 }
 
 # Titles each recipe decides both ways, plus the awkward shapes production
