@@ -3,37 +3,16 @@
 from api.mail.current import current_event, current_match
 from core import verdict_reads
 
-# A count is not a rate. Presence is the only threshold for applications.
 APPLICATIONS_MIN = 1
-
-# The open share IS read as a proportion ("9 of 14 still answer"), but it is
-# rendered as its own counts rather than extrapolated, so the binomial floor
-# that governs a true rate is heavier than this needs. Five is the point below
-# which the phrase stops being worth a sentence; it still omits the field for
-# roughly 92% of names, since only 616 of 7,564 reach it.
 OPEN_MIN_CHECKED = 5
 
-# Grouping on lower(btrim(company)) rather than the raw string is the whole
-# identity model, such as it is. The most common spelling is the display
-# name, so the UI shows "Stripe" rather than whichever variant sorted first.
-#
-# The comp split is three-way on purpose. A job_comp row says the extractor
-# ran; an amount says it found one. A posting where it ran and found nothing
-# (3,000 of them) is the closest this schema gets to "the posting stated no
-# pay" - but it still cannot separate that from "the posting stated pay and we
-# missed it", so both live in one bucket named for what WE did.
-#
-# Pay is counted over job_comp (110,243 rows) and joined to the per-company
-# totals, rather than joining job_comp to every jobs row before grouping:
-# that join spilled its sort to disk, 4.3 s against 2.9 s for this shape and
-# 2.6 s for the old single pass over jobs (production, 2026-10-10).
-#
-# The display spelling is mode() computed by hand: count each spelling, then
-# keep the most common per name, ties to the first in sort order as mode()
-# breaks them. mode() walked all 1.41M postings in name order through the
-# heap; counting spellings is one hash aggregate into 10,891 rows. The page
-# statement took 2.7-3.2 s against 3.6-4.2 s, with all 10,751 rows identical
-# under both sorts (production, 2026-11-01).
+# Keyed by lower(btrim(company)).
+# - Display spelling uses hash-aggregated spelling counts + DISTINCT ON instead
+#   of mode() (2.7-3.2 s vs 3.6-4.2 s, production 2026-11-01).
+# - Pay aggregates over job_comp before joining to avoid sort spill (2.9 s vs
+#   4.3 s joining job_comp to all jobs first, production 2026-10-10).
+# - `apps` is strictly scoped to `user_id` and reads `applications` (including
+#   mail-derived rows without a `user_jobs` entry), excluding dismissed rows.
 _BASE_CTES = """
 WITH seen AS (
     SELECT DISTINCT ON (company_key) company_key, company AS company_name,
@@ -63,23 +42,6 @@ WITH seen AS (
            seen.total_postings_seen - COALESCE(paid.comp_read, 0) AS comp_not_attempted
     FROM seen LEFT JOIN paid ON paid.company_key = seen.company_key
 ), apps AS (
-    -- SCOPED TO THE CALLING USER. Every query in this file that touches
-    -- `applications` or `user_jobs` now carries a user_id, and none of them
-    -- did before: the aggregate spanned every user in the database. With one
-    -- real user it produced correct numbers, which is what made it dangerous -
-    -- there is no error and no wrong value to notice, right up until a second
-    -- user signs up and their applications silently join these counts and the
-    -- response rates derived from them.
-    --
-    -- `applications`, not `user_jobs`. The board table only knows postings the
-    -- user tracked by hand; `applications` also holds the ones only email
-    -- knows about, whose posting was never in this catalog and never will be.
-    -- Reading the old table reported 605 companies when 1,283 had evidence,
-    -- and it had been that way since the mail pipeline landed - a view that
-    -- silently stopped describing the system it names.
-    --
-    -- Dismissed applications are excluded: a dismissal says the row should
-    -- never have existed, so counting it would be counting a known mistake.
     SELECT lower(btrim(a.company_name)) AS company_key,
            count(*) AS applications_n,
            max(a.applied_at)::date AS last_applied_at
@@ -91,12 +53,7 @@ WITH seen AS (
 )
 """
 
-# The columns are named, not `base.*`. A star select and the shape that reads
-# it drift apart in silence, which is this module's own defect one level down.
-# The CTEs are their own constant because the page and the total below count
-# the same rows and must keep doing so. The total rides on the page as a
-# window over the cut rows, so the whole-catalog GROUP BY runs once; only a
-# page past the end, which has no row to carry it, runs _COUNT_SQL.
+# Shared by page query (window total_names) and _COUNT_SQL (used when offset is past the end).
 _BASE_SQL = (
     _BASE_CTES
     + """
@@ -112,12 +69,7 @@ LIMIT %(limit)s OFFSET %(offset)s
 """
 )
 
-# The lenses over 8,503 names: the ones this admin applied to, the ones whose
-# postings state pay, the ones that re-list. Each is a predicate over the same
-# aggregate the page already computes, spelled once here and applied to the
-# page and to the total alike, so "12 of 8,503" is the count of what the
-# lens shows. The repost cut is the same grouping _REPOST_SQL uses per page,
-# run once over the catalog rather than per company.
+# Filter predicates shared between the page query and _COUNT_SQL.
 _CUTS = """(%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
   AND (NOT %(applied)s OR apps.applications_n IS NOT NULL)
   AND (NOT %(has_comp)s OR base.comp_found > 0)
@@ -130,10 +82,7 @@ _CUTS = """(%(q)s::text IS NULL OR base.company_key LIKE %(q)s::text)
          AND max(r.date_posted) - min(r.date_posted) > make_interval(days => %(min_span)s)))"""
 
 
-# A reply is any classified mail attached to the application. An OUTCOME is a
-# reply that decided something - an acknowledgement is a mail server saying it
-# received the form, and counting it as "they replied" would report a 100%
-# response rate for every company running an ATS.
+# Decisive reply kinds (excludes automated acknowledgements).
 _OUTCOME_KINDS = (
     "rejection",
     "interview_invite",
@@ -143,6 +92,8 @@ _OUTCOME_KINDS = (
     "position_closed",
 )
 
+# Excludes applications whose matched mail includes an intermediary domain, and
+# restricts timing percentiles to tracker-sourced rows with first_outcome_at >= applied_at.
 _RESPONSE_SQL = f"""
 WITH scoped AS (
     SELECT a.id, lower(btrim(a.company_name)) AS company_key,
@@ -152,12 +103,6 @@ WITH scoped AS (
       AND a.dismissed_at IS NULL
       AND a.user_id = %(user_id)s
       AND lower(btrim(a.company_name)) = ANY(%(keys)s)
-      -- Applications whose first contact came from a platform rather than an
-      -- employer's own mail. A course provider that replies to everyone is not
-      -- a company that answers every applicant, and including them put a
-      -- perfect response rate on a university.
-      -- (No percent sign in this comment on purpose: psycopg reads a bare one
-      -- as a placeholder and the query fails to prepare.)
       AND NOT EXISTS (
           SELECT 1 FROM ({current_match("application_id")}) am2
           JOIN email_messages m2 ON m2.id = am2.message_id
@@ -184,9 +129,6 @@ SELECT company_key,
        count(*) AS applications,
        count(*) FILTER (WHERE replies > 0) AS replied,
        count(*) FILTER (WHERE outcomes > 0) AS with_outcome,
-       -- Timing is TRACKER-ONLY and the filter is the whole point; see
-       -- _response_block. The >= guard drops three rows whose outcome predates
-       -- the date entered by hand.
        count(*) FILTER (
            WHERE source_provenance = 'tracker' AND applied_at IS NOT NULL
              AND first_outcome_at IS NOT NULL AND first_outcome_at >= applied_at
@@ -208,17 +150,13 @@ SELECT company_key,
 FROM per_app GROUP BY company_key
 """
 
-# The total counts what the lenses show: same CTEs, same cuts, no page.
 _COUNT_SQL = (
     _BASE_CTES
     + "SELECT count(*) AS c\nFROM base LEFT JOIN apps ON apps.company_key = base.company_key\n"
     + "WHERE {cuts}\n"
 )
 
-# Currency is present on 452 of 11,442 extracted rows, so the NULL bucket is
-# the overwhelming majority. It is reported as its own entry rather than
-# folded into USD: an amount whose currency was never captured is not a dollar
-# figure, and averaging across the two would invent one.
+# Keeps NULL currency as its own bucket rather than assuming USD.
 _CURRENCY_SQL = """
 SELECT lower(btrim(j.company)) AS company_key, pay.comp_currency AS currency,
        count(*) AS n, min(pay.comp_min) AS min, max(pay.comp_max) AS max
@@ -229,17 +167,8 @@ WHERE j.company <> ''
 GROUP BY lower(btrim(j.company)), pay.comp_currency
 """
 
-# Keyed and filtered exactly like the count above it, because the two are
-# rendered together and a whole must be counted the same way as its parts.
-# They previously disagreed: the count came from `applications` keyed on
-# company_name and excluding dismissals, while this came from `user_jobs` keyed
-# on jobs.company with no dismissal filter. Adjacent numbers from two tables
-# with two keys read as a total and its breakdown and were neither.
-#
-# `board_status` is still what the user typed, so an application with no board
-# row contributes to the count and to no status - that is a real gap between
-# what mail knows and what he has recorded, and it should be visible rather
-# than reconciled away.
+# Keyed and filtered on `applications` to stay consistent with `apps` counts;
+# mail-only applications without a `user_jobs` row contribute to no status.
 _STATUS_SQL = """
 SELECT lower(btrim(a.company_name)) AS company_key, uj.status, count(*) AS n
 FROM applications a
@@ -252,10 +181,6 @@ WHERE a.company_name IS NOT NULL AND btrim(a.company_name) <> ''
 GROUP BY lower(btrim(a.company_name)), uj.status
 """
 
-# The same instrument the board row and the per-job signal use: the latest
-# closed verdict per posting. Computing it any other way - "has any closed row
-# in ai_queries", say, which would count 'failed' rows too - would let this
-# page and the board disagree with nobody able to see which was wrong.
 _LATEST_CLOSED_PER_JOB = verdict_reads.latest_per(
     "j.id",
     "lower(btrim(j.company)) AS company_key, v.status, v.created_at",
@@ -274,23 +199,9 @@ SELECT company_key,
 FROM latest GROUP BY company_key
 """
 
-# One title repeated under several urls on a SINGLE source AT ONE LOCATION,
-# more than REPOST_MIN_SPAN_DAYS apart. Every exclusion is measured, not
-# assumed, and the constants live in api.signals so the company page and the
-# per-job pane cannot disagree about what a repost is.
-#
-# Location is in the key because without it a chain listing one role across its
-# estate reads as one enormous repost - Sainsbury's "Trading Assistant"
-# grouped to 1,056 urls over 120 locations, which is bulk hiring, not
-# re-listing. It also picks the LARGEST surviving group per company, so a high
-# url_count still means an evergreen requisition rather than a repost cycle;
-# the count is reported so a reader can tell those apart.
-#
-# The display title, mode() over the group's spellings, is taken only for the
-# group that wins. mode() is an ordered-set aggregate, which cannot be
-# computed in parallel parts, so asking for it on all ~10,000 groups of a
-# busy page kept the whole grouping on one process: 850 ms against 430 ms
-# for this shape on the top page of a synthetic catalog (2026-10-04).
+# Largest same-source, same-location recurring `(company, title)` group per company.
+# mode() runs only on the winning group so the outer GROUP BY can parallelize
+# (430 ms vs 850 ms on a synthetic top page, 2026-10-04).
 _REPOST_SQL = """
 WITH g AS (
     SELECT lower(btrim(company)) AS company_key, lower(btrim(title)) AS title_key,
