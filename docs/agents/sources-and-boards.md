@@ -743,7 +743,7 @@ not at all, as any page that keeps failing is.
 which every reader of a decided answer goes through, leaves out an answer
 whose `page_fetch_id` is rejected, so the posting reads as not yet answered
 for that check and is asked again on its own text. The maintenance page alone
-had carried 364 custom rejections, 67 closed checks read as open and 70
+had carried 385 custom rejections, 67 closed checks read as open and 70
 clearance passes (2026-11-27). A closed check's rejection stays: a closure
 page is shared across roles and names none, and it is still what the closed
 check reads. The sweep marks a newly rejected fetch's postings in

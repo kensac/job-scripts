@@ -3,7 +3,7 @@
 An answer that judged a fetch page_text_rejections names (a maintenance
 notice, a career site's shell, a cookie wall: 0838a60ed6e9) judged a page
 that was not the posting. On 2026-11-27 the Workday maintenance page alone
-carried 364 custom rejections, 67 closed checks read as open and 70
+carried 385 custom rejections, 67 closed checks read as open and 70
 clearance passes. verdicts, which every reader of a decided answer goes
 through (core.verdict_reads, core.latest_posting_checks), leaves such an
 answer out, so the posting reads as not yet answered for that check and is
