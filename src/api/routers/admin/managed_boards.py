@@ -220,6 +220,96 @@ def _require(board_id: int, *, lock: bool = False) -> ManagedBoard:
     return board
 
 
+def _matches_bootstrap_definition(
+    board: ManagedBoard,
+    *,
+    name: str,
+    description: str,
+    sponsor_user_id: int,
+    prompt: str,
+    execution_mode: str,
+    criteria_json: dict,
+    sources: list[str],
+) -> bool:
+    return (
+        board.name == name
+        and board.description == description
+        and board.sponsor_user_id == sponsor_user_id
+        and board.prompt == prompt
+        and board.prompt_hash == compute_filter_hash(prompt, "filter")
+        and board.requested_model == _BOOTSTRAP_MODEL
+        and board.execution_mode == execution_mode
+        and board.on_ambiguous == "filter"
+        and board.fail_closed is True
+        and board.criteria.model_dump(mode="json") == criteria_json
+        and board.title_gate is None
+        and board.sources == sources
+        and board.published is False
+        and board.revision == 1
+    )
+
+
+def _validate_patch_fields(fields: dict) -> None:
+    if "on_ambiguous" in fields:
+        _validate_ambiguity(fields["on_ambiguous"])
+    if "requested_model" in fields:
+        _validate_model(fields["requested_model"])
+    if "execution_mode" in fields:
+        _validate_execution_mode(fields["execution_mode"])
+
+
+def _lock_and_check_slug(board_id: int, slug: str) -> None:
+    db.execute(
+        "SELECT pg_advisory_xact_lock(hashtext('managed-board-slug:' || %s))",
+        (slug,),
+    )
+    duplicate = db.query_one_as(
+        _Id,
+        "SELECT id FROM managed_boards WHERE slug = %s AND id <> %s",
+        (slug, board_id),
+    )
+    if duplicate is not None:
+        raise refuse(409, "DUPLICATE_SLUG", "managed board slug exists")
+
+
+def _require_board_has_sources(board_id: int) -> None:
+    source_count = db.query_one_as(
+        _Count,
+        "SELECT count(*) AS n FROM managed_board_sources WHERE managed_board_id = %s",
+        (board_id,),
+    )
+    if source_count is None or source_count.n == 0:
+        raise refuse(400, "NO_SOURCES", "a published board needs a source")
+
+
+def _prepare_patch_update(
+    existing: ManagedBoard, body: ManagedBoardPatch, fields: dict
+) -> tuple[dict, int, int | None]:
+    # Read from the body, not `fields`: model_dump turned the nested models
+    # in `fields` into plain dicts. A null title_gate clears the gate.
+    criteria = body.criteria if body.criteria is not None else existing.criteria
+    title_gate = body.title_gate if "title_gate" in fields else existing.title_gate
+    _validate_title_gate(fields.get("execution_mode", existing.execution_mode), title_gate)
+    effective_published = fields.get("published", existing.published)
+    prompt = fields.get("prompt", existing.prompt)
+    on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
+    updated = {
+        **fields,
+        "criteria": db.jsonb(criteria.model_dump(mode="json")),
+        "title_gate": db.jsonb(title_gate.model_dump(mode="json"))
+        if title_gate is not None
+        else None,
+        "prompt_hash": compute_filter_hash(prompt, on_ambiguous),
+        "published": effective_published,
+    }
+    next_revision = existing.revision + 1
+    advance_public = existing.published or effective_published != existing.published
+    next_public_revision = (
+        (existing.public_revision or 0) + 1 if advance_public else existing.public_revision
+    )
+    return updated, next_revision, next_public_revision
+
+
 @router.get("/managed-boards")
 def list_managed_boards(user: AuthedUser = Depends(require_admin)) -> ManagedBoards:
     return ManagedBoards(
@@ -249,23 +339,16 @@ def bootstrap_managed_boards(
                 (slug,),
             )
             if board is not None:
-                matches = (
-                    board.name == name
-                    and board.description == description
-                    and board.sponsor_user_id == user.id
-                    and board.prompt == prompt
-                    and board.prompt_hash == compute_filter_hash(prompt, "filter")
-                    and board.requested_model == _BOOTSTRAP_MODEL
-                    and board.execution_mode == execution_mode
-                    and board.on_ambiguous == "filter"
-                    and board.fail_closed is True
-                    and board.criteria.model_dump(mode="json") == criteria_json
-                    and board.title_gate is None
-                    and board.sources == sources
-                    and board.published is False
-                    and board.revision == 1
-                )
-                if not matches:
+                if not _matches_bootstrap_definition(
+                    board,
+                    name=name,
+                    description=description,
+                    sponsor_user_id=user.id,
+                    prompt=prompt,
+                    execution_mode=execution_mode,
+                    criteria_json=criteria_json,
+                    sources=sources,
+                ):
                     raise refuse(409, "BOOTSTRAP_DRIFT", f"{slug} differs from bootstrap v2")
                 boards.append(board)
                 continue
@@ -384,12 +467,7 @@ def patch_managed_board(
     fields.pop("expected_revision")
     if not fields:
         raise refuse(400, "EMPTY_PATCH", "no fields to update")
-    if "on_ambiguous" in fields:
-        _validate_ambiguity(fields["on_ambiguous"])
-    if "requested_model" in fields:
-        _validate_model(fields["requested_model"])
-    if "execution_mode" in fields:
-        _validate_execution_mode(fields["execution_mode"])
+    _validate_patch_fields(fields)
     requested_sources = fields.pop("sources") if "sources" in fields else None
     with db.transaction():
         existing = _require(board_id, lock=True)
@@ -400,49 +478,15 @@ def patch_managed_board(
                 "managed board changed; reload it before saving",
                 current_revision=existing.revision,
             )
-        # Read from the body, not `fields`: model_dump turned the nested models
-        # in `fields` into plain dicts. A null title_gate clears the gate.
-        criteria = body.criteria if body.criteria is not None else existing.criteria
-        title_gate = body.title_gate if "title_gate" in fields else existing.title_gate
-        _validate_title_gate(fields.get("execution_mode", existing.execution_mode), title_gate)
-        if "slug" in fields:
-            db.execute(
-                "SELECT pg_advisory_xact_lock(hashtext('managed-board-slug:' || %s))",
-                (fields["slug"],),
-            )
-            duplicate = db.query_one_as(
-                _Id,
-                "SELECT id FROM managed_boards WHERE slug = %s AND id <> %s",
-                (fields["slug"], board_id),
-            )
-            if duplicate is not None:
-                raise refuse(409, "DUPLICATE_SLUG", "managed board slug exists")
+        updated, next_revision, next_public_revision = _prepare_patch_update(existing, body, fields)
+        if "slug" in updated:
+            _lock_and_check_slug(board_id, updated["slug"])
         sources = _validate_sources(requested_sources) if requested_sources is not None else None
         if sources is not None:
             source_selection.set_board_sources(board_id, sources)
-        effective_published = fields.get("published", existing.published)
-        if effective_published:
-            source_count = db.query_one_as(
-                _Count,
-                "SELECT count(*) AS n FROM managed_board_sources WHERE managed_board_id = %s",
-                (board_id,),
-            )
-            if source_count is None or source_count.n == 0:
-                raise refuse(400, "NO_SOURCES", "a published board needs a source")
-        prompt = fields.get("prompt", existing.prompt)
-        on_ambiguous = fields.get("on_ambiguous", existing.on_ambiguous)
-        fields["criteria"] = db.jsonb(criteria.model_dump(mode="json"))
-        fields["title_gate"] = (
-            db.jsonb(title_gate.model_dump(mode="json")) if title_gate is not None else None
-        )
-        fields["prompt_hash"] = compute_filter_hash(prompt, on_ambiguous)
-        fields["published"] = effective_published
-        next_revision = existing.revision + 1
-        advance_public = existing.published or effective_published != existing.published
-        next_public_revision = (
-            (existing.public_revision or 0) + 1 if advance_public else existing.public_revision
-        )
-        assignments = ", ".join(f"{key} = %({key})s" for key in fields)
+        if updated["published"]:
+            _require_board_has_sources(board_id)
+        assignments = ", ".join(f"{key} = %({key})s" for key in updated)
         db.execute(
             f"UPDATE managed_boards SET {assignments}, revision = %(next_revision)s, "
             "public_revision = %(next_public_revision)s, "
@@ -455,7 +499,7 @@ def patch_managed_board(
                 "board_id": board_id,
                 "next_revision": next_revision,
                 "next_public_revision": next_public_revision,
-                **fields,
+                **updated,
             },
         )
         board = _get(board_id)
