@@ -66,9 +66,13 @@ def upgrade() -> None:
         sa.Column(
             "rejected_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
         ),
+        # The index build below commits what precedes it, so a start that
+        # times out on the build retries all of it: everything here applies
+        # again over what it already made.
+        if_not_exists=True,
     )
     op.execute(f"CREATE OR REPLACE VIEW page_texts AS {_SELECT} {_NOT_REJECTED}")
-    op.execute(f"CREATE VIEW page_fetch_texts AS {_SELECT}")
+    op.execute(f"CREATE OR REPLACE VIEW page_fetch_texts AS {_SELECT}")
     with op.get_context().autocommit_block():
         # A judgment, not a measurement: a start can afford a minute for the
         # transactions in flight, and past that the wait is not ending.
@@ -95,6 +99,6 @@ def downgrade() -> None:
         op.drop_index(
             _INDEX, table_name="page_fetches", postgresql_concurrently=True, if_exists=True
         )
-    op.execute("DROP VIEW page_fetch_texts")
+    op.execute("DROP VIEW IF EXISTS page_fetch_texts")
     op.execute(f"CREATE OR REPLACE VIEW page_texts AS {_SELECT}")
     op.drop_table("page_text_rejections")

@@ -268,16 +268,25 @@ def host_paced(url: str) -> bool:
     return False
 
 
-# The run of empty fetches since the url's last successful one. The failed
-# content rows refresh_content writes are the only memory of an attempt, so
-# the run is read off them rather than kept as state that could disagree.
+# The run of fetches that brought back no posting text since the url's last
+# one that did. The failed content rows refresh_content writes are the only
+# memory of an attempt, so the run is read off them rather than kept as state
+# that could disagree. A passed fetch whose text is not the posting's
+# (page_text_rejections: a maintenance notice, a career site's shell) brought
+# back none either: counting it is what parks a posting whose site only ever
+# serves that page, or whose text the rule rejects wrongly, instead of
+# fetching it again every window.
 # It walks each arm's url index, a few dozen rows a url at most.
 FETCH_STREAK = """
     SELECT count(*) AS failures, max(f.created_at) AS last_failed
     FROM page_fetches f
-    WHERE f.url = {url} AND f.status = 'failed'
+    WHERE f.url = {url}
+      AND (f.status = 'failed'
+           OR EXISTS (SELECT 1 FROM page_text_rejections r WHERE r.fetch_id = f.id))
       AND f.id > COALESCE((SELECT max(p.id) FROM page_fetches p
-                           WHERE p.url = {url} AND p.status = 'passed'), 0)
+                           WHERE p.url = {url} AND p.status = 'passed'
+                             AND NOT EXISTS (SELECT 1 FROM page_text_rejections r
+                                             WHERE r.fetch_id = p.id)), 0)
 """
 
 

@@ -119,17 +119,38 @@ def test_the_sweep_judges_older_fetches_once_their_text_is_shared(f, objects):
     assert through == second
 
 
-def test_the_sweep_resumes_and_stops_below_inline_text(f, objects):
+def test_the_sweep_judges_inline_text_by_its_own_digest(f, objects):
     f.make_job(url="https://jobs.test/a", title="Paralegal")
-    done = page_fetches.record("https://jobs.test/a", "passed", "scraped", _posting("Paralegal"))
-    assert _run() == done
+    f.make_job(url="https://jobs.test/b", title="Software Engineer")
+    held = page_fetches.record("https://jobs.test/a", "passed", "scraped", NOTICE)
     inline = db.query_one(
         "INSERT INTO page_fetches (url, status, method, content) "
-        "VALUES ('https://jobs.test/a', 'passed', 'scraped', %s) RETURNING id",
-        (_posting("Paralegal"),),
+        "VALUES ('https://jobs.test/b', 'passed', 'scraped', %s) RETURNING id",
+        (NOTICE,),
     )
     assert inline is not None
-    after = page_fetches.record("https://jobs.test/a", "passed", "scraped", _posting("Paralegal"))
-    # The inline row has no digest yet, so the walk waits below it.
-    assert _run() == done
-    assert after > inline["id"]
+    assert _run() == inline["id"]
+    assert _rejected() == {held, inline["id"]}
+
+
+def test_a_boards_record_in_a_shared_group_is_left_alone(f, objects):
+    f.make_job(url="https://jobs.test/a", title="Cashier")
+    f.make_job(url="https://jobs.test/b", title="Customer Service Associate")
+    board = page_fetches.record("https://jobs.test/a", "passed", "ats text", NOTICE)
+    page = page_fetches.record("https://jobs.test/b", "passed", "scraped", NOTICE)
+    _run()
+    assert _rejected() == {page}
+    assert board not in _rejected()
+
+
+def test_a_rejected_fetch_counts_toward_the_fetch_streak(f, objects):
+    from api.ai import verdicts
+
+    f.make_job(url="https://jobs.test/a", title="Paralegal")
+    url = "https://jobs.test/b"
+    f.make_job(url=url, title="Software Engineer - Austin")
+    page_fetches.record("https://jobs.test/a", "passed", "scraped", NOTICE)
+    page_fetches.record(url, "passed", "scraped", NOTICE)
+    assert verdicts.fetch_failure_streaks([url]) == {url: 1}
+    page_fetches.record(url, "passed", "scraped", _posting("Software Engineer - Austin"))
+    assert verdicts.fetch_failure_streaks([url]) == {}

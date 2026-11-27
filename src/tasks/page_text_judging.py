@@ -8,10 +8,12 @@ shared later, when another posting's page comes back the same, and then its
 older fetches are judged too: this sweep walks page_fetches in id order and
 judges every text a new fetch carries, all of that text's fetches at once.
 
-The walk stops below the oldest fetch whose text is still inline: such a row
-has no digest until tasks.page_text_tiering moves it, so passing it would
-skip it for good. The cursor is the latest run's `through`, so a run killed by
-a deploy resumes where it stopped, and the first run walks the history.
+A fetch whose text is still inline (tasks.page_text_tiering has not moved
+it) has no stored digest, so the step takes it from the text. The cursor is
+the latest run's `through`, so a run killed by a deploy resumes where it
+stopped, and the first run walks the history. A fetch that commits after the
+walk passed its id was judged when written; the older fetches of its text
+are judged again when the next fetch of that text arrives.
 
 A newly rejected fetch's local embedding is removed with it, in one
 transaction, so tasks.derivations.local_embeddings embeds the posting again
@@ -54,47 +56,66 @@ def _start() -> int:
 
 
 def _limit() -> int:
-    """The last fetch id the walk may pass: below the oldest inline text
-    (idx_page_fetches_inline_text), else the newest fetch."""
-    row = db.query_one(
-        "SELECT (SELECT min(id) FROM page_fetches WHERE content <> '') AS inline, "
-        "(SELECT max(id) FROM page_fetches) AS newest"
-    )
-    if row is None or row["newest"] is None:
-        return 0
-    return row["inline"] - 1 if row["inline"] is not None else row["newest"]
+    """The newest fetch id, where this run's walk ends."""
+    row = db.query_one("SELECT max(id) AS newest FROM page_fetches")
+    return row["newest"] if row and row["newest"] is not None else 0
 
 
-def _texts(groups: dict[bytes, list[dict[str, Any]]]) -> dict[bytes, str]:
-    """One fetch's text for each digest, read from what that fetch held
-    (page_fetch_texts), whether or not it was already rejected."""
-    first = {members[0]["id"]: sha for sha, members in groups.items()}
-    rows = db.query(
-        "SELECT id, input_content, content_ref FROM page_fetch_texts WHERE id = ANY(%s)",
-        (list(first),),
+def _texts(groups: dict[bytes, list[dict[str, Any]]], inline: dict[bytes, str]) -> dict[bytes, str]:
+    """Each digest's text: from an inline fetch of it when the step met one,
+    else read from what one of its fetches held (page_fetch_texts), whether
+    or not that fetch was already rejected."""
+    first = {members[0]["id"]: sha for sha, members in groups.items() if sha not in inline}
+    rows = (
+        db.query(
+            "SELECT id, input_content, content_ref FROM page_fetch_texts WHERE id = ANY(%s)",
+            (list(first),),
+        )
+        if first
+        else []
     )
-    return {first[r["id"]]: r["input_content"] or "" for r in page_fetches.resolve(rows)}
+    held = {first[r["id"]]: r["input_content"] or "" for r in page_fetches.resolve(rows)}
+    return {sha: inline.get(sha, held.get(sha, "")) for sha in groups}
 
 
 def step(after: int, through: int) -> tuple[int, int, int]:
     """Judge the texts of fetches (after, through], at most STEP_FETCHES of
     them. Returns the last id read, the fetches newly rejected, and the
-    embeddings removed with them."""
+    embeddings removed with them.
+
+    A fetch whose text is still inline has no digest until
+    tasks.page_text_tiering moves it, so its digest is taken here from the
+    text and it joins its text's other fetches as one of them."""
     rows = db.query(
-        "SELECT id, content_sha256 AS sha FROM page_fetches "
-        "WHERE id > %s AND id <= %s ORDER BY id LIMIT %s",
+        "SELECT f.id, f.content_sha256 AS sha, f.method, f.status, j.title, "
+        "CASE WHEN f.content <> '' THEN f.content END AS inline "
+        "FROM page_fetches f LEFT JOIN jobs j ON j.url = f.url "
+        "WHERE f.id > %s AND f.id <= %s ORDER BY f.id LIMIT %s",
         (after, through, STEP_FETCHES),
     )
     if not rows:
         return through, 0, 0
-    shas = {bytes(r["sha"]) for r in rows if r["sha"] is not None}
+    inline: dict[bytes, str] = {}
+    unheld: list[tuple[bytes, dict[str, Any]]] = []
+    for r in rows:
+        if r["inline"] is not None:
+            sha = bytes.fromhex(page_fetches.digest(r["inline"]))
+            inline[sha] = r["inline"]
+            if r["status"] == "passed" and r["title"] is not None:
+                unheld.append((sha, r))
+    shas = {bytes(r["sha"]) for r in rows if r["sha"] is not None} | set(inline)
+    groups = page_fetches.members_of(shas)
+    for sha, r in unheld:
+        groups.setdefault(sha, []).append(
+            {"id": r["id"], "sha": sha, "method": r["method"], "title": r["title"]}
+        )
     groups = {
         sha: members
-        for sha, members in page_fetches.members_of(shas).items()
+        for sha, members in groups.items()
         if len({page_fetches.role(m["title"]) for m in members}) > 1
         and any(m["method"] not in page_fetches.BOARD_RECORDS for m in members)
     }
-    texts = _texts(groups) if groups else {}
+    texts = _texts(groups, inline) if groups else {}
     foreign = [
         fetch_id
         for sha, members in groups.items()

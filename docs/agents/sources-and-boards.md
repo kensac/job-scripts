@@ -693,9 +693,10 @@ verdicts were rejections read off the maintenance page.
 
 **Such a fetch is named in `page_text_rejections`, and `page_texts` leaves it
 out.** The fetch stays, as the record of what the page said, and keeps its
-status: the closed check still reads a closure page ("This job is no longer
-available"), which is evidence, so marking it failed would leave the posting
-open and park it as unfetchable. Every reader of a posting's text goes
+status: re-verification judges the page it has just fetched, so it still
+reads a closure page ("This job is no longer available"), which is evidence.
+New-posting verification reads the posting's text through `page_texts` and
+does not see one. Every reader of a posting's text goes
 through `page_texts` and so falls back to the posting's newest fetch that is
 its own (`CONTENT_LATERAL` is `ORDER BY id DESC LIMIT 1` over the view), or
 finds none and fetches again. A reader asking what one fetch held, by id,
@@ -725,10 +726,18 @@ posting's page comes back the same; the `judge_page_texts` task
 (`tasks.page_text_judging`) walks `page_fetches` in id order, judges every
 text a new fetch carries across all of that text's fetches
 (`idx_page_fetches_content_sha256`), and resumes from the latest run's
-`through`. It stops below the oldest fetch whose text is still inline, which
-has no digest until `tier_page_text` moves it. It runs only beside the
-database, like `tier_page_text`: it reads the shared texts from object
-storage.
+`through`. A fetch whose text is still inline has no stored digest until
+`tier_page_text` moves it, so the walk takes it from the text. It runs only
+beside the database, like `tier_page_text`: it reads the shared texts from
+object storage.
+
+**A wrong rejection backs off like a failed fetch.** The rule's known miss is a
+title carrying a word its page never says: a location or seniority suffix on
+one description shared by several postings ("Software Engineer - Austin" and
+"- Denver" on a page that says neither). Such a posting has no text and its
+next fetch is rejected again, so a rejected fetch counts toward the fetch
+streak (`verdicts.FETCH_STREAK`) and the posting is retried less often, then
+not at all, as any page that keeps failing is.
 
 **What was derived from a rejected text is redone.** The sweep removes a
 newly rejected fetch's local embedding in the same transaction, so
@@ -1233,8 +1242,11 @@ worker, which was most of the fleet's block rate.
 
 ## A page that keeps failing is retried less often, then not at all
 
-The run of failed `page_fetches` rows since the URL's last passed one decides
-whether an automatic path may fetch it (`verdicts.fetch_parked_sql`). After
+The run of `page_fetches` rows that brought back no posting text since the
+URL's last one that did decides whether an automatic path may fetch it
+(`verdicts.fetch_parked_sql`): failed rows, and passed rows whose text is
+rejected as not the posting's, so a site that only ever serves its shell is
+retried less often like any other failure, not fetched every cycle. After
 the k-th consecutive failure the wait is `fetch_retry_after_hours * 2^(k-1)`,
 capped at `fetch_retry_max_hours`. At `fetch_give_up_after_failures` the
 posting is unfetchable and nothing automatic fetches it again.

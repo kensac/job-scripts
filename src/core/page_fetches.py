@@ -250,7 +250,13 @@ def record_many(fetches: Sequence[Fetch]) -> list[int]:
             (WORKER, *columns),
         ).fetchall()
     ids = sorted(row["id"] for row in rows)
-    _reject_new(ids, fetches)
+    # The fetches are stored; judging them now only spares a reader a page
+    # that is not its posting until the sweep (tasks.page_text_judging)
+    # judges them anyway, so a failure here must not read as a failed fetch.
+    try:
+        _reject_new(ids, fetches)
+    except Exception:
+        logger.warning("page fetches %s were not judged when written", ids, exc_info=True)
     return ids
 
 
