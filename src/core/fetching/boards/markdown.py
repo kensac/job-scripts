@@ -35,6 +35,39 @@ def _link(cell: str) -> str:
     return (m.group(1) or m.group(2)) if m else ""
 
 
+def _parse_header_columns(heads: list[str]) -> dict[str, int]:
+    columns: dict[str, int] = {}
+    for i, h in enumerate(heads):
+        if h in _TITLE_HEADERS:
+            columns["title"] = i
+        elif h == "location":
+            columns["location"] = i
+        elif h in _DATE_HEADERS:
+            columns["date"] = i
+        elif h == "posting" or h.startswith("appl"):
+            columns["link"] = i
+    return columns
+
+
+def _parse_row(
+    cells: list[str], columns: dict[str, int], previous_company: str
+) -> tuple[str, JobPosting | None]:
+    cell = {k: cells[i] for k, i in columns.items() if i < len(cells)}
+    raw_company = _text(cells[0])
+    company = previous_company if raw_company == "↳" else raw_company
+    url = _link(cell.get("link", "")) or _link(cell.get("title", ""))
+    location = _text(cell.get("location", "").replace("</br>", "; "))
+    location = re.sub(r"\s*\+\d+\s*$", "", location)
+    posting = posting_from_listing(
+        company,
+        _text(cell.get("title", "")),
+        location.split(";"),
+        url,
+        posted_ts(cell.get("date", "")),
+    )
+    return company, posting
+
+
 def parse_markdown(text: str) -> list[JobPosting]:
     out: list[JobPosting] = []
     columns: dict[str, int] = {}
@@ -46,33 +79,13 @@ def parse_markdown(text: str) -> list[JobPosting]:
         cells = [c.strip() for c in line.strip("|").split("|")]
         heads = [_text(c).lower() for c in cells]
         if heads and heads[0] == "company":
-            columns = {}
-            for i, h in enumerate(heads):
-                if h in _TITLE_HEADERS:
-                    columns["title"] = i
-                elif h == "location":
-                    columns["location"] = i
-                elif h in _DATE_HEADERS:
-                    columns["date"] = i
-                elif h == "posting" or h.startswith("appl"):
-                    columns["link"] = i
+            columns = _parse_header_columns(heads)
             continue
         if not columns or "title" not in columns or set(cells[0]) <= {"-", ":"}:
             continue
-        cell = {k: cells[i] for k, i in columns.items() if i < len(cells)}
-        company = _text(cells[0]) if _text(cells[0]) != "↳" else company
-        url = _link(cell.get("link", "")) or _link(cell.get("title", ""))
-        location = _text(cell.get("location", "").replace("</br>", "; "))
-        location = re.sub(r"\s*\+\d+\s*$", "", location)
-        p = posting_from_listing(
-            company,
-            _text(cell.get("title", "")),
-            location.split(";"),
-            url,
-            posted_ts(cell.get("date", "")),
-        )
-        if p:
-            out.append(p)
+        company, posting = _parse_row(cells, columns, company)
+        if posting:
+            out.append(posting)
     return out
 
 

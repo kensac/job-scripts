@@ -36,13 +36,7 @@ def _tier_for(rates: Rates, prompt_tokens: Decimal) -> Tier:
 
 
 def cached_rate(tier: Tier) -> Decimal:
-    """A cache hit's rate, or the full input rate when the vendor publishes none.
-
-    Alibaba, for two of its models, names them explicitly and declines to give
-    a number. Billing those at the input rate overstates a cache hit rather
-    than inventing a discount - the same reasoning that books an unpriced model
-    as NULL instead of zero.
-    """
+    """Return the cached-input rate, falling back to full input rate when unpublished."""
     return tier.rate_in if tier.rate_cached_in is None else tier.rate_cached_in
 
 
@@ -52,16 +46,12 @@ def cache_write_rate(tier: Tier) -> Decimal | None:
 
 
 def is_off_peak(rates: Rates, at: datetime.datetime | None) -> bool:
-    """Whether `at` falls outside every declared peak window.
+    """Return whether `at` (UTC, isodow 1=Monday) falls outside all declared peak windows.
 
-    False whenever the answer is not knowable: no timestamp, no declared
-    windows, or no published discount. That is the safe direction - the tier
-    rates ARE the peak rates, so returning False bills the undiscounted price
-    rather than inventing a discount, exactly as cached_rate() does when a
-    vendor publishes no cached rate.
+    isodow is converted here and only here so the SQL rendering and this one agree.
 
-    isodow, 1=Monday, converted here and only here so the SQL rendering and
-    this one cannot disagree about which day is which.
+    Returns False when `at`, peak windows, or off-peak multiplier is missing so
+    undiscounted peak rates apply by default.
     """
     if at is None or not rates.peak_windows or rates.off_peak_multiplier is None:
         return False
@@ -83,21 +73,14 @@ def estimate_cost_usd(
     at: datetime.datetime | None = None,
     cache_write_tokens: int | _UnspecifiedCacheWrite | None = _UNSPECIFIED_CACHE_WRITE,
 ) -> Decimal | None:
-    """Cost of ONE call, or None when the model has no published price.
+    """Price a single call, or return None when the model or cache-write cost is unknown.
 
-    Returning None rather than 0 keeps "we do not know what this cost" distinct
-    from "this was free"; summing a column of NULLs tells you coverage is
-    incomplete, summing a column of zeros silently understates the bill.
+    None, not 0: summed zeros silently understate the bill, summed NULLs show
+    incomplete coverage.
 
-    One call, not many: the tier is chosen by this request's prompt length, so
-    passing summed tokens for a tiered model prices a request that never
-    happened.
-
-    `at` is when the request was made, for the vendors that bill by wall-clock
-    time. Omitting it bills the PEAK rate rather than reading the clock here:
-    the function stays deterministic and testable, and a caller that does not
-    know the time overstates instead of guessing a discount. Every caller that
-    matters does know it - cost is written at call time.
+    Must be called per request because prompt-length tier selection depends on a
+    single request's prompt tokens. Omitting `at` bills peak rates rather than
+    reading the wall clock.
     """
     rates = rates_for(model)
     if rates is None:
@@ -109,12 +92,10 @@ def estimate_cost_usd(
     tier = _tier_for(rates, prompt)
     write_rate = cache_write_rate(tier)
     if cache_write_tokens is _UNSPECIFIED_CACHE_WRITE:
-        # A reservation has no provider receipt. Reserve for every uncached
-        # token being written, which is the conservative GPT-5.6+ case.
+        # Pre-call reservation has no receipt; conservatively assume all uncached tokens write.
         cache_write = remaining if write_rate is not None else Decimal(0)
     elif cache_write_tokens is None:
-        # A receipt that omits the field is unknown. If the model publishes a
-        # premium write rate, returning NULL avoids inventing zero writes.
+        # Receipt omitted cache writes; return None if the model charges a premium write rate.
         if write_rate is not None and write_rate != tier.rate_in:
             return None
         cache_write = Decimal(0)
@@ -129,15 +110,12 @@ def estimate_cost_usd(
         + cache_write * (write_rate if write_rate is not None else tier.rate_in)
         + completion * tier.rate_out
     ) / _PER_MTOK
+    # A batched call with no batch lane bills at the synchronous rate; a discount
+    # there would under-report cost.
     if batched and rates.batch_rate is not None:
         cost *= rates.batch_rate
     if is_off_peak(rates, at) and rates.off_peak_multiplier is not None:
         cost *= rates.off_peak_multiplier
-    # A batched call on a model whose vendor publishes no batch lane bills at
-    # the synchronous rate, so there is nothing to apply. Applying a discount
-    # here anyway would report a fraction of the true cost on the one surface
-    # built to make cost visible - a wrong number, which is worse than the NULL
-    # an unpriced model gets.
     return cost
 
 
@@ -154,25 +132,14 @@ def cost_sql(
     cache_write: str | None = None,
     batched: str,
 ) -> str:
-    """The same formula as estimate_cost_usd, rendered as a SQL expression.
+    """Render `estimate_cost_usd` as a SQL expression for bulk pricing.
 
-    Bulk pricing (a backfill over 74k rows, an aggregate over a time window)
-    has to happen in the database; pulling every row into Python to price it
-    would be absurd. But a second hand-written copy of the formula is exactly
-    the drift this module exists to end, so both renderings are generated here
-    and tested against each other.
+    Both renderings live here and are tested against each other; never hand-copy
+    the formula elsewhere.
 
-    Every rate is a placeholder the caller binds, including the cached rate and
-    the batch multiplier, because no discount is universal across models. A
-    caller whose model has no batch lane binds 1.
-
-    Wall-clock discounts are NOT rendered here either: estimate_cost_usd
-    applies them from `at`, and no bulk caller prices a provider that has them.
-
-    Tier selection is NOT rendered here. A tiered model's rate depends on each
-    row's own prompt length, so a caller pricing in bulk binds the rates per
-    tier and restricts each statement to the matching prompt range - the way
-    the backfill already issues one statement per model.
+    Callers bind per-tier rates (and 1 for `batch_rate` when a model has no batch
+    lane), filter rows by tier prompt range when needed, and handle wall-clock
+    off-peak discounts outside SQL.
     """
     p = f"GREATEST(COALESCE({prompt}, 0), 0)"
     c = f"GREATEST(COALESCE({completion}, 0), 0)"
