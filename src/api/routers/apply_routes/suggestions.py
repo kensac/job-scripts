@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -87,14 +88,7 @@ def never_filled(fields: list[SuggestField]) -> list[str]:
     ]
 
 
-@router.post("/user/apply/suggest", responses=AI_REFUSALS)
-async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -> Suggested:
-    """Everything the ladder left blank, in one live call on the person's
-    own model settings. The extension fills the answers; the person still
-    sees them in the form before submitting, and an answer left in place
-    goes into the bank on submit."""
-    token = None
-    saved = {}
+def _validate_suggest_request(body: SuggestBody, user_id: int) -> None:
     if body.review_only and (
         body.fill_id is None or body.revision is None or len(body.fields) != 1
     ):
@@ -104,39 +98,30 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     # Touchable, the rule resolve_form matches a fill's posting by: the
     # posting text goes into the prompt, and another person's private upload
     # is not this person's to read.
-    if body.job_id and not touchable_job_ids(user.id, [body.job_id]):
+    if body.job_id and not touchable_job_ids(user_id, [body.job_id]):
         raise refuse(404, "NOT_FOUND", "unknown job")
-    if body.fill_id is not None:
-        token, saved = fill_answers.reserve(
-            user.id,
-            body.fill_id,
-            [f.key for f in body.fields],
-            body.job_id,
-            expected_revision=body.revision if body.review_only else None,
-        )
-    skipped = never_filled(body.fields)
-    fields = [f for f in body.fields if f.key not in skipped]
-    if not fields:
-        _finish_suggestions(user.id, body, token, {}, {}, skipped)
-        record_apply_event(
-            "apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None
-        )
-        return Suggested(answers={}, skipped=skipped, model=None)
-    profile = apply.load_profile(user.id)
-    resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
-    cfg = ai_access.require_config(user)
+
+
+async def _build_suggest_prompt(
+    user_id: int,
+    body: SuggestBody,
+    fields: list[SuggestField],
+    saved: dict[str, Any],
+    profile: apply.Profile,
+    resume: str,
+) -> str:
     job = (
         db.query_one("SELECT company, title, url FROM jobs WHERE id = %s", (body.job_id,))
         if body.job_id
         else None
     )
-    parts = []
+    parts: list[str] = []
     if job:
         parts.append(f"Job: {job['title']} at {job['company']}")
     if any(f.kind in {"text", "long"} and not f.options for f in fields):
         posting = get_content(job["url"]) if job else None
         if not posting and body.fill_id is not None:
-            posting = await posting_context.external_posting(user.id, body.fill_id)
+            posting = await posting_context.external_posting(user_id, body.fill_id)
         parts.append(f"Posting:\n{(posting or '')[:6000] or '(no posting text captured)'}")
     parts.append("Fields:\n" + json.dumps([f.model_dump() for f in fields], indent=1))
     if body.review_only:
@@ -158,33 +143,66 @@ async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -
     parts.append("Profile:\n" + profile.model_dump_json(exclude={"default_resume_id", "notes"}))
     if resume:
         parts.append("Resume:\n" + resume)
-    rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
-    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id)) + MULTI_CHOICE
-    with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
-        parsed, usage = await ai.parse(cfg, rules, "\n\n".join(parts), Suggestions)
-    budget.record_tokens(
-        user.id,
-        cfg.key_source,
-        drafts.PURPOSE,
-        cfg.model,
-        usage,
-    )
-    if parsed is None:
-        raise refuse(502, "NO_ANSWER", "the model returned no usable answer; try again")
+    return "\n\n".join(parts)
+
+
+def _match_suggested_answers(
+    parsed: Suggestions, fields: list[SuggestField]
+) -> tuple[dict[str, str], dict[str, str]]:
     by_key = {f.key: f for f in fields}
-    answers = {}
-    raw = {}
-    for a in parsed.answers:
-        field = by_key.get(a.key)
-        text = a.answer.strip()
+    answers: dict[str, str] = {}
+    raw: dict[str, str] = {}
+    for answer in parsed.answers:
+        field = by_key.get(answer.key)
+        text = answer.answer.strip()
         if not field or not text:
             continue
-        raw[a.key] = text
+        raw[answer.key] = text
         if field.options:
             pick = apply.pick_options if field.kind == "multiselect" else apply.pick_option
             text = pick(text, field.options) or ""
         if text:
-            answers[a.key] = text
+            answers[answer.key] = text
+    return answers, raw
+
+
+@router.post("/user/apply/suggest", responses=AI_REFUSALS)
+async def suggest(body: SuggestBody, user: AuthedUser = Depends(require_user)) -> Suggested:
+    """Everything the ladder left blank, in one live call on the person's
+    own model settings. The extension fills the answers; the person still
+    sees them in the form before submitting, and an answer left in place
+    goes into the bank on submit."""
+    _validate_suggest_request(body, user.id)
+    token = None
+    saved: dict[str, Any] = {}
+    if body.fill_id is not None:
+        token, saved = fill_answers.reserve(
+            user.id,
+            body.fill_id,
+            [f.key for f in body.fields],
+            body.job_id,
+            expected_revision=body.revision if body.review_only else None,
+        )
+    skipped = never_filled(body.fields)
+    fields = [f for f in body.fields if f.key not in skipped]
+    if not fields:
+        _finish_suggestions(user.id, body, token, {}, {}, skipped)
+        record_apply_event(
+            "apply_ai_suggested", user, asked=0, answered=0, skipped=len(skipped), model=None
+        )
+        return Suggested(answers={}, skipped=skipped, model=None)
+    profile = apply.load_profile(user.id)
+    resume = drafts.resume_text(user.id, profile.default_resume_id) or ""
+    cfg = ai_access.require_config(user)
+    prompt = await _build_suggest_prompt(user.id, body, fields, saved, profile, resume)
+    rules = (db.get_config("application_suggest_instructions") or "").strip() or DEFAULT_SUGGEST
+    rules = drafts.with_answer_guidance(rules, drafts.writing_style(user.id)) + MULTI_CHOICE
+    with budget.record_parse_failures(user.id, cfg.key_source, drafts.PURPOSE, cfg.model):
+        parsed, usage = await ai.parse(cfg, rules, prompt, Suggestions)
+    budget.record_tokens(user.id, cfg.key_source, drafts.PURPOSE, cfg.model, usage)
+    if parsed is None:
+        raise refuse(502, "NO_ANSWER", "the model returned no usable answer; try again")
+    answers, raw = _match_suggested_answers(parsed, fields)
     _finish_suggestions(user.id, body, token, answers, raw, skipped)
     record_apply_event(
         "apply_ai_suggested",

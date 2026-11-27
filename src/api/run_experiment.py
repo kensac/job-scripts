@@ -58,10 +58,92 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(_run(args))
 
 
-async def _run(args: argparse.Namespace) -> int:
+def _bound_cost(
+    arms: list[tuple[str, str]],
+    instructions: str,
+    inputs: dict[str, str],
+    max_output_tokens: int,
+) -> tuple[float | None, str | None]:
+    """Upper-bound batch cost assuming full output caps and the batch token estimate."""
+    from core import pricing
+    from core.batch import BATCH_CHARS_PER_TOKEN
+
+    bound = 0.0
+    for model, _ in arms:
+        for text in inputs.values():
+            cost = pricing.estimate_cost_usd(
+                model,
+                (len(instructions) + len(text)) // BATCH_CHARS_PER_TOKEN,
+                max_output_tokens,
+                batched=True,
+            )
+            if cost is None:
+                return None, model
+            bound += float(cost)
+    return bound, None
+
+
+def _collect_arm_results(
+    step: Any,
+    arms: list[tuple[str, str]],
+    answered: list[dict[str, Any]],
+    label: str | None,
+) -> list[dict[str, Any]]:
     from api import experiments as exp
     from core import pricing
-    from core.batch import BATCH_CHARS_PER_TOKEN, run_responses_batch, structured_response_spec
+
+    results = []
+    for (model, effort), by_url in zip(arms, answered, strict=True):
+        arm = exp.arm_name(model, effort, label)
+        for url, res in by_url.items():
+            usage = exp.usage(res)
+            cost = pricing.estimate_cost_usd(
+                model,
+                usage["input_tokens"],
+                usage["output_tokens"],
+                cached_tokens=usage["cached_tokens"],
+                cache_write_tokens=usage["cache_write_tokens"],
+                batched=True,
+            )
+            output, error = None, res.error
+            if res.text and not res.error:
+                try:
+                    output = step.answer_model.model_validate_json(res.text).model_dump(mode="json")
+                except ValueError as e:
+                    error = f"unparsable: {str(e)[:200]}"
+            results.append(
+                {
+                    "arm": arm,
+                    "url": url,
+                    "output": output,
+                    "usage": usage,
+                    "cost_usd": float(cost) if cost is not None else None,
+                    "error": error,
+                }
+            )
+    return results
+
+
+def _write_run_artifacts(
+    out_dir: Path,
+    step_name: str,
+    params: dict[str, Any],
+    results: list[dict[str, Any]],
+    reference: str | None,
+) -> dict[str, Any]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "run.json").write_text(json.dumps({"purpose": step_name, "params": params}))
+    with (out_dir / "results.jsonl").open("w") as f:
+        for r in results:
+            f.write(json.dumps(r) + "\n")
+    summary = _score([out_dir], reference)
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    return summary
+
+
+async def _run(args: argparse.Namespace) -> int:
+    from api import experiments as exp
+    from core.batch import run_responses_batch, structured_response_spec
 
     step = exp.steps().get(args.step)
     if step is None:
@@ -89,29 +171,17 @@ async def _run(args: argparse.Namespace) -> int:
     params["sampled"] = len(rows)
     inputs = {r["url"]: step.build_input(r) for r in rows}
     lengths = [len(i) for i in inputs.values()]
-    # Worst case per request: the whole output cap is spent, input at the
-    # batch transport's own chars-per-token estimate.
-    bound = 0.0
-    for model, _ in arms:
-        for text in inputs.values():
-            cost = pricing.estimate_cost_usd(
-                model,
-                (len(instructions) + len(text)) // BATCH_CHARS_PER_TOKEN,
-                step.max_output_tokens,
-                batched=True,
-            )
-            if cost is None:
-                print(f"{model} has no published price; spend cannot be bounded", file=sys.stderr)
-                return 2
-            bound += float(cost)
+    bound, unpriced_model = _bound_cost(arms, instructions, inputs, step.max_output_tokens)
+    if bound is None:
+        print(f"{unpriced_model} has no published price; spend cannot be bounded", file=sys.stderr)
+        return 2
     plan = {
         "step": args.step,
         "arms": [exp.arm_name(m, e, args.label) for m, e in arms],
         "skipped": skipped,
         "postings": len(rows),
         "requests": len(rows) * len(arms),
-        # The 2026-09-06 filter comparison sent every request a posting's
-        # first line. Read these before submitting.
+        # Check input_chars before submitting to catch truncated or header-only inputs.
         "input_chars": {
             "min": min(lengths),
             "median": int(statistics.median(lengths)),
@@ -133,41 +203,8 @@ async def _run(args: argparse.Namespace) -> int:
     answered = await asyncio.gather(
         *(run_responses_batch(specs, m, e, step.max_output_tokens) for m, e in arms)
     )
-    results = []
-    for (model, effort), by_url in zip(arms, answered, strict=True):
-        for url, res in by_url.items():
-            usage = exp.usage(res)
-            cost = pricing.estimate_cost_usd(
-                model,
-                usage["input_tokens"],
-                usage["output_tokens"],
-                cached_tokens=usage["cached_tokens"],
-                cache_write_tokens=usage["cache_write_tokens"],
-                batched=True,
-            )
-            output, error = None, res.error
-            if res.text and not res.error:
-                try:
-                    output = step.answer_model.model_validate_json(res.text).model_dump(mode="json")
-                except ValueError as e:
-                    error = f"unparsable: {str(e)[:200]}"
-            results.append(
-                {
-                    "arm": exp.arm_name(model, effort, args.label),
-                    "url": url,
-                    "output": output,
-                    "usage": usage,
-                    "cost_usd": float(cost) if cost is not None else None,
-                    "error": error,
-                }
-            )
-    args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "run.json").write_text(json.dumps({"purpose": args.step, "params": params}))
-    with (args.out / "results.jsonl").open("w") as f:
-        for r in results:
-            f.write(json.dumps(r) + "\n")
-    summary = _score([args.out], args.reference)
-    (args.out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    results = _collect_arm_results(step, arms, answered, args.label)
+    summary = _write_run_artifacts(args.out, args.step, params, results, args.reference)
     print(json.dumps(summary, indent=2, default=str))
     return 0
 

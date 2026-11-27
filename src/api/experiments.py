@@ -302,11 +302,9 @@ def _agreement(a: dict[str, Any], b: dict[str, Any]) -> dict[str, float]:
     return out
 
 
-def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Score answers already collected: per arm cost, tokens, failures and
-    agreement with the reference arm and with what production decided. Each
-    row carries arm, url, output, usage, cost_usd and error."""
-    step = steps()[purpose]
+def _accumulate_arm_rows(
+    step: ExperimentStep, rows: list[dict[str, Any]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict]]]:
     by_arm: dict[str, dict[str, Any]] = {}
     fields_by_arm: dict[str, dict[str, dict]] = {}
     for r in rows:
@@ -338,8 +336,12 @@ def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str,
         else:
             a["ok"] += 1
             fields_by_arm.setdefault(r["arm"], {})[r["url"]] = step.project(r["output"])
-    urls = sorted({r["url"] for r in rows})
-    deployed = deployed_verdicts(purpose, urls, params)
+    return by_arm, fields_by_arm
+
+
+def _select_reference_arm(
+    by_arm: dict[str, dict[str, Any]], params: Params
+) -> tuple[str | None, str | None]:
     explicit_reference = params.get("reference")
     incomplete_costs = any(a["unpriced_results"] for a in by_arm.values())
     reference = explicit_reference or (
@@ -348,38 +350,61 @@ def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str,
         else None
     )
     reference_reason = "cost_incomplete" if incomplete_costs and not explicit_reference else None
-    for arm, a in by_arm.items():
-        n = a["n"] or 1
-        known_cost = a["known_cost_usd"]
-        a["cost_per_100_usd"] = (
-            round(known_cost / n * 100, 4) if a["unpriced_results"] == 0 else None
+    return reference, reference_reason
+
+
+def _mean_agreement(
+    mine: dict[str, dict[str, Any]], other: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    common = [u for u in mine if u in other]
+    if not common:
+        return None
+    per_field: dict[str, float] = {}
+    for u in common:
+        for k, v in _agreement(mine[u], other[u]).items():
+            per_field[k] = per_field.get(k, 0.0) + v
+    return {"n": len(common), **{k: round(v / len(common), 3) for k, v in per_field.items()}}
+
+
+def _finalize_arm_stats(
+    arm_stats: dict[str, Any],
+    mine: dict[str, dict[str, Any]],
+    reference_fields: dict[str, dict[str, Any]],
+    deployed: Deployed,
+    purpose: str,
+) -> None:
+    n = arm_stats["n"] or 1
+    known_cost = arm_stats["known_cost_usd"]
+    arm_stats["cost_per_100_usd"] = (
+        round(known_cost / n * 100, 4) if arm_stats["unpriced_results"] == 0 else None
+    )
+    arm_stats["known_cost_usd"] = round(known_cost, 4)
+    arm_stats["cost_usd"] = None if arm_stats["unpriced_results"] else arm_stats["known_cost_usd"]
+    arm_stats["input_per_request"] = round(arm_stats["input_tokens"] / n)
+    arm_stats["output_per_request"] = round(arm_stats["output_tokens"] / n)
+    arm_stats["reasoning_per_request"] = round(arm_stats["reasoning_tokens"] / n)
+    arm_stats["agreement_with_reference"] = _mean_agreement(mine, reference_fields)
+    arm_stats["agreement_with_deployed"] = _mean_agreement(mine, deployed)
+    if purpose == "filter" and mine:
+        arm_stats["pass_rate"] = round(
+            sum(1 for f in mine.values() if not f.get("should_filter")) / len(mine), 3
         )
-        a["known_cost_usd"] = round(known_cost, 4)
-        a["cost_usd"] = None if a["unpriced_results"] else a["known_cost_usd"]
-        a["input_per_request"] = round(a["input_tokens"] / n)
-        a["output_per_request"] = round(a["output_tokens"] / n)
-        a["reasoning_per_request"] = round(a["reasoning_tokens"] / n)
-        mine = fields_by_arm.get(arm, {})
-        for label, other in (
-            ("reference", fields_by_arm.get(reference or "", {})),
-            ("deployed", deployed),
-        ):
-            common = [u for u in mine if u in other]
-            if not common:
-                a[f"agreement_with_{label}"] = None
-                continue
-            per_field: dict[str, float] = {}
-            for u in common:
-                for k, v in _agreement(mine[u], other[u]).items():
-                    per_field[k] = per_field.get(k, 0.0) + v
-            a[f"agreement_with_{label}"] = {
-                "n": len(common),
-                **{k: round(v / len(common), 3) for k, v in per_field.items()},
-            }
-        if purpose == "filter" and mine:
-            a["pass_rate"] = round(
-                sum(1 for f in mine.values() if not f.get("should_filter")) / len(mine), 3
-            )
+
+
+def score(purpose: str, params: Params, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Score answers already collected: per arm cost, tokens, failures and
+    agreement with the reference arm and with what production decided. Each
+    row carries arm, url, output, usage, cost_usd and error."""
+    step = steps()[purpose]
+    by_arm, fields_by_arm = _accumulate_arm_rows(step, rows)
+    urls = sorted({r["url"] for r in rows})
+    deployed = deployed_verdicts(purpose, urls, params)
+    reference, reference_reason = _select_reference_arm(by_arm, params)
+    reference_fields = fields_by_arm.get(reference or "", {})
+    for arm, arm_stats in by_arm.items():
+        _finalize_arm_stats(
+            arm_stats, fields_by_arm.get(arm, {}), reference_fields, deployed, purpose
+        )
     skipped = params.get("skipped") or {}
     expected_arms = {
         arm_name(arm["model"], arm["effort"], arm.get("label")) for arm in params.get("arms", [])
