@@ -36,7 +36,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "2.13.0"
+version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -48,9 +48,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/09/fc/fb3accd8b9f9f9123ee5e90f27d855a9ed40a315197be6d4c8f07f9f0428/anthropic-2.13.0.tar.gz", hash = "sha256:966718543d354aae57cba5b8b5693491b9538a55ac8d83d3ddc54448ae8f58e7", size = 2048816, upload-time = "2026-11-23T18:35:03.506Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/ca/714857a41e333b9292b1db0d642d46256d27b3efe4697df642286ca23ad9/anthropic-2.14.0.tar.gz", hash = "sha256:afb02f4df8efba429ff769bbfd71340d8b244b41ba42c073a45cc307702549fe", size = 2090851, upload-time = "2026-11-24T21:01:49.208Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/7b/a0c69f7a530a3648f8c0100af74d11f9fca7b307c352f1db8b679f37107d/anthropic-2.13.0-py3-none-any.whl", hash = "sha256:b9f61dc45a9630108f96135ecb726ffe1a6fd1f70dd2c9db5621eaaca62c16ec", size = 2613482, upload-time = "2026-11-23T18:35:01.841Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/27/8bbae12e619497c651f35fec779389ab04e6b7b92b022f94390ec82be973/anthropic-2.14.0-py3-none-any.whl", hash = "sha256:5cf986851f61c0858ac88c6f7c28490369a68ff4a89c309849605b764da0664d", size = 2726387, upload-time = "2026-11-24T21:01:46.861Z" },
 ]
 
 [[package]]
@@ -719,7 +719,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = "==1.20.1" },
     { name = "annotated-types", specifier = "==0.8.0" },
-    { name = "anthropic", specifier = "==2.13.0" },
+    { name = "anthropic", specifier = "==2.14.0" },
     { name = "anyio", specifier = "==4.16.0" },
     { name = "attrs", specifier = "==26.1.0" },
     { name = "beautifulsoup4", specifier = "==4.15.0" },
@@ -749,7 +749,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = "==1.45.2" },
     { name = "outcome", specifier = "==1.3.0.post0" },
     { name = "pgvector", specifier = "==0.5.1" },
-    { name = "posthog", specifier = "==8.2.2" },
+    { name = "posthog", specifier = "==8.2.3" },
     { name = "prometheus-client", specifier = "==0.26.0" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.9" },
     { name = "psycopg-pool", specifier = "==3.3.3" },
@@ -1197,16 +1197,16 @@ wheels = [
 
 [[package]]
 name = "posthog"
-version = "8.2.2"
+version = "8.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "distro" },
     { name = "requests" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/a7/6b0ce1745bbee3a37d7f468366bab62ce003ed5357dcc8e0d1363fee4325/posthog-8.2.2.tar.gz", hash = "sha256:22dd7aa240b459ba998d5afe43a47e30b9f9d42b9ff7751550edfd43aedcf323", size = 1048504, upload-time = "2026-11-24T17:52:59.909Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/cc/403f5877e8fcdb3ffda3a9fc18110edcfcd7f960bc508250edf3f04b8925/posthog-8.2.3.tar.gz", hash = "sha256:5c20fb1a430c2a74a77cdad26814b4c10d650ceeb326967b76e77ad7029cc0b3", size = 1048735, upload-time = "2026-11-24T20:43:29.488Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/3b/d0f61f86b84b94c32b0ac62a324afd85bc9d954a3e9356cc0db1a3cf23b1/posthog-8.2.2-py3-none-any.whl", hash = "sha256:63065bcfa505a95f1935a3bb9ff9c93753c36f7b9d8c83e5e6b03825f1dd307d", size = 1201448, upload-time = "2026-11-24T17:52:57.971Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/36/cf38a5d1ec29e3699611bca70de01f17c54aa9f0b8cb03f42b0808da1fd2/posthog-8.2.3-py3-none-any.whl", hash = "sha256:466e0bc84dba4e3e28aed1c0d80c9d280c599d5562f39f75b89ad461eb2c542b", size = 1201718, upload-time = "2026-11-24T20:43:27.6Z" },
 ]
 
 [[package]]

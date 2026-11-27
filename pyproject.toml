@@ -5,7 +5,7 @@ requires-python = ">=3.15"
 dependencies = [
     "alembic==1.20.1",
     "annotated-types==0.8.0",
-    "anthropic==2.13.0",
+    "anthropic==2.14.0",
     "anyio==4.16.0",
     "attrs==26.1.0",
     "beautifulsoup4==4.15.0",
@@ -34,7 +34,7 @@ dependencies = [
     "outcome==1.3.0.post0",
     "pgvector==0.5.1",
     "prometheus-client==0.26.0",
-    "posthog==8.2.2",
+    "posthog==8.2.3",
     "psycopg-pool==3.3.3",
     "psycopg[binary]==3.3.9",
     "pydantic==2.14.4",
