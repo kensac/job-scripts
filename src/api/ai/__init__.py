@@ -249,6 +249,17 @@ async def parse[T: BaseModel](
     return result
 
 
+def _chat_usage(cu: Any) -> dict[str, int | None]:
+    return _usage_tuple(
+        getattr(cu, "prompt_tokens", 0) or 0,
+        getattr(cu, "completion_tokens", 0) or 0,
+        getattr(cu, "total_tokens", 0) or 0,
+        cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
+        cache_write=_optional_detail(cu, "prompt_tokens_details", "cache_write_tokens"),
+        reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
+    )
+
+
 async def _parse_json_object[T: BaseModel](
     oa: AsyncOpenAI,
     cfg: AIConfig,
@@ -294,15 +305,7 @@ async def _parse_json_object[T: BaseModel](
         timeout=timeout,
         **kwargs,
     )
-    cu = completion.usage
-    usage = _usage_tuple(
-        getattr(cu, "prompt_tokens", 0) or 0,
-        getattr(cu, "completion_tokens", 0) or 0,
-        getattr(cu, "total_tokens", 0) or 0,
-        cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
-        cache_write=_optional_detail(cu, "prompt_tokens_details", "cache_write_tokens"),
-        reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
-    )
+    usage = _chat_usage(completion.usage)
     choice = completion.choices[0] if completion.choices else None
     if choice is None:
         return None, usage
@@ -322,42 +325,39 @@ async def _parse_json_object[T: BaseModel](
         raise PaidParseError(str(exc), usage) from exc
 
 
-async def _parse[T: BaseModel](
+async def _parse_anthropic[T: BaseModel](
     cfg: AIConfig,
     instructions: str,
     input_text: str,
     response_model: type[T],
-    timeout: float = 120.0,
+    timeout: float,
 ) -> tuple[T | None, dict[str, int | None]]:
-    if (
-        providers.PROVIDERS.get(cfg.provider, None) is not None
-        and providers.PROVIDERS[cfg.provider].wire is providers.Wire.ANTHROPIC_MESSAGES
-    ):
-        client = AsyncAnthropic(api_key=cfg.api_key, timeout=timeout)
-        kwargs: dict[str, Any] = {}
-        if cfg.params.get("effort"):
-            kwargs["output_config"] = {"effort": cfg.params["effort"]}
-        response = await client.messages.parse(
-            model=cfg.model,
-            max_tokens=cfg.params.get("max_output_tokens", 4000),
-            system=instructions,
-            messages=[{"role": "user", "content": input_text}],
-            output_format=response_model,
-            **kwargs,
-        )
-        cached = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-        writes = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-        usage = _usage_tuple(
-            (getattr(response.usage, "input_tokens", 0) or 0) + cached + writes,
-            getattr(response.usage, "output_tokens", 0),
-            0,
-            cached=cached,
-            cache_write=writes,
-        )
-        return response.parsed_output, usage
+    client = AsyncAnthropic(api_key=cfg.api_key, timeout=timeout)
+    kwargs: dict[str, Any] = {}
+    if cfg.params.get("effort"):
+        kwargs["output_config"] = {"effort": cfg.params["effort"]}
+    response = await client.messages.parse(
+        model=cfg.model,
+        max_tokens=cfg.params.get("max_output_tokens", 4000),
+        system=instructions,
+        messages=[{"role": "user", "content": input_text}],
+        output_format=response_model,
+        **kwargs,
+    )
+    cached = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+    writes = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+    usage = _usage_tuple(
+        (getattr(response.usage, "input_tokens", 0) or 0) + cached + writes,
+        getattr(response.usage, "output_tokens", 0),
+        0,
+        cached=cached,
+        cache_write=writes,
+    )
+    return response.parsed_output, usage
 
+
+def _openai_client(cfg: AIConfig, declared: providers.Provider | None) -> AsyncOpenAI:
     client_kwargs: dict[str, Any] = {"api_key": cfg.api_key}
-    declared = providers.PROVIDERS.get(cfg.provider)
     if declared is not None and declared.base_url:
         # A declared provider's endpoint is our own constant, so it does not
         # need the SSRF-pinned transport below - that exists because
@@ -368,48 +368,51 @@ async def _parse[T: BaseModel](
 
         client_kwargs["base_url"] = cfg.base_url
         client_kwargs["http_client"] = safe_async_client()
-    oa = AsyncOpenAI(**client_kwargs)
+    return AsyncOpenAI(**client_kwargs)
 
-    if declared is not None and declared.wire is providers.Wire.OPENAI_RESPONSES:
-        response = await oa.responses.parse(
-            model=cfg.model,
-            **cached_prompt(cfg.model, instructions, input_text),
-            text_format=response_model,
-            reasoning={"effort": cfg.params.get("reasoning_effort", "low")},
-            # Covers reasoning AND output on the Responses API; too small and
-            # the JSON gets truncated mid-string after a long reasoning pass.
-            max_output_tokens=cfg.params.get("max_output_tokens", 6000),
-            store=False,
-            # Same key the batched path uses for these instructions, so a
-            # live check and the sweep share one prompt cache.
-            prompt_cache_key=prompt_cache_key(instructions),
-            timeout=timeout,
-        )
-        u = response.usage
-        usage = _usage_tuple(
-            getattr(u, "input_tokens", 0) or 0,
-            getattr(u, "output_tokens", 0) or 0,
-            getattr(u, "total_tokens", 0) or 0,
-            cached=_detail(u, "input_tokens_details", "cached_tokens"),
-            cache_write=_optional_detail(u, "input_tokens_details", "cache_write_tokens"),
-            reasoning=_detail(u, "output_tokens_details", "reasoning_tokens"),
-        )
-        return response.output_parsed, usage
 
-    # Among the chat-wire providers, the DECLARED MODE decides whether the
-    # provider can be asked to enforce a schema. Wire chose the protocol above;
-    # this chooses what to ask for within it. Dispatching on the declaration
-    # rather than on the provider name is what stops the next json_object
-    # provider needing a branch of its own.
-    declared_model = providers.model(cfg.model)
-    if (
-        declared_model is not None
-        and declared_model.structured_output.mode is StructuredOutput.JSON_OBJECT
-    ):
-        return await _parse_json_object(
-            oa, cfg, instructions, input_text, response_model, declared_model, timeout
-        )
+async def _parse_openai_responses[T: BaseModel](
+    oa: AsyncOpenAI,
+    cfg: AIConfig,
+    instructions: str,
+    input_text: str,
+    response_model: type[T],
+    timeout: float,
+) -> tuple[T | None, dict[str, int | None]]:
+    response = await oa.responses.parse(
+        model=cfg.model,
+        **cached_prompt(cfg.model, instructions, input_text),
+        text_format=response_model,
+        reasoning={"effort": cfg.params.get("reasoning_effort", "low")},
+        # Covers reasoning AND output on the Responses API; too small and
+        # the JSON gets truncated mid-string after a long reasoning pass.
+        max_output_tokens=cfg.params.get("max_output_tokens", 6000),
+        store=False,
+        # Same key the batched path uses for these instructions, so a
+        # live check and the sweep share one prompt cache.
+        prompt_cache_key=prompt_cache_key(instructions),
+        timeout=timeout,
+    )
+    u = response.usage
+    usage = _usage_tuple(
+        getattr(u, "input_tokens", 0) or 0,
+        getattr(u, "output_tokens", 0) or 0,
+        getattr(u, "total_tokens", 0) or 0,
+        cached=_detail(u, "input_tokens_details", "cached_tokens"),
+        cache_write=_optional_detail(u, "input_tokens_details", "cache_write_tokens"),
+        reasoning=_detail(u, "output_tokens_details", "reasoning_tokens"),
+    )
+    return response.output_parsed, usage
 
+
+async def _parse_chat_completions[T: BaseModel](
+    oa: AsyncOpenAI,
+    cfg: AIConfig,
+    instructions: str,
+    input_text: str,
+    response_model: type[T],
+    timeout: float,
+) -> tuple[T | None, dict[str, int | None]]:
     # Everything that is not OpenAI's Responses API lands here: xAI and any
     # user-configured openai_compatible endpoint. Both accept a strict
     # json_schema response_format, which is what .parse() sends, so neither
@@ -431,14 +434,39 @@ async def _parse[T: BaseModel](
         timeout=timeout,
         **completion_kwargs,
     )
-    cu = completion.usage
-    usage = _usage_tuple(
-        getattr(cu, "prompt_tokens", 0) or 0,
-        getattr(cu, "completion_tokens", 0) or 0,
-        getattr(cu, "total_tokens", 0) or 0,
-        cached=_detail(cu, "prompt_tokens_details", "cached_tokens"),
-        cache_write=_optional_detail(cu, "prompt_tokens_details", "cache_write_tokens"),
-        reasoning=_detail(cu, "completion_tokens_details", "reasoning_tokens"),
-    )
+    usage = _chat_usage(completion.usage)
     parsed = completion.choices[0].message.parsed if completion.choices else None
     return parsed, usage
+
+
+async def _parse[T: BaseModel](
+    cfg: AIConfig,
+    instructions: str,
+    input_text: str,
+    response_model: type[T],
+    timeout: float = 120.0,
+) -> tuple[T | None, dict[str, int | None]]:
+    declared = providers.PROVIDERS.get(cfg.provider)
+    if declared is not None and declared.wire is providers.Wire.ANTHROPIC_MESSAGES:
+        return await _parse_anthropic(cfg, instructions, input_text, response_model, timeout)
+
+    oa = _openai_client(cfg, declared)
+    if declared is not None and declared.wire is providers.Wire.OPENAI_RESPONSES:
+        return await _parse_openai_responses(
+            oa, cfg, instructions, input_text, response_model, timeout
+        )
+
+    # Among the chat-wire providers, the DECLARED MODE decides whether the
+    # provider can be asked to enforce a schema. Wire chose the protocol above;
+    # this chooses what to ask for within it. Dispatching on the declaration
+    # rather than on the provider name is what stops the next json_object
+    # provider needing a branch of its own.
+    declared_model = providers.model(cfg.model)
+    if (
+        declared_model is not None
+        and declared_model.structured_output.mode is StructuredOutput.JSON_OBJECT
+    ):
+        return await _parse_json_object(
+            oa, cfg, instructions, input_text, response_model, declared_model, timeout
+        )
+    return await _parse_chat_completions(oa, cfg, instructions, input_text, response_model, timeout)
