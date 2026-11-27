@@ -122,6 +122,8 @@ REQUIREMENTS_TASK = TaskShape(
     max_output_tokens=REQUIREMENTS_MAX_OUTPUT_TOKENS,
     # Fitted against a 60-posting pilot (1,255 fixed + 0.181/char at ~5.5 chars/token).
     est_prompt_tokens=2270,
+    # A preference, not a pin: luna rejects "minimal" and mini rejects "none", so a
+    # pinned effort fails a swapped model's whole batch on a 400 (#179).
     effort_preference=_REQUIREMENTS_EFFORT_PREFERENCE,
     candidates=(REQUIREMENTS_MODEL,),
 )
@@ -129,7 +131,8 @@ REQUIREMENTS_TASK = TaskShape(
 
 # --- location classification ---
 
-# Default for classify_locations_per_cycle.
+# Default for classify_locations_per_cycle. Strings are short, so the whole backlog
+# (8,735 distinct strings on 2026-09-04) fits one cycle.
 CLASSIFY_LOCATIONS_PER_CYCLE = 10000
 
 LOCATIONS_TASK = TaskShape(
@@ -174,13 +177,17 @@ VERIFY_TASK = TaskShape(
 
 # --- mail classification ---
 
+# One model for both: the backfill ran on luna, and an ongoing feed on another model
+# would read the same mail by different standards, shifting the funnel unexplained.
 # Separate env overrides so backfill and ongoing can be moved independently.
 BACKFILL_MODEL = os.environ.get("JOBTRACKER_MAIL_BACKFILL_MODEL", "gpt-6-luna")
 ONGOING_MODEL = os.environ.get("JOBTRACKER_MAIL_ONGOING_MODEL", "gpt-6-luna")
 
-# Cheapest accepted effort first; accepted sets live in core/providers/.
+# Cheapest accepted effort first; accepted sets live in core/providers/. A shared
+# constant 400'd every ongoing call; luna at "none" measured ~40 output tokens/message.
 _CLASSIFY_EFFORT_PREFERENCE = ("none", "minimal", "low")
 
+# The schema's few short fields with no reasoning; a smaller cap truncates the JSON.
 CLASSIFY_MAX_TOKENS = 400
 
 # Default for mail_classify_per_cycle, sized to fill BATCH_WAVE_CONCURRENCY waves.

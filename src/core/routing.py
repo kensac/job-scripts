@@ -3,6 +3,10 @@
 Callers declare candidate models and hard requirements in a TaskShape; this
 module filters eligible candidates and picks the cheapest. Provider key
 availability is checked at spend sites via `server_key`, not during resolution.
+
+A failed call switches models only when its provider reported the account cannot
+pay and an admin set a fallback chain for the purpose (core.fallback); the switch
+is recorded on every row it writes.
 """
 
 from __future__ import annotations
@@ -173,6 +177,7 @@ class Candidacy:
     rejection: str
     sanctioned: bool
     est_cost_usd: Decimal | None
+    # None when per_cycle is 0 (unbounded sweep): a cycle figure would be invented.
     est_cycle_cost_usd: Decimal | None
     # True when rates depend on time of day (estimates above use peak rates).
     price_varies_by_time: bool

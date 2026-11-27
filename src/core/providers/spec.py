@@ -23,7 +23,11 @@ class StructuredOutput(StrEnum):
 
 
 class Wire(StrEnum):
-    """Request/response protocol used to select the client implementation."""
+    """Request/response protocol used to select the client implementation.
+
+    It picks client code only: xAI speaks OpenAI's chat wire but keeps its own
+    rates, batch eligibility and schema rules.
+    """
 
     OPENAI_RESPONSES = "openai_responses"
     OPENAI_CHAT = "openai_chat"
@@ -66,7 +70,8 @@ class PeakWindow:
     """Undiscounted hours in UTC.
 
     `isodows` uses ISO 1..7 (Monday..Sunday, matching Postgres EXTRACT(isodow)).
-    Hours are half-open: [start_hour_utc, end_hour_utc).
+    Hours are half-open: [start_hour_utc, end_hour_utc). Pricing converts
+    Python's 0-based weekday() once; two day origins would misprice a day a week.
     """
 
     isodows: tuple[int, ...]
@@ -86,12 +91,14 @@ class Rates:
     batch_rate: Decimal | None
     source: Source
     # Separate from `source` when batch pricing comes from a different reference.
+    # None means no batch lane is claimed.
     batch_source: Source | None = None
     cache_write_source: Source | None = None
 
     # Tier rates above are peak rates; `off_peak_multiplier` scales input,
     # output, and cached rates outside `peak_windows`. Unknown call times bill
-    # at peak rates rather than assuming a discount.
+    # at peak rates rather than assuming a discount. One multiplier for all three
+    # rates; a vendor discounting them unevenly needs per-rate fields.
     off_peak_multiplier: Decimal | None = None
     peak_windows: tuple[PeakWindow, ...] = ()
     off_peak_source: Source | None = None
