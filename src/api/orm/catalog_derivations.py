@@ -276,11 +276,12 @@ class RankingModel(Base):
     examples it was fitted on, and how it scored on examples it did not see.
     The latest row of a kind (and person) is the one in use. `tech_scope`
     decides the scope of a posting whose title names technical work only
-    vaguely (core.tech_scope)."""
+    vaguely (core.tech_scope); `taste` ranks postings for one person
+    (core.taste)."""
 
     __tablename__ = "ranking_models"
     __table_args__ = (
-        CheckConstraint("kind IN ('tech_scope')", name="ck_ranking_models_kind"),
+        CheckConstraint("kind IN ('tech_scope', 'taste')", name="ck_ranking_models_kind"),
         Index("idx_ranking_models_latest", "kind", "user_id", text("id DESC")),
     )
 

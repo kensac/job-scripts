@@ -43,7 +43,7 @@ def upgrade() -> None:
         sa.Column(
             "trained_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
         ),
-        sa.CheckConstraint("kind IN ('tech_scope')", name="ck_ranking_models_kind"),
+        sa.CheckConstraint("kind IN ('tech_scope', 'taste')", name="ck_ranking_models_kind"),
     )
     op.create_index(
         "idx_ranking_models_latest",
