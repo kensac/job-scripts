@@ -10,10 +10,16 @@ from core.pool import connection, pool, transaction
 if TYPE_CHECKING:
     from core.fetching.posting import JobPosting
 
-# Whether listings row `{listing}` appeared on its source's latest pull.
+# Whether listings row `{listing}` appeared on its source's latest pull. A pull
+# refreshes every row it lists older than refresh_hours, so a listed row is never
+# older than the source's newest row minus refresh_hours; a source whose pulls
+# fail keeps its rows current, since nothing newer moves its newest row.
 # Pass a bound parameter for `{source}` when scanning one source so Postgres
-# evaluates the max() once as an InitPlan (correlated over 25k rows timed out
-# at 120 s; 1.6 s vs 0.6 s on retire_switched_off, production 2026-10-10).
+# evaluates the max() once as an InitPlan (correlated over one source's 25k rows
+# it did not finish in 120 s). The predicate itself costs retire_switched_off's
+# select 1.6 s against 0.6 s without it (production 2026-10-10).
+# ponytail: max() per source scans that source's rows; a per-source latest-pull
+# column is the upgrade if a source's listings outgrow it.
 LISTED_NOW: LiteralString = (
     "{listing}.last_seen_at >= (SELECT max(newest.last_seen_at) FROM listings newest "
     "WHERE newest.source = {source}) - make_interval(hours => %(refresh_hours)s)"
@@ -51,9 +57,11 @@ PATTERNS_ENFORCED: LiteralString = (
 # 1. Latest admin correction wins until a newer source observation arrives.
 # 2. True if any active source's latest observation admits the job (appeared,
 #    reappeared, not_listed, or filtered while patterns are disabled).
-# 3. False if observations exist with none admitting, the owning source is
-#    inactive, or source is 'sheet_import'.
-# 4. Otherwise NULL (unobserved).
+# 3. False if observations exist with none admitting.
+# 4. False if no source has observed it and its owning source is switched off,
+#    or it is a 'sheet_import' row: imported once 2026-08-24 and nothing pulls
+#    it, so it counts as switched off (decided 2026-10-10).
+# 5. Otherwise NULL (cannot tell).
 AVAILABLE: LiteralString = (
     """(
     COALESCE(
@@ -81,10 +89,14 @@ AVAILABLE: LiteralString = (
 
 # Readers query stored `jobs.available` rather than recomputing AVAILABLE per row
 # (AI-eligible count 2.0 s vs 6.5 s; board recompute 27 s vs 38 s, production 2026-10-10).
+# Every row is stored on insert or by the reconcile, so NULL is a row nothing has
+# stored yet and reads as not available.
 IS_AVAILABLE: LiteralString = "COALESCE({job}.available, false)"
 
 # Stored availability falls back to frozen `jobs.active` for rows never yet
-# observed by a pull (e.g. partial pulls or sources not yet pulled).
+# observed by a pull: a capped (partial) pull records no absence past its cap,
+# and a board not yet pulled has observed nothing. On 2026-10-11 that was 102,662
+# active postings, 81,644 on unpulled boards and 14,693 past a partial-pull cap.
 _STORED: LiteralString = "COALESCE(" + AVAILABLE + ", {job}.active)"
 
 
@@ -93,6 +105,8 @@ def _refresh_available(conn, ids: list[int], skip_locked: bool) -> int:
 
     Locks in URL code-point order first, then evaluates in a second statement so
     READ COMMITTED sees observations committed before the lock was acquired.
+    Evaluated in the locking statement, the value would come from a snapshot
+    older than the lock. Returns the rows written.
     """
     if not ids:
         return 0
@@ -126,9 +140,14 @@ def refresh_available(ids: list[int]) -> int:
 def reconcile_available() -> int:
     """Reconcile stale jobs.available rows across the catalog (run hourly).
 
+    Catches what observations do not announce: a source switched on or off, or
+    the title pattern setting flipped.
+
     Finds stale IDs in one unlocked scan (21 s with jit=off vs 34 s with jit=on
     on 2.15M jobs, production copy 2026-11-26), then updates in URL-ordered
     batches with SKIP LOCKED so it never deadlocks against concurrent ingests.
+    Not id ranges: upserts spend ids, so 2.15M jobs spread over ids 1 to 41.8M
+    and the range walk took 11 minutes a run (2026-11-26).
     """
     # Dedicated transaction so SET LOCAL jit = off does not leak to a caller.
     with pool.connection() as conn, conn.transaction():
@@ -159,7 +178,9 @@ def observe(
     Call after upsert_postings so newly inserted jobs have IDs. `kept` records
     title-pattern matches regardless of the enforcement switch. `absence` is
     'unlisted' (authoritative complete pull), 'not_listed' (aggregator), or None
-    (partial/empty pull, recording no absence). Returns inserted counts per kind.
+    (partial/empty pull, recording no absence). A listed posting carrying the
+    feed's inactive flag is unlisted. A posting with no catalog row is skipped;
+    listings keeps it. Returns inserted counts per kind.
     """
     posting_by_url = {posting.url: posting for posting in postings if posting.url}
     with pool.connection() as conn:
@@ -192,7 +213,8 @@ def observe(
                 observation_rows.append((job["url"], job["id"], observed_kind))
         if absence == "unlisted":
             # Close currently available rows owned by this source that were never
-            # observed before (carried forward from frozen jobs.active).
+            # observed before (carried forward from frozen jobs.active), or nothing
+            # would close them. Only rows stored available, so closed history stays.
             observation_rows += [
                 (job["url"], job["id"], absence)
                 for job in conn.execute(

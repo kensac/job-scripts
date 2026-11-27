@@ -38,7 +38,8 @@ def latest(
 
 
 def latest_per(key: str, columns: str, where: str, *, alias: str = "v", join: str = "") -> str:
-    """Latest answer per `key` via DISTINCT ON ordered by `(key, id DESC)`.
+    """Latest answer per `key` via DISTINCT ON ordered by `(key, id DESC)`, so an
+    index on (url, check_type, id) or (url, prompt_hash, id) yields rows in order.
 
     Keying on integer `jobs.id` avoids text sorting (245 ms vs 1.15 s in
     api/analytics/queries.py).
@@ -61,6 +62,10 @@ def posting_status(job: str, check: str) -> str:
     Correlated dirty probe stays an index probe under backlog. Measured on a
     production copy (2026-11-26, 315,390 candidates): 5.0 s vs 16.7 s probing
     ai_queries directly.
+
+    A write the dirty triggers cannot see (session_replication_role = replica, a
+    TRUNCATE, rows loaded before migration d81c5e2b7a43) reads stale until a fold
+    over every job: the daily one, or `fold(everything=True)` after the load.
     """
     if check == "custom":
         raise ValueError("custom answers are keyed by prompt; use latest_status")
@@ -82,18 +87,29 @@ def closed_verdict(url: str) -> str:
 
 
 # Three-valued with NULL ("never checked"); never collapse NULL into 'closed'.
+# jobs.active cannot stand in: it is the feed's last word and nothing clears it;
+# 114 applications it flagged dead were open per the closed check.
 Openness = Literal["open", "closed"]
 
 
 def has_verdict(url: str, check: str) -> str:
     """Whether any answer exists for `check` (takes no status; use `latest_status`
-    for current pass/reject state)."""
+    for current pass/reject state).
+
+    "Ever rejected" and "ever passed" are not the latest answer: the content sweep
+    skipped 99 active postings rejected once and open since, and the re-check
+    re-ran 214 passed once and closed since (production, 2026-10-10)."""
     return (
         f"EXISTS (SELECT 1 FROM verdicts vany "
         f"WHERE vany.url = {url} AND vany.check_type = {_check(check)})"
     )
 
 
+# The extractors (comp, requirements) select on this: on 2026-09-06, 37,438 of
+# 74,477 active postings were verified open. Extracting only for postings on a
+# board (3,117 that day) is not taken: a posting reaching a board later would
+# wait a cycle for its comp, and the market table would cover less than the
+# filters admit. Relies on ai_queries never being pruned.
 def verified_open(job: str) -> str:
     """True when the posting's latest closed and clearance verdicts both passed."""
     return (
