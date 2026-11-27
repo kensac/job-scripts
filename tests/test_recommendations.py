@@ -72,24 +72,25 @@ def test_postings_come_in_taste_order_with_why(client, admin_headers, f):
     best = _posting(f, "best", {0: 0.9, 1: 0.1})
     repost = _posting(f, "repost", {0: 1.0})
     middling = _posting(f, "middling", {0: 0.5, 1: 0.5})
-    _posting(f, "worst", {1: 1.0})
+    worst = _posting(f, "worst", {1: 1.0})
     _posting(f, "out of scope", {0: 1.0}, in_scope=False)
     _taste(admin, {0: 1.0})
 
     first = client.get("/v1/user/recommendations?first=2", headers=admin_headers).json()
     assert first["total_count"] == 4
-    assert [n["job_id"] for n in first["nodes"]] == [repost, best]
-    repost_node, best_node = first["nodes"]
+    # The best posting is a near copy of the repost ranked above it, so it is
+    # folded into the repost's row and the page is refilled.
+    assert [n["job_id"] for n in first["nodes"]] == [repost, middling]
+    repost_node = first["nodes"][0]
+    assert [c["job_id"] for c in repost_node["copies"]] == [best]
     assert repost_node["applied_copy"] is True
     assert repost_node["like"]["job_id"] == applied
-    # The best posting is a near copy of the repost above it on the page.
-    assert best_node["copy_of"] == repost
     assert repost_node["match"] == 1.0
     assert first["page_info"]["has_next_page"] is True
 
     after = first["page_info"]["end_cursor"]
     rest = client.get(f"/v1/user/recommendations?after={after}", headers=admin_headers).json()
-    assert [n["job_id"] for n in rest["nodes"]][:1] == [middling]
+    assert [n["job_id"] for n in rest["nodes"]] == [worst]
     assert rest["page_info"]["has_next_page"] is False
     assert first["model"]["held_out_in_top_share"] == 0.8
 

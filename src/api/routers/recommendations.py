@@ -46,6 +46,17 @@ class LikeApplication(BaseModel):
     similarity: float
 
 
+class Copy(BaseModel):
+    """Another listing of the same job: reposted, in another city, on
+    another board."""
+
+    job_id: int
+    url: str
+    company: str
+    title: str
+    locations: list[str]
+
+
 class Recommendation(BaseModel):
     job_id: int
     url: str
@@ -59,8 +70,9 @@ class Recommendation(BaseModel):
     like: LikeApplication | None
     # A near copy of something the person applied to (core.recommendations.NEAR_COPY).
     applied_copy: bool
-    # A near copy of a higher posting on this page.
-    copy_of: int | None
+    # Its near copies ranked below it in the pool, folded into this row: a
+    # posting with a near copy ranked above it is never a row of its own.
+    copies: list[Copy]
 
 
 class TasteModel(BaseModel):
@@ -157,8 +169,9 @@ def recommendations_page(
     user: AuthedUser = Depends(require_admin),
 ) -> Recommendations:
     """The person's recent tech postings they have not touched, best match
-    first, with the application each is nearest to and whether it is a near
-    copy of one, or of a posting higher on the page."""
+    first, each with the application it is nearest to, whether it is a near
+    copy of one, and its own near copies folded in. total_count counts the
+    pool's postings, copies included."""
     limit = _first(first)
     model, training, fit_failed = _model(user.id)
     if model is None:
@@ -171,20 +184,64 @@ def recommendations_page(
             fit_failed=fit_failed,
         )
     query = {"q": "recommendations", "model": model.id}
-    after_score, after_id = decode_cursor(after, query) if after else (None, None)
-    rows = db.query(
-        recommendations.ranked_sql(),
-        {
-            "user_id": user.id,
-            "window_days": int(db.get_config("recommendation_window_days")),
-            "after_score": after_score,
-            "after_id": after_id,
-            "limit": limit + 1,
-        },
-    )
-    more = len(rows) > limit
-    rows = rows[:limit]
-    urls = [r["url"] for r in rows]
+    cursor = decode_cursor(after, query) if after else [None, None]
+    window = int(db.get_config("recommendation_window_days"))
+    kept: list[tuple[dict[str, Any], list[Copy]]] = []
+    total = 0
+    more = True
+    # A page is refilled past the postings folded into one above them, so it
+    # holds `limit` rows unless the pool runs out.
+    while len(kept) < limit and more:
+        rows = db.query(
+            recommendations.ranked_sql(),
+            {
+                "user_id": user.id,
+                "window_days": window,
+                "after_score": cursor[0],
+                "after_id": cursor[1],
+                "limit": limit + 1,
+            },
+        )
+        more = len(rows) > limit
+        batch = rows[:limit]
+        if not batch:
+            break
+        total = batch[0]["total"]
+        pairs: dict[str, list[dict[str, Any]]] = {}
+        for pair in db.query(
+            recommendations.copies_sql(),
+            {
+                "user_id": user.id,
+                "window_days": window,
+                "urls": [r["url"] for r in batch],
+                "near_copy": recommendations.NEAR_COPY,
+            },
+        ):
+            pairs.setdefault(pair["of_url"], []).append(pair)
+        for at, r in enumerate(batch):
+            if len(kept) == limit:
+                more = more or at < len(batch)
+                break
+            cursor = [float(r["score"]), r["id"]]
+            mine = pairs.get(r["url"], [])
+            if any(p["above"] for p in mine):
+                continue
+            kept.append(
+                (
+                    r,
+                    [
+                        Copy(
+                            job_id=p["id"],
+                            url=p["url"],
+                            company=p["company"],
+                            title=p["title"],
+                            locations=p["locations"] or [],
+                        )
+                        for p in mine
+                    ],
+                )
+            )
+    urls = [r["url"] for r, _ in kept]
     near = (
         {
             r["url"]: r
@@ -195,20 +252,8 @@ def recommendations_page(
         if urls
         else {}
     )
-    copies = (
-        {
-            r["url"]: r["copy_of"]
-            for r in db.query(
-                recommendations.copies_sql(),
-                {"urls": urls, "near_copy": recommendations.NEAR_COPY},
-            )
-        }
-        if urls
-        else {}
-    )
-    id_of = {r["url"]: r["id"] for r in rows}
     nodes = []
-    for r in rows:
+    for r, copies in kept:
         like = near.get(r["url"])
         nodes.append(
             Recommendation(
@@ -229,17 +274,16 @@ def recommendations_page(
                 if like
                 else None,
                 applied_copy=bool(like and like["similarity"] >= recommendations.NEAR_COPY),
-                copy_of=id_of.get(copies[r["url"]]) if r["url"] in copies else None,
+                copies=copies,
             )
         )
-    last = rows[-1] if rows else None
     return Recommendations(
         nodes=nodes,
         page_info=PageInfo(
-            end_cursor=cursor_for(query, [float(last["score"]), last["id"]]) if last else None,
+            end_cursor=cursor_for(query, cursor) if kept else None,
             has_next_page=more,
         ),
-        total_count=rows[0]["total"] if rows else 0,
+        total_count=total,
         model=model,
         training=training,
         fit_failed=fit_failed,

@@ -101,19 +101,27 @@ def nearest_application_sql() -> LiteralString:
 
 
 def copies_sql() -> LiteralString:
-    """For each of %(urls)s (in page order), the first earlier url on the
-    page it is a near copy of."""
-    return """
-        WITH page AS (
-            SELECT n.url, n.ord, pe.embedding
-            FROM unnest(%(urls)s::text[]) WITH ORDINALITY AS n(url, ord)
-            JOIN posting_embeddings pe ON pe.url = n.url
-        )
-        SELECT DISTINCT ON (later.url) later.url, earlier.url AS copy_of
-        FROM page later JOIN page earlier ON earlier.ord < later.ord
-        WHERE 1 - (later.embedding <=> earlier.embedding) >= %(near_copy)s
-        ORDER BY later.url, earlier.ord
-    """
+    """Every near copy, in the person's pool, of each of %(urls)s: its id,
+    url, company, title and locations, and whether it ranks above the posting
+    it copies (by the taste score, then id, the page's own order). Params:
+    user_id, window_days, urls, near_copy."""
+    return cast(
+        "LiteralString",
+        f"""
+        WITH m AS ({taste.latest_sql()}),
+        pool AS (
+            SELECT j.id, j.url, j.company, j.title, j.locations, pe.embedding,
+                   m.intercept - (pe.embedding <#> m.weights) AS score
+            {_pool_from("m")}
+        ),
+        page AS (SELECT * FROM pool WHERE url = ANY(%(urls)s))
+        SELECT page.url AS of_url, c.id, c.url, c.company, c.title, c.locations,
+               (c.score, c.id) > (page.score, page.id) AS above
+        FROM page JOIN pool c ON c.url <> page.url
+        WHERE 1 - (c.embedding <=> page.embedding) >= %(near_copy)s
+        ORDER BY page.url, c.score DESC, c.id DESC
+        """,
+    )
 
 
 def similar_sql() -> LiteralString:

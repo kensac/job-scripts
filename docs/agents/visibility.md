@@ -495,8 +495,10 @@ administrator to any catalog posting but another person's private upload
 (`visibility.ADMIN_CATALOG`), and holds everyone else to `FAST`.
 
 A node says why it is there: the application it is nearest to, and whether
-it is a near copy (`NEAR_COPY`) of an application or of a higher posting on
-the page. A cursor names the model it was read under, so a cursor from before
+it is a near copy (`NEAR_COPY`) of an application. A job listed several
+times (reposted, in other cities, on other boards) is one row: a posting with
+a near copy ranked above it anywhere in the pool is folded into that row's
+`copies` instead of being a row, and a page is refilled past what it folded. A cursor names the model it was read under, so a cursor from before
 a refit is refused rather than read in another order. The page asks for a
 fit when the person has no model or theirs is from before today, and says so
 (`training`). The administrative surface has no version of this page: it is a
