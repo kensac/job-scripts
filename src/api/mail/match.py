@@ -1,19 +1,8 @@
-"""Tying an email to the application it is about.
+"""Attach emails to applications via ordered matching tiers.
 
-Four tiers, cheapest and most certain first. Anything the tiers cannot settle
-stays UNMATCHED and is recorded as such - a wrong match is worse than no
-match, because everything downstream treats a match as fact.
-
-Two properties make this affordable and safe:
-
-The candidate set is small. Matching is against the user's ~716 applications,
-not the 49k job catalog, so even an exhaustive comparison is cheap.
-
-Matching RE-RUNS. `application_matches` is append-only, so a message that
-could not be matched in March can match in September when the posting finally
-appears on the board. Nothing here is a one-shot decision, which is what makes
-"applied first, added to the board later" work by recomputation rather than
-repair.
+Tiers run cheapest and most certain first and never guess: ambiguous cases stay
+UNMATCHED. `application_matches` is append-only so sweeps can reconsider
+messages as new applications appear.
 """
 
 from __future__ import annotations
@@ -55,10 +44,7 @@ from core.fetching.ats import canonicalize
 
 logger = logging.getLogger(__name__)
 
-# Kinds that describe the user rather than an application, and so must never
-# be attached to one. Already excluded from creating applications
-# (tasks.mail.matching.derived.APPLIED_KINDS); this is the same rule on the matching side,
-# which had drifted.
+# Event kinds that are never attached to an application (matches derived.APPLIED_KINDS).
 UNATTACHABLE_KINDS = frozenset({"recruiter_outreach"})
 
 _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
@@ -89,14 +75,7 @@ def urls_in(body: str | None) -> list[str]:
 
 
 def canonical_urls(body: str | None) -> set[str]:
-    """Canonical posting URLs mentioned anywhere in the message.
-
-    ATS mail almost always links back to the posting or the application, and
-    core.fetching.ats already knows how to reduce those links to a stable identity -
-    the same function that dedupes the job catalog. Reusing it means a link in
-    an email and the job row it points at agree by construction rather than by
-    a second, parallel spelling.
-    """
+    """Canonical ATS posting URLs extracted from `body`."""
     found = set()
     for url in urls_in(body):
         canonical = canonicalize(url.rstrip(".,);"))
@@ -130,21 +109,15 @@ def _by_exact_link(user_id: int, body: str | None) -> MatchDecision | None:
 
 
 def norm_company(value: str | None) -> str:
-    """Loose enough that 'Stripe' and 'Stripe, Inc.' agree.
-
-    company is free text on both sides, so exact equality would treat those as
-    different employers - the same weakness that makes the reposted-role count
-    an undercount elsewhere in this codebase.
-    """
+    """Normalize free-text company or role names so 'Stripe' and 'Stripe, Inc.' match."""
     text = (value or "").lower().strip()
     text = re.sub(r"\b(inc|llc|ltd|limited|corp|corporation|co|plc|gmbh|sa|nv)\b", " ", text)
     return re.sub(r"[^a-z0-9]+", "", text)
 
 
-# An employer cannot reply before you apply. Shared by both company tiers so
-# they cannot drift: tier 3 had no window at all and matched a 2025 rejection
-# to a 2026 application, which is the same predicate missing rather than a
-# different rule.
+# Shared by both company tiers: mail cannot predate an application. Tracker
+# dates carry 1 day of slack because they are timezone-less dates cast to UTC
+# midnight; email-derived timestamps are exact instants and get 0 slack.
 _NOT_BEFORE_APPLYING = """
     (a.applied_at IS NULL OR %s::timestamptz IS NULL
      OR a.applied_at - CASE WHEN a.source_provenance = 'tracker'
@@ -152,22 +125,11 @@ _NOT_BEFORE_APPLYING = """
         <= %s::timestamptz)
 """
 
-
-# Employment type as an ATS spells it. This is not a keyword list anyone
-# tuned - it is the vocabulary a job board uses to say "this is an
-# internship", and it is the one attribute of a role that is almost always
-# written out rather than implied.
 _INTERNSHIP_WORDS = frozenset({"intern", "interns", "internship", "internships", "coop"})
 
 
 def _employment_type_contradicts(mail_title: str | None, app_title: str | None) -> bool:
-    """True when one title is an internship and the other plainly is not.
-
-    A veto, not a requirement: it only speaks when BOTH sides carry a title, so
-    the 330 matches where one side is silent are untouched. And it tests a
-    categorical fact rather than similarity - no overlap fraction, no
-    threshold, nothing to tune. Either the word is there or it is not.
-    """
+    """True when both titles are present and only one names an internship."""
     if not mail_title or not app_title:
         return False
     mail_words = set(re.findall(r"[a-z0-9]+", mail_title.lower()))
@@ -178,31 +140,7 @@ def _employment_type_contradicts(mail_title: str | None, app_title: str | None) 
 def _by_company(
     user_id: int, company: str | None, sent_at, title: str | None = None
 ) -> MatchDecision | None:
-    """One application at that company inside the window, or nothing.
-
-    Ambiguity is not resolved here on purpose. Two open applications at the
-    same employer is exactly the case a human or a model should settle, and
-    guessing would produce a confident wrong answer that nothing downstream
-    can question.
-
-    A TRACKER APPLICATION'S DATE IS A DAY, NOT AN INSTANT, and the day of
-    slack below is that fact rather than a tolerance anyone tuned.
-    The board's applied day is a `date` - a calendar day in a timezone nobody
-    recorded - and storing it as `applied_at` casts it to midnight UTC,
-    inventing an hour, a minute and a second it never had. That invented
-    precision then vetoes the acknowledgement of the application it describes:
-    an ATS replying at 23:57 UTC, which is 19:57 on a summer evening in New
-    York, falls a few minutes before a midnight that only exists because of
-    the cast.
-
-    A timezone-less date is uncertain by exactly one day. That is the width of
-    the datum, so it is the width of the comparison; if the column ever became
-    a real instant the slack should go with it.
-
-    It applies ONLY to tracker rows. An email-derived `applied_at` is a real
-    timestamp taken from a message, so it has no such uncertainty - and its
-    own boundary problem is a different bug, not a wider version of this one.
-    """
+    """Match a single unambiguous application at `company` inside the date window."""
     key = norm_company(company)
     if not key:
         return None
@@ -219,19 +157,7 @@ def _by_company(
     )
     candidates = [r for r in rows if norm_company(r["company_name"]) == key]
     if len(candidates) == 1 and _employment_type_contradicts(title, candidates[0]["title"]):
-        # This tier matches on the employer alone and never consulted the role
-        # it already had, so an internship rejection attached itself to a
-        # full-time application whenever that was the only one on file.
-        # Measured over the matches this tier produced: 26 of the 429 that
-        # carry a title on both sides contradict this way - a Data Science
-        # internship attached to "Software Development Engineer I", a Business
-        # Intelligence internship to "Data Engineer I".
-        #
-        # Refusing costs the handful where the user recorded an internship
-        # under a shortened title, and this module's own rule is that a wrong
-        # match is worse than no match. A refusal is `unmatched`, which is
-        # re-runnable and visible for adjudication; a wrong attachment is
-        # neither.
+        # Refuse rather than attach an internship email to a full-time role (or vice versa).
         return None
     if len(candidates) == 1:
         return MatchDecision(
@@ -248,16 +174,7 @@ def _by_company(
 def _by_company_and_title(
     user_id: int, company: str | None, title: str | None, sent_at=None
 ) -> MatchDecision | None:
-    """Company and title, INSIDE THE SAME WINDOW tier 2 uses.
-
-    It had no date bound at all, which is how a rejection from 2025 attached
-    itself to an application made in 2026: the company matched, the title
-    matched, and nothing asked whether the mail could possibly be about it.
-    Repeat applications to one employer for one role are exactly the case this
-    tier exists to serve, so being time-blind made it wrong precisely where it
-    was meant to help - and it collapsed every message for that role, across
-    every year, onto one application.
-    """
+    """Match a single application by normalized company and title inside the date window."""
     key, role = norm_company(company), norm_company(title)
     if not key or not role:
         return None
@@ -293,12 +210,7 @@ def match_message(
     title: str | None,
     sent_at=None,
 ) -> MatchDecision:
-    """Best available match, or an explicit non-match.
-
-    Never returns a guess. UNMATCHED with a NULL application_id is a real
-    recorded outcome meaning "we looked and found nothing", which is different
-    from never having looked and is what lets a later re-run improve on it.
-    """
+    """Run matching tiers in order and return the first unambiguous match or UNMATCHED."""
     for finder in (
         lambda: _by_exact_link(user_id, body),
         lambda: _by_company(user_id, company, sent_at, title),
@@ -311,26 +223,14 @@ def match_message(
 
 
 def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None = None) -> None:
-    """Append a match and record the person who decided it, if any.
+    """Append a match decision and advance `email_messages.current_match_id`.
 
-    A null `actor_user_id` identifies the matcher. Compare a human actor with
-    the message owner to distinguish owner and administrator corrections.
+    When `actor_user_id` is None (automated matcher):
+    - Never overturns an existing human decision (enforced here at write time
+      against races with sweep selection).
+    - Skips appending if the decision fields repeat the current match.
 
-    The matcher cannot overturn a human decision. In production, match 14911
-    assigned message 126111 to application 2507 at 19:16. One hour later,
-    match 14912 replaced it with `unmatched`. The sweep had selected the
-    message before the human write. Selection cannot close that race; the
-    write must check the latest match.
-
-    A person can still reconsider a human decision from the review queue.
-    The matcher skips an identical verdict to avoid appending the same state
-    on every sweep. At 6,124 unmatched messages and an hourly cycle, that
-    would add roughly 147,000 redundant rows per day. The first unmatched
-    verdict stays because it records the decision.
-
-    A human decision always appends, even when it agrees with the current
-    match. Its actor is new evidence. Compare decision fields only; different
-    rationale prose does not make a different decision.
+    Human writes always append, even when agreeing with the current match.
     """
     if actor_user_id is None:
         current = latest(message_id)
@@ -341,8 +241,7 @@ def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None =
             current.application_id, current.method, current.confidence
         ):
             return
-    # The append and the pointer in one statement, as `events.append` does,
-    # and GREATEST for the same reason: two appends can commit in either order.
+    # GREATEST keeps the pointer monotonic if two appends commit out of order.
     db.execute(
         """
         WITH appended AS (
@@ -367,8 +266,7 @@ def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None =
 
 
 def latest(message_id: int) -> CurrentMatch | None:
-    """The current match. Append-only, so the newest row wins - the same rule
-    as the verdict log, and what makes re-running non-destructive."""
+    """Return the newest match row for `message_id`, or None."""
     return db.query_one_as(
         CurrentMatch,
         "SELECT id, message_id, application_id, method, confidence, rationale, "
@@ -379,19 +277,8 @@ def latest(message_id: int) -> CurrentMatch | None:
 
 
 def confirm(message_id: int, current: dict, *, actor_user_id: int, note: str | None = None) -> None:
-    """A person looked at this attachment and says it is right.
-
-    KEEPS THE METHOD AND CONFIDENCE the matcher wrote. Rewriting them to
-    `manual` would make a confirmation indistinguishable from a hand-made
-    match and would destroy the only thing worth measuring here: whether
-    `ats_company` at medium confidence is right often enough to stop asking.
-    The tier that produced the attachment is the grouping key for that, and it
-    survives only if confirming preserves it.
-
-    `actor_user_id` is what changes, and it is the whole answer to "has anyone
-    looked at this". Append rather than update, so the unreviewed row it
-    replaces stays readable underneath.
-    """
+    """Append a human confirmation preserving the original method and confidence
+    so tier accuracy remains measurable."""
     record(
         message_id,
         MatchDecision(
@@ -405,18 +292,8 @@ def confirm(message_id: int, current: dict, *, actor_user_id: int, note: str | N
 
 
 def reject(message_id: int, *, actor_user_id: int, note: str | None = None) -> None:
-    """A person says this message does not belong to the application it is on.
-
-    The same append `detach` writes, because it is the same fact - one is
-    reached from the application and the other from the review queue, and two
-    spellings of one decision is how the two surfaces come to disagree about
-    what the queue contains.
-
-    DELETES NOTHING and names no replacement. `application_id` NULL with a
-    method that is not `not_an_application` is exactly the state the queue
-    selects, so the message comes back as a question for a person rather than
-    for the matcher, which will not touch a row a person wrote.
-    """
+    """Append a human detachment (`application_id=None`, `method=detached`) so
+    the message returns to the review queue without the matcher overriding it."""
     record(
         message_id,
         MatchDecision.detached(note or "rejected by a person"),

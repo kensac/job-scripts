@@ -21,9 +21,7 @@ from api.resolve.ranking import (
     rank,
 )
 
-# Kinds that are about a job at all. `not_job_related` is excluded because it
-# is already resolved - the classifier said this is not job mail and nothing
-# is waiting on a person.
+# Job-related event kinds eligible for the queue (excludes not_job_related).
 _AWAITING_KINDS = (
     "acknowledgement",
     "rejection",
@@ -36,37 +34,16 @@ _AWAITING_KINDS = (
 )
 
 
-# EVERY ROW THE QUEUE RANKS, in one statement that reads the current event and
-# the current match once. It used to be four statements, each recomputing
-# the newest row per message over every email_events and application_matches
-# row - 83,846 events four times per request, and again on the limit=1 re-read
-# after every answer.
-#
-# Two disjoint populations, told apart by `application_id`:
-#
-#   - Messages whose current match is one of the owner's live applications.
-#     These are the events behind every stage (what `events_for` reads), the
-#     attachments nobody has confirmed, and the evidence proposals are made
-#     from. Dismissed applications are left out: no row of the queue asks
-#     about one, so their stage is never read.
-#   - The owner's own mail with a job kind that reached no application and no
-#     deliberate refusal.
-#
-# Narrow on purpose. Ranking needs kind, ids, board state and `sent_at`; the
-# subject, sender, extracted title and match rationale are read for the page
-# alone, by `_DETAIL_SQL`. Reading them for every row was most of the heap
-# traffic into email_messages, whose rows carry the mail bodies.
-#
-# Ties on `sent_at` are ordered newest message first. Each of the four
-# statements this replaces ordered by `sent_at` alone, so the order among
-# equal timestamps was whatever the plan produced, not a property of the data.
+# Single-pass read of all queue-rankable rows via current_match_id /
+# current_event_id pointers:
+# 1. Messages currently matched to a live (non-dismissed) application.
+# 2. Unmatched job-related messages that were not explicitly marked not_an_application.
+# Keeps columns narrow for ranking; subject/sender/rationale are fetched for the
+# page alone in queue_item_rendering. Ties break newest message_id first.
 _CURRENT_SQL = """
 WITH answered AS (
     SELECT DISTINCT event_id FROM event_answers WHERE question = 'status'
 )
--- Through the pointers, from rows already in hand: the owner's applications
--- reach their matches by index, and a match counts only while it is its
--- message's current one. No pass over every message or every event.
 SELECT m.id AS message_id, m.sent_at, e.id AS event_id, e.kind, NULL AS company,
        cm.id AS match_id, cm.actor_user_id, a.id AS application_id,
        uj.status AS board_status, uj.user_id IS NOT NULL AS on_board,
@@ -80,8 +57,6 @@ LEFT JOIN answered sr ON sr.event_id = e.id
 WHERE a.user_id = %(user)s
   AND a.dismissed_at IS NULL
 UNION ALL
--- What the matcher read the sender as is how an unmatched message finds its
--- candidates, so these rows carry it.
 SELECT m.id, m.sent_at, e.id, e.kind, e.detail->>'company',
        NULL, NULL, NULL, NULL, false, false
 FROM email_messages m
@@ -90,9 +65,6 @@ LEFT JOIN application_matches cm ON cm.id = m.current_match_id
 WHERE m.user_id = %(user)s
   AND e.kind = ANY(%(kinds)s)
   AND cm.application_id IS NULL
-  -- A deliberate refusal is already an answer. Only a failure to find one is
-  -- still a question, and collapsing those two is the bug this queue exists
-  -- to stop repeating.
   AND COALESCE(cm.method, '') <> %(refused)s
 ORDER BY sent_at DESC NULLS LAST, message_id DESC
 """
@@ -110,13 +82,8 @@ def current_rows(owner_id: int) -> list[dict[str, Any]]:
 
 
 def events_by_application(rows: list[dict[str, Any]]) -> dict[int, list[QueueEvent]]:
-    """`mail_pipeline.events_by_application` over the rows already read, for
-    the owner's live applications.
-
-    The same predicates - the current match is the application, the current
-    event is the event - so the queue and the board agree about every stage.
-    A test holds the two equal.
-    """
+    """Group current events by application ID (held equal to
+    `mail_pipeline.events_by_application` by tests)."""
     grouped: dict[int, list[QueueEvent]] = {}
     for row in rows:
         if row["application_id"] is not None and row["event_id"] is not None:
@@ -151,19 +118,10 @@ def message_items(
 
 
 def match_items(rows: list[dict[str, Any]], events: dict[int, list[QueueEvent]]) -> list[Ranked]:
-    """Attachments the matcher made that nobody has been asked about.
+    """Unconfirmed automated attachments (`actor_user_id IS NULL` on the current match).
 
-    `actor_user_id IS NULL` on the CURRENT row is the whole test, and it only
-    became a true one when every human write started going through
-    `mail_match.record`. Method cannot answer it: `manual` means a person chose
-    the application, and 37 rows in production say `manual` with no actor
-    because three endpoints wrote this table directly before that column
-    existed.
-
-    The stage a rejection would remove is the same question `rank` asks of an
-    unmatched message, run backwards: an attachment holding an application at
-    `rejected` is worth checking, because getting it wrong is the difference
-    between a live application and a closed one.
+    Ranked at `RANK_MOVES_STAGE` when removing the message would change the
+    application's derived stage, otherwise `RANK_ATTACHABLE`.
     """
     stages: dict[int, str] = {}
     out = []
@@ -174,9 +132,6 @@ def match_items(rows: list[dict[str, Any]], events: dict[int, list[QueueEvent]])
         own = events.get(app, [])
         if app not in stages:
             stages[app] = mail_pipeline.stage_for(own)
-        # What this message contributes: the stage without it, against the
-        # stage with everything. Equal means rejecting it changes nothing a
-        # person would see.
         without = [e for e in own if e.message_id != row["message_id"]]
         moves = mail_pipeline.stage_for(without) != stages[app]
         out.append(
@@ -191,17 +146,9 @@ def match_items(rows: list[dict[str, Any]], events: dict[int, list[QueueEvent]])
 
 
 def proposal_items(rows: list[dict[str, Any]]) -> list[Ranked]:
-    """Where the mail and the board disagree, as `mail_pipeline.proposals_for`
-    derives it, over the rows already read. A test holds the two equal.
-
-    Never an overwrite: the board says the application is live, or there is no
-    board row to disagree with, and the mail says otherwise. One per
-    application and event kind, from the newest such event nobody has
-    answered, in application then kind order.
-
-    Every one of these moves what the product says, by construction, so they
-    all rank at the top, and the reason says which way.
-    """
+    """Newest unanswered status proposal per `(application_id, kind)` where mail
+    disagrees with an unresolved or absent board row (held equal to
+    `mail_pipeline.proposals_for` by tests)."""
     newest: dict[tuple[int, str], dict[str, Any]] = {}
     for row in rows:
         if (
@@ -224,21 +171,8 @@ def proposal_items(rows: list[dict[str, Any]]) -> list[Ranked]:
 
 
 def action_items(owner_id: int, events: dict[int, list[QueueEvent]]) -> list[Ranked]:
-    """Open asks, each saying what could ever close it without a person.
-
-    All at one rank, deliberately. Marking an ask done closes the ask and moves
-    no stage, so the question this queue orders by - would answering change
-    what the product says - has the same answer for every one of them.
-
-    What differs is whether waiting is an option, and that is `settles_on`
-    rather than a rank. It is not evenly true: `schedule_interview` is settled
-    by a later event 117 times in 181, while `respond_to_offer` manages 8 in
-    194, because the only event that closes an offer is a rejection and
-    accepting one produces no mail at all. A rate is not a rank though, and
-    cutting it somewhere would be a tuned number wearing a derivation's
-    clothes. The list is the honest form: it says what would close this, and
-    an empty one says nothing will.
-    """
+    """Open asks ranked at `RANK_ATTACHABLE`, with `settles_on` naming which
+    future event kinds would close each ask automatically."""
     open_apps = {
         r["id"]: r
         for r in db.query(
