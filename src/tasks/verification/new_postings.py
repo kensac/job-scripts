@@ -73,18 +73,13 @@ def _build_specs(rows: list[dict[str, Any]]) -> list[BatchSpec]:
     ]
 
 
-def _record_result(res: BatchResult) -> str:
-    """Write the verdicts one collected result settles; return its receipt outcome."""
-    job = res.request.context if res.request else None
-    if not job:
-        return "unknown_request"
-    if res.error or not res.text:
-        return "failed"
-    boards = job.get("boards") or []
-    decisions: dict[int, FilterDecision] = {}
+def _parse_batch_answer(
+    custom_id: str, text: str, boards: list[dict[str, Any]]
+) -> tuple[Any, dict[int, FilterDecision]] | None:
+    """Validate a standalone or joint verification batch reply."""
     try:
         if boards:
-            answer = json.loads(res.text)
+            answer = json.loads(text)
             parsed = VERIFICATION_REQUEST.response_model.model_validate(answer["verification"])
             decisions = {
                 board["board_id"]: FilterDecision.model_validate(
@@ -92,19 +87,22 @@ def _record_result(res: BatchResult) -> str:
                 )
                 for board in boards
             }
-        else:
-            parsed = VERIFICATION_REQUEST.response_model.model_validate_json(res.text)
+            return parsed, decisions
+        return VERIFICATION_REQUEST.response_model.model_validate_json(text), {}
     except ValueError, KeyError, TypeError:
-        logger.warning("verify_new: unparsable batch output for %s", res.custom_id)
-        return "invalid_output"
-    if boards:
-        parsed_json = parsed.model_dump_json()
-        # The question verification answered, as if it had been asked alone,
-        # so reverify's unchanged-page reuse still recognises it.
-        question = job.get("verify_question") if res.model == job.get("model") else None
-    else:
-        parsed_json = res.text
-        question = question_sha256(res.model, res.request)
+        logger.warning("verify_new: unparsable batch output for %s", custom_id)
+        return None
+
+
+def _record_verification_verdicts(
+    res: BatchResult,
+    job: dict[str, Any],
+    parsed: Any,
+    parsed_json: str,
+    question: str | None,
+    usage: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Write unsettled closed/clearance verdicts, attaching token usage to the first row."""
     # A verdict settled after submission takes precedence over this
     # missing-check request, even if its original snapshot asked for it.
     settled = {
@@ -115,7 +113,6 @@ def _record_result(res: BatchResult) -> str:
             (res.custom_id,),
         )
     }
-    usage = ai.batch_usage(res.usage)
     written = False
     for check, rejected, reason in (
         ("closed", parsed.is_closed, parsed.closed_reason),
@@ -143,6 +140,18 @@ def _record_result(res: BatchResult) -> str:
             )
             usage = {}
             written = True
+    return usage, written
+
+
+def _record_board_verdicts(
+    res: BatchResult,
+    job: dict[str, Any],
+    boards: list[dict[str, Any]],
+    decisions: dict[int, FilterDecision],
+    usage: dict[str, Any],
+    written: bool,
+) -> bool:
+    """Write managed-board custom verdicts that still match the board's model and lack a verdict."""
     for board in boards:
         # A verdict is keyed by the model that gave it; one the board did not
         # ask for, or that its own run has bought meanwhile, is not written.
@@ -176,4 +185,30 @@ def _record_result(res: BatchResult) -> str:
         )
         usage = {}
         written = True
+    return written
+
+
+def _record_result(res: BatchResult) -> str:
+    """Write the verdicts one collected result settles; return its receipt outcome."""
+    job = res.request.context if res.request else None
+    if not job:
+        return "unknown_request"
+    if res.error or not res.text:
+        return "failed"
+    boards = job.get("boards") or []
+    decoded = _parse_batch_answer(res.custom_id, res.text, boards)
+    if decoded is None:
+        return "invalid_output"
+    parsed, decisions = decoded
+    if boards:
+        parsed_json = parsed.model_dump_json()
+        # Keep the standalone verification question hash so reverify can reuse it.
+        question = job.get("verify_question") if res.model == job.get("model") else None
+    else:
+        parsed_json = res.text
+        question = question_sha256(res.model, res.request)
+    usage, written = _record_verification_verdicts(
+        res, job, parsed, parsed_json, question, ai.batch_usage(res.usage)
+    )
+    written = _record_board_verdicts(res, job, boards, decisions, usage, written)
     return "written" if written else "superseded"
