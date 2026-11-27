@@ -4185,7 +4185,7 @@
     "/v1/user/recommendations": {
       "get": {
         "summary": "Recommendations Page",
-        "description": "The person's recent tech postings they have not touched, best match\nfirst, with the application each is nearest to and whether it is a near\ncopy of one, or of a posting higher on the page.",
+        "description": "The person's recent tech postings they have not touched, best match\nfirst, each with the application it is nearest to, whether it is a near\ncopy of one, and its own near copies folded in. total_count counts the\npool's postings, copies included.",
         "operationId": "recommendations_page_v1_user_recommendations_get",
         "parameters": [
           {
@@ -39454,6 +39454,43 @@
         "title": "ContextDraft",
         "description": "A draft already written for this posting. Only drafts that exist are\nlisted, so `draft` is never null here."
       },
+      "Copy": {
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "company": {
+            "type": "string",
+            "title": "Company"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "locations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Locations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "url",
+          "company",
+          "title",
+          "locations"
+        ],
+        "title": "Copy",
+        "description": "Another listing of the same job: reposted, in another city, on\nanother board."
+      },
       "CorrectedJob": {
         "properties": {
           "id": {
@@ -53054,16 +53091,12 @@
             "type": "boolean",
             "title": "Applied Copy"
           },
-          "copy_of": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Copy Of"
+          "copies": {
+            "items": {
+              "$ref": "#/components/schemas/Copy"
+            },
+            "type": "array",
+            "title": "Copies"
           }
         },
         "type": "object",
@@ -53078,7 +53111,7 @@
           "match",
           "like",
           "applied_copy",
-          "copy_of"
+          "copies"
         ],
         "title": "Recommendation"
       },
