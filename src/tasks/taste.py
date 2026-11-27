@@ -11,6 +11,7 @@ import asyncio
 from typing import Any
 
 from api import db
+from api.queue import enqueue
 from core import taste
 from core.derivations.local_embeddings import LOCAL_EMBEDDING_MODEL
 from tasks.runtime import set_progress
@@ -29,4 +30,10 @@ async def handle_train_taste(task_id: int, payload: dict[str, Any]) -> None:
         f"taste model {stored['id']}: {evaluation['held_out_in_top_share']:.0%} of held-out "
         f"applications in the top {evaluation['top_share']:.0%}",
         extra=stored,
+    )
+    # The ranking the For you page reads, recomputed with the new model.
+    enqueue(
+        "rank_for_you",
+        {"user_id": user_id, "model_id": stored["id"]},
+        dedupe_key=f"rank-for-you:{user_id}:model-{stored['id']}",
     )

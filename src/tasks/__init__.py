@@ -30,6 +30,7 @@ from tasks.filtering.personal_runs import (
     handle_run_filter_batch_chunk,
     handle_run_filter_chunk,
 )
+from tasks.for_you import handle_rank_for_you
 from tasks.health import handle_data_health
 from tasks.ingest import handle_ingest_source, handle_retire_switched_off
 from tasks.latest_posting_checks import handle_fold_latest_posting_checks
@@ -80,6 +81,7 @@ HANDLERS = {
     "train_tech_scope": handle_train_tech_scope,
     "score_tech_scope": handle_score_tech_scope,
     "train_taste": handle_train_taste,
+    "rank_for_you": handle_rank_for_you,
     "embed_postings_local": handle_embed_postings_local,
     "move_receipt_responses": handle_move_receipt_responses,
     "reverify_open": handle_reverify_open,

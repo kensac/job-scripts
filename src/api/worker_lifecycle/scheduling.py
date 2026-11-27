@@ -251,11 +251,18 @@ def schedule_ingest_cycle() -> None:
     enqueue("score_tech_scope", {"cycle": cycle}, dedupe_key=f"score-tech-scope:{cycle}")
     # Each taste model refitted once a day (tasks.taste): everyone who has
     # one asked for it by opening the For you page.
+    # And each person's For you ranking (tasks.for_you) recomputed every
+    # cycle, taking in what was scoped or judged since.
     for row in db.query("SELECT DISTINCT user_id FROM ranking_models WHERE kind = 'taste'"):
         enqueue(
             "train_taste",
             {"cycle": day, "user_id": row["user_id"]},
             dedupe_key=f"train-taste:{row['user_id']}:{day}",
+        )
+        enqueue(
+            "rank_for_you",
+            {"cycle": cycle, "user_id": row["user_id"]},
+            dedupe_key=f"rank-for-you:{row['user_id']}:{cycle}",
         )
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync
