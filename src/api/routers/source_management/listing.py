@@ -93,75 +93,71 @@ class SourceLedgers(BaseModel):
     sources: list[SourceLedger]
 
 
-@router.get("/sources")
-def admin_list_sources(
-    shape: str = "full", user: AuthedUser = Depends(require_admin)
-) -> SourceNames | CatalogCounts | SourceLedgers:
-    """shape=full is the ledger. shape=names is the vocabulary (name, active,
-    kind, bundles) for pickers and filters; shape=counts is what the dashboard
-    tiles and pull health need. Both skip the per-source aggregation over jobs, tasks and
-    subscribers, which the dashboard was paying for on every live tick."""
-    if shape == "names":
-        source_rows = db.query(
-            """
-            WITH bundles AS (
-                SELECT m AS source, array_agg(DISTINCT g.name ORDER BY g.name) AS groups
-                FROM source_groups g, unnest(g.members) AS m GROUP BY m
+def _list_source_names() -> SourceNames:
+    source_rows = db.query(
+        """
+        WITH bundles AS (
+            SELECT m AS source, array_agg(DISTINCT g.name ORDER BY g.name) AS groups
+            FROM source_groups g, unnest(g.members) AS m GROUP BY m
+        )
+        SELECT s.name, s.listings_url, s.active, COALESCE(b.groups, '{}') AS groups
+        FROM sources s LEFT JOIN bundles b ON b.source = s.name
+        ORDER BY s.active DESC, s.name
+        """
+    )
+    return SourceNames(
+        sources=[
+            SourceName(
+                name=source_row["name"],
+                active=source_row["active"],
+                groups=source_row["groups"],
+                kind=boards.kind(source_row["listings_url"]),
             )
-            SELECT s.name, s.listings_url, s.active, COALESCE(b.groups, '{}') AS groups
-            FROM sources s LEFT JOIN bundles b ON b.source = s.name
-            ORDER BY s.active DESC, s.name
-            """
-        )
-        return SourceNames(
-            sources=[
-                SourceName(
-                    name=source_row["name"],
-                    active=source_row["active"],
-                    groups=source_row["groups"],
-                    kind=boards.kind(source_row["listings_url"]),
-                )
-                for source_row in source_rows
-            ]
-        )
-    if shape == "counts":
-        total = db.query_one(
-            "SELECT COUNT(*) AS sources, COUNT(*) FILTER (WHERE active) AS active FROM sources"
-        )
-        # The latest pull per active source, one probe of
-        # idx_tasks_ingest_source_latest each, as the full ledger reads it.
-        active_rows = db.query(
-            """
-            SELECT s.name, s.listings_url, li.status, li.finished_at, li.error,
-                   li.finished_at > now() - interval '24 hours' AS within_day
-            FROM sources s
-            LEFT JOIN LATERAL (
-                SELECT status, finished_at, error FROM tasks
-                WHERE kind = 'ingest_source' AND payload->>'source' = s.name
-                ORDER BY id DESC LIMIT 1
-            ) li ON true
-            WHERE s.active
-            ORDER BY s.name
-            """
-        )
-        by_kind: dict[str, int] = {}
-        for source_row in active_rows:
-            source_kind = boards.kind(source_row["listings_url"])
-            by_kind[source_kind] = by_kind.get(source_kind, 0) + 1
-        return CatalogCounts(
-            sources=total["sources"] if total else 0,
-            active=total["active"] if total else 0,
-            by_kind=by_kind,
-            pulled_ok_24h=sum(1 for r in active_rows if r["status"] == "done" and r["within_day"]),
-            stale=sum(1 for r in active_rows if r["status"] != "failed" and not r["within_day"]),
-            failing=[
-                FailingPull(name=r["name"], error=r["error"], at=r["finished_at"])
-                for r in active_rows
-                if r["status"] == "failed"
-            ],
-            bundles=(db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
-        )
+            for source_row in source_rows
+        ]
+    )
 
+
+def _list_source_counts() -> CatalogCounts:
+    total = db.query_one(
+        "SELECT COUNT(*) AS sources, COUNT(*) FILTER (WHERE active) AS active FROM sources"
+    )
+    # The latest pull per active source, one probe of
+    # idx_tasks_ingest_source_latest each, as the full ledger reads it.
+    active_rows = db.query(
+        """
+        SELECT s.name, s.listings_url, li.status, li.finished_at, li.error,
+               li.finished_at > now() - interval '24 hours' AS within_day
+        FROM sources s
+        LEFT JOIN LATERAL (
+            SELECT status, finished_at, error FROM tasks
+            WHERE kind = 'ingest_source' AND payload->>'source' = s.name
+            ORDER BY id DESC LIMIT 1
+        ) li ON true
+        WHERE s.active
+        ORDER BY s.name
+        """
+    )
+    by_kind: dict[str, int] = {}
+    for source_row in active_rows:
+        source_kind = boards.kind(source_row["listings_url"])
+        by_kind[source_kind] = by_kind.get(source_kind, 0) + 1
+    return CatalogCounts(
+        sources=total["sources"] if total else 0,
+        active=total["active"] if total else 0,
+        by_kind=by_kind,
+        pulled_ok_24h=sum(1 for r in active_rows if r["status"] == "done" and r["within_day"]),
+        stale=sum(1 for r in active_rows if r["status"] != "failed" and not r["within_day"]),
+        failing=[
+            FailingPull(name=r["name"], error=r["error"], at=r["finished_at"])
+            for r in active_rows
+            if r["status"] == "failed"
+        ],
+        bundles=(db.query_one("SELECT COUNT(*) AS n FROM source_groups") or {}).get("n", 0),
+    )
+
+
+def _list_source_ledgers() -> SourceLedgers:
     # Each fact is aggregated once over its table and joined, rather than
     # computed per source in a correlated subquery. At 751 sources the
     # per-row form ran five subplans and a lateral per row and took 890 ms
@@ -249,3 +245,18 @@ def admin_list_sources(
             for source_row in source_rows
         ]
     )
+
+
+@router.get("/sources")
+def admin_list_sources(
+    shape: str = "full", user: AuthedUser = Depends(require_admin)
+) -> SourceNames | CatalogCounts | SourceLedgers:
+    """shape=full is the ledger. shape=names is the vocabulary (name, active,
+    kind, bundles) for pickers and filters; shape=counts is what the dashboard
+    tiles and pull health need. Both skip the per-source aggregation over jobs, tasks and
+    subscribers, which the dashboard was paying for on every live tick."""
+    if shape == "names":
+        return _list_source_names()
+    if shape == "counts":
+        return _list_source_counts()
+    return _list_source_ledgers()

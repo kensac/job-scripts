@@ -156,30 +156,17 @@ class Pipeline(BaseModel):
     summary: PipelineSummary
 
 
-@router.get("/user/pipeline")
-def pipeline(
-    include_closed: bool = Query(default=False),
-    stage: str | None = Query(default=None),
-    provenance: str | None = Query(default=None),
-    tier: str | None = Query(default=None),
-    evidence: bool | None = Query(default=None),
-    silent_days: int | None = Query(default=None, ge=0),
-    sort: str = Query(default="applied_at"),
-    dir: str = Query(default="desc"),
-    q: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    user: AuthedUser = Depends(require_user),
-) -> Pipeline:
-    """The user's applications with their derived stage and open actions.
-
-    Stage is derived, so it cannot be filtered or paged in SQL. Both happen
-    after derivation, which is why the bulk events query matters: the
-    alternative is deriving a page's worth and having no idea what the totals
-    are.
-    """
-    rows = application_rows_for_user(user.id)
-    summary = _summary(rows)
+def _filter_pipeline_rows(
+    rows: list[PipelineApplication],
+    *,
+    include_closed: bool,
+    stage: str | None,
+    provenance: str | None,
+    tier: str | None,
+    evidence: bool | None,
+    silent_days: int | None,
+    q: str | None,
+) -> tuple[list[PipelineApplication], list[str], list[str]]:
     # Comma-separated, because every lens worth having is multi-valued:
     # "waiting" is applied AND acknowledged, "over" is rejected AND closed AND
     # withdrawn. A single-valued filter makes a lens either impossible or a
@@ -225,6 +212,60 @@ def pipeline(
             for r in rows
             if needle in (r.company_name or "").lower() or needle in (r.title or "").lower()
         ]
+    return rows, provenances, tiers
+
+
+def _open_pipeline_actions(user_id: int) -> list[PipelineAction]:
+    names = {
+        r["id"]: r
+        for r in db.query(
+            "SELECT id, company_name, title FROM applications WHERE user_id = %s", (user_id,)
+        )
+    }
+    return [
+        PipelineAction(
+            **item.model_dump(),
+            company_name=names[item.application_id]["company_name"],
+            title=names[item.application_id]["title"],
+        )
+        for item in mail_pipeline.action_items(user_id, open_only=True)
+    ]
+
+
+@router.get("/user/pipeline")
+def pipeline(
+    include_closed: bool = Query(default=False),
+    stage: str | None = Query(default=None),
+    provenance: str | None = Query(default=None),
+    tier: str | None = Query(default=None),
+    evidence: bool | None = Query(default=None),
+    silent_days: int | None = Query(default=None, ge=0),
+    sort: str = Query(default="applied_at"),
+    dir: str = Query(default="desc"),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: AuthedUser = Depends(require_user),
+) -> Pipeline:
+    """The user's applications with their derived stage and open actions.
+
+    Stage is derived, so it cannot be filtered or paged in SQL. Both happen
+    after derivation, which is why the bulk events query matters: the
+    alternative is deriving a page's worth and having no idea what the totals
+    are.
+    """
+    rows = application_rows_for_user(user.id)
+    summary = _summary(rows)
+    rows, provenances, tiers = _filter_pipeline_rows(
+        rows,
+        include_closed=include_closed,
+        stage=stage,
+        provenance=provenance,
+        tier=tier,
+        evidence=evidence,
+        silent_days=silent_days,
+        q=q,
+    )
     # Sorted on the SET, not the page. A client sorting what it was handed
     # sorts one page of a filtered whole and reads as though it sorted
     # everything - which is a quiet lie rather than a missing feature.
@@ -235,26 +276,12 @@ def pipeline(
     key = _PIPELINE_SORT_KEYS.get(sort, _PIPELINE_SORT_KEYS["applied_at"])
     rows.sort(key=key, reverse=dir != "asc")
     page = rows[offset : offset + limit]
-    names = {
-        r["id"]: r
-        for r in db.query(
-            "SELECT id, company_name, title FROM applications WHERE user_id = %s", (user.id,)
-        )
-    }
-    actions = [
-        {
-            **item.model_dump(),
-            "company_name": names[item.application_id]["company_name"],
-            "title": names[item.application_id]["title"],
-        }
-        for item in mail_pipeline.action_items(user.id, open_only=True)
-    ]
     return Pipeline(
         applications=page,
         total=len(rows),
         has_more=offset + len(page) < len(rows),
         filters=params_.applied(provenance=provenances, tier=tiers),
-        actions=[PipelineAction(**action) for action in actions],
+        actions=_open_pipeline_actions(user.id),
         summary=summary,
     )
 

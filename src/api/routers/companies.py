@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from fastapi import APIRouter, Depends, Query
 
 from api import db, rates, signals, sorting
@@ -88,6 +90,57 @@ _pages: StaleByKey[tuple, CompanyList] = StaleByKey(
 )
 
 
+class _CompanySupplements(NamedTuple):
+    currency: dict[str, list[_CurrencyRow]]
+    statuses: dict[str, list[_StatusRow]]
+    open_rows: dict[str, _OpenRow]
+    reposts: dict[str, _RepostRow]
+    responses: dict[str, _ResponseRow]
+
+
+def _fetch_company_supplements(keys: list[str], user_id: int) -> _CompanySupplements:
+    if not keys:
+        return _CompanySupplements({}, {}, {}, {}, {})
+    currency = _bucket(db.query_as(_CurrencyRow, _CURRENCY_SQL, {"keys": keys}))
+    statuses = _bucket(db.query_as(_StatusRow, _STATUS_SQL, {"keys": keys, "user_id": user_id}))
+    open_rows = {r.company_key: r for r in db.query_as(_OpenRow, _OPEN_SQL, {"keys": keys})}
+    reposts = {
+        r.company_key: r
+        for r in db.query_as(
+            _RepostRow,
+            _REPOST_SQL,
+            {
+                "keys": keys,
+                "min_urls": signals.REPOST_MIN_URLS,
+                "min_span": signals.REPOST_MIN_SPAN_DAYS,
+            },
+        )
+    }
+    responses = {
+        r.company_key: r
+        for r in db.query_as(
+            _ResponseRow,
+            _RESPONSE_SQL,
+            {
+                "keys": keys,
+                "user_id": user_id,
+                "outcomes": list(_OUTCOME_KINDS),
+                "intermediaries": mail_pipeline.intermediary_domains(),
+            },
+        )
+    }
+    return _CompanySupplements(currency, statuses, open_rows, reposts, responses)
+
+
+def _total_company_names(rows: list[_CompanyRow], offset: int, params: dict[str, object]) -> int:
+    if rows:
+        return rows[0].total_names
+    if offset:
+        total_row = db.query_one_as(_Count, _COUNT_SQL.format(cuts=_CUTS), params)
+        return total_row.c if total_row else 0
+    return 0
+
+
 def _list_companies(
     q: str | None,
     applied: bool,
@@ -124,59 +177,8 @@ def _list_companies(
     rows = db.query_as(_CompanyRow, _BASE_SQL.format(order=order, cuts=_CUTS), params)
     has_more = len(rows) > limit
     rows = rows[:limit]
-    keys = [r.company_key for r in rows]
-
-    currency = _bucket(db.query_as(_CurrencyRow, _CURRENCY_SQL, {"keys": keys})) if keys else {}
-    statuses = (
-        _bucket(db.query_as(_StatusRow, _STATUS_SQL, {"keys": keys, "user_id": user.id}))
-        if keys
-        else {}
-    )
-    open_rows = (
-        {r.company_key: r for r in db.query_as(_OpenRow, _OPEN_SQL, {"keys": keys})} if keys else {}
-    )
-    reposts = (
-        {
-            r.company_key: r
-            for r in db.query_as(
-                _RepostRow,
-                _REPOST_SQL,
-                {
-                    "keys": keys,
-                    "min_urls": signals.REPOST_MIN_URLS,
-                    "min_span": signals.REPOST_MIN_SPAN_DAYS,
-                },
-            )
-        }
-        if keys
-        else {}
-    )
-
-    responses = (
-        {
-            r.company_key: r
-            for r in db.query_as(
-                _ResponseRow,
-                _RESPONSE_SQL,
-                {
-                    "keys": keys,
-                    "user_id": user.id,
-                    "outcomes": list(_OUTCOME_KINDS),
-                    "intermediaries": mail_pipeline.intermediary_domains(),
-                },
-            )
-        }
-        if keys
-        else {}
-    )
-
-    if rows:
-        total_names = rows[0].total_names
-    elif offset:
-        total_row = db.query_one_as(_Count, _COUNT_SQL.format(cuts=_CUTS), params)
-        total_names = total_row.c if total_row else 0
-    else:
-        total_names = 0
+    supplements = _fetch_company_supplements([r.company_key for r in rows], user.id)
+    total_names = _total_company_names(rows, offset, params)
     awaiting = db.query_one_as(
         _Count,
         "SELECT count(*) AS c FROM email_messages m WHERE NOT EXISTS "
@@ -186,11 +188,11 @@ def _list_companies(
         items=[
             _item(
                 row,
-                currency=currency.get(row.company_key, []),
-                statuses=statuses.get(row.company_key, []),
-                open_row=open_rows.get(row.company_key),
-                repost=reposts.get(row.company_key),
-                responses=responses.get(row.company_key),
+                currency=supplements.currency.get(row.company_key, []),
+                statuses=supplements.statuses.get(row.company_key, []),
+                open_row=supplements.open_rows.get(row.company_key),
+                repost=supplements.reposts.get(row.company_key),
+                responses=supplements.responses.get(row.company_key),
                 min_sample=min_sample,
             )
             for row in rows

@@ -1,21 +1,8 @@
-"""Per-job signals: possibilities, not facts.
+"""Per-job observational signals.
 
-Each signal is a claim plus the evidence and sample size it rests on. A signal
-that cannot clear its floor is ABSENT from the result rather than degraded into
-a hedge - the caller renders a missing key as nothing at all, so silence is a
-correct output and a pane with two honest signals beats one with six guesses.
-
-Nothing here predicts. "23 of 4,700 postings from this board were already gone
-the first time we checked" is an observation; "this posting will close soon" is
-not, and at these sample sizes it would be a lie. The floors below are what
-keeps the difference enforceable rather than editorial.
-
-Two columns are deliberately unused. `jobs.active` is frozen historical feed
-state, not current availability or proof that a posting is open.
-`jobs.created_at` is a catalog-load timestamp bounded below by the last
-reseed, so any "first seen"
-derived from it would be an artefact of a database rebuild. Age comes from
-date_posted and openness comes from the closed-check.
+Each signal is optional and returns None below its sample floor. Age comes from
+`date_posted` (not `jobs.created_at`, which reflects catalog reloads) and
+openness comes from the closed check (not frozen `jobs.active`).
 """
 
 from __future__ import annotations
@@ -28,46 +15,25 @@ from pydantic import BaseModel
 
 from api import db
 
-# A proportion needs enough trials before it carries information. Thirty is the
-# conventional floor for the normal approximation to the binomial: below it a
-# single extra rejection moves the rate by whole percentage points. Every board
-# that survives this floor has 100+ first-checks, so it excludes only `upload`
-# (n=1) and boards that have barely been swept.
+# Minimum first-check sample size before reporting a board's dead-on-arrival rate.
 BOARD_RELIABILITY_MIN_CHECKED = 30
 
-# A repost claim needs at least two postings to be about anything.
 REPOST_MIN_URLS = 2
 
-# Below a fortnight, "the same role posted twice" is not employer behaviour.
-# Measured over the catalog: of 4,848 same-source (company, title) groups
-# carrying more than one url, 1,838 (38%) share a single day and the median
-# span is 4.7 days. Same-day duplicates are not reposts - and the obvious
-# explanation fails, since differing locations appear in 42% of same-day groups
-# against 49% of separated ones, so location does not account for them. Cutting
-# at fourteen days drops that mass and leaves 1,815 groups where the gap is
-# long enough that a person re-listed something.
+# Drops same-day multi-URL duplicates (median span 4.7 days in catalog) so only
+# roles re-listed across at least two weeks surface as reposts.
 REPOST_MIN_SPAN_DAYS = 14
 
-# Board reliability is cumulative over a board's whole history (7,159
-# first-checks for the largest), and new verdicts arrive on the hourly ingest
-# cycle, so an hour of fresh checks cannot move it by a tenth of a point.
-# Recomputing it per drawer-open costs 178ms for a number identical across all
-# 18,888 postings from that board; fifteen minutes bounds staleness well inside
-# the cadence that produces it.
+# Cached per process; verdicts arrive hourly so 15 minutes bounds staleness.
 _BOARD_RELIABILITY_TTL_SECONDS = 900
 
 _DAY = 86400.0
 
 
 def first_closed_sql(*, one_source: bool = False) -> str:
-    """Dead on arrival: the FIRST closed-check ever run on a posting already
-    said closed. Ordering by id ASC rather than DESC is the whole difference
-    from the latest-verdict funnel - it asks whether the board handed us
-    something already dead, not whether the posting has died since.
+    """Count first-ever closed checks (id ASC) per source or for one source.
 
-    One definition, two callers: the per-board analytics endpoint groups it
-    across every source, this module reads a single board. A second copy is
-    how the two would drift.
+    Shared by board analytics and per-job signals so both agree on dead-on-arrival rates.
     """
     where = "AND j.source = %(source)s" if one_source else ""
     group = "" if one_source else "GROUP BY source"
@@ -88,11 +54,6 @@ FROM firsts {group}
 """
 
 
-# Process-local, and that is enough: this is a display statistic, so three
-# hosts holding independently-aged copies is not a correctness problem. Two
-# threads racing to fill the same key recompute the same value and one wins,
-# which is why no lock is taken - a dict get/set needs none, and blocking a
-# request thread to save a duplicate query would be the worse trade.
 _board_cache: dict[str, tuple[float, BoardReliability | None]] = {}
 
 
@@ -164,26 +125,18 @@ def _board_reliability(source: str) -> BoardReliability | None:
 
 
 def _posting_age(job: dict[str, Any]) -> PostingAge | None:
-    """Purely observational, so it carries no sample size - it is a fact about
-    this one listing. Absent when the board supplied no date (sheet_import
-    carries one for 1,628 of 6,021 postings, upload for none), because the
-    only fallback would be the reseed-bounded created_at."""
+    """Days since `date_posted`, or None when missing or in the future."""
     posted = job.get("date_posted")
     if not isinstance(posted, datetime.datetime):
         return None
     days = (datetime.datetime.now(tz=datetime.UTC) - posted).total_seconds() / _DAY
     if days < 0:
-        # A future date_posted is a feed error, not a posting from tomorrow.
         return None
     return PostingAge(posted_at=posted, days_listed=int(days))
 
 
-# Location is part of the key, and leaving it out was a real defect rather
-# than a nicety. Without it a chain listing one role across its estate reads as
-# one enormous repost: Sainsbury's "Trading Assistant" grouped to 1,056 urls
-# spanning 120 distinct locations and 107 days, which is bulk multi-site
-# hiring and not an employer re-listing anything. Keying on location as well
-# leaves 1,510 groups catalog-wide, 89% of them two to five urls.
+# Keyed by (source, company, title, locations) so multi-location hiring and
+# cross-board mirrors are not counted as reposts.
 _REPOST_SQL = """
 SELECT count(*) AS url_count,
        min(date_posted) AS first_posted_at,
@@ -198,18 +151,8 @@ WHERE source = %(source)s
 
 
 def _repost(job: dict[str, Any]) -> Repost | None:
-    """Scoped to a single source on purpose. The same (company, title) under
-    two urls from two different boards is our ingest seeing one posting twice,
-    not an employer re-listing it: 15% of multi-url pairs span sources and are
-    excluded here rather than hedged about in the wording.
-
-    The match is casefold+trim on free text - there is no company or requisition
-    identity in this schema - so the claim a caller may make is "this company
-    name and title string recurred", never "this employer reposts". A large
-    url_count in particular means an evergreen requisition rather than a
-    repost cycle, and the two are not separable here: the count is reported so
-    a reader can tell them apart, not so it can be characterised.
-    """
+    """Same-source, same-location recurring `(company, title)` across at least
+    `REPOST_MIN_URLS` URLs and `REPOST_MIN_SPAN_DAYS` days."""
     company = (job.get("company") or "").strip().lower()
     title = (job.get("title") or "").strip().lower()
     if not company or not title:
@@ -238,10 +181,7 @@ def _repost(job: dict[str, Any]) -> Repost | None:
 
 
 def signals_for(job: dict[str, Any]) -> Signals:
-    """Every signal is optional. A caller must treat a missing one as "this
-    signal does not exist" - never as a zero, and never as something to
-    re-derive.
-    """
+    """Compute optional per-job signals; None means unavailable or below floor."""
     return Signals(
         posting_age=_posting_age(job),
         board_reliability=_board_reliability(job["source"]),
