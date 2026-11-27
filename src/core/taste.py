@@ -2,13 +2,14 @@
 apply to.
 
 A logistic regression on posting embeddings, fitted on the postings the
-person applied to (applications with a posting) against a sample of recent
-in-scope postings they never touched (core.tech_scope). There are no true
-negatives: "No Longer Interested" meant closed or needs sponsorship as often
-as not for me, so it says nothing about taste and is left out; the untouched
-sample stands in, which is positive-unlabelled learning. A posting the person
-would have liked but never saw is in that sample, so a score orders postings
-rather than judging one.
+person applied to (applications with a posting) against the postings they
+marked NOT_FOR_ME and a sample of recent in-scope postings they never touched
+(core.tech_scope). "No Longer Interested" says nothing about taste: it meant
+closed or needs sponsorship as often as not for me, which is why NOT_FOR_ME is
+its own status. Until a person has marked many, the untouched sample carries
+the negatives, which is positive-unlabelled learning: a posting the person
+would have liked but never saw is in it, so a score orders postings rather
+than judging one.
 
 The weights are a ranking_models row, so a posting's score is one inner
 product in SQL, as the scope's is.
@@ -31,6 +32,11 @@ from core.pool import connection
 logger = logging.getLogger(__name__)
 
 KIND = "taste"
+
+# The board status a person gives a posting they decided is not for them: the
+# taste model's one true negative. A status, so it is served and written like
+# every other (api.routers.job_board.DEFAULT_STATUSES).
+NOT_FOR_ME = "Not For Me"
 
 # Untouched in-scope postings a model is fitted against: the study's sample,
 # at which held-out applications ranked as above; more takes longer to fit and
@@ -64,9 +70,15 @@ def _vectors(conn: Any, sql: str, params: dict[str, Any]) -> list[list[float]]:
 
 
 def examples(user_id: int, window_days: int) -> tuple[list[list[float]], list[list[float]]]:
-    """The person's applied postings' embeddings, and a sample of recent
-    in-scope postings they never touched."""
-    params = {"user_id": user_id, "window_days": window_days, "n": BACKGROUND}
+    """The person's applied postings' embeddings, and the negatives: the
+    postings they marked NOT_FOR_ME and a sample of recent in-scope postings
+    they never touched."""
+    params = {
+        "user_id": user_id,
+        "window_days": window_days,
+        "n": BACKGROUND,
+        "not_for_me": NOT_FOR_ME,
+    }
     with connection() as conn:
         applied = _vectors(
             conn,
@@ -85,6 +97,17 @@ def examples(user_id: int, window_days: int) -> tuple[list[list[float]], list[li
             JOIN posting_scopes s ON s.url = j.url AND s.in_scope
             WHERE {tech_scope.RECENT} AND j.id NOT IN ({_TOUCHED})
             ORDER BY random() LIMIT %(n)s
+            """,
+            params,
+        )
+        background += _vectors(
+            conn,
+            f"""
+            SELECT pe.embedding::vector::real[] AS v FROM user_jobs uj
+            JOIN jobs j ON j.id = uj.job_id
+            JOIN posting_embeddings pe ON pe.url = j.url
+            WHERE uj.user_id = %(user_id)s AND uj.status = %(not_for_me)s
+              AND uj.job_id NOT IN ({_APPLIED})
             """,
             params,
         )

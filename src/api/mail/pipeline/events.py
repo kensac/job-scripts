@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from api import db
 from api.mail.current import current_event, current_match
+from core import taste
 
 
 class ApplicationEvent(BaseModel):
@@ -111,7 +112,7 @@ _EVENT_TO_STAGE = {
 # out - it is the one stage only the person can assert. Without this it was
 # declared vocabulary with no producer: a state the API named, the frontend
 # rendered a column for, and nothing could ever reach.
-WITHDRAWN_STATUSES = ("No Longer Interested", "Withdrawn")
+WITHDRAWN_STATUSES = ("No Longer Interested", taste.NOT_FOR_ME, "Withdrawn")
 
 
 def stage_for(events: Sequence[Staged], board_status: str | None = None) -> str:

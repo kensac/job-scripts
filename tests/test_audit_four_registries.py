@@ -19,6 +19,7 @@ def test_board_options_carry_status_meaning_and_report_kinds(client, user_header
     assert meta["Accepted"] == {"name": "Accepted", "terminal": True, "outcome": "won"}
     assert meta["Rejected"]["outcome"] == "lost"
     assert meta["No Longer Interested"]["outcome"] == "withdrawn"
+    assert meta["Not For Me"]["outcome"] == "withdrawn" and meta["Not For Me"]["terminal"]
     assert meta["Interview"] == {"name": "Interview", "terminal": False, "outcome": None}
     assert [k["kind"] for k in body["report_kinds"]] == ["stale", "wrong_data", "closed", "other"]
     assert all(k["label"] for k in body["report_kinds"])

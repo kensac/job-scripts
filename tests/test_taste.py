@@ -78,3 +78,15 @@ def test_too_few_applications_is_refused(f):
     user_id = f.make_user()
     with pytest.raises(ValueError, match="needs 5"):
         taste.train(user_id, WINDOW, "m")
+
+
+def test_postings_marked_not_for_me_are_negatives(f, person):
+    rejected = _posting(f, 0, 900)
+    db.execute(
+        "INSERT INTO user_jobs (user_id, job_id, status) VALUES (%s, %s, %s)",
+        (person, rejected, taste.NOT_FOR_ME),
+    )
+    applied, background = taste.examples(person, WINDOW)
+    assert len(applied) == 30
+    # The 160 untouched, and the one marked: touched, so not in the sample.
+    assert len(background) == 161
