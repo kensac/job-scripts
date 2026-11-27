@@ -355,6 +355,91 @@ def _viewer_filters(
     return filters, params
 
 
+def _compile_column_filters(rules: list[column_filters_.ColumnFilter]) -> tuple[list[str], dict]:
+    try:
+        return column_filters_.compile_rules(rules, catalog_only=True)
+    except ValueError as error:
+        raise refuse(422, "INVALID_FILTER", str(error)) from error
+
+
+def _public_facets(
+    viewer: list[str],
+    picks: list[column_filters_.ColumnFilter],
+    params: dict[str, object],
+) -> PublicFacets:
+    def scope(field: str, columns: str) -> tuple[str, dict]:
+        clauses, extra = _compile_column_filters([r for r in picks if r.field != field])
+        return (
+            f"SELECT {columns} FROM managed_board_jobs mj JOIN jobs j ON j.id=mj.job_id "
+            "LEFT JOIN job_comp pay ON pay.url = j.url "
+            f"WHERE mj.managed_board_id = %(board_id)s {' '.join(viewer + clauses)}",
+            {**params, **extra},
+        )
+
+    terms_sql, terms_params = scope("terms", "j.terms")
+    return PublicFacets(
+        place=column_filters_.place_counts(*scope("place", "j.id, j.locations")),
+        company=column_filters_.company_counts(*scope("company", "j.company")),
+        terms=db.query_as(
+            column_filters_.FacetValue,
+            f"SELECT t AS value, COUNT(*) AS count FROM ({terms_sql}) b, unnest(b.terms) t "
+            "GROUP BY t ORDER BY 2 DESC, 1",
+            terms_params,
+        ),
+    )
+
+
+def _public_list_etag(
+    board: _BoardRow,
+    *,
+    cursor: str | None,
+    limit: int,
+    sort: PublicSort,
+    direction: SortDirection,
+    q: str | None,
+    location: str | None,
+    remote: bool | None,
+    min_comp: Decimal | None,
+    comp_currency: str | None,
+    comp_period: PayPeriodParam | None,
+    hide_restricted: bool,
+    matched_count: int,
+    wanted_terms: list[str],
+    next_cursor: str | None,
+    picks: list[column_filters_.ColumnFilter],
+    facets: PublicFacets | None,
+    cards: list[PublicJobCard],
+    accepts_feedback: bool,
+) -> str:
+    # Projection revisions identify membership, but posting facts and closure
+    # evidence can change between projection runs. Hash the rendered page so a
+    # revalidation cannot preserve stale public facts under an unchanged revision.
+    return _etag(
+        [
+            board.slug,
+            str(board.public_revision),
+            cursor or "",
+            str(limit),
+            sort,
+            direction,
+            q or "",
+            location or "",
+            str(remote),
+            str(min_comp),
+            comp_currency or "",
+            canonical_compensation_period(comp_period) or "",
+            str(hide_restricted),
+            str(matched_count),
+            "\0".join(wanted_terms),
+            next_cursor or "",
+            *(rule.model_dump_json() for rule in picks),
+            facets.model_dump_json() if facets else "",
+            *(card.model_dump_json() for card in cards),
+            str(accepts_feedback),
+        ]
+    )
+
+
 @router.get("/{slug}", response_model=PublicJobList)
 def get_public_job_list(
     slug: str,
@@ -391,13 +476,6 @@ def get_public_job_list(
         )
         if values
     ]
-
-    def compiled(rules: list[column_filters_.ColumnFilter]) -> tuple[list[str], dict]:
-        try:
-            return column_filters_.compile_rules(rules, catalog_only=True)
-        except ValueError as error:
-            raise refuse(422, "INVALID_FILTER", str(error)) from error
-
     if min_comp is not None and (comp_currency is None or comp_period is None):
         raise refuse(
             422, "COMP_UNITS_REQUIRED", "a compensation minimum requires currency and period"
@@ -414,7 +492,7 @@ def get_public_job_list(
         comp_period=comp_period,
         hide_restricted=hide_restricted,
     )
-    pick_clauses, pick_params = compiled(picks)
+    pick_clauses, pick_params = _compile_column_filters(picks)
     viewer = list(filters)
     filters += pick_clauses
     params.update(pick_params)
@@ -450,29 +528,7 @@ def get_public_job_list(
         )
         matched_count = count["n"] if count else 0
         rows = db.query_as(_JobRow, jobs_sql, params)
-        facets = None
-        if with_facets:
-
-            def scope(field: str, columns: str) -> tuple[str, dict]:
-                clauses, extra = compiled([r for r in picks if r.field != field])
-                return (
-                    f"SELECT {columns} FROM managed_board_jobs mj JOIN jobs j ON j.id=mj.job_id "
-                    "LEFT JOIN job_comp pay ON pay.url = j.url "
-                    f"WHERE mj.managed_board_id = %(board_id)s {' '.join(viewer + clauses)}",
-                    {**params, **extra},
-                )
-
-            terms_sql, terms_params = scope("terms", "j.terms")
-            facets = PublicFacets(
-                place=column_filters_.place_counts(*scope("place", "j.id, j.locations")),
-                company=column_filters_.company_counts(*scope("company", "j.company")),
-                terms=db.query_as(
-                    column_filters_.FacetValue,
-                    f"SELECT t AS value, COUNT(*) AS count FROM ({terms_sql}) b, unnest(b.terms) t "
-                    "GROUP BY t ORDER BY 2 DESC, 1",
-                    terms_params,
-                ),
-            )
+        facets = _public_facets(viewer, picks, params) if with_facets else None
     page = rows[:limit]
     has_more = len(rows) > limit
     next_cursor = (
@@ -480,32 +536,26 @@ def get_public_job_list(
     )
     cards = [_card(row) for row in page]
     accepts_feedback = db.get_config("public_feedback_hourly_limit") > 0
-    # Projection revisions identify membership, but posting facts and closure
-    # evidence can change between projection runs. Hash the rendered page so a
-    # revalidation cannot preserve stale public facts under an unchanged revision.
-    etag = _etag(
-        [
-            board.slug,
-            str(board.public_revision),
-            cursor or "",
-            str(limit),
-            sort,
-            dir,
-            q or "",
-            location or "",
-            str(remote),
-            str(min_comp),
-            comp_currency or "",
-            canonical_compensation_period(comp_period) or "",
-            str(hide_restricted),
-            str(matched_count),
-            "\0".join(wanted_terms),
-            next_cursor or "",
-            *(rule.model_dump_json() for rule in picks),
-            facets.model_dump_json() if facets else "",
-            *(card.model_dump_json() for card in cards),
-            str(accepts_feedback),
-        ]
+    etag = _public_list_etag(
+        board,
+        cursor=cursor,
+        limit=limit,
+        sort=sort,
+        direction=dir,
+        q=q,
+        location=location,
+        remote=remote,
+        min_comp=min_comp,
+        comp_currency=comp_currency,
+        comp_period=comp_period,
+        hide_restricted=hide_restricted,
+        matched_count=matched_count,
+        wanted_terms=wanted_terms,
+        next_cursor=next_cursor,
+        picks=picks,
+        facets=facets,
+        cards=cards,
+        accepts_feedback=accepts_feedback,
     )
     unchanged = _not_modified(if_none_match, etag, response)
     if unchanged is not None:
