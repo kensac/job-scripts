@@ -243,6 +243,12 @@ def schedule_ingest_cycle() -> None:
         {"cycle": day, "everything": True},
         dedupe_key=f"lpc-all:{day}",
     )
+    # The tech scope (tasks.tech_scope): its model refitted once a day on the
+    # day's recent postings, and the postings new or changed since scoped
+    # every cycle. A cycle's scoring before the day's first fit uses the
+    # previous model, and none is scored before a model exists.
+    enqueue("train_tech_scope", {"cycle": day}, dedupe_key=f"train-tech-scope:{day}")
+    enqueue("score_tech_scope", {"cycle": cycle}, dedupe_key=f"score-tech-scope:{cycle}")
     enqueue("sync_gmail", {"cycle": cycle}, dedupe_key=f"gmail:{cycle}")
     # Importing mail nobody classifies is an inbox, not an ingest. The sync
     # above runs hourly, so without these two the pipeline would fill

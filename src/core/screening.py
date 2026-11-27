@@ -35,6 +35,8 @@ Recipe = Literal[
     "finance_experienced_v1",
     "finance_experienced_v2",
     "finance_experienced_v3",
+    "software_title_v1",
+    "technical_title_v1",
 ]
 BoardRecipe = Literal[
     "internship_v1",
@@ -488,6 +490,44 @@ RECIPES["finance_experienced_v3"] = (
         _keep("finance_title_signal", title=_FINANCE_SIGNAL_V2),
     ),
     Screen(True, "no_finance_title_signal"),
+)
+
+
+# The tech scope (core.tech_scope) reads a title in three parts with two
+# recipes: a title that names software, data or ML work is in
+# (software_title_v1); one that names other engineering, or no technical work
+# at all, is out (technical_title_v1 skips it); what is left names technical
+# work vaguely ("Engineer II", "Member of Technical Staff", "Analyst") and the
+# posting's text decides. Drawn from the tech-scope study of 2026-11-27 over
+# 272,053 active postings of 30 days: titles of the first kind were 23,479, of
+# the second 227,884, and vague 20,690. The other engineering list is the
+# disciplines no software role is named by; a title naming one of them and a
+# software word as well is in by the first recipe, which is read first.
+_SOFTWARE_WORK = _words(
+    r"\b(?:software|developer\w*|programmer|swe|sde|backend|back-end|frontend|front-end"
+    r"|full[- ]?stack|devops|sre|site reliability|machine learning|ml|ai|deep learning"
+    r"|computer vision|data (?:engineer\w*|scien\w*|platform)|analytics engineer"
+    r"|(?:platform|infrastructure|cloud|security|mobile|embedded software|research|solutions"
+    r"|forward deployed|reliability) engineer\w*|ios|android|firmware"
+    r"|member of technical staff|mts)\b|\bc\+\+"
+)
+_OTHER_ENGINEERING = _words(
+    r"\b(?:mechanical|civil|structural|electrical|propulsion|manufacturing|process|chemical"
+    r"|traffic|hvac|construction|field service|optical|rf|analog|mixed[- ]signal|serdes|asic"
+    r"|silicon|layout|pcb|hardware|materials|nuclear|petroleum|environmental|geotechnical"
+    r"|piping|maintenance|quality|test engineer\w*|validation|packaging|thermal|aerospace"
+    r"|avionics|automation engineer\w*)\b"
+)
+RECIPES["software_title_v1"] = (
+    (_keep("software_title", title=_SOFTWARE_WORK),),
+    Screen(True, "no_software_title"),
+)
+RECIPES["technical_title_v1"] = (
+    (
+        _skip("other_engineering", title=_OTHER_ENGINEERING),
+        _keep("technical_title", title=_TECHNICAL),
+    ),
+    Screen(True, "no_technical_title"),
 )
 
 

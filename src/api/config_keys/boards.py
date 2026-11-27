@@ -31,6 +31,16 @@ CONFIG_KEYS: dict[str, ConfigKey] = {
         "gates admit the posting and that have no verdict for it yet. Board runs then reuse "
         "those verdicts. Turning this off restores separate board requests from the next sweep.",
     ),
+    # Read by core.tech_scope and the recommendations it serves.
+    "recommendation_window_days": ConfigKey(
+        section="Boards",
+        default=30,
+        value_type=PositiveInt,
+        help="How recent an active posting must be (posted, or first seen when the board gives "
+        "no date) to be scoped as tech work and ranked on the For you page. The tech-scope "
+        "classifier also learns from postings this recent. A longer window ranks more postings "
+        "and scores more each hour.",
+    ),
     "verify_near_copy_reuse": ConfigKey(
         section="Boards",
         default=True,

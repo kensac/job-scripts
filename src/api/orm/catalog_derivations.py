@@ -10,6 +10,8 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Float,
+    ForeignKey,
     Identity,
     Index,
     Integer,
@@ -266,3 +268,49 @@ class CompanySharedParagraph(Base):
 
     company_key: Mapped[str] = mapped_column(Text, primary_key=True)
     paragraph_sha: Mapped[bytes] = mapped_column(LargeBinary, primary_key=True)
+
+
+class RankingModel(Base):
+    """A model fitted on posting embeddings (posting_embeddings): its weights
+    and intercept, so a posting's score is one inner product in SQL, the
+    examples it was fitted on, and how it scored on examples it did not see.
+    The latest row of a kind (and person) is the one in use. `tech_scope`
+    decides the scope of a posting whose title names technical work only
+    vaguely (core.tech_scope)."""
+
+    __tablename__ = "ranking_models"
+    __table_args__ = (
+        CheckConstraint("kind IN ('tech_scope')", name="ck_ranking_models_kind"),
+        Index("idx_ranking_models_latest", "kind", "user_id", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    # The posting_embeddings model the weights apply to.
+    embedding_model: Mapped[str] = mapped_column(Text)
+    weights: Mapped[Any] = mapped_column(HALFVEC(LOCAL_EMBEDDING_DIMENSIONS))
+    intercept: Mapped[float] = mapped_column(Float)
+    examples: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    evaluation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    trained_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
+
+
+class PostingScope(Base):
+    """Whether an embedded posting is tech work, and what decided: its title,
+    or its text through the latest tech_scope model (core.tech_scope)."""
+
+    __tablename__ = "posting_scopes"
+    __table_args__ = (
+        CheckConstraint("decided_by IN ('title', 'text')", name="ck_posting_scopes_decided_by"),
+    )
+
+    url: Mapped[str] = mapped_column(Text, primary_key=True)
+    in_scope: Mapped[bool] = mapped_column(Boolean)
+    decided_by: Mapped[str] = mapped_column(Text)
+    model_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ranking_models.id", ondelete="SET NULL")
+    )
+    scored_at: Mapped[datetime.datetime] = mapped_column(server_default=_now)
