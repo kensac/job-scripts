@@ -186,6 +186,18 @@ def reject(fetch_ids: Iterable[int], conn: Any | None = None) -> list[int]:
         return [r["fetch_id"] for r in own.execute(sql, (ids,)).fetchall()]
 
 
+def rejected(fetch_ids: Iterable[int]) -> set[int]:
+    """Which of these fetches are not their posting's text."""
+    ids = list(set(fetch_ids))
+    if not ids:
+        return set()
+    with connection() as conn:
+        rows = conn.execute(
+            "SELECT fetch_id FROM page_text_rejections WHERE fetch_id = ANY(%s)", (ids,)
+        ).fetchall()
+    return {r["fetch_id"] for r in rows}
+
+
 def _reject_new(ids: Sequence[int], fetches: Sequence[Fetch]) -> None:
     """Judge fetches just written against the text's other fetches, so a
     page already known to come back the same for every posting (the

@@ -328,10 +328,15 @@ AI_ELIGIBLE_JOB = (
 
 class Page(NamedTuple):
     """Page text and the fetch it came from, which an answer judging the text
-    points at (ai_queries.page_fetch_id)."""
+    points at (ai_queries.page_fetch_id). `own` is False for a fetch just
+    made whose text is not the posting's (page_text_rejections): only the
+    closed check reads such a page, since a closure page is evidence; no
+    question about the posting's content is asked of it. Text read through
+    page_texts is always the posting's own."""
 
     fetch_id: int
     text: str
+    own: bool = True
 
 
 def get_contents(urls: list[str]) -> dict[str, Page]:

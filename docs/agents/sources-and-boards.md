@@ -739,6 +739,24 @@ next fetch is rejected again, so a rejected fetch counts toward the fetch
 streak (`verdicts.FETCH_STREAK`) and the posting is retried less often, then
 not at all, as any page that keeps failing is.
 
+**An answer read off a rejected page is no evidence.** The `verdicts` view,
+which every reader of a decided answer goes through, leaves out an answer
+whose `page_fetch_id` is rejected, so the posting reads as not yet answered
+for that check and is asked again on its own text. The maintenance page alone
+had carried 364 custom rejections, 67 closed checks read as open and 70
+clearance passes (2026-11-27). A closed check's rejection stays: a closure
+page is shared across roles and names none, and it is still what the closed
+check reads. The sweep marks a newly rejected fetch's postings in
+`latest_posting_checks_dirty` in the same transaction, so the projection is
+folded again and read live from `verdicts` until it is.
+
+**A page that is not the posting is never asked about it.** `refresh_page`
+returns a page its writer rejected with `Page.own` false. A filter run and
+filter preparation skip it, so no custom check is paid for on a notice, and
+`refresh_content` returns no text for it, so an upload's parse and the
+content backfill treat it as a fetch that brought nothing. Verification
+still reads it, for the closed check's sake.
+
 **What was derived from a rejected text is redone.** The sweep removes a
 newly rejected fetch's local embedding in the same transaction, so
 `embed_postings_local` embeds the posting again from its own text, or leaves

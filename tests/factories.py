@@ -118,12 +118,21 @@ def make_verdict(
     *,
     prompt_hash: str | None = None,
     reason: str = "",
+    page_fetch_id: int | None = None,
 ) -> None:
     """Append a verdict. Latest row per (url, check_type) wins, so calling this
     twice is how a test expresses "the verdict changed"."""
     from core.store import add_ai_result
 
-    add_ai_result(url, status, reason, check_type, prompt_hash=prompt_hash, model="gpt-5-nano")
+    add_ai_result(
+        url,
+        status,
+        reason,
+        check_type,
+        prompt_hash=prompt_hash,
+        model="gpt-5-nano",
+        page_fetch_id=page_fetch_id,
+    )
 
 
 def paid_answer(
