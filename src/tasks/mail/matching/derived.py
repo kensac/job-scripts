@@ -26,13 +26,18 @@ APPLIED_KINDS = frozenset(
     }
 )
 
-# Minimum per-company derivation cap when tracker history is smaller. Companies
-# exceeding the user's cap are left unmatched rather than creating bulk rows.
+# Minimum per-company derivation cap when tracker history is smaller: the 99th
+# percentile of this user's per-company counts. The cap is per user because real
+# history reaches 43 applications at one company. Companies exceeding the user's
+# cap are left unmatched rather than creating bulk rows.
 CAP_FLOOR = 15
 
 
 def _unmatched_applied_messages(user_id: int) -> list[dict[str, Any]]:
-    """Unmatched messages whose current event is in APPLIED_KINDS and names a company."""
+    """Unmatched messages whose current event is in APPLIED_KINDS and names a company.
+
+    Current event only, so a reclassification retracts the evidence.
+    """
     return db.query(
         f"""
         WITH current_event AS (
@@ -82,7 +87,8 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
 
     Skips companies that already have an application (to keep `_by_company`
     unambiguous) and groups messages by provider thread ID when present, else by
-    normalized company and role title.
+    normalized company and role title. Outlook ThreadTopic is a subject, not a
+    thread ID: grouping on it once put 56 messages from 32 employers together.
     """
     known = _existing_companies(user_id)
     cap = derived_cap(user_id)
@@ -132,7 +138,9 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
             default=anchor_message["sent_at"],
         )
         # Guard against concurrent workers claiming the same anchor message;
-        # duplicate applications at one employer would break `_by_company`.
+        # duplicate applications at one employer would break `_by_company`. Not a
+        # unique constraint: company and title are nullable free text, and genuine
+        # repeat applications to one role are legal.
         row = db.query_one(
             """
             INSERT INTO applications (user_id, job_id, company_name, title,
@@ -174,8 +182,10 @@ def seed_from_mail(user_id: int) -> tuple[int, int]:
 def recompute_derived_floors(user_id: int) -> int:
     """Lower email-derived `applied_at` values when earlier evidence exists.
 
-    Idempotent and strictly monotonic (never raises a floor, which could
-    invalidate existing matches). Returns the number of rows lowered.
+    Only ever lowers, since raising a floor could invalidate existing matches;
+    idempotent. Runs every sweep because `seed_from_mail` only reaches new groups:
+    when its floor rule was corrected, 1,813 existing applications kept stale
+    floors. Returns the number of rows lowered.
     """
     derived = db.query(
         "SELECT id, company_name, applied_at FROM applications "

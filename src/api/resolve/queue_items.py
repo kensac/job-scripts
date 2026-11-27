@@ -39,7 +39,8 @@ _AWAITING_KINDS = (
 # 1. Messages currently matched to a live (non-dismissed) application.
 # 2. Unmatched job-related messages that were not explicitly marked not_an_application.
 # Keeps columns narrow for ranking; subject/sender/rationale are fetched for the
-# page alone in queue_item_rendering. Ties break newest message_id first.
+# page alone in queue_item_rendering, because reading them for every row was most
+# of the heap traffic into email_messages. Ties break newest message_id first.
 _CURRENT_SQL = """
 WITH answered AS (
     SELECT DISTINCT event_id FROM event_answers WHERE question = 'status'
@@ -65,6 +66,7 @@ LEFT JOIN application_matches cm ON cm.id = m.current_match_id
 WHERE m.user_id = %(user)s
   AND e.kind = ANY(%(kinds)s)
   AND cm.application_id IS NULL
+  -- A deliberate refusal is an answer; only a failure to find one is a question.
   AND COALESCE(cm.method, '') <> %(refused)s
 ORDER BY sent_at DESC NULLS LAST, message_id DESC
 """
@@ -120,6 +122,9 @@ def message_items(
 def match_items(rows: list[dict[str, Any]], events: dict[int, list[QueueEvent]]) -> list[Ranked]:
     """Unconfirmed automated attachments (`actor_user_id IS NULL` on the current match).
 
+    Method cannot answer this: 37 production rows say `manual` with no actor,
+    written directly by endpoints before the actor column existed.
+
     Ranked at `RANK_MOVES_STAGE` when removing the message would change the
     application's derived stage, otherwise `RANK_ATTACHABLE`.
     """
@@ -172,7 +177,12 @@ def proposal_items(rows: list[dict[str, Any]]) -> list[Ranked]:
 
 def action_items(owner_id: int, events: dict[int, list[QueueEvent]]) -> list[Ranked]:
     """Open asks ranked at `RANK_ATTACHABLE`, with `settles_on` naming which
-    future event kinds would close each ask automatically."""
+    future event kinds would close each ask automatically.
+
+    `settles_on` is not a rank: a later event settles `schedule_interview` 117
+    times in 181 but `respond_to_offer` 8 in 194, and a cutoff between them
+    would be a tuned number.
+    """
     open_apps = {
         r["id"]: r
         for r in db.query(

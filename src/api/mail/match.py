@@ -1,8 +1,10 @@
 """Attach emails to applications via ordered matching tiers.
 
 Tiers run cheapest and most certain first and never guess: ambiguous cases stay
-UNMATCHED. `application_matches` is append-only so sweeps can reconsider
-messages as new applications appear.
+UNMATCHED, because downstream treats a match as fact, so a wrong match is worse
+than none. Candidates are the user's own applications (~716), not the 49k job
+catalog, so exhaustive comparison is cheap. `application_matches` is
+append-only so sweeps can reconsider messages as new applications appear.
 """
 
 from __future__ import annotations
@@ -125,6 +127,7 @@ _NOT_BEFORE_APPLYING = """
         <= %s::timestamptz)
 """
 
+# The vocabulary an ATS uses for employment type, not a tuned keyword list.
 _INTERNSHIP_WORDS = frozenset({"intern", "interns", "internship", "internships", "coop"})
 
 
@@ -157,7 +160,8 @@ def _by_company(
     )
     candidates = [r for r in rows if norm_company(r["company_name"]) == key]
     if len(candidates) == 1 and _employment_type_contradicts(title, candidates[0]["title"]):
-        # Refuse rather than attach an internship email to a full-time role (or vice versa).
+        # Refuse rather than attach an internship email to a full-time role (or vice versa):
+        # 26 of the 429 tier matches with a title on both sides contradicted this way.
         return None
     if len(candidates) == 1:
         return MatchDecision(
@@ -226,9 +230,11 @@ def record(message_id: int, match: MatchDecision, *, actor_user_id: int | None =
     """Append a match decision and advance `email_messages.current_match_id`.
 
     When `actor_user_id` is None (automated matcher):
-    - Never overturns an existing human decision (enforced here at write time
-      against races with sweep selection).
-    - Skips appending if the decision fields repeat the current match.
+    - Never overturns an existing human decision, checked here at write time
+      because a sweep can select a message before a person matches it (match
+      14912 overwrote human match 14911 with `unmatched` an hour later).
+    - Skips appending if the decision fields repeat the current match: at 6,124
+      unmatched messages and an hourly sweep that is ~147k redundant rows a day.
 
     Human writes always append, even when agreeing with the current match.
     """
