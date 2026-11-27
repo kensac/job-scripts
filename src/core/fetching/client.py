@@ -1,24 +1,9 @@
-"""The one HTTP client the fetchers in core.fetching speak through.
+"""Shared HTTP client and per-host pacing for `core.fetching`.
 
-Board pulls, ATS resolvers, form reads and the aggregator feeds all send
-their requests through `session`, so what a request looks like to a host and
-what happens when it fails are decided here, once. A new board format or
-resolver builds a request and parses the answer; it does not pick a user
-agent, a timeout or a retry. Workday (listing search and posting reads) is
-the one exception, sent through the standard library (`stdlib_session`) because its
-Cloudflare refuses the requests session. Four copies of those choices had drifted: two
-user agents, timeouts of 10, 20 and 30 seconds, and retry in only the board
-pulls and a hand-rolled backoff in the aggregator feeds.
-
-The host budget (api.hosts) is what answers a refusal: a 429 is returned to
-the caller, never slept on and retried here, because the budget widens the
-gap for every worker on the address, and a retry inside one request would
-spend the refused address again before the budget saw the refusal.
-
-`pace` is the gap between requests to one host from this process, inside a
-pull. Its floors are ingest_host_pace_seconds, which the ingest task hands
-in before each pull because core cannot read app_config, keyed by
-hosts.pace_key like the budget row.
+`session` handles board pulls, ATS resolvers, form reads, and aggregator feeds
+with uniform User-Agent, timeout, and 5xx retries. `stdlib_session` exists for
+Workday, whose Cloudflare returns 429 to `requests`. HTTP 429 is never retried
+here; callers report it to the host budget (`api.hosts`).
 """
 
 from __future__ import annotations
@@ -40,28 +25,14 @@ from urllib3.util.retry import Retry
 
 from core.fetching.hosts import pace_key, slot_key
 
-# The resolvers sent this user agent with "*/*" and the board pulls sent
-# "Mozilla/5.0" with JSON first. The first request to three active sources of
-# every board format answered the same status and length under each on
-# 2026-10-10; Oracle labels its JSON application/json only when asked for
-# JSON (vnd.oracle.adf.resourcecollection+json to "*/*"), so JSON is asked
-# for first and anything else still accepted.
+# Prefer JSON first in Accept so Oracle returns application/json instead of vnd.oracle.*.
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
-# Connect and read, per request. The slowest page measured is ByteDance's
-# 500-row reply at about 11 seconds (2026-10-05); the board pulls had 30, the
-# resolvers and form reads 20 and the aggregator feed 10, none of them
-# measured. One bound that clears the slowest known page.
 TIMEOUT = 30.0
-# The hourly cycle is the real retry; this only rides out a blip inside one
-# fetch, the three retries the board pulls and aggregator feeds already made.
-# Only idempotent methods, which is urllib3's default: a POST search is not
-# replayed. raise_on_status=False hands the last 5xx back as a response, so
-# its status reaches the caller instead of a RetryError without one.
-# A 5xx is tried three more times, one, two and four seconds apart, by the
-# session's adapter and by stdlib_session alike.
+# Retry 5xx up to 3 times (1s, 2s, 4s) on idempotent methods; raise_on_status=False
+# returns the final 5xx response to the caller. Never retry 429.
 _RETRIES = 3
 _RETRY_STATUSES = (500, 502, 503, 504)
 _RETRY = Retry(
@@ -86,19 +57,10 @@ for _prefix in ("https://", "http://"):
 
 
 class _StdlibSession:
-    """A JSON request through the standard library, answered as a requests.Response.
+    """urllib-backed JSON client returning `requests.Response` for Workday.
 
-    Workday's Cloudflare refuses this module's requests session from the
-    fleet's addresses and lets the standard library through. Measured from
-    hetzner on 2026-11-20, alternating the two 15 seconds apart: FHLBNY
-    answered the session 429 four times out of four and urllib 200 four out
-    of four. No Workday pull succeeded from 2026-11-16 to that day. The
-    reply keeps the requests shape so the refusal handling in the ingest
-    task (a 429 widens the host budget) reads it unchanged. A 5xx is retried
-    as the session retries one; a 429 never is. The posting reads (ats.Workday) came through here on
-    2026-11-21, when the session got 429 for every tenant from both fleet
-    addresses and urllib 200, and half of Workday's postings had gone to the
-    browser instead.
+    Workday's Cloudflare returns 429 to `requests` from fleet IPs while allowing
+    stdlib `urllib` (measured 2026-11-20). Retries 5xx like `session`; never retries 429.
     """
 
     def get(self, url: str, timeout: float = TIMEOUT, **_: Any):
@@ -108,10 +70,7 @@ class _StdlibSession:
         return self._send("POST", url, _json.dumps(json).encode(), timeout)
 
     def _send(self, method: str, url: str, data: bytes | None, timeout: float):
-        """One request, retried on a 5xx as the session's adapter retries one. Without
-        it a tenant read through thousands of sliced searches failed whole on
-        one server hiccup: Walmart failed every pull from 2026-11-21, on a 502
-        and then an empty answer. A 429 is still returned at once."""
+        """Send one request with 1/2/4s backoff on 5xx; return 429 immediately."""
         for attempt in range(_RETRIES):
             response = self._once(method, url, data, timeout)
             if response.status_code not in _RETRY_STATUSES:
@@ -149,17 +108,11 @@ class _StdlibSession:
 stdlib_session = _StdlibSession()
 
 
-# A worker running several pulls at once (api.worker) calls these from
-# several threads. The floors are swapped whole, so a reader never sees the
-# table half rebuilt, and a call reserves its moment under the lock before
-# it sleeps, so two threads asking one host cannot both find it free.
+# Shared across concurrent pull threads: `_PACE_SECONDS` is replaced atomically
+# and each caller reserves its slot timestamp under `_pace_lock` before sleeping.
 _PACE_SECONDS: dict[str, float] = {}
 _last_call: dict[str, float] = {}
 _pace_lock = threading.Lock()
-# Called once per request a pull makes, before its wait, with the request's
-# identity. A pull runs in one thread (asyncio.to_thread copies the context),
-# so the caller that sets this sees every request of its own pull and none of
-# another's.
 _on_request: contextvars.ContextVar[Callable[[str], None] | None] = contextvars.ContextVar(
     "on_request", default=None
 )
@@ -181,10 +134,7 @@ def set_pace(floors: dict) -> None:
 
 
 def pace(url: str, request: str | None = None) -> None:
-    """Wait out this host's floor since this process last asked the same slot
-    (`hosts.slot_key`), and tell whoever is watching the pull (`on_request`)
-    which request this is: `request` names it whole (its parameters and
-    body), the url alone when the caller passes nothing."""
+    """Enforce this host's per-slot pacing floor and notify any active `on_request` watcher."""
     watcher = _on_request.get()
     if watcher is not None:
         watcher(request or url)

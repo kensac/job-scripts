@@ -40,20 +40,8 @@ _BATCH = Source(
     note="Batch processing at 50% of standard token pricing",
 )
 
-# Read straight out of OpenAI's own 400s on 2026-09-02, which name the
-# supported set verbatim:
-#
-#   gpt-5-mini    "Unsupported value: 'none' is not supported with the
-#                  'gpt-5-mini' model. Supported values are: 'minimal', 'low',
-#                  'medium', and 'high'."
-#   gpt-5.6-luna  "Unsupported value: 'minimal' is not supported with the
-#                  'gpt-5.6-luna' model. Supported values are: 'none', 'low',
-#                  'medium', 'high', 'xhigh', and 'max'."
-#
-# So these are vendor-confirmed even though no documentation page carries them:
-# the API itself is the source. Note the two generations share only low, medium
-# and high - any single effort value used across both must be one of those
-# three, which is not a constraint a union of the two sets can express.
+# Supported efforts probed from OpenAI 400 error responses (2026-09-02).
+# Shared values across GPT-5 and GPT-5.6+ are low, medium, and high.
 _EFFORTS_API = Source(
     url="https://api.openai.com/v1/responses",
     read_on=datetime.date(2026, 9, 2),
@@ -61,8 +49,6 @@ _EFFORTS_API = Source(
     note="quoted from the provider's own 400 error text; see comment above",
 )
 
-# gpt-6. Unlike everything above it, these rates were read off OpenAI's own
-# page rather than inherited, so they carry a URL and a date.
 _GPT6_PRICES = Source(
     url="https://developers.openai.com/api/docs/pricing",
     read_on=datetime.date(2026, 9, 22),
@@ -70,15 +56,8 @@ _GPT6_PRICES = Source(
     note="short- and long-context rows for gpt-6-luna, gpt-6-sol and gpt-6-astra",
 )
 
-# "Prompts with more than 272K input tokens are priced at 2x input and cache
-# rates and 1.5x output for the full request" - each model's page, read
-# 2026-09-22. The whole request rebills at the tier its prompt selects, which
-# is what Tier already means.
-#
-# Both tiers are written out per model rather than as "twice the base": that
-# the multipliers are currently 2x and 1.5x is a fact about today's price
-# list, not a rule OpenAI has committed to, and arithmetic would absorb a
-# future change silently. Same reasoning as xAI's tiers.
+# Prompts above 272K input tokens rebill the full request at the long-context
+# tier. Both tiers are written out explicitly per model rather than derived.
 _GPT6_TIER_TOKENS = 272_000
 
 _EARLIER_GEN = Reasoning(
@@ -97,26 +76,9 @@ _5_6_GEN = Reasoning(
     source=_EFFORTS_API,
 )
 
-# Covers reasoning AND output on the Responses API; too small and the JSON gets
-# truncated mid-string after a long reasoning pass.
-# gpt-6, read the same way on 2026-09-22, and the two answers differ per
-# model - astra takes neither "none" nor "minimal", the other two take "none"
-# but not "minimal":
-#
-#   gpt-6-astra  "Unsupported value: 'none' is not supported with the
-#                 'gpt-6-astra' model. Supported values are: 'low', 'medium',
-#                 'high', 'xhigh', and 'max'."
-#   gpt-6-sol    "Unsupported value: 'minimal' is not supported with the
-#                 'gpt-6-sol' model. Supported values are: 'none', 'low',
-#                 'medium', 'high', 'xhigh', and 'max'."
-#
-# WORTH KNOWING FOR THE NEXT READER: an invalid value gets a different 400.
-# Sending effort="__nonsense__" returns "Invalid value ... Supported values
-# are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'" for all
-# three models - that is the PARAMETER's enum, not the model's. Only a real
-# value the model refuses produces the per-model list above, and only that
-# form is evidence. The first probe here said all three took "minimal"; they
-# do not.
+# Probed via per-model 400s on 2026-09-22 (gpt-6-astra rejects "none" and
+# "minimal"; luna/sol reject "minimal"). Note: invalid effort strings return
+# the parameter enum instead of the per-model list.
 _EFFORTS_API_GPT6 = Source(
     url="https://api.openai.com/v1/responses",
     read_on=datetime.date(2026, 9, 22),
@@ -124,10 +86,7 @@ _EFFORTS_API_GPT6 = Source(
     note="per-model 400 text; an invalid value returns the parameter enum instead",
 )
 
-# Default stays "low" like every other OpenAI entry here - the value the
-# datasheet says is safe when a task expresses no preference. OpenAI's own
-# default for this generation is "medium", which is the more expensive half of
-# a choice this system already made deliberately.
+# Default stays "low" (cheaper than OpenAI's own "medium" default).
 _6_GEN = Reasoning(
     param="reasoning_effort",
     accepts=("none", "low", "medium", "high", "xhigh", "max"),
@@ -144,6 +103,7 @@ _6_ASTRA = Reasoning(
     source=_EFFORTS_API_GPT6,
 )
 
+# max_output_tokens covers both reasoning and output tokens on Responses API.
 _OUTPUT = Output(
     max_output_tokens=128_000,
     default_max_output_tokens=6000,
@@ -151,8 +111,6 @@ _OUTPUT = Output(
     truncates_silently=False,
 )
 
-# gpt-6 publishes both numbers, so they are facts here rather than blanks:
-# "1,050,000 context window", "128,000 max output tokens".
 _OUTPUT_GPT6 = Output(
     max_output_tokens=128_000,
     default_max_output_tokens=6000,
@@ -199,13 +157,7 @@ def _gpt6_rates(
     hi_out: str,
     hi_cached: str,
 ) -> Rates:
-    """Two tiers, the second selected by a prompt over _GPT6_TIER_TOKENS.
-
-    Cache writes follow the same 1.25x of uncached input as the 5.6
-    generation: the prompt-caching guide says "GPT-5.6 and later", and the
-    read rates on the pricing page are the 0.1x that sentence also states,
-    so the write half of it is taken to hold too.
-    """
+    """Two-tier rates split at `_GPT6_TIER_TOKENS`, with 1.25x cache-write pricing."""
     return Rates(
         tiers=(
             Tier(
@@ -249,13 +201,7 @@ PROVIDER = Provider(
     api_key_env="OPENAI_API_KEY",
     supports_temperature=False,
     batch_endpoint="/v1/responses",
-    # "Error code: 400 - Billing hard limit has been reached" refused every
-    # batch submission from 19:05 to 23:17 UTC on 2026-10-31 (883 refused
-    # waves in the worker logs); the per-request form is the same message in
-    # a result line's response body. insufficient_quota arrives as a 429
-    # ("You exceeded your current quota, please check your plan and billing
-    # details") and billing_not_active as "Your account is not active, please
-    # check your billing details"; the codes are matched as well as the text.
+    # Match both OpenAI error codes and messages for billing exhaustion (400/429).
     exhaustion_markers=(
         "billing hard limit has been reached",
         "billing_hard_limit_reached",
@@ -322,10 +268,7 @@ PROVIDER = Provider(
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),
-        # Not selectable: used by core/embeddings.py, never offered in the
-        # picker. Priced because it costs money - the output rate is a real
-        # 0.00 rather than an omission, since an embedding call returns no
-        # completion tokens at all.
+        # Embeddings only (core/embeddings.py); output rate is 0.00 because no completion tokens return.
         Model(
             name="text-embedding-3-small",
             note="Embeddings; not a chat model",
@@ -352,11 +295,7 @@ PROVIDER = Provider(
             reasoning=_5_6_GEN,
             output=_OUTPUT,
         ),
-        # gpt-6, cheapest first, which is the order the picker offers them in.
-        # Every number below is off OpenAI's own pages on 2026-09-22; the
-        # batch lane is stated there too ("a 50% discount across all three
-        # models"), so unlike the models above it this generation's batch rate
-        # is vendor-sourced rather than inherited from an aggregator.
+        # GPT-6 models ordered cheapest first.
         Model(
             name="gpt-6-luna",
             note="GPT-6 small: cheapest of the generation",
