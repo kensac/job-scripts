@@ -111,7 +111,7 @@ def _with_pages(jobs: list[dict[str, Any]], decided: set[str]) -> list[dict[str,
             row["id"]: row["input_content"]
             for row in page_fetches.resolve(
                 db.query(
-                    "SELECT id, input_content, content_ref FROM page_texts WHERE id = ANY(%s)",
+                    "SELECT id, input_content, content_ref FROM page_fetch_texts WHERE id = ANY(%s)",
                     (wanted,),
                 )
             )

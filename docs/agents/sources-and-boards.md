@@ -680,6 +680,65 @@ oldest-first keeps each step inside a few hours. The TOAST space a move frees
 is reused by new rows, and comes back to disk only when the table is
 rewritten (`VACUUM FULL page_fetches`).
 
+## A page that is not its posting is never the posting's text
+
+A fetch can bring back a page that is not the posting: Workday's maintenance
+notice ("Workday is currently unavailable"), saved as a passed fetch for 1,304
+postings across 113 Workday sites by 2026-11-27, most on its weekend
+maintenance windows; a career site's shell that renders without the posting
+(Tower Research's 37 roles shared one text); a cookie wall; "page not
+found". Every posting with such text embedded the same, read as a perfect
+match for every other, and was judged by filters on the notice: 364 custom
+verdicts were rejections read off the maintenance page.
+
+**Such a fetch is named in `page_text_rejections`, and `page_texts` leaves it
+out.** The fetch stays, as the record of what the page said, and keeps its
+status: the closed check still reads a closure page ("This job is no longer
+available"), which is evidence, so marking it failed would leave the posting
+open and park it as unfetchable. Every reader of a posting's text goes
+through `page_texts` and so falls back to the posting's newest fetch that is
+its own (`CONTENT_LATERAL` is `ORDER BY id DESC LIMIT 1` over the view), or
+finds none and fetches again. A reader asking what one fetch held, by id,
+reads `page_fetch_texts`, which keeps them: what an answer read
+(`core.page_fetches.text_of`, the admin ledger) and what a managed-board run
+froze.
+
+**The rule is `core.page_fetches.foreign`.** A text stored for postings with
+different roles is a page that came back the same whatever was asked for. It
+is still a posting's own when it names that posting's role, every title word
+of three letters or more as the start of a word of the text, without level
+numerals ("Engineer II" is the role "engineer"). So a fetch is rejected when
+its text is shared across roles and does not name its own role. ATS text and
+listing text (`BOARD_RECORDS`) are the board's own record of one posting and
+are never rejected: of the 4,826 texts stored for more than one title
+(2026-11-27), what the role test would reject among board records was nearly
+all real postings under variant titles (a feed's "Associate I" and
+"Associate II", a curated list's renamed title, French and English names),
+where among pages the fetcher read itself it was nearly all notices, shells
+and cookie walls.
+
+**Judged when written, and again when a text becomes shared.**
+`page_fetches.record_many` judges each fetch it writes against the text's
+fetches so far, so a page already known to come back the same is never
+served as a new posting's text. A text becomes shared later, when another
+posting's page comes back the same; the `judge_page_texts` task
+(`tasks.page_text_judging`) walks `page_fetches` in id order, judges every
+text a new fetch carries across all of that text's fetches
+(`idx_page_fetches_content_sha256`), and resumes from the latest run's
+`through`. It stops below the oldest fetch whose text is still inline, which
+has no digest until `tier_page_text` moves it. It runs only beside the
+database, like `tier_page_text`: it reads the shared texts from object
+storage.
+
+**What was derived from a rejected text is redone.** The sweep removes a
+newly rejected fetch's local embedding in the same transaction, so
+`embed_postings_local` embeds the posting again from its own text, or leaves
+it unembedded when it has none. Pay, requirements, job profiles and the
+OpenAI embeddings compare their stored `content_row_id` with the posting's
+current text (`CONTENT_LATERAL`) and re-derive when it moved; a posting with
+no text of its own left keeps what they derived until a fetch brings one,
+since none of them is a candidate without text.
+
 ## A pull rewrites a catalog row only when the row would change
 
 `catalog.upsert_postings` follows the first two listings rules above for

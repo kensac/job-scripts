@@ -113,6 +113,13 @@ def schedule_ingest_cycle() -> None:
         "AND status IN ('pending', 'running') LIMIT 1"
     ):
         enqueue("tier_page_text", {"cycle": cycle}, dedupe_key=f"tier-page-text:{cycle}")
+    # Fetches whose text is not their posting's, judged as texts become shared
+    # (tasks.page_text_judging). One at a time: the walk has one cursor.
+    if not db.query_one(
+        "SELECT 1 FROM tasks WHERE kind = 'judge_page_texts' "
+        "AND status IN ('pending', 'running') LIMIT 1"
+    ):
+        enqueue("judge_page_texts", {"cycle": cycle}, dedupe_key=f"judge-page-texts:{cycle}")
     # Postings embedded with the fleet's own model, by a host that serves it
     # (tasks.derivations.local_embeddings; api.worker_lifecycle.claims.NEEDS_ENV).
     # One at a time: two runs would select the same postings.
