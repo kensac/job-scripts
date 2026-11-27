@@ -115,3 +115,14 @@ def test_similar_postings_leave_out_near_copies(client, admin_headers, f):
     body = client.get(f"/v1/user/jobs/{source}/similar", headers=admin_headers).json()
     assert [n["job_id"] for n in body["nodes"]] == [near, far]
     assert body["nodes"][0]["similarity"] < recommendations.NEAR_COPY
+
+
+def test_a_failed_fit_says_why(client, admin_headers):
+    client.get("/v1/user/recommendations", headers=admin_headers)
+    db.execute(
+        "UPDATE tasks SET status = 'failed', error = 'ValueError: 0 applied' "
+        "WHERE kind = 'train_taste'"
+    )
+    body = client.get("/v1/user/recommendations", headers=admin_headers).json()
+    assert body["training"] is False
+    assert body["fit_failed"] == "ValueError: 0 applied"

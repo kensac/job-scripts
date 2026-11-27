@@ -79,6 +79,8 @@ class Recommendations(BaseModel):
     model: TasteModel | None
     # A model is being fitted: there is none, or the one shown is a day old.
     training: bool
+    # Why today's fit failed, when it did; the page asks again tomorrow.
+    fit_failed: str | None = None
 
 
 class SimilarPosting(BaseModel):
@@ -115,21 +117,24 @@ def _first(first: int | None) -> int:
     return first or DEFAULT_FIRST
 
 
-def _model(user_id: int) -> tuple[TasteModel | None, bool]:
-    """The person's taste model, and whether a fit was asked for: when they
-    have none, or theirs was fitted before today (UTC), the day the schedule
-    refits on."""
+def _model(user_id: int) -> tuple[TasteModel | None, bool, str | None]:
+    """The person's taste model, whether a fit is under way, and why today's
+    failed when it did. A fit is asked for when they have none, or theirs was
+    fitted before today (UTC), the day the schedule refits on; one fit a
+    person a day, so a failed one stands until tomorrow."""
     row = db.query_one(taste.latest_sql(), {"user_id": user_id})
     today = datetime.datetime.now(datetime.UTC).date()
     stale = row is None or row["trained_at"].astimezone(datetime.UTC).date() < today
+    failed = None
     if stale:
-        enqueue(
-            "train_taste",
-            {"cycle": today.isoformat(), "user_id": user_id},
-            dedupe_key=f"train-taste:{user_id}:{today.isoformat()}",
-        )
+        key = f"train-taste:{user_id}:{today.isoformat()}"
+        enqueue("train_taste", {"cycle": today.isoformat(), "user_id": user_id}, dedupe_key=key)
+        fit = db.query_one("SELECT status, error FROM tasks WHERE dedupe_key = %s", (key,))
+        if fit and fit["status"] == "failed":
+            failed = fit["error"] or "the fit failed"
+            stale = False
     if row is None:
-        return None, True
+        return None, stale, failed
     evaluation = row["evaluation"]
     return (
         TasteModel(
@@ -141,6 +146,7 @@ def _model(user_id: int) -> tuple[TasteModel | None, bool]:
             top_share=evaluation["top_share"],
         ),
         stale,
+        failed,
     )
 
 
@@ -154,7 +160,7 @@ def recommendations_page(
     first, with the application each is nearest to and whether it is a near
     copy of one, or of a posting higher on the page."""
     limit = _first(first)
-    model, training = _model(user.id)
+    model, training, fit_failed = _model(user.id)
     if model is None:
         return Recommendations(
             nodes=[],
@@ -162,6 +168,7 @@ def recommendations_page(
             total_count=0,
             model=None,
             training=training,
+            fit_failed=fit_failed,
         )
     query = {"q": "recommendations", "model": model.id}
     after_score, after_id = decode_cursor(after, query) if after else (None, None)
@@ -235,6 +242,7 @@ def recommendations_page(
         total_count=rows[0]["total"] if rows else 0,
         model=model,
         training=training,
+        fit_failed=fit_failed,
     )
 
 
