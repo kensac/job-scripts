@@ -53111,6 +53111,17 @@
           "training": {
             "type": "boolean",
             "title": "Training"
+          },
+          "fit_failed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit Failed"
           }
         },
         "type": "object",
