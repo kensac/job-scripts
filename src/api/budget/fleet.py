@@ -35,7 +35,10 @@ def fleet_spend_this_week() -> Decimal:
 
 
 class FleetBudgetExceeded(RuntimeError):
-    """Raised when fleet spend meets or would exceed its weekly ceiling."""
+    """Raised when fleet spend meets or would exceed its weekly ceiling.
+
+    Raised, not logged: the runaway case is the one nobody is watching.
+    """
 
 
 def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
@@ -49,6 +52,7 @@ def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
         "enabled": cycles > 0 and ceiling > 0,
         "spent_usd": spent,
         "ceiling_usd": ceiling,
+        # The ceiling is defined in sweeps; a dollar figure alone loses the derivation.
         "cycles": cycles,
         "cycle_cost_usd": cycle_cost,
         "headroom_usd": ceiling - spent if ceiling > 0 else None,
@@ -72,6 +76,10 @@ def fleet_budget_status(projected_usd: Decimal | None = None) -> dict[str, Any]:
 
 def check_fleet_budget(projected_usd: Decimal | None = None) -> None:
     """Raise FleetBudgetExceeded before submitting work that would breach the weekly ceiling.
+
+    Checked before submit because a submitted batch is already billable. It
+    includes `projected_usd` because without it one batch at 12% of the ceiling
+    sailed through and the refusal came a cycle late.
 
     A zero `fleet_weekly_cycles` disables the check for intentional backfills.
     """

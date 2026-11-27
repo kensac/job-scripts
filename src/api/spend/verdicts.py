@@ -153,8 +153,10 @@ def read_verdict_breakdowns(
 
     Uses `api.ledger_rollup` hourly sums grouped by `(day, model, check_type)`
     and folds Decimals in Python so all cuts stay consistent without rescanning
-    `ai_queries` (measured 97s across five raw scans on 2026-10-04; 15s single
-    raw scan on 2026-10-13).
+    `ai_queries` (measured 97s across five raw scans on 2026-10-04, where one
+    grouped pass took 3.2-4.0s for 327 groups; 15s single raw scan on 2026-10-13).
+    Day is `hour::date`, exact in any whole-hour timezone. Decimal sums keep a sum
+    of group sums equal to one SUM.
     """
     groups = db.query(
         f"""
@@ -261,6 +263,9 @@ def verdict_reach(
     # Group answers against current `jobs` and subscription eligibility into
     # three buckets: `no_posting` (missing job row, distinct from unwanted),
     # `reachable`, and `unreachable`. Read untyped to fold Decimal costs cleanly.
+    # It exists because 21.7M of a 99.7M-token 30-day bill reached boards no user
+    # had enabled (measured 2026-09-03). Unpriced calls are counted, never summed
+    # as zero.
     reach_rows = db.query(
         f"""
         SELECT COALESCE(j.source, '') AS source,
