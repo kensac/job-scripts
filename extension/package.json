@@ -14,7 +14,7 @@
     "postinstall": "node scripts/entrypoints.mjs && wxt prepare"
   },
   "devDependencies": {
-    "@types/react": "19.3.1",
+    "@types/react": "19.3.2",
     "@types/react-dom": "19.3.0",
     "@playwright/test": "1.65.1",
     "@types/chrome": "0.3.8",
